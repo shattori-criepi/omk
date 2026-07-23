@@ -1,0 +1,6 @@
+services:
+  gateway:
+    build:
+      context: ./services/gateway
+    container_name: omk-gateway
+    restart: unless-stopped
