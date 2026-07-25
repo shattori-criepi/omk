@@ -1,0 +1,27 @@
+measurement:
+  instantaneous_interval_seconds: 10
+  cumulative_check_interval_seconds: 60
+
+serial:
+  port: null
+  baudrate: 115200
+  timeout_seconds: 5
+
+adapter:
+  auto_configure: true
+  expected_settings:
+    uart_mode: "80"
+    output_mode: "01"
+
+retry:
+  request_timeout_seconds: 5
+  request_max_attempts: 3
+  reconnect_after_consecutive_failures: 5
+  reconnect_wait_seconds: 30
+
+storage:
+  data_directory: "./data"
+
+logging:
+  level: "INFO"
+  directory: "./logs"
