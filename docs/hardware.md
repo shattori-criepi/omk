@@ -249,6 +249,10 @@ SUBSYSTEM=="tty", ATTRS{idVendor}=="xxxx", ATTRS{idProduct}=="yyyy", SYMLINK+="o
 
 ## 8. Raspberry Pi 4／5のホストセットアップ
 
+Raspberry Piを購入直後の状態からDockerホストとして準備する標準手順は、
+[Raspberry Pi初期セットアップ](raspberry-pi-setup.md)を参照してください。この手順は
+OS、SSH、Docker、データ保存領域までを扱い、周辺機器やOMKサービスの起動は扱いません。
+
 最低限確認する項目:
 
 1. Raspberry Pi 4とRaspberry Pi 5それぞれについて、採用する64-bit Raspberry Pi OSとARM64イメージの組み合わせ
@@ -409,4 +413,3 @@ WindowsからWSL2へのUSB公開手順は、採用するWindows／WSL2／Docker�
 - 実機試験を自動化するためのテスト治具
 
 判断後は本書の表を更新し、必要に応じてADRを作成します。
-

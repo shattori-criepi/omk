@@ -12,8 +12,30 @@ OMK（おうちモニタキット）は、住宅内の電力消費と環境・�
 - 人間と生成AIのどちらにも構造と判断理由が分かる
 - 一部の機器や製品が廃止されても、システム全体を書き直さずに済む
 
-> **現在の位置付け**  
+> **現在の位置付け**<br>
 > 本文書は再開発時の設計基準です。既存実装と本文書が食い違う場合は、既存実装を無条件に正とせず、差分を確認して設計判断を記録してください。
+
+## 0. 新しいRaspberry Piへの導入
+
+Raspberry Piを新規購入してOMK用ホストを作る場合は、まず
+[Raspberry Pi初期セットアップ](docs/raspberry-pi-setup.md)を使用します。購入から
+Docker動作確認までの手順と、Raspberry Pi Imagerで入力する項目を一箇所にまとめています。
+
+準備するものは、64-bit Raspberry Pi OSを実行できるRaspberry Pi 4または5、対応する
+電源、OSを書き込むmicroSDカード、ネットワーク接続（有線LANまたは設定可能なWi-Fi）、
+Windows PCです。初期設定はSSHで行えるため、キーボードとディスプレイは必須ではありません。
+
+導入の順序は次のとおりです。
+
+1. Raspberry Pi ImagerでOS、`omkdev`ユーザー、SSH、ネットワーク、地域設定を準備する
+2. Raspberry Piを起動し、WindowsからSSH接続する
+3. `/home/omkdev/projects/omk`へこのリポジトリをcloneする
+4. `./scripts/setup-raspberry-pi.sh`を実行し、再ログイン後にDockerを確認する
+5. 後続タスクとして、周辺機器、秘密情報、OMKサービス、表示・ネットワーク機能を個別に設定する
+
+現時点のセットアップスクリプトは、OS更新、Docker、データ保存領域までを準備します。
+OMKアプリケーションやDocker Composeサービスは起動しません。実機用Compose構成、秘密情報、
+周辺機器設定が整備されるまでは、本番計測の開始手順として扱わないでください。
 
 ## 1. OMKが扱う範囲
 
