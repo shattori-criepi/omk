@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -16,6 +17,7 @@ from broute_meter.adapter import (
     AdapterCommunicationError,
     AdapterConfigurationResult,
 )
+from broute_meter.broute import BRouteSessionError
 from broute_meter.config import AppConfig
 from broute_meter.models import CumulativeEnergyReading, InstantaneousPowerReading
 from broute_meter.serial.port_detector import PortInfo
@@ -26,8 +28,11 @@ ENVIRONMENT_KEYS = (
     "B_ROUTE_SERIAL_PORT",
     "B_ROUTE_INSTANT_INTERVAL",
     "B_ROUTE_CUMULATIVE_INTERVAL",
+    "B_ROUTE_CUMULATIVE_DELAY",
     "B_ROUTE_DATA_DIR",
     "B_ROUTE_LOG_LEVEL",
+    "OMK_DATA_DIR",
+    "OMK_LOG_DIR",
 )
 
 
@@ -537,6 +542,97 @@ def test_connection_configures_connects_reads_e7_and_closes_adapter(
         ({"uart_mode": "80", "output_mode": "01"}, True)
     ]
     assert adapter.closed
+
+
+def test_run_connection_retries_broute_session_after_scan_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """run用の初期接続は一時的なスキャン失敗で終了しない。"""
+
+    attempts: list[tuple[str, str]] = []
+
+    class FakeSession:
+        def __init__(self, _adapter: object, *, scan_max_attempts: int) -> None:
+            assert scan_max_attempts == 3
+
+        def connect(self, identifier: str, password: str) -> SimpleNamespace:
+            attempts.append((identifier, password))
+            if len(attempts) == 1:
+                raise BRouteSessionError("候補なし")
+            return SimpleNamespace(smart_meter_ipv6=IPv6Address("fe80::1"))
+
+    class RecordingStopEvent:
+        def __init__(self) -> None:
+            self.waits: list[float] = []
+
+        def is_set(self) -> bool:
+            return False
+
+        def wait(self, timeout: float) -> bool:
+            self.waits.append(timeout)
+            return False
+
+    stop_event = RecordingStopEvent()
+    config = SimpleNamespace(
+        credentials=SimpleNamespace(b_route_id="A" * 32, password="P" * 12),
+        retry=SimpleNamespace(request_max_attempts=3, reconnect_wait_seconds=30),
+    )
+    monkeypatch.setattr(cli, "BRouteSession", FakeSession)
+
+    with caplog.at_level(logging.WARNING):
+        connection = cli._connect_broute_until_ready(  # type: ignore[arg-type]
+            object(),
+            config,  # type: ignore[arg-type]
+            stop_event,  # type: ignore[arg-type]
+            logging.getLogger("broute_meter.test"),
+        )
+
+    assert connection is not None
+    assert attempts == [("A" * 32, "P" * 12)] * 2
+    assert stop_event.waits == [30]
+    assert "初期Bルート接続に失敗しました。再試行します" in caplog.text
+
+
+def test_run_connection_retry_wait_stops_on_shutdown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """終了要求があれば初期接続の再試行待機を中断する。"""
+
+    class FakeSession:
+        def __init__(self, _adapter: object, *, scan_max_attempts: int) -> None:
+            pass
+
+        def connect(self, _identifier: str, _password: str) -> SimpleNamespace:
+            raise BRouteSessionError("候補なし")
+
+    class StopDuringWait:
+        stopped = False
+
+        def is_set(self) -> bool:
+            return self.stopped
+
+        def wait(self, timeout: float) -> bool:
+            assert timeout == 30
+            self.stopped = True
+            return True
+
+    monkeypatch.setattr(cli, "BRouteSession", FakeSession)
+    stop_event = StopDuringWait()
+    config = SimpleNamespace(
+        credentials=SimpleNamespace(b_route_id="A" * 32, password="P" * 12),
+        retry=SimpleNamespace(request_max_attempts=3, reconnect_wait_seconds=30),
+    )
+
+    assert (
+        cli._connect_broute_until_ready(  # type: ignore[arg-type]
+            object(),
+            config,  # type: ignore[arg-type]
+            stop_event,  # type: ignore[arg-type]
+            logging.getLogger("broute_meter.test"),
+        )
+        is None
+    )
 
 
 def test_run_treats_inflight_failure_after_stop_signal_as_graceful(
