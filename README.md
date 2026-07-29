@@ -201,6 +201,7 @@ docker compose -f compose.yaml -f compose.pi.yaml up -d --build
 - [設計原則](docs/design-principles.md) — 長期保守、交換可能性、AIフレンドリーな実装規約
 - [ハードウェア](docs/hardware.md) — Raspberry Pi、Windows、ESP32、周辺機器の責務分担
 - [開発ガイド](docs/development.md) — 開発手順、テスト、センサ追加、Codex利用時の規則
+- [Raspberry Pi初期セットアップ](docs/raspberry-pi-setup.md) — Raspberry Pi Imager設定後のホスト環境構築
 - [ロードマップ](docs/roadmap.md) — 移行手順、完了条件、未決定事項
 
 ## 8. 実装時の必須ルール
