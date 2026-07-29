@@ -48,6 +48,7 @@ def test_load_config_uses_defaults_for_empty_files(tmp_path: Path) -> None:
 
     assert config.measurement.instantaneous_interval_seconds == 10
     assert config.measurement.cumulative_check_interval_seconds == 60
+    assert config.measurement.cumulative_fetch_delay_seconds == 5
     assert config.serial == SerialConfig()
     assert config.adapter.auto_configure is True
     assert dict(config.adapter.expected_settings) == {
@@ -55,8 +56,9 @@ def test_load_config_uses_defaults_for_empty_files(tmp_path: Path) -> None:
         "output_mode": "01",
     }
     assert config.retry.request_max_attempts == 3
-    assert config.storage.data_directory == Path("data")
+    assert config.storage.data_directory == Path("../data/broute-meter")
     assert config.logging.level == "INFO"
+    assert config.logging.directory == Path("../logs/broute-meter")
     assert config.credentials.b_route_id is None
     assert config.credentials.password is None
 
@@ -78,6 +80,7 @@ def test_yaml_values_override_defaults(tmp_path: Path) -> None:
 measurement:
   instantaneous_interval_seconds: 15
   cumulative_check_interval_seconds: 45
+  cumulative_fetch_delay_seconds: 7
 serial:
   port: /dev/serial/by-id/example-adapter
   baudrate: 57600
@@ -105,7 +108,7 @@ b_route:
         require_credentials=True,
     )
 
-    assert config.measurement == MeasurementConfig(15, 45)
+    assert config.measurement == MeasurementConfig(15, 45, 7)
     assert config.serial.port == "/dev/serial/by-id/example-adapter"
     assert config.serial.baudrate == 57_600
     assert config.serial.timeout_seconds == 2.5
@@ -132,6 +135,7 @@ def test_all_supported_environment_variables_override_yaml(tmp_path: Path) -> No
 measurement:
   instantaneous_interval_seconds: 20
   cumulative_check_interval_seconds: 120
+  cumulative_fetch_delay_seconds: 9
 serial:
   port: COM2
 storage:
@@ -150,8 +154,11 @@ b_route:
             "B_ROUTE_SERIAL_PORT": "/dev/ttyUSB7",
             "B_ROUTE_INSTANT_INTERVAL": "30",
             "B_ROUTE_CUMULATIVE_INTERVAL": "90",
+            "B_ROUTE_CUMULATIVE_DELAY": "11",
             "B_ROUTE_DATA_DIR": "./from-environment",
             "B_ROUTE_LOG_LEVEL": "error",
+            "OMK_DATA_DIR": "./omk-data",
+            "OMK_LOG_DIR": "./omk-logs",
         },
         require_credentials=True,
     )
@@ -161,8 +168,10 @@ b_route:
     assert config.serial.port == "/dev/ttyUSB7"
     assert config.measurement.instantaneous_interval_seconds == 30
     assert config.measurement.cumulative_check_interval_seconds == 90
-    assert config.storage.data_directory == Path("from-environment")
+    assert config.measurement.cumulative_fetch_delay_seconds == 11
+    assert config.storage.data_directory == Path("omk-data")
     assert config.logging.level == "ERROR"
+    assert config.logging.directory == Path("omk-logs")
 
 
 def test_valid_environment_can_replace_invalid_lower_priority_scalar(
@@ -188,8 +197,11 @@ measurement:
         "B_ROUTE_SERIAL_PORT",
         "B_ROUTE_INSTANT_INTERVAL",
         "B_ROUTE_CUMULATIVE_INTERVAL",
+        "B_ROUTE_CUMULATIVE_DELAY",
         "B_ROUTE_DATA_DIR",
         "B_ROUTE_LOG_LEVEL",
+        "OMK_DATA_DIR",
+        "OMK_LOG_DIR",
     ],
 )
 @pytest.mark.parametrize("empty_value", ["", "   "])
@@ -222,6 +234,8 @@ b_route:
         ("instantaneous_interval_seconds", -1),
         ("cumulative_check_interval_seconds", 0),
         ("cumulative_check_interval_seconds", -1),
+        ("cumulative_fetch_delay_seconds", 0),
+        ("cumulative_fetch_delay_seconds", 1800),
     ],
 )
 def test_invalid_measurement_intervals_are_rejected(

@@ -23,7 +23,7 @@ RUN groupadd --gid 10001 broute \
         --home-dir /app \
         --shell /usr/sbin/nologin \
         broute \
-    && mkdir -p /app/data /app/logs \
+    && mkdir -p /data /logs \
     && chown -R 10001:10001 /app
 
 USER 10001:10001

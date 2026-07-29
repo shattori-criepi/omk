@@ -7,11 +7,12 @@ from pathlib import Path
 import yaml
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+OMK_ROOT = PROJECT_ROOT.parent
 
 
 def test_default_compose_service_uses_mock_without_usb_or_credentials() -> None:
     compose = yaml.safe_load(
-        (PROJECT_ROOT / "compose.yaml").read_text(encoding="utf-8")
+        (OMK_ROOT / "compose.yaml").read_text(encoding="utf-8")
     )
     services = compose["services"]
     mock_service = services["broute-meter-mock"]
@@ -22,20 +23,31 @@ def test_default_compose_service_uses_mock_without_usb_or_credentials() -> None:
     assert mock_service["network_mode"] == "none"
     assert mock_service["read_only"] is True
 
-    test_service = services["tests"]
+    assert mock_service["environment"] == {
+        "OMK_DATA_DIR": "/data",
+        "OMK_LOG_DIR": "/logs",
+    }
+    assert mock_service["volumes"] == [
+        "./data/broute-meter:/data",
+        "./logs/broute-meter:/logs",
+    ]
+    assert mock_service["user"] == "${OMK_UID:-1000}:${OMK_GID:-1000}"
+
+    test_service = services["broute-meter-tests"]
     assert test_service["build"]["target"] == "test"
     assert test_service["command"][0] == "tests/integration"
     assert test_service["profiles"] == ["test"]
 
-    for service in services.values():
+    for service in (mock_service, test_service):
         for forbidden_key in (
             "devices",
             "env_file",
-            "environment",
             "secrets",
-            "volumes",
         ):
             assert forbidden_key not in service
+        if service is not mock_service:
+            assert "environment" not in service
+            assert "volumes" not in service
         assert service.get("privileged", False) is False
         assert service["cap_drop"] == ["ALL"]
         assert service["security_opt"] == ["no-new-privileges:true"]

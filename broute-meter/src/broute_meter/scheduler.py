@@ -57,7 +57,7 @@ def next_aligned_timestamp(timestamp: float, interval_seconds: int) -> float:
 
 
 class MeasurementScheduler:
-    """瞬時値と積算値を直列に取得し、遅延時は過去分を追跡しない。"""
+    """E7と定時積算値を異なる時刻基準で直列に取得する。"""
 
     def __init__(
         self,
@@ -65,14 +65,14 @@ class MeasurementScheduler:
         storage: MeasurementStorage,
         *,
         instantaneous_interval_seconds: int,
-        cumulative_interval_seconds: int,
+        cumulative_fetch_delay_seconds: int,
         now: Callable[[], datetime] | None = None,
         stop_event: StopEvent | None = None,
     ) -> None:
         self._meter = meter
         self._storage = storage
         self._instant_interval = instantaneous_interval_seconds
-        self._cumulative_interval = cumulative_interval_seconds
+        self._cumulative_delay = cumulative_fetch_delay_seconds
         self._now = now or (lambda: datetime.now().astimezone())
         self._stop_event = stop_event or threading.Event()
         self._previous_cumulative = storage.latest_cumulative()
@@ -93,11 +93,16 @@ class MeasurementScheduler:
 
         initial = self._now().timestamp()
         next_instant = next_aligned_timestamp(initial, self._instant_interval)
-        next_cumulative = next_aligned_timestamp(initial, self._cumulative_interval)
+        startup_cumulative_pending = True
+        next_cumulative = _next_cumulative_timestamp(
+            initial,
+            self._cumulative_delay,
+        )
 
         while not self._stop_event.is_set():
             current = self._now().timestamp()
-            wait_seconds = min(next_instant, next_cumulative) - current
+            cumulative_due = current if startup_cumulative_pending else next_cumulative
+            wait_seconds = min(next_instant, cumulative_due) - current
             if wait_seconds > 0 and self._stop_event.wait(wait_seconds):
                 break
             if self._stop_event.is_set():
@@ -117,7 +122,7 @@ class MeasurementScheduler:
             if self._stop_event.is_set():
                 break
             current = self._now().timestamp()
-            if current >= next_cumulative:
+            if startup_cumulative_pending or current >= next_cumulative:
                 try:
                     self._measure_cumulative()
                 except MeasurementUnavailableError as exc:
@@ -126,9 +131,10 @@ class MeasurementScheduler:
                         exc,
                     )
                 finally:
-                    next_cumulative = _strictly_next_aligned_timestamp(
+                    startup_cumulative_pending = False
+                    next_cumulative = _next_cumulative_timestamp(
                         self._now().timestamp(),
-                        self._cumulative_interval,
+                        self._cumulative_delay,
                     )
 
     def _measure_instantaneous(self) -> None:
@@ -200,3 +206,16 @@ def _strictly_next_aligned_timestamp(
     interval_seconds: int,
 ) -> float:
     return (math.floor(timestamp / interval_seconds) + 1) * interval_seconds
+
+
+def _next_cumulative_timestamp(
+    timestamp: float,
+    delay_seconds: int,
+) -> float:
+    """次の毎時00分・30分の遅延後時刻を返す。"""
+
+    if not 1 <= delay_seconds < 1800:
+        raise ValueError("cumulative delay must be between 1 and 1799 seconds")
+    boundary_seconds = 30 * 60
+    next_boundary = (math.floor(timestamp / boundary_seconds) + 1) * boundary_seconds
+    return next_boundary + delay_seconds

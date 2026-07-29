@@ -70,6 +70,7 @@ class DelayedMeter:
         self.clock = clock
         self.stop_event = stop_event
         self.request_times: list[float] = []
+        self.cumulative_request_times: list[float] = []
 
     def get_instantaneous_power(self) -> InstantaneousPowerReading:
         self.request_times.append(self.clock.timestamp)
@@ -81,7 +82,16 @@ class DelayedMeter:
         return reading
 
     def get_cumulative_energy(self) -> CumulativeEnergyReading:
-        raise AssertionError("このテストでは積算計測時刻に到達しません")
+        self.cumulative_request_times.append(self.clock.timestamp)
+        now = self.clock.now()
+        return CumulativeEnergyReading(
+            now,
+            now,
+            1,
+            1,
+            Decimal("1"),
+            Decimal("1"),
+        )
 
 
 def test_next_aligned_timestamp_uses_wall_clock_boundaries() -> None:
@@ -99,7 +109,7 @@ def test_scheduler_skips_missed_instants_instead_of_catching_up() -> None:
         meter,
         storage,
         instantaneous_interval_seconds=10,
-        cumulative_interval_seconds=1000,
+        cumulative_fetch_delay_seconds=5,
         now=clock.now,
         stop_event=stop_event,
     )
@@ -107,6 +117,7 @@ def test_scheduler_skips_missed_instants_instead_of_catching_up() -> None:
     scheduler.run()
 
     assert meter.request_times == [10, 50]
+    assert meter.cumulative_request_times == [1]
     assert len(storage.instantaneous) == 2
 
 
@@ -135,7 +146,7 @@ def test_scheduler_saves_both_measurements_at_shared_boundary() -> None:
         Meter(),
         storage,
         instantaneous_interval_seconds=10,
-        cumulative_interval_seconds=60,
+        cumulative_fetch_delay_seconds=5,
         now=clock.now,
         stop_event=stop_event,
     ).run()
@@ -181,7 +192,7 @@ def test_scheduler_uses_cumulative_restored_from_storage() -> None:
         Meter(),
         storage,
         instantaneous_interval_seconds=10,
-        cumulative_interval_seconds=60,
+        cumulative_fetch_delay_seconds=5,
         now=clock.now,
         stop_event=stop_event,
     ).run()
@@ -189,3 +200,42 @@ def test_scheduler_uses_cumulative_restored_from_storage() -> None:
     assert len(storage.intervals) == 1
     assert storage.intervals[0].import_energy_kwh == Decimal("0.5")
     assert storage.intervals[0].export_energy_kwh == Decimal("0.2")
+
+
+def test_cumulative_is_requested_at_startup_and_after_half_hour_boundary() -> None:
+    clock = MutableClock(1_799)
+    stop_event = VirtualStopEvent(clock)
+    storage = RecordingStorage()
+
+    class Meter:
+        def __init__(self) -> None:
+            self.cumulative_times: list[float] = []
+
+        def get_instantaneous_power(self) -> InstantaneousPowerReading:
+            if clock.timestamp >= 1_810:
+                stop_event.set()
+            return InstantaneousPowerReading(clock.now(), 1)
+
+        def get_cumulative_energy(self) -> CumulativeEnergyReading:
+            self.cumulative_times.append(clock.timestamp)
+            now = clock.now()
+            return CumulativeEnergyReading(
+                now,
+                now,
+                1,
+                1,
+                Decimal("1"),
+                Decimal("1"),
+            )
+
+    meter = Meter()
+    MeasurementScheduler(
+        meter,
+        storage,
+        instantaneous_interval_seconds=10,
+        cumulative_fetch_delay_seconds=5,
+        now=clock.now,
+        stop_event=stop_event,
+    ).run()
+
+    assert meter.cumulative_times == [1_799, 1_805]

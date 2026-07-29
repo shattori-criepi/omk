@@ -1,6 +1,7 @@
 measurement:
   instantaneous_interval_seconds: 10
-  cumulative_check_interval_seconds: 60
+  # EA/EBは起動時と、毎時00分・30分の後にだけ取得する。
+  cumulative_fetch_delay_seconds: 5
 
 serial:
   port: null
@@ -20,8 +21,11 @@ retry:
   reconnect_wait_seconds: 30
 
 storage:
-  data_directory: "./data"
+  # broute-meterディレクトリから見たOMK共通の実行時データ領域。
+  # DockerではOMK_DATA_DIR=/dataで上書きする。
+  data_directory: "../data/broute-meter"
 
 logging:
   level: "INFO"
-  directory: "./logs"
+  # DockerではOMK_LOG_DIR=/logsで上書きする。
+  directory: "../logs/broute-meter"

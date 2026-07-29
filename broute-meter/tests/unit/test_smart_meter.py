@@ -1,5 +1,6 @@
 """スマートメータークライアントの要求・応答検証テスト。"""
 
+import logging
 from collections.abc import Callable
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -60,6 +61,24 @@ class FlakyDatagramAdapter:
         if len(self.calls) == 1:
             raise AdapterCommunicationError("temporary failure")
         return self.response
+
+
+class MatchingDatagramAdapter:
+    def __init__(self, responses: list[bytes]) -> None:
+        self.responses = responses
+
+    def exchange_udp(
+        self,
+        _address: IPv6Address,
+        _payload: bytes,
+        *,
+        response_matcher: Callable[[bytes], bool] | None = None,
+    ) -> bytes:
+        assert response_matcher is not None
+        for response in self.responses:
+            if response_matcher(response):
+                return response
+        raise AdapterCommunicationError("no matching response")
 
 
 def _response(
@@ -219,7 +238,7 @@ def test_reject_different_forward_and_reverse_metered_times() -> None:
 
 def test_retry_communication_failure_with_new_tid() -> None:
     adapter = FlakyDatagramAdapter(
-        _property_response(0x1235, 0xE7, "00000064")
+        _property_response(0x1235, 0xE1, "00")
     )
     client = SmartMeterClient(
         adapter,
@@ -228,10 +247,82 @@ def test_retry_communication_failure_with_new_tid() -> None:
         request_max_attempts=2,
     )
 
-    reading = client.get_instantaneous_power()
+    unit = client._get_property(0xE1)
 
-    assert reading.net_power_w == 100
+    assert unit == b"\x00"
     assert [payload[2:4] for payload in adapter.calls] == [
         bytes.fromhex("1234"),
         bytes.fromhex("1235"),
     ]
+
+
+def test_e7_timeout_is_not_immediately_retried() -> None:
+    adapter = FlakyDatagramAdapter(
+        _property_response(0x1235, 0xE7, "00000064")
+    )
+    client = SmartMeterClient(
+        adapter,
+        IPv6Address("fe80::1"),
+        tid_generator=TidGenerator(0x1234),
+        request_max_attempts=3,
+    )
+
+    with pytest.raises(AdapterCommunicationError):
+        client.get_instantaneous_power()
+
+    assert len(adapter.calls) == 1
+
+
+def test_debug_log_records_request_response_mapping(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    client = SmartMeterClient(
+        FakeDatagramAdapter(_response()),
+        IPv6Address("fe80::1"),
+        tid_generator=TidGenerator(0x1234),
+        now=lambda: datetime(2026, 7, 29, 12, 0, tzinfo=UTC),
+        request_timeout_seconds=4,
+    )
+
+    meter_logger = logging.getLogger("broute_meter.meter.smart_meter")
+    meter_logger.addHandler(caplog.handler)
+    try:
+        with caplog.at_level(logging.DEBUG, logger="broute_meter.meter.smart_meter"):
+            client.get_instantaneous_power()
+    finally:
+        meter_logger.removeHandler(caplog.handler)
+
+    messages = "\n".join(caplog.messages)
+    assert "tid=1234" in messages
+    assert "epc=E7" in messages
+    assert "timeout_seconds=4" in messages
+    assert "request_tid=1234" in messages
+    assert "response_tid=1234" in messages
+    assert "request_epc=E7" in messages
+    assert "response_epc=E7" in messages
+
+
+def test_ignores_mismatched_tid_and_epc_until_matching_response(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    client = SmartMeterClient(
+        MatchingDatagramAdapter(
+            [
+                _property_response(0x1235, 0xE7, "00000001"),
+                _property_response(0x1234, 0xEA, "00000001"),
+                _property_response(0x1234, 0xE7, "00000064"),
+            ]
+        ),
+        IPv6Address("fe80::1"),
+        tid_generator=TidGenerator(0x1234),
+    )
+    meter_logger = logging.getLogger("broute_meter.meter.smart_meter")
+    meter_logger.addHandler(caplog.handler)
+    try:
+        with caplog.at_level(logging.DEBUG, logger="broute_meter.meter.smart_meter"):
+            reading = client.get_instantaneous_power()
+    finally:
+        meter_logger.removeHandler(caplog.handler)
+
+    assert reading.net_power_w == 100
+    assert "ECHONET Lite応答を破棄しました" in "\n".join(caplog.messages)

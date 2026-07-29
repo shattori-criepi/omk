@@ -122,48 +122,28 @@ flowchart LR
 ```text
 .
 ├── README.md
-├── AGENTS.md                  # Codex等に与える作業規約。別途作成する
 ├── compose.yaml
-├── compose.pi.yaml           # Raspberry Pi 4／5の実機向け差分
-├── compose.mock.yaml         # Windows・実機なし開発向け差分
-├── compose.windows-hardware.yaml # Windows上の任意Bルート実機検証向け差分
-├── .env.example
-├── apps/
-│   ├── core/                  # TypeScriptのモジュラーモノリス
-│   │   └── src/
-│   │       ├── modules/
-│   │       │   ├── devices/
-│   │       │   ├── measurements/
-│   │       │   ├── storage/
-│   │       │   ├── upload/
-│   │       │   └── health/
-│   │       ├── ports/         # 外部依存に対するインターフェース
-│   │       ├── adapters/      # Wi-SUN、BLE、MQTT、DB等
-│   │       └── bootstrap/     # DI、設定読込、起動処理
-│   ├── ui/                    # 本体表示・Web UI
-│   └── uploader-python/       # 既存Python処理の移行用
-├── packages/
-│   ├── contracts/             # MQTT/API/イベントの共有スキーマ
-│   └── testkit/               # モック、fixture、契約テスト支援
-├── firmware/
-│   └── esp32/                 # ESP32センサノード
-├── config/
-│   ├── example/
-│   └── schemas/
-├── scripts/                   # セットアップ、診断、保守
-├── tests/
-│   ├── integration/
-│   └── hardware/
-└── docs/
-    ├── project-overview.md
-    ├── architecture.md
-    ├── design-principles.md
-    ├── hardware.md
-    ├── development.md
-    └── roadmap.md
+├── broute-meter/              # Bルート計測の独立サブプロジェクト
+│   ├── src/
+│   ├── tests/
+│   ├── config/
+│   ├── Dockerfile
+│   ├── pyproject.toml
+│   └── README.md
+├── docs/
+├── data/                      # Git管理外: data/broute-meter/ など
+├── logs/                      # Git管理外: logs/broute-meter/ など
+└── services/gateway/           # 既存コンポーネント（この変更では移動しない）
 ```
 
-この構成は実装開始時の基準です。実際の責務が見えた段階で変更できますが、変更時は`docs/architecture.md`も同時に更新します。
+計測・収集プログラムは、原則として機能単位の独立フォルダをOMKルート直下へ追加します。
+現時点では`apps/`、`services/`、`sensors/`などの新たな中間階層を設けません。
+実行時の計測データとログは、各サブプロジェクト内へ保存せず、OMKルートの
+`data/<機能名>/`と`logs/<機能名>/`へ保存します。保存先は設定または環境変数で
+切り替え可能にし、Dockerでは同じホスト領域をコンテナへマウントします。
+
+既存の`services/gateway/`はこの方針策定前からあるため、現時点では不要な移動を
+行いません。変更が必要になった時点で、責務と移行手順を明確にして扱います。
 
 ## 5. 開発環境
 

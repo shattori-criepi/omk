@@ -69,14 +69,18 @@ class SmartMeterClient:
         tid_generator: TidGenerator | None = None,
         now: Callable[[], datetime] | None = None,
         request_max_attempts: int = 1,
+        request_timeout_seconds: float = 5.0,
     ) -> None:
         if request_max_attempts < 1:
             raise ValueError("request_max_attempts must be at least one")
+        if request_timeout_seconds <= 0:
+            raise ValueError("request_timeout_seconds must be greater than zero")
         self._adapter = adapter
         self._ipv6_address = ipv6_address
         self._tid_generator = tid_generator or TidGenerator()
         self._now = now or (lambda: datetime.now().astimezone())
         self._request_max_attempts = request_max_attempts
+        self._request_timeout_seconds = request_timeout_seconds
         self._coefficient: int | None = None
         self._significant_digits: int | None = None
         self._unit_kwh: Decimal | None = None
@@ -84,7 +88,9 @@ class SmartMeterClient:
     def get_instantaneous_power(self) -> InstantaneousPowerReading:
         """E7を1回取得し、正が買電・負が逆潮流のW値として返す。"""
 
-        edt = self._get_property(INSTANTANEOUS_POWER_EPC)
+        # E7は10秒周期を優先する。同期的な即時再試行は次周期を遅延させる
+        # ため、失敗時はこの周期の欠測として呼出元へ返す。
+        edt = self._get_property(INSTANTANEOUS_POWER_EPC, max_attempts=1)
         assert edt is not None
 
         try:
@@ -177,29 +183,78 @@ class SmartMeterClient:
             raise SmartMeterError("積算電力量換算プロパティのEDTが不正です。") from exc
         return self._coefficient, self._significant_digits, self._unit_kwh
 
-    def _get_property(self, epc: int, *, optional: bool = False) -> bytes | None:
+    def _get_property(
+        self,
+        epc: int,
+        *,
+        optional: bool = False,
+        max_attempts: int | None = None,
+    ) -> bytes | None:
+        attempts = self._request_max_attempts if max_attempts is None else max_attempts
+        if attempts < 1:
+            raise ValueError("max_attempts must be at least one")
         last_error: AdapterCommunicationError | None = None
-        for attempt in range(1, self._request_max_attempts + 1):
+        for attempt in range(1, attempts + 1):
             try:
-                return self._get_property_once(epc, optional=optional)
+                result = self._get_property_once(
+                    epc,
+                    optional=optional,
+                    attempt=attempt,
+                    max_attempts=attempts,
+                )
             except AdapterCommunicationError as exc:
                 last_error = exc
-                if attempt >= self._request_max_attempts:
+                logger.debug(
+                    "ECHONET Lite Get失敗 tid_attempt=%d epc=%02X "
+                    "timeout_seconds=%s retry_result=%s",
+                    attempt,
+                    epc,
+                    self._request_timeout_seconds,
+                    "exhausted" if attempt >= attempts else "will_retry",
+                )
+                if attempt >= attempts:
                     raise
                 logger.warning(
                     "EPC %02Xの取得に失敗したため再試行します attempt=%d/%d",
                     epc,
                     attempt,
-                    self._request_max_attempts,
+                    attempts,
                 )
+            else:
+                logger.debug(
+                    "ECHONET Lite Get成功 epc=%02X attempt=%d/%d retry_result=%s",
+                    epc,
+                    attempt,
+                    attempts,
+                    "retried_success" if attempt > 1 else "first_attempt_success",
+                )
+                return result
         assert last_error is not None
         raise last_error
 
-    def _get_property_once(self, epc: int, *, optional: bool) -> bytes | None:
+    def _get_property_once(
+        self,
+        epc: int,
+        *,
+        optional: bool,
+        attempt: int,
+        max_attempts: int,
+    ) -> bytes | None:
         tid = self._tid_generator.next()
         request = build_get_request(tid, epc)
-        response = parse_frame(
-            self._adapter.exchange_udp(
+        sent_at = self._now()
+        logger.debug(
+            "ECHONET Lite Get送信 tid=%04X epc=%02X sent_at=%s "
+            "timeout_seconds=%s attempt=%d/%d",
+            tid,
+            epc,
+            sent_at.isoformat(),
+            self._request_timeout_seconds,
+            attempt,
+            max_attempts,
+        )
+        try:
+            response_payload = self._adapter.exchange_udp(
                 self._ipv6_address,
                 request.to_bytes(),
                 response_matcher=lambda payload: _matches_get_response(
@@ -208,11 +263,31 @@ class SmartMeterClient:
                     expected_epc=epc,
                 ),
             )
-        )
+        except AdapterCommunicationError:
+            logger.debug(
+                "ECHONET Lite Getタイムアウト tid=%04X epc=%02X sent_at=%s "
+                "timeout_seconds=%s attempt=%d/%d",
+                tid,
+                epc,
+                sent_at.isoformat(),
+                self._request_timeout_seconds,
+                attempt,
+                max_attempts,
+            )
+            raise
+        response = parse_frame(response_payload)
         _validate_response_envelope(response, expected_tid=tid)
         matching = [prop for prop in response.properties if prop.epc == epc]
         if len(matching) != 1:
             raise SmartMeterError(f"EPC {epc:02X}が応答に1件だけ含まれていません。")
+        logger.debug(
+            "ECHONET Lite応答照合成功 request_tid=%04X response_tid=%04X "
+            "request_epc=%02X response_epc=%02X",
+            tid,
+            response.tid,
+            epc,
+            matching[0].epc,
+        )
         if response.esv == ESV_GET_SNA:
             if optional:
                 return None
@@ -252,11 +327,23 @@ def _matches_get_response(
     try:
         frame = parse_frame(payload)
     except EchonetFrameError:
+        logger.debug("ECHONET Lite応答を破棄しました reason=invalid_frame")
         return False
-    return (
+    matched = (
         frame.tid == expected_tid
         and frame.seoj == LOW_VOLTAGE_SMART_METER_EOJ
         and frame.deoj == CONTROLLER_EOJ
         and frame.esv in (ESV_GET_RESPONSE, ESV_GET_SNA)
         and any(prop.epc == expected_epc for prop in frame.properties)
     )
+    if not matched:
+        response_epcs = ",".join(f"{prop.epc:02X}" for prop in frame.properties)
+        logger.debug(
+            "ECHONET Lite応答を破棄しました expected_tid=%04X response_tid=%04X "
+            "expected_epc=%02X response_epcs=%s",
+            expected_tid,
+            frame.tid,
+            expected_epc,
+            response_epcs,
+        )
+    return matched

@@ -76,7 +76,8 @@ Dockerは任意の実行手段であり、アプリケーションの必須条�
 # config/settings.yaml
 measurement:
   instantaneous_interval_seconds: 10
-  cumulative_check_interval_seconds: 60
+  # EA/EBは起動時と、毎時00分・30分の後にだけ取得する。
+  cumulative_fetch_delay_seconds: 5
 
 serial:
   port: null
@@ -96,12 +97,17 @@ retry:
   reconnect_wait_seconds: 30
 
 storage:
-  data_directory: "./data"
+  # OMKルート直下の共通データ領域（このREADMEのコマンドはbroute-meterから実行）。
+  data_directory: "../data/broute-meter"
 
 logging:
   level: "INFO"
-  directory: "./logs"
+  directory: "../logs/broute-meter"
 ```
+
+`cumulative_fetch_delay_seconds`は30分境界後の待機秒数です。既存の
+`cumulative_check_interval_seconds`は設定読込みの互換性のためだけに受け付け、
+`run`のEA/EB取得周期には使用しません。
 
 ```yaml
 # config/credentials.yaml
@@ -117,8 +123,16 @@ b_route:
 - `B_ROUTE_SERIAL_PORT`
 - `B_ROUTE_INSTANT_INTERVAL`
 - `B_ROUTE_CUMULATIVE_INTERVAL`
+- `B_ROUTE_CUMULATIVE_DELAY`
 - `B_ROUTE_DATA_DIR`
 - `B_ROUTE_LOG_LEVEL`
+- `OMK_DATA_DIR`
+- `OMK_LOG_DIR`
+
+`OMK_DATA_DIR`と`OMK_LOG_DIR`は、OMK共通の実行時保存先を指定するための環境変数です。
+両方が指定されている場合は、互換用の`B_ROUTE_DATA_DIR`より`OMK_DATA_DIR`を優先します。
+開発時の既定値はOMKルートから見て`data/broute-meter/`と`logs/broute-meter/`です。
+実行時データ・ログはGit管理対象外です。
 
 瞬時電力間隔は10秒以上でなければなりません。空の環境変数は下位設定へフォールバックせず、設定ミスとして扱います。BルートIDまたはパスワードが不足している場合、通信を開始するコマンドは設定エラーで終了します。
 
@@ -202,11 +216,14 @@ python -m broute_meter \
 
 ## Dockerによるモック実行
 
-Docker関連ファイルはこのPythonサブプロジェクト内に閉じています。リポジトリルートのOMK用Composeとは別物なので、必ず`broute-meter`へ移動して実行してください。
+DockerfileはこのPythonサブプロジェクト内にあります。OMK全体を扱うCompose定義は
+リポジトリルートの`compose.yaml`です。Dockerではホストの
+`data/broute-meter/`と`logs/broute-meter/`を、コンテナの`/data`と`/logs`へ
+マウントします。
 
 ```bash
-cd broute-meter
-docker compose up --build \
+cd ..
+docker compose up --build broute-meter-mock \
   --abort-on-container-exit \
   --exit-code-from broute-meter-mock
 ```
@@ -216,7 +233,7 @@ docker compose up --build \
 Docker内でモック統合テストを実行する場合は、`test`プロファイルを使用します。
 
 ```bash
-docker compose --profile test run --build --rm tests
+docker compose --profile test run --build --rm broute-meter-tests
 ```
 
 ランタイムイメージとテストイメージは同じ[Dockerfile](Dockerfile)の別ステージです。通常の直接実行・直接テストは、Dockerをインストールしていない環境でも従来どおり利用できます。
