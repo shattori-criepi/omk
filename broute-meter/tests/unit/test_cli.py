@@ -485,10 +485,12 @@ def test_connection_configures_connects_reads_e7_and_closes_adapter(
             selected_address: IPv6Address,
             *,
             request_max_attempts: int,
+            request_timeout_seconds: float,
         ) -> None:
             assert selected_adapter is adapter
             assert selected_address == address
             assert request_max_attempts == 3
+            assert request_timeout_seconds == 5
 
         def get_instantaneous_power(self) -> InstantaneousPowerReading:
             return InstantaneousPowerReading(

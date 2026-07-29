@@ -220,12 +220,14 @@ def _run(args: argparse.Namespace) -> int:
                     adapter,
                     reconnected.smart_meter_ipv6,
                     request_max_attempts=config.retry.request_max_attempts,
+                    request_timeout_seconds=config.retry.request_timeout_seconds,
                 )
 
             initial_meter = SmartMeterClient(
                 adapter,
                 connection.smart_meter_ipv6,
                 request_max_attempts=config.retry.request_max_attempts,
+                request_timeout_seconds=config.retry.request_timeout_seconds,
             )
             recovering_meter = RecoveringMeterReader(
                 initial_meter,
@@ -249,16 +251,16 @@ def _run(args: argparse.Namespace) -> int:
                 instantaneous_interval_seconds=(
                     config.measurement.instantaneous_interval_seconds
                 ),
-                cumulative_interval_seconds=(
-                    config.measurement.cumulative_check_interval_seconds
+                cumulative_fetch_delay_seconds=(
+                    config.measurement.cumulative_fetch_delay_seconds
                 ),
                 stop_event=shutdown_event,
             )
             logger.info(
                 "定期計測を開始します instantaneous_interval=%s "
-                "cumulative_interval=%s",
+                "cumulative_fetch_delay=%s",
                 config.measurement.instantaneous_interval_seconds,
-                config.measurement.cumulative_check_interval_seconds,
+                config.measurement.cumulative_fetch_delay_seconds,
             )
             scheduler.run()
         except KeyboardInterrupt:
@@ -352,6 +354,7 @@ def _test_connection(args: argparse.Namespace) -> int:
             adapter,
             connection.smart_meter_ipv6,
             request_max_attempts=config.retry.request_max_attempts,
+            request_timeout_seconds=config.retry.request_timeout_seconds,
         )
         reading = meter.get_instantaneous_power()
         cumulative = meter.get_cumulative_energy()

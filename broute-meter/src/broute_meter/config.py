@@ -43,8 +43,11 @@ _SUPPORTED_ENVIRONMENT_KEYS = frozenset(
         "B_ROUTE_SERIAL_PORT",
         "B_ROUTE_INSTANT_INTERVAL",
         "B_ROUTE_CUMULATIVE_INTERVAL",
+        "B_ROUTE_CUMULATIVE_DELAY",
         "B_ROUTE_DATA_DIR",
         "B_ROUTE_LOG_LEVEL",
+        "OMK_DATA_DIR",
+        "OMK_LOG_DIR",
     }
 )
 
@@ -64,6 +67,7 @@ _SECTION_KEYS: Mapping[str, frozenset[str]] = MappingProxyType(
             {
                 "instantaneous_interval_seconds",
                 "cumulative_check_interval_seconds",
+                "cumulative_fetch_delay_seconds",
             }
         ),
         "serial": frozenset({"port", "baudrate", "timeout_seconds"}),
@@ -99,6 +103,7 @@ class MeasurementConfig:
 
     instantaneous_interval_seconds: int = 10
     cumulative_check_interval_seconds: int = 60
+    cumulative_fetch_delay_seconds: int = 5
 
 
 @dataclass(frozen=True, slots=True)
@@ -134,7 +139,7 @@ class RetryConfig:
 class StorageConfig:
     """Measurement storage settings."""
 
-    data_directory: Path = Path("./data")
+    data_directory: Path = Path("../data/broute-meter")
 
 
 @dataclass(frozen=True, slots=True)
@@ -142,7 +147,7 @@ class LoggingConfig:
     """Application logging settings."""
 
     level: str = "INFO"
-    directory: Path = Path("./logs")
+    directory: Path = Path("../logs/broute-meter")
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -237,6 +242,13 @@ def validate_config(
     elif config.measurement.cumulative_check_interval_seconds <= 0:
         errors.append(
             "measurement.cumulative_check_interval_seconds must be greater than 0"
+        )
+
+    if not _is_int(config.measurement.cumulative_fetch_delay_seconds):
+        errors.append("measurement.cumulative_fetch_delay_seconds must be an integer")
+    elif not 1 <= config.measurement.cumulative_fetch_delay_seconds < 1800:
+        errors.append(
+            "measurement.cumulative_fetch_delay_seconds must be between 1 and 1799"
         )
 
     if config.serial.port is not None:
@@ -350,6 +362,9 @@ def safe_config_summary(config: AppConfig) -> dict[str, object]:
             "cumulative_check_interval_seconds": (
                 config.measurement.cumulative_check_interval_seconds
             ),
+            "cumulative_fetch_delay_seconds": (
+                config.measurement.cumulative_fetch_delay_seconds
+            ),
         },
         "serial": {
             "port": config.serial.port,
@@ -390,6 +405,7 @@ def _default_values() -> dict[str, dict[str, Any]]:
         "measurement": {
             "instantaneous_interval_seconds": 10,
             "cumulative_check_interval_seconds": 60,
+            "cumulative_fetch_delay_seconds": 5,
         },
         "serial": {
             "port": None,
@@ -406,8 +422,8 @@ def _default_values() -> dict[str, dict[str, Any]]:
             "reconnect_after_consecutive_failures": 5,
             "reconnect_wait_seconds": 30,
         },
-        "storage": {"data_directory": "./data"},
-        "logging": {"level": "INFO", "directory": "./logs"},
+        "storage": {"data_directory": "../data/broute-meter"},
+        "logging": {"level": "INFO", "directory": "../logs/broute-meter"},
         "b_route": {"id": None, "password": None},
     }
 
@@ -557,7 +573,17 @@ def _merge_environment(
             "cumulative_check_interval_seconds",
         ),
         (
+            "B_ROUTE_CUMULATIVE_DELAY",
+            "measurement",
+            "cumulative_fetch_delay_seconds",
+        ),
+        (
             "B_ROUTE_DATA_DIR",
+            "storage",
+            "data_directory",
+        ),
+        (
+            "OMK_DATA_DIR",
             "storage",
             "data_directory",
         ),
@@ -566,6 +592,11 @@ def _merge_environment(
             "logging",
             "level",
         ),
+        (
+            "OMK_LOG_DIR",
+            "logging",
+            "directory",
+        ),
     )
     for environment_key, section, field_name in environment_targets:
         if environment_key in environ:
@@ -573,6 +604,7 @@ def _merge_environment(
             if environment_key in {
                 "B_ROUTE_INSTANT_INTERVAL",
                 "B_ROUTE_CUMULATIVE_INTERVAL",
+                "B_ROUTE_CUMULATIVE_DELAY",
             }:
                 try:
                     environment_value = int(environ[environment_key], 10)
@@ -591,6 +623,10 @@ def _build_config(values: Mapping[str, Mapping[str, Any]]) -> AppConfig:
     cumulative = _integer_value(
         values["measurement"]["cumulative_check_interval_seconds"],
         "measurement.cumulative_check_interval_seconds",
+    )
+    cumulative_delay = _integer_value(
+        values["measurement"]["cumulative_fetch_delay_seconds"],
+        "measurement.cumulative_fetch_delay_seconds",
     )
 
     port_value = values["serial"]["port"]
@@ -628,6 +664,7 @@ def _build_config(values: Mapping[str, Mapping[str, Any]]) -> AppConfig:
         measurement=MeasurementConfig(
             instantaneous_interval_seconds=instantaneous,
             cumulative_check_interval_seconds=cumulative,
+            cumulative_fetch_delay_seconds=cumulative_delay,
         ),
         serial=SerialConfig(
             port=port_value,
