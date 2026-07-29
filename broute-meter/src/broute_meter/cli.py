@@ -26,6 +26,7 @@ from broute_meter.config import AppConfig, ConfigError, load_config, safe_config
 from broute_meter.echonet import EchonetFrameError
 from broute_meter.logging_config import configure_logging
 from broute_meter.meter import SmartMeterClient, SmartMeterError
+from broute_meter.models import BRouteConnection
 from broute_meter.resilience import RecoveringMeterReader
 from broute_meter.scheduler import MeasurementScheduler
 from broute_meter.serial.port_detector import (
@@ -183,19 +184,22 @@ def _run(args: argparse.Namespace) -> int:
                 logger.info("アダプター設定完了後に終了します")
                 return 0
 
-            credentials = config.credentials
-            assert credentials.b_route_id is not None
-            assert credentials.password is not None
-            connection = BRouteSession(
+            connection = _connect_broute_until_ready(
                 adapter,
-                scan_max_attempts=config.retry.request_max_attempts,
-            ).connect(
-                credentials.b_route_id,
-                credentials.password,
+                config,
+                shutdown_event,
+                logger,
             )
+            if connection is None:
+                logger.info("初期Bルート接続の再試行を終了します")
+                return 0
             if shutdown_event.is_set():
                 logger.info("Bルート接続処理完了後に終了します")
                 return 0
+
+            credentials = config.credentials
+            assert credentials.b_route_id is not None
+            assert credentials.password is not None
 
             def reconnect_meter() -> SmartMeterClient:
                 logger.warning("シリアルポートとPANA接続を再確立します")
@@ -288,6 +292,48 @@ def _run(args: argparse.Namespace) -> int:
 
     logger.info("アプリケーションコマンド終了 command=run exit_code=0")
     return 0
+
+
+def _connect_broute_until_ready(
+    adapter: RsWsuhaPAdapter,
+    config: AppConfig,
+    stop_event: threading.Event,
+    logger: logging.Logger,
+) -> BRouteConnection | None:
+    """終了要求までBルート接続シーケンス全体を再試行する。
+
+    ``run`` は無人での継続計測を目的とするため、Wi-SUNの一時的なスキャン
+    不成立やPANA接続失敗では終了しない。診断用の ``test-connection`` は
+    呼び出さず、単発失敗を利用者へ返す。
+    """
+
+    credentials = config.credentials
+    assert credentials.b_route_id is not None
+    assert credentials.password is not None
+
+    attempt = 0
+    while not stop_event.is_set():
+        attempt += 1
+        try:
+            return BRouteSession(
+                adapter,
+                scan_max_attempts=config.retry.request_max_attempts,
+            ).connect(
+                credentials.b_route_id,
+                credentials.password,
+            )
+        except (AdapterError, BRouteSessionError, TransportError) as exc:
+            logger.warning(
+                "初期Bルート接続に失敗しました。再試行します "
+                "connection_attempt=%d retry_wait_seconds=%s error=%s",
+                attempt,
+                config.retry.reconnect_wait_seconds,
+                exc,
+            )
+            if stop_event.wait(config.retry.reconnect_wait_seconds):
+                break
+
+    return None
 
 
 def _install_stop_signal_handlers(
