@@ -6,6 +6,22 @@ __pycache__/
 .vscode/
 .DS_Store
 
-data/
+# Runtime measurement data is ignored; only documentation and placeholders
+# that preserve the standard directory layout are tracked.
+data/*
+!data/README.md
+!data/.gitkeep
+!data/broute/
+data/broute/*
+!data/broute/.gitkeep
+!data/sensors/
+data/sensors/*
+!data/sensors/.gitkeep
+!data/database/
+data/database/*
+!data/database/.gitkeep
+!data/exports/
+data/exports/*
+!data/exports/.gitkeep
 logs/
 secrets/
