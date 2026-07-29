@@ -31,7 +31,8 @@ Windows PCです。初期設定はSSHで行えるため、キーボードとデ�
 2. Raspberry Piを起動し、WindowsからSSH接続する
 3. `/home/omkdev/projects/omk`へこのリポジトリをcloneする
 4. `./scripts/setup-raspberry-pi.sh`を実行し、再ログイン後にDockerを確認する
-5. 後続タスクとして、周辺機器、秘密情報、OMKサービス、表示・ネットワーク機能を個別に設定する
+5. Onyx を使う場合は [SORACOM Onyx セットアップ](docs/soracom-onyx-setup.md)を実行する
+6. 後続タスクとして、周辺機器、秘密情報、OMKサービス、表示・ネットワーク機能を個別に設定する
 
 現時点のセットアップスクリプトは、OS更新、Docker、データ保存領域までを準備します。
 OMKアプリケーションやDocker Composeサービスは起動しません。実機用Compose構成、秘密情報、
@@ -224,6 +225,7 @@ docker compose -f compose.yaml -f compose.pi.yaml up -d --build
 - [ハードウェア](docs/hardware.md) — Raspberry Pi、Windows、ESP32、周辺機器の責務分担
 - [開発ガイド](docs/development.md) — 開発手順、テスト、センサ追加、Codex利用時の規則
 - [Raspberry Pi初期セットアップ](docs/raspberry-pi-setup.md) — Raspberry Pi Imager設定後のホスト環境構築
+- [SORACOM Onyx セットアップ](docs/soracom-onyx-setup.md) — Onyx LTE モデムの認識・接続・診断
 - [ロードマップ](docs/roadmap.md) — 移行手順、完了条件、未決定事項
 
 ## 8. 実装時の必須ルール
