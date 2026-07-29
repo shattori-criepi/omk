@@ -267,3 +267,4 @@ if [[ "${RELOGIN_REQUIRED}" == "yes" ]]; then
 fi
 
 log "OMK Raspberry Pi setup completed."
+log "Optional next step for a connected SORACOM Onyx: ./scripts/setup-soracom-onyx.sh"
