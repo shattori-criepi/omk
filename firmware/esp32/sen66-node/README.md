@@ -52,10 +52,18 @@ Windowsでは、USBを接続したWindows側のVS Code + PlatformIOから書き�
 [INFO] SEN66 detected at 0x6B
 [INFO] SEN66 serial number: xxxxxxxxx
 [INFO] Continuous measurement started
-{"type":"measurement","uptime_ms":123456,"pm1_0_ug_m3":2.10,"pm2_5_ug_m3":3.40,"pm4_0_ug_m3":4.00,"pm10_0_ug_m3":4.80,"relative_humidity_percent":48.20,"temperature_celsius":25.60,"voc_index":102.00,"nox_index":null,"co2_ppm":612.00}
+{"type":"measurement","uptime_ms":123456,"pm1_0_ug_m3":2.10,"pm2_5_ug_m3":3.40,"pm4_0_ug_m3":4.00,"pm10_0_ug_m3":4.80,"relative_humidity_percent":48.20,"temperature_celsius":25.60,"voc_index":102.00,"nox_index":1.00,"co2_ppm":612.00}
 ```
 
 SEN66が示す未取得値（起動直後のNOx/CO2を含む）は0に置き換えず、JSONの`null`として出力します。測定データ未準備は異常ではなく、次の1秒周期で再試行します。
+
+## 実機確認
+
+ESP32とSEN66をI2C接続し、PlatformIOからの書き込みとシリアルモニタを確認しました。
+
+- PM1.0、PM2.5、PM4.0、PM10、相対湿度、温度、VOC Index、NOx Index、CO2を取得
+- JSON Lines形式で1測定値につき1行を出力
+- `uptime_ms`が約1,000 ms間隔で増加することを確認
 
 ## エラー時の確認
 
