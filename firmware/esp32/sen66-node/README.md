@@ -1,6 +1,6 @@
 # OMK SEN66 node
 
-ESP32 DevKitCとSEN66を接続し、1秒ごとの測定値をUSBシリアルのJSON Linesと、Raspberry Pi上のMosquittoへ送信するPlatformIOプロジェクトです。SEN66の計測とシリアル出力はWi-Fi/MQTTの接続状態に関係なく継続します。
+ESP32 DevKitCとSEN66を接続し、10秒ごとの測定値をUSBシリアルのJSON Linesと、Raspberry Pi上のMosquittoへ送信するPlatformIOプロジェクトです。SEN66の計測とシリアル出力はWi-Fi/MQTTの接続状態に関係なく継続します。
 
 ## ハードウェア
 
