@@ -197,7 +197,81 @@ Wi-Fiパスワード、SSH秘密鍵、APIキーなどの秘密情報を、リポ
 
 秘密値そのものを、この文書、Git、セットアップログ、チケットへ記載しないでください。
 
-## 13. data-transformerの定期実行
+## 13. Dockerデータ収集・表示サービスを起動する
+
+Wi-Fiアクセスポイントを先に設定し、`wlan0` に `192.168.50.1/24` が割り当てられた後で、
+次のスクリプトを実行します。このアドレスはMosquittoの公開先としてComposeに固定されて
+いるため、APが未設定のまま起動すると安全に失敗します。APの設定は
+`scripts/setup-wifi-access-point.sh` を使用してください。
+
+このスクリプトが本番起動するのは、次の3サービスだけです。
+
+- `mosquitto` (`omk-mosquitto`)
+- `sensor-collector` (`omk-sensor-collector`)
+- `dashboard` (`omk-dashboard`)
+
+`gateway`、`broute-meter-mock`、`broute-meter-tests` は起動しません。Bルート本体は
+ホストのsystemdサービスとして動作し、Docker化しません。
+
+Docker EngineとCompose pluginが利用でき、実行ユーザーがDocker groupを反映済みである
+こと、`curl`、Compose設定、各Dockerfileが存在することが前提です。最初に予定と
+非秘密設定を確認できます。
+
+```bash
+./scripts/setup-data-collection.sh --dry-run
+./scripts/setup-data-collection.sh --print-config
+```
+
+通常の起動、対象イメージの取得、対象アプリケーションのビルド、明示的な再起動はそれぞれ
+次のとおりです。通常実行は既に正常稼働中のサービスを不要に再作成しません。
+
+```bash
+./scripts/setup-data-collection.sh
+./scripts/setup-data-collection.sh --pull
+./scripts/setup-data-collection.sh --build
+./scripts/setup-data-collection.sh --restart
+```
+
+`--pull` は配布イメージであるMosquittoだけを取得します。`sensor-collector` と
+`dashboard` はレジストリからpullしないローカルbuildサービスです。これらのベースイメージも
+更新して再buildする場合は、`--pull --build` を併用してください。
+
+実行ログは `logs/setup/setup-data-collection-YYYYMMDD-HHMMSS.log` に保存されます。
+Dashboardは [http://localhost:8000/display](http://localhost:8000/display)、health確認は
+[http://localhost:8000/health](http://localhost:8000/health) です。状態とログは次で確認します。
+
+```bash
+docker compose ps mosquitto sensor-collector dashboard
+docker compose logs --tail 100 mosquitto sensor-collector dashboard
+```
+
+停止・再起動も必ず対象サービスを明示します。`docker compose down` や特に
+`docker compose down -v` は、他サービス、ネットワーク、またはデータへ影響し得るため
+使用しないでください。
+
+```bash
+docker compose stop mosquitto sensor-collector dashboard
+docker compose restart mosquitto sensor-collector dashboard
+```
+
+`data/sensors`（JSONL）と`data/processed`（処理済みデータ）、
+`services/mosquitto/data` は運用データです。削除せず、バックアップと保持方針に従って
+管理してください。スクリプトは既存ディレクトリを再帰的にchownしません。
+
+### トラブルシューティング
+
+- `192.168.50.1` がない: `nmcli connection show omk-ap` と
+  `ip -4 address show wlan0` を確認し、AP設定を完了してから再実行します。Composeのbindを
+  `0.0.0.0` に書き換えないでください。
+- Docker権限エラー: `systemctl status docker` を確認し、`docker` group追加後はSSHから
+  ログアウト・再接続します。恒常的に `sudo docker` で運用しないでください。
+- Dashboard health失敗: `docker compose logs --tail 100 dashboard` とポート8000の利用状況を
+  確認します。processedデータがまだなくてもDashboard自体は起動できます。
+- sensor-collectorのMQTT接続失敗: Mosquittoの状態、`192.168.50.1:1883`、および
+  `MQTT_HOST=mosquitto`、`MQTT_PORT=1883`、`MQTT_TOPIC=omk/#` を確認します。センサが
+  未送信でもセットアップは成功します。
+
+## 14. data-transformerの定期実行
 
 sensor-collectorが保存するJSONLをParquetへ変換するには、リポジトリ更新後に以下を実行します。これはDockerコンテナではなくRaspberry Piホスト上のsystemd timerを設定します。
 
