@@ -1,0 +1,226 @@
+"""Streaming JSONL normalisation and atomic, partitioned Parquet output."""
+
+from __future__ import annotations
+
+import json
+import logging
+import math
+import os
+import time
+from collections import Counter
+from dataclasses import dataclass, field
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Callable
+from zoneinfo import ZoneInfo
+
+import pyarrow as pa
+import pyarrow.parquet as pq
+
+LOGGER = logging.getLogger(__name__)
+JST = ZoneInfo("Asia/Tokyo")
+
+POWER = "broute_power"
+CUMULATIVE = "broute_cumulative_energy"
+SEN66 = "sen66"
+
+SCHEMAS = {
+    POWER: pa.schema([
+        ("device_id", pa.string()), ("measured_at", pa.timestamp("us", tz="Asia/Tokyo")),
+        ("received_at", pa.timestamp("us", tz="Asia/Tokyo")),
+        ("collector_received_at", pa.timestamp("us", tz="Asia/Tokyo")),
+        ("net_power_w", pa.int64()), ("topic", pa.string()), ("source_file", pa.string()),
+        ("source_line_number", pa.int64()),
+    ]),
+    CUMULATIVE: pa.schema([
+        ("device_id", pa.string()), ("metered_at", pa.timestamp("us", tz="Asia/Tokyo")),
+        ("received_at", pa.timestamp("us", tz="Asia/Tokyo")),
+        ("collector_received_at", pa.timestamp("us", tz="Asia/Tokyo")),
+        ("cumulative_energy_import_kwh", pa.float64()), ("cumulative_energy_export_kwh", pa.float64()),
+        ("topic", pa.string()), ("source_file", pa.string()), ("source_line_number", pa.int64()),
+    ]),
+    SEN66: pa.schema([
+        ("device_id", pa.string()), ("measured_at", pa.timestamp("us", tz="Asia/Tokyo")),
+        ("received_at", pa.timestamp("us", tz="Asia/Tokyo")),
+        ("collector_received_at", pa.timestamp("us", tz="Asia/Tokyo")),
+        ("temperature_c", pa.float64()), ("relative_humidity_pct", pa.float64()), ("co2_ppm", pa.float64()),
+        ("pm1_0_ug_m3", pa.float64()), ("pm2_5_ug_m3", pa.float64()), ("pm4_0_ug_m3", pa.float64()),
+        ("pm10_0_ug_m3", pa.float64()), ("voc_index", pa.float64()), ("nox_index", pa.float64()),
+        ("topic", pa.string()), ("source_file", pa.string()), ("source_line_number", pa.int64()),
+    ]),
+}
+
+
+class RecordError(ValueError):
+    """A record validation failure whose category is safe to report."""
+
+    def __init__(self, category: str, message: str) -> None:
+        super().__init__(message)
+        self.category = category
+
+
+@dataclass
+class TransformResult:
+    input_file: Path
+    total_lines: int = 0
+    written: Counter[str] = field(default_factory=Counter)
+    errors: Counter[str] = field(default_factory=Counter)
+    outputs: list[Path] = field(default_factory=list)
+    elapsed_seconds: float = 0.0
+
+    @property
+    def converted(self) -> int:
+        return sum(self.written.values())
+
+
+def _timestamp(value: Any, field_name: str) -> datetime:
+    if not isinstance(value, str):
+        raise RecordError("missing_required_field", f"{field_name} must be an ISO 8601 string")
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as error:
+        raise RecordError("invalid_datetime", f"invalid {field_name}: {value!r}") from error
+    if parsed.tzinfo is None:
+        raise RecordError("invalid_datetime", f"{field_name} must include a timezone")
+    return parsed.astimezone(JST)
+
+
+def _number(payload: dict[str, Any], field_name: str, *, required: bool = False, integer: bool = False) -> float | int | None:
+    value = payload.get(field_name)
+    if value is None:
+        if required:
+            raise RecordError("missing_required_field", f"missing {field_name}")
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        raise RecordError("invalid_number", f"invalid numeric {field_name}")
+    if integer and isinstance(value, float) and not value.is_integer():
+        raise RecordError("invalid_number", f"{field_name} must be an integer")
+    return int(value) if integer else float(value)
+
+
+def _payload(record: dict[str, Any]) -> tuple[str, dict[str, Any], datetime]:
+    topic = record.get("topic")
+    payload = record.get("payload")
+    if not isinstance(topic, str) or not isinstance(payload, dict):
+        raise RecordError("missing_required_field", "topic and object payload are required")
+    collector_received_at = _timestamp(record.get("received_at"), "collector received_at")
+    if not isinstance(payload.get("device_id"), str) or not payload["device_id"]:
+        raise RecordError("missing_required_field", "payload.device_id is required")
+    return topic, payload, collector_received_at
+
+
+def _common(record: dict[str, Any], source_file: Path, line_number: int) -> tuple[str, dict[str, Any], datetime, dict[str, Any]]:
+    topic, payload, collector_received_at = _payload(record)
+    return topic, payload, collector_received_at, {
+        "device_id": payload["device_id"], "collector_received_at": collector_received_at,
+        "topic": topic, "source_file": str(source_file), "source_line_number": line_number,
+    }
+
+
+def _power(record: dict[str, Any], source_file: Path, line_number: int) -> tuple[str, str, dict[str, Any]]:
+    topic, payload, _, row = _common(record, source_file, line_number)
+    row["measured_at"] = _timestamp(payload.get("measured_at"), "payload.measured_at")
+    row["received_at"] = _timestamp(payload["received_at"], "payload.received_at") if "received_at" in payload else None
+    row["net_power_w"] = _number(payload, "net_power_w", required=True, integer=True)
+    return POWER, row["measured_at"].date().isoformat(), row
+
+
+def _cumulative(record: dict[str, Any], source_file: Path, line_number: int) -> tuple[str, str, dict[str, Any]]:
+    topic, payload, _, row = _common(record, source_file, line_number)
+    row["metered_at"] = _timestamp(payload.get("metered_at"), "payload.metered_at")
+    row["received_at"] = _timestamp(payload.get("received_at"), "payload.received_at")
+    row["cumulative_energy_import_kwh"] = _number(payload, "cumulative_energy_import_kwh")
+    row["cumulative_energy_export_kwh"] = _number(payload, "cumulative_energy_export_kwh")
+    if row["cumulative_energy_import_kwh"] is None and row["cumulative_energy_export_kwh"] is None:
+        raise RecordError("missing_required_field", "at least one cumulative energy value is required")
+    return CUMULATIVE, row["metered_at"].date().isoformat(), row
+
+
+def _sen66(record: dict[str, Any], source_file: Path, line_number: int) -> tuple[str, str, dict[str, Any]]:
+    topic, payload, collector_received_at, row = _common(record, source_file, line_number)
+    # ESP32 SEN66 firmware has no clock. Its collector receipt time is its measurement time.
+    row["measured_at"] = _timestamp(payload["measured_at"], "payload.measured_at") if "measured_at" in payload else collector_received_at
+    row["received_at"] = _timestamp(payload["received_at"], "payload.received_at") if "received_at" in payload else None
+    mappings = {"temperature_c": "temperature_celsius", "relative_humidity_pct": "relative_humidity_percent",
+                "co2_ppm": "co2_ppm", "pm1_0_ug_m3": "pm1_0_ug_m3", "pm2_5_ug_m3": "pm2_5_ug_m3",
+                "pm4_0_ug_m3": "pm4_0_ug_m3", "pm10_0_ug_m3": "pm10_0_ug_m3", "voc_index": "voc_index", "nox_index": "nox_index"}
+    for output_name, input_name in mappings.items():
+        row[output_name] = _number(payload, input_name)
+    return SEN66, row["measured_at"].date().isoformat(), row
+
+
+NORMALIZERS: dict[str, Callable[[dict[str, Any], Path, int], tuple[str, str, dict[str, Any]]]] = {
+    "power": _power, "cumulative-energy": _cumulative, "sen66": _sen66,
+}
+
+
+def _normalizer_for(record: dict[str, Any]) -> Callable[[dict[str, Any], Path, int], tuple[str, str, dict[str, Any]]]:
+    topic = record.get("topic")
+    if not isinstance(topic, str):
+        raise RecordError("missing_required_field", "topic is required")
+    suffix = topic.rsplit("/", 1)[-1]
+    if not topic.startswith("omk/") or suffix not in NORMALIZERS:
+        raise RecordError("unsupported_topic", f"unsupported MQTT topic: {topic}")
+    return NORMALIZERS[suffix]
+
+
+def transform(input_file: Path, output_root: Path, *, dry_run: bool = False, error_root: Path | None = None) -> TransformResult:
+    """Convert one JSONL file. Each target file is replaced atomically on success."""
+    started = time.monotonic()
+    result = TransformResult(input_file=input_file)
+    writers: dict[tuple[str, str], tuple[Path, Path, pq.ParquetWriter]] = {}
+    error_file = None if dry_run else (error_root or output_root.parent / "errors" / "transform") / f"{input_file.stem}.jsonl"
+    error_handle = None
+
+    def report_error(category: str, line_number: int, raw: str, detail: str) -> None:
+        result.errors[category] += 1
+        LOGGER.debug("Skipping %s:%s category=%s detail=%s", input_file, line_number, category, detail)
+        if error_file is not None:
+            nonlocal error_handle
+            if error_handle is None:
+                error_file.parent.mkdir(parents=True, exist_ok=True)
+                error_handle = error_file.open("w", encoding="utf-8")
+            json.dump({"source_file": str(input_file), "source_line_number": line_number, "error": category,
+                       "detail": detail, "raw_record": raw.rstrip("\n")}, error_handle, ensure_ascii=False, separators=(",", ":"))
+            error_handle.write("\n")
+
+    try:
+        with input_file.open(encoding="utf-8") as source:
+            for line_number, raw in enumerate(source, 1):
+                result.total_lines += 1
+                try:
+                    record = json.loads(raw)
+                    if not isinstance(record, dict):
+                        raise RecordError("invalid_json", "record must be a JSON object")
+                    dataset, date, row = _normalizer_for(record)(record, input_file, line_number)
+                    result.written[dataset] += 1
+                    if dry_run:
+                        continue
+                    key = (dataset, date)
+                    if key not in writers:
+                        destination = output_root / dataset / f"date={date}" / "data.parquet"
+                        temporary = destination.with_name("data.parquet.tmp")
+                        destination.parent.mkdir(parents=True, exist_ok=True)
+                        writers[key] = (destination, temporary, pq.ParquetWriter(temporary, SCHEMAS[dataset], compression="zstd"))
+                    writers[key][2].write_table(pa.Table.from_pylist([row], schema=SCHEMAS[dataset]))
+                except json.JSONDecodeError as error:
+                    report_error("invalid_json", line_number, raw, str(error))
+                except RecordError as error:
+                    report_error(error.category, line_number, raw, str(error))
+        for destination, temporary, writer in writers.values():
+            writer.close()
+            os.replace(temporary, destination)
+            result.outputs.append(destination)
+    except Exception:
+        for _, temporary, writer in writers.values():
+            writer.close()
+            temporary.unlink(missing_ok=True)
+        raise
+    finally:
+        if error_handle is not None:
+            error_handle.close()
+        result.elapsed_seconds = time.monotonic() - started
+    LOGGER.info("Transform complete input_file=%s records_read=%s records_written=%s dataset_counts=%s records_skipped=%s errors=%s unsupported_topics=%s outputs=%s elapsed_seconds=%.3f",
+                input_file, result.total_lines, result.converted, dict(result.written), sum(result.errors.values()),
+                dict(result.errors), result.errors["unsupported_topic"], result.outputs, result.elapsed_seconds)
+    return result

@@ -79,6 +79,8 @@ docker compose logs --tail=100 sensor-collector
 
 各JSONL行は独立したJSONです。一次保存は汎用JSONLとし、CSVなどの用途別形式は後段の処理で生成します。
 
+分析用には、独立した`services/data-transformer`でJSONLを`data/processed/`配下の日時・データセット別Parquetへ変換できます。Bルートの瞬時電力・積算電力量とSEN66を正規化し、未知のトピックや不正レコードは`data/errors/transform/`へ追跡情報付きで記録します。実行方法とスキーマは[サービスREADME](services/data-transformer/README.md)を参照してください。
+
 ## 2. 採用する設計方針
 
 ### 2.1 モジュラーモノリスを基本とする

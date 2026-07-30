@@ -109,8 +109,10 @@ flowchart LR
     ESP -->|publish| MQ
     BR -. 将来: publish .-> MQ
     MQ --> COL --> JSONL
+    JSONL --> TRANSFORM[data-transformer]
+    TRANSFORM --> PARQUET[(partitioned Parquet)]
     JSONL --> CSV
-    JSONL --> VIEW
+    PARQUET --> VIEW
     JSONL --> SEND
 ```
 
@@ -341,7 +343,8 @@ QoS、retain、再送上限は実機試験で確定します。
 1. 各データ取得処理がJSON payloadをMQTTへpublishする
 2. `sensor-collector`が`omk/#`を受信する
 3. collectorがRaspberry Pi受信時刻とMQTTメタデータを付与してJSONLへ追記する
-4. CSV変換、分析、可視化、外部送信がJSONLを後段入力として利用する
+4. `data-transformer`が対応トピックを正規化し、日付パーティション済みParquetを生成する
+5. CSV変換、分析、可視化、外部送信がJSONLまたはParquetを後段入力として利用する
 
 「保存前に送信する」流れを標準にしません。通信断でデータを失わないため、原則はローカル保存を先に行います。
 
@@ -369,6 +372,7 @@ QoS、retain、再送上限は実機試験で確定します。
 |---|---|---|
 | `mosquitto` | LAN内のMQTTメッセージ中継 | MQTT broker |
 | `sensor-collector` | `omk/#`の汎用受信と日次JSONL一次保存 | Python / Docker Compose |
+| `data-transformer` | JSONLの検証・トピック別正規化・Parquet出力 | Python / PyArrow |
 | Bルートsystemdサービス | USBシリアル・PANAによるBルート通信 | ホストOS |
 | CSV・分析・可視化・外部送信 | JSONLを使う後段処理 | 今後決定 |
 
