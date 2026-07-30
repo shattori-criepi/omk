@@ -1,0 +1,1 @@
+"""OMK dashboard application."""

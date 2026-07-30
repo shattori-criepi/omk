@@ -15,6 +15,16 @@ services:
     container_name: omk-gateway
     restart: unless-stopped
 
+  dashboard:
+    build:
+      context: ./services/dashboard
+    container_name: omk-dashboard
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      TZ: Asia/Tokyo
+
   sensor-collector:
     build:
       context: ./services/sensor-collector
