@@ -32,11 +32,16 @@ def _write(data_root, dataset, rows):
 
 def _processed_data(tmp_path):
     data_root = tmp_path / "processed"
-    _write(data_root, "sen66", [{"device_id": "sen66-001", "measured_at": _time("2026-07-30T12:00:05"), "temperature_c": 25.25, "relative_humidity_pct": 45.5, "co2_ppm": 600.0, "pm2_5_ug_m3": 3.2}, {"device_id": "sen66-001", "measured_at": _time("2026-07-30T12:00:15"), "temperature_c": 25.5, "relative_humidity_pct": 46.0, "co2_ppm": 601.0, "pm2_5_ug_m3": 3.3}])
-    _write(data_root, "broute_power", [{"device_id": "broute-001", "measured_at": _time("2026-07-30T12:00:00"), "net_power_w": 100}])
+    _write(data_root, "sen66", [{"device_id": "sen66-001", "measured_at": _time("2026-07-30T11:59:50"), "temperature_c": 25.0, "relative_humidity_pct": 45.0, "co2_ppm": 599.0, "pm2_5_ug_m3": 3.1}, {"device_id": "sen66-001", "measured_at": _time("2026-07-30T12:00:05"), "temperature_c": 25.25, "relative_humidity_pct": 45.5, "co2_ppm": 600.0, "pm2_5_ug_m3": 3.2}, {"device_id": "sen66-001", "measured_at": _time("2026-07-30T12:00:10"), "temperature_c": 25.5, "relative_humidity_pct": 46.0, "co2_ppm": 601.0, "pm2_5_ug_m3": 3.3}, {"device_id": "sen66-001", "measured_at": _time("2026-07-30T12:00:20"), "temperature_c": 25.75, "relative_humidity_pct": 46.5, "co2_ppm": 602.0, "pm2_5_ug_m3": 3.4}])
+    _write(data_root, "broute_power", [{"device_id": "broute-001", "measured_at": _time("2026-07-30T12:00:00"), "net_power_w": 100}, {"device_id": "broute-001", "measured_at": _time("2026-07-30T12:00:10"), "net_power_w": 110}])
     _write(data_root, "broute_cumulative_energy", [{"device_id": "broute-001", "metered_at": _time("2026-07-30T12:00:00"), "cumulative_energy_import_kwh": 10.0, "cumulative_energy_export_kwh": 5.0}, {"device_id": "broute-001", "metered_at": _time("2026-07-30T12:30:00"), "cumulative_energy_import_kwh": 11.0, "cumulative_energy_export_kwh": 5.5}])
-    _write(data_root, "broute_interval_energy", [{"device_id": "broute-001", "start_at": _time("2026-07-30T12:00:00"), "end_at": _time("2026-07-30T12:30:00"), "import_energy_kwh": 1.0, "export_energy_kwh": 0.5, "quality_status": "normal"}])
+    _write(data_root, "broute_interval_energy", [{"device_id": "broute-001", "start_at": _time("2026-07-30T11:30:00"), "end_at": _time("2026-07-30T12:00:00"), "import_energy_kwh": 0.1, "export_energy_kwh": 0.1, "quality_status": "normal"}, {"device_id": "broute-001", "start_at": _time("2026-07-30T12:00:00"), "end_at": _time("2026-07-30T12:30:00"), "import_energy_kwh": 1.0, "export_energy_kwh": 0.5, "quality_status": "normal"}])
     return data_root
+
+
+def _section_row(output, title):
+    section = output.split(f"=== {title} ===\n", 1)[1].split("\n=== ", 1)[0].strip().splitlines()
+    return dict(zip((value.strip() for value in section[0].split("|")), (value.strip() for value in section[2].split("|")), strict=True))
 
 
 def test_verification_succeeds_and_prints_key_sections(tmp_path, capsys):
@@ -46,6 +51,17 @@ def test_verification_succeeds_and_prints_key_sections(tmp_path, capsys):
     assert "hourly statistics" in output
     assert "Cumulative-energy deltas compared with interval energy" in output
     assert "ASOF join" in output
+    asof = _section_row(output, "SEN66 and B-route power ASOF join (15 sec or less: usual; 15-30 sec: update delay; over 30 sec: stale or missing candidate)")
+    assert asof["all_sen66_record_count"] == "4"
+    assert asof["overlap_sen66_record_count"] == "2"
+    assert asof["joined_count"] == "2"
+    assert asof["unmatched_in_overlap_count"] == "0"
+    assert asof["join_rate_in_overlap_pct"] == "100.0"
+    assert asof["before_power_period_count"] == "1"
+    assert asof["after_power_period_count"] == "1"
+    interval_summary = _section_row(output, "B-route interval energy: summary")
+    assert interval_summary["total_export_kwh"] == "0.6"
+    assert "not_comparable" in output
 
 
 def test_verification_reports_missing_dataset(tmp_path, capsys):
