@@ -10,6 +10,7 @@ from datetime import datetime
 from typing import Protocol
 
 from broute_meter.models import CumulativeEnergyReading, InstantaneousPowerReading
+from broute_meter.mqtt import MeasurementPublisher, NullMeasurementPublisher
 from broute_meter.processing import QualityStatus, calculate_interval_energy
 from broute_meter.resilience import MeasurementUnavailableError
 from broute_meter.storage import MeasurementStorage
@@ -63,6 +64,7 @@ class MeasurementScheduler:
         self,
         meter: MeterReader,
         storage: MeasurementStorage,
+        publisher: MeasurementPublisher | None = None,
         *,
         instantaneous_interval_seconds: int,
         cumulative_fetch_delay_seconds: int,
@@ -71,6 +73,7 @@ class MeasurementScheduler:
     ) -> None:
         self._meter = meter
         self._storage = storage
+        self._publisher = publisher or NullMeasurementPublisher()
         self._instant_interval = instantaneous_interval_seconds
         self._cumulative_delay = cumulative_fetch_delay_seconds
         self._now = now or (lambda: datetime.now().astimezone())
@@ -140,6 +143,7 @@ class MeasurementScheduler:
     def _measure_instantaneous(self) -> None:
         reading = self._meter.get_instantaneous_power()
         self._storage.save_instantaneous(reading)
+        self._publish_safely("publish_instantaneous", reading)
         logger.info(
             "瞬時電力を保存しました measured_at=%s net_power_w=%d",
             reading.measured_at.isoformat(),
@@ -149,6 +153,7 @@ class MeasurementScheduler:
     def _measure_cumulative(self) -> None:
         reading = self._meter.get_cumulative_energy()
         if self._storage.save_cumulative(reading):
+            self._publish_safely("publish_cumulative", reading)
             logger.info(
                 "定時積算電力量を保存しました metered_at=%s",
                 reading.metered_at.isoformat(),
@@ -158,14 +163,15 @@ class MeasurementScheduler:
                 reading,
             )
             if calculation.reading is not None:
-                self._storage.save_interval(calculation.reading)
-                logger.info(
-                    "30分買電・売電量を保存しました start_at=%s end_at=%s "
-                    "quality_status=%s",
-                    calculation.reading.start_at.isoformat(),
-                    calculation.reading.end_at.isoformat(),
-                    calculation.quality_status.value,
-                )
+                if self._storage.save_interval(calculation.reading):
+                    self._publish_safely("publish_interval", calculation.reading)
+                    logger.info(
+                        "30分買電・売電量を保存しました start_at=%s end_at=%s "
+                        "quality_status=%s",
+                        calculation.reading.start_at.isoformat(),
+                        calculation.reading.end_at.isoformat(),
+                        calculation.quality_status.value,
+                    )
             elif calculation.quality_status is QualityStatus.MISSING_PREVIOUS:
                 logger.warning(
                     "前回積算値がないため30分値を生成しません metered_at=%s",
@@ -199,6 +205,14 @@ class MeasurementScheduler:
                 "同一計量時刻の積算値を保存済みのためスキップしました metered_at=%s",
                 reading.metered_at.isoformat(),
             )
+
+    def _publish_safely(self, method_name: str, reading: object) -> None:
+        """Do not let an optional real-time sink interrupt durable storage."""
+
+        try:
+            getattr(self._publisher, method_name)(reading)
+        except Exception:
+            logger.warning("MQTT publishに失敗しました。計測を継続します", exc_info=True)
 
 
 def _strictly_next_aligned_timestamp(
