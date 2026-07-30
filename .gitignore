@@ -25,3 +25,5 @@ data/exports/*
 !data/exports/.gitkeep
 logs/
 secrets/
+config/omk-ap.env
+firmware/esp32/sen66-node/src/network_config.h
