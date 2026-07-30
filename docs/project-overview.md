@@ -122,6 +122,12 @@ Bルート対応USBドングルをWindowsへ接続し、WSL2またはDockerコ�
 
 ## 4. 想定する全体構成
 
+### 現在のデータ収集方針
+
+データ取得処理と保存処理を分離する。各取得処理は原則としてMQTTでRaspberry Piへデータを集約し、汎用`sensor-collector`が`omk/#`を購読して日次JSONLへ一次保存する。collectorはセンサ固有項目を解釈しないため、未知のセンサ、device ID、測定項目の追加にcollector変更なしで対応できる。
+
+CSVは分析・受け渡し用の派生形式であり、DB化、可視化、外部送信もJSONL保存より後段の責務とする。センサノードはクラウドへ直接接続せず、外部通信はRaspberry Pi側へ集約する。
+
 ```mermaid
 flowchart LR
     subgraph Sensors["計測機器"]
@@ -138,11 +144,9 @@ flowchart LR
 
     subgraph Gateway["OMKゲートウェイ: Raspberry Pi 4 / 5"]
         AP["OMK用Wi-Fi AP"]
-        ADP["デバイスアダプタ"]
-        CORE["データ収集・正規化"]
-        DB["ローカルデータ保存"]
-        API["API・管理機能"]
-        SYNC["Outbox・外部送信"]
+        MQTT["Mosquitto"]
+        COL["sensor-collector"]
+        JSONL["JSONL一次保存"]
     end
 
     subgraph Use["データ利用"]
@@ -156,20 +160,17 @@ flowchart LR
     ENV --> USB
     ENV --> ESP
     OPT --> ESP
-    WIN --> ADP
-    USB --> ADP
-    ESP -->|第一候補: Wi-Fi + MQTT<br/>代替候補: BLE| ADP
+    WIN --> USB
+    USB -->|将来: MQTT publish| MQTT
+    ESP -->|Wi-Fi + MQTT| MQTT
     AP --> ESP
-    ADP --> CORE
-    CORE --> DB
-    DB --> API
-    DB --> SYNC
-    API --> DASH
-    SYNC -->|LTE等| CLOUD
-    DB --> EXPORT
+    MQTT --> COL --> JSONL
+    JSONL --> DASH
+    JSONL --> EXPORT
+    JSONL -->|Raspberry Pi側で送信| CLOUD
 ```
 
-Windows上の任意Bルート実機検証とRaspberry Pi 4／5上のBルート運用は、同じアダプタ契約を使用します。Windows経路は開発中のスマートメータ実機検証に限定し、ホストごとの差はUSB公開方法、デバイスパス、権限、Compose設定へ隔離します。
+Bルート通信はUSBシリアル、OS権限、認証、PANA通信への依存が強いため、当面ホスト上のsystemdサービスで実行し、コンテナ化しない。将来、Bルート取得値をMQTTへpublishしてcollectorで保存する。移行時は既存の専用保存とMQTT→JSONL保存を二重化して検証し、安定後に既存保存の廃止可否を判断する。
 
 ---
 
@@ -284,18 +285,14 @@ Bootstrap        # 設定読込、依存性注入、起動・停止
 外部送信は、計測直後にネットワークへ直接送るだけの構造にしません。
 
 ```text
-計測
+MQTT publish
   ↓
-ローカル保存
+sensor-collectorによるJSONL一次保存
   ↓
-Outbox登録
-  ↓
-ネットワーク利用可能時に外部送信
-  ↓
-送信成功を記録
+CSV変換・分析・可視化・外部送信
 ```
 
-通信断中も計測とローカル保存を継続し、回線復旧後に未送信データを追送します。各データには重複送信を判別できるIDを持たせます。
+通信断中も取得処理と一次保存を継続する。外部送信のキュー、再送、重複制御はJSONL保存後に設計・実装する。
 
 ---
 

@@ -1,10 +1,10 @@
 # MQTT仕様
 
-OMKのESP32センサノードは、OMK専用Wi-Fi経由でRaspberry Pi上のMosquittoへ測定値を送る。ESP32がクラウドへ直接接続することはない。Brokerは初期構成では`192.168.50.1:1883`で待ち受け、Composeのポート公開もこのAP側IPに限定する。
+MQTTは、各データ取得処理をRaspberry Piへ集約するLAN内の内部データバスである。ESP32などのセンサノードはOMK専用Wi-Fi経由でRaspberry Pi上のMosquittoへ送信し、クラウドへ直接接続しない。Brokerは初期構成では`192.168.50.1:1883`で待ち受け、Composeのポート公開もこのAP側IPに限定する。
 
 ## トピックとdevice_id
 
-`device_id`は各ノードを識別する設定値である。現時点では`network_config.h`の固定値を使い、将来MACアドレス由来のIDへ変更できるよう、トピックとpayloadで直接固定しない。
+`device_id`は各ノードを識別する設定値である。トピックは`omk/<device_id>/<data_type>`を基本とし、`data_type`には測定種別または`status`を置く。現時点では`network_config.h`の固定値を使い、将来MACアドレス由来のIDへ変更できるよう、トピックとpayloadで直接固定しない。
 
 | 用途 | トピック | QoS | retain |
 | --- | --- | --- | --- |
@@ -32,6 +32,22 @@ MQTT接続直後はretain付きで次を送信する。
 ```json
 {"device_id":"sen66-001","status":"offline"}
 ```
+
+## 汎用JSONL収集
+
+`sensor-collector`は`omk/#`をQoS 0で購読し、測定値と`omk/<device_id>/status`の両方を収集する。collectorはセンサ機種、`device_id`、測定項目の意味を解釈せず、受信したpayloadをトップレベルへ展開しない。
+
+Raspberry Pi側でAsia/Tokyoの受信時刻をミリ秒付きISO 8601形式で付与し、`data/sensors/YYYY/MM/DD.jsonl`へ1メッセージ1行で追記する。通常のJSON payloadの共通構造は次のとおりである。
+
+```json
+{"received_at":"2026-07-30T10:54:12.123+09:00","topic":"omk/sen66-001/sen66","qos":0,"retain":false,"payload":{"device_id":"sen66-001"}}
+```
+
+JSONとして解析できないUTF-8 payloadは`payload_raw`と`payload_parse_error`を記録する。UTF-8でないpayloadは`payload_base64`と`payload_encoding: "base64"`で保持し、メッセージを破棄しない。CSVは一次保存形式ではなく、必要に応じてこのJSONLから後段で生成する。
+
+## Bルートの将来接続
+
+Bルート通信はUSBシリアル、OS権限、認証、PANA通信に依存するため、当面はホスト上のsystemdサービスで実行し、コンテナ化しない。BルートのMQTT publishは未実装である。対応時は`omk/<device_id>/<data_type>`へpublishし、既存の専用保存を残したままcollectorのJSONL保存を並行して検証する。MQTT経由の保存が安定した後に、既存保存を廃止するか判断する。
 
 ## セキュリティと運用
 

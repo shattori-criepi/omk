@@ -67,6 +67,18 @@ Raspberry Pi 4とRaspberry Pi 5の両方で最終実機テスト
 
 ## 4. 環境別の起動
 
+### 4.0 MQTT collectorの確認
+
+センサ系サービスはDocker Composeで運用する。Mosquittoと`sensor-collector`を起動すると、collectorは`omk/#`を受信して`data/sensors/YYYY/MM/DD.jsonl`へ追記する。collectorはpayloadを機種別に解釈しない。
+
+```bash
+docker compose up -d --build mosquitto sensor-collector
+docker compose logs --tail=100 sensor-collector
+tail -n 1 data/sensors/$(date +%Y)/$(date +%m)/$(date +%d).jsonl | python3 -m json.tool
+```
+
+CSV変換、分析、可視化、外部送信はJSONL保存後の処理として扱う。
+
 ### 4.1 Windows／モック
 
 ```bash
@@ -137,6 +149,8 @@ Raspberry Pi 4またはRaspberry Pi 5の実機で問題が起きた場合は、�
 4. ドライバが接続できるか
 5. 共通データへ変換できるか
 6. 保存・送信できるか
+
+Bルート通信はDocker Composeへ移さず、ホスト上のsystemdサービスとして確認する。将来のBルートMQTT対応では、既存保存を維持したままMQTT publishとcollectorによるJSONL保存を並行検証する。
 
 ## 5. 設定管理
 
@@ -532,4 +546,3 @@ Raspberry Pi 4とRaspberry Pi 5の両方を正式対応とし、64-bit Raspberry
 - 実機試験結果の保存形式
 
 これらは実装開始時に最小限を決定し、判断理由を記録します。
-

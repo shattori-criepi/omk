@@ -14,8 +14,9 @@ OMKは周辺機器の種類が多く、Raspberry Pi OS、USB、Bluetooth、Wi-SU
 | 配備単位 | 採用 | Docker Composeで管理する少数の責務別コンテナ |
 | 既存Python処理 | 移行対象 | 当面は独立コンテナ／アダプタとして維持し、必要性を見て統合 |
 | ハードウェア連携 | 採用 | Ports and Adapters方式でドライバを交換可能にする |
-| ESP32連携 | 暫定 | OMK用Wi-Fi＋MQTTを第一候補として設計・試作し、BLEは代替候補として比較 |
-| 内部通信 | 採用 | 同一プロセス内は型付き呼び出し、機器・プロセス境界はMQTT等 |
+| データ集約 | 採用 | 各取得処理はMQTTでRaspberry Piへ集約し、`sensor-collector`が`omk/#`を収集 |
+| 一次保存 | 採用 | センサ固有項目を解釈しないJSONL保存。CSV、分析、DB、外部送信は後段責務 |
+| Bルート通信 | 採用 | USBシリアル・PANA依存のためホスト上systemdで実行。MQTT publishは今後追加 |
 | Windows開発 | 採用 | モックを標準とし、BルートUSB接続は開発中のスマートメータ実機確認に限る任意経路 |
 | Raspberry Pi | 採用 | Raspberry Pi 4とRaspberry Pi 5の両方を正式対応。Raspberry Pi 3以前と未評価の将来モデルは正式対象外 |
 | Raspberry Pi OS | 採用 | 64-bit Raspberry Pi OSのみを正式対象とし、32-bit版は対象外 |
@@ -35,10 +36,10 @@ flowchart LR
     CLOUD[外部データ基盤]
     DEV[Windows 11 + WSL2 / Docker]
 
-    METER -->|Bルート / Wi-SUN USB| PI
+    METER -->|Bルート / Wi-SUN USB<br/>host systemd| PI
     METER -. 開発中の任意検証のみ<br/>BルートUSB .-> DEV
     HOMEDEV -->|BLE / USB / I2C / GPIO等| PI
-    ESP -->|第一候補: OMK用Wi-Fi + MQTT| PI
+    ESP -->|OMK用Wi-Fi + MQTT| PI
     DEV -->|Mock data / tests / images| PI
     PI -->|本番: LTE等の独立回線| CLOUD
     PI -. 所内・開発: Ethernet / Wi-Fi可 .-> CLOUD
@@ -88,48 +89,32 @@ Windowsは、実機に依存しない部分を高速に開発する標準環境�
 ## 4. 論理アーキテクチャ
 
 ```mermaid
-flowchart TB
-    subgraph Input[入力アダプタ]
-        WISUN[Wi-SUN / B-route Adapter]
-        BLE[BLE Watt Checker Adapter]
-        MQTTIN[MQTT Sensor Adapter]
-        MOCK[Mock / Simulator Adapter]
+flowchart LR
+    subgraph Acquisition[データ取得層]
+        ESP[ESP32・将来のセンサノード]
+        BR[Bルート通信<br/>host systemd]
     end
-
-    subgraph Core[OMK Core]
-        DEVICE[Device Registry Module]
-        MEASURE[Measurement Module]
-        VALIDATE[Validation / Normalization]
-        STOREAPP[Storage Application Service]
-        UPLOADAPP[Upload Application Service]
-        HEALTH[Health Module]
+    subgraph Messaging[MQTTメッセージング層]
+        MQ[Mosquitto]
     end
-
-    subgraph Output[出力アダプタ]
-        DB[(Storage Adapter)]
-        OUTBOX[(Upload Outbox)]
-        UIAPI[UI API / Event Stream]
-        CLOUDADAPTER[Cloud Upload Adapter]
-        LOG[Structured Logger]
+    subgraph Collection[汎用収集・一次保存層]
+        COL[sensor-collector<br/>omk/#]
+        JSONL[(日次JSONL)]
     end
-
-    WISUN --> MEASURE
-    BLE --> MEASURE
-    MQTTIN --> MEASURE
-    MOCK --> MEASURE
-
-    DEVICE --> MEASURE
-    MEASURE --> VALIDATE
-    VALIDATE --> STOREAPP
-    STOREAPP --> DB
-    STOREAPP --> UIAPI
-    STOREAPP --> UPLOADAPP
-    UPLOADAPP --> OUTBOX
-    OUTBOX --> CLOUDADAPTER
-    HEALTH --> LOG
-    MEASURE --> LOG
-    UPLOADAPP --> LOG
+    subgraph Downstream[後段処理]
+        CSV[CSV変換・分析]
+        VIEW[可視化]
+        SEND[外部送信]
+    end
+    ESP -->|publish| MQ
+    BR -. 将来: publish .-> MQ
+    MQ --> COL --> JSONL
+    JSONL --> CSV
+    JSONL --> VIEW
+    JSONL --> SEND
 ```
+
+取得処理と保存処理は分離する。collectorはpayloadの機種別スキーマを持たず、MQTT受信時刻、トピック、QoS、retain、payloadをそのまま記録する。したがって、測定項目の増減や未知のセンサ追加はcollector変更を必要としない。
 
 ## 5. モジュール境界
 
@@ -172,7 +157,7 @@ flowchart TB
 - 保持期間、集約、削除処理の調整
 - 保存失敗時の扱い
 
-保存技術は未決定です。ドメイン／アプリケーション層からは`MeasurementRepository`等のポートだけを参照します。
+一次保存は日次JSONLである。DB化・集約・検索最適化はJSONLを入力とする後段処理として別途決定する。
 
 ### 5.4 Uploadモジュール
 
@@ -330,26 +315,22 @@ export interface Measurement {
 
 ## 8. MQTT境界
 
-MQTTは、ESP32との通信における第一候補であり、独立プロセスとの境界にも利用できます。初期設計・試作はOMK用Wi-Fi＋MQTTを優先し、BLEは代替または併用候補として比較します。
+MQTTはRaspberry Pi内のLAN向け内部データバスであり、各取得処理を汎用collectorへ集約する境界である。センサノードはクラウドへ直接接続しない。collectorは`omk/#`を購読し、測定値とstatusの両方をJSONLへ保存する。
 
 ### 8.1 初期トピック規約
 
 ```text
-omk/v1/{siteId}/devices/{deviceId}/measurements
-omk/v1/{siteId}/devices/{deviceId}/status
-omk/v1/{siteId}/devices/{deviceId}/commands/{commandName}
-omk/v1/{siteId}/devices/{deviceId}/command-results/{requestId}
+omk/<device_id>/<data_type>
 ```
 
 ### 8.2 MQTTメッセージ規則
 
-- payloadはJSONとし、JSON Schemaを`packages/contracts`へ置く
-- 計測値にはスキーマバージョン、時刻、デバイス識別子を含める
+- payloadはJSONオブジェクトを基本とする
+- `data_type`には測定種別または`status`を置く
+- collectorはpayloadを検証・正規化・展開せずに保存する
 - statusはretained messageを利用できる
-- commandには`requestId`と期限を持たせる
 - broker切断中の動作を定義する
 - 本番環境では匿名接続を許可しない
-- MQTTを同一プロセス内の関数呼び出し代替として使わない
 
 QoS、retain、再送上限は実機試験で確定します。
 
@@ -357,14 +338,10 @@ QoS、retain、再送上限は実機試験で確定します。
 
 ### 9.1 通常計測
 
-1. ドライバが値を取得する
-2. ドライバが共通`Measurement`へ変換する
-3. Measurementsモジュールがスキーマ、時刻、単位、品質を検証する
-4. Storageモジュールがローカル保存する
-5. UIへ現在値・更新通知を公開する
-6. UploadモジュールがOutboxへ登録する
-7. ネットワーク利用可能時に外部へ送信する
-8. 成功時にOutboxを送信済みにする
+1. 各データ取得処理がJSON payloadをMQTTへpublishする
+2. `sensor-collector`が`omk/#`を受信する
+3. collectorがRaspberry Pi受信時刻とMQTTメタデータを付与してJSONLへ追記する
+4. CSV変換、分析、可視化、外部送信がJSONLを後段入力として利用する
 
 「保存前に送信する」流れを標準にしません。通信断でデータを失わないため、原則はローカル保存を先に行います。
 
@@ -390,11 +367,10 @@ QoS、retain、再送上限は実機試験で確定します。
 
 | サービス | 主な責務 | 言語／実装 |
 |---|---|---|
-| `core` | ドライバ統合、正規化、保存、送信制御、API | TypeScript |
-| `ui` | 本体表示・Web表示 | 未決定 |
-| `mqtt` | ESP32連携の第一候補であるWi-Fi＋MQTTのメッセージ中継 | MQTT broker |
-| `uploader-python` | 既存Python送信処理の移行 | Python |
-| `simulator` | Windows・CI向け疑似計測 | TypeScript等 |
+| `mosquitto` | LAN内のMQTTメッセージ中継 | MQTT broker |
+| `sensor-collector` | `omk/#`の汎用受信と日次JSONL一次保存 | Python / Docker Compose |
+| Bルートsystemdサービス | USBシリアル・PANAによるBルート通信 | ホストOS |
+| CSV・分析・可視化・外部送信 | JSONLを使う後段処理 | 今後決定 |
 
 `core`を細かく多数のサービスへ分割しません。別コンテナ化は、次のいずれかを満たす場合だけ検討します。
 
@@ -501,4 +477,3 @@ Dockerのhealthcheckと、UIで確認できる診断APIを用意します。
 - クラウド送信契約の変更
 - 実機権限の追加
 - Raspberry Pi 4／5の対応条件や64-bit Raspberry Pi OSの変更
-

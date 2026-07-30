@@ -37,6 +37,8 @@ PubSubClient `2.8`を使用します。Brokerへの接続と測定値の送信�
 
 詳細は[リポジトリのMQTT仕様](../../../docs/mqtt.md)を参照してください。現在の匿名・平文MQTTはOMK専用LANでの初期確認用です。運用前に認証、ACL、TLSを導入する予定です。
 
+このノードは取得とMQTT publishだけを担当します。Raspberry Pi上の汎用`sensor-collector`が`omk/#`を購読してJSONLへ一次保存するため、SEN66固有の保存処理やクラウド接続はこのファームウェアへ追加しません。
+
 ## ビルド、書き込み、確認
 
 ```bash

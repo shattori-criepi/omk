@@ -69,31 +69,30 @@ OMKの初期・中期規模では、ネットワーク越しに分散した多�
 - 代替機器の評価手順を`docs/hardware.md`へ追加する
 - 特定ベンダー機能へ依存する場合は理由と代替案を記録する
 
-## 5. 正規化してから保存・表示・送信する
+## 5. 取得と保存を分離し、JSONLを一次保存にする
 
-各ドライバ固有の形式を、そのままデータベース、UI、クラウド送信へ流しません。
+各データ取得処理はMQTTへpublishし、汎用collectorがJSONLへ一次保存する。collectorはセンサ固有の保存処理や列定義を持たず、payloadを解釈しない。JSONLは最終分析形式ではなく、CSV、分析、可視化、DB化、外部送信の入力となる生の保存形式である。
 
 ```text
-Device-specific data
+Data acquisition
         ↓
-Driver / Adapter
+MQTT internal data bus
         ↓
-Canonical Measurement
+Generic collector
         ↓
-Validation
+JSONL primary storage
         ↓
-Storage / UI / Upload
+CSV / analysis / visualization / external delivery
 ```
 
 ### 原則
 
-- 単位を明示する
-- 観測時刻と受信時刻を分ける
-- 品質情報を持つ
-- 安定したデバイス識別子を使う
-- スキーマバージョンを持つ
-- 再送時の重複を判定できるIDを持つ
-- 物理量と表示文言を分離する
+- 取得と保存を分離し、MQTTを内部データバスとして使う
+- topicは`omk/<device_id>/<data_type>`を基本とする
+- collectorは`omk/#`を購読し、受信時刻・topic・payload等を保存する
+- payloadの測定項目が増減してもcollectorを変更しない
+- センサ固有の処理をcollectorへ持ち込まない
+- CSVは一次保存ではなく、JSONLから生成する派生データとする
 
 ## 6. オフラインを通常状態として設計する
 
@@ -143,6 +142,7 @@ DockerはすべてのOS設定を隠すためのものではありません。周
 - ディスプレイ設定
 - 時刻同期
 - OS更新・再起動・電源管理
+- Bルート通信（USBシリアル、PANA、認証）を実行するsystemdサービス
 
 ### コンテナへ置くもの
 
@@ -152,6 +152,8 @@ DockerはすべてのOS設定を隠すためのものではありません。周
 - API・UI
 - ログ・ヘルスチェック
 - モック・自動テスト
+
+Bルート通信そのものは当面コンテナ化しない。一方、将来Bルート取得値をMQTTへpublishする場合、保存は他のセンサと同じ汎用collectorとJSONL一次保存へ集約する。既存の専用保存は、二重保存による検証が完了するまで維持する。
 
 ### 禁止事項
 
@@ -340,4 +342,3 @@ Codex等の生成AIにコード変更を任せる場合、文脈を会話だけ�
 - テスト方法
 
 「急いでいた」「動いたから」だけを理由に恒久化しません。
-

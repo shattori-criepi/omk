@@ -58,6 +58,27 @@ OMKは、次の処理を一つの製品・開発基盤として扱います。
 - SORACOM Onyx等のLTE USBドングル
 - ESP32を利用した遠隔センサノード
 
+## データ収集と一次保存
+
+OMKのデータは、原則としてMQTTでRaspberry Piへ集約し、汎用`sensor-collector`がJSON Lines（JSONL）で一次保存します。collectorは`omk/#`を購読し、センサ機種や測定項目を解釈せずに、受信時刻・トピック・MQTTメタデータとpayloadを保存します。保存先は`data/sensors/YYYY/MM/DD.jsonl`です。測定値とstatusメッセージの両方が対象です。
+
+```text
+各データ取得処理 → MQTT → sensor-collector → JSONL一次保存
+                                      ↓
+                     CSV変換・分析・可視化・外部送信
+```
+
+ESP32などのセンサ系サービスとMosquitto、collectorはDocker Composeで運用します。一方、USBシリアル、OS権限、PANA認証に強く依存するBルート通信は、当面ホスト上のsystemdサービスで実行します。BルートのMQTT publishは今後追加し、既存の専用保存とJSONL保存を並行して検証した後に統一を判断します。
+
+起動とログ確認は次のとおりです。
+
+```bash
+docker compose up -d --build sensor-collector
+docker compose logs --tail=100 sensor-collector
+```
+
+各JSONL行は独立したJSONです。一次保存は汎用JSONLとし、CSVなどの用途別形式は後段の処理で生成します。
+
 ## 2. 採用する設計方針
 
 ### 2.1 モジュラーモノリスを基本とする
