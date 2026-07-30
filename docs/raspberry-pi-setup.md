@@ -196,4 +196,22 @@ Wi-Fiパスワード、SSH秘密鍵、APIキーなどの秘密情報を、リポ
 - `data/`の容量監視、バックアップ、保持期間、削除手順
 
 秘密値そのものを、この文書、Git、セットアップログ、チケットへ記載しないでください。
+
+## 13. data-transformerの定期実行
+
+sensor-collectorが保存するJSONLをParquetへ変換するには、リポジトリ更新後に以下を実行します。これはDockerコンテナではなくRaspberry Piホスト上のsystemd timerを設定します。
+
+```bash
+cd ~/projects/omk
+./scripts/setup-data-transformer.sh
+```
+
+timerは起動後約2分、その後5分ごとにJST当日と前日の既存JSONLを変換します。確認、ログ確認、停止は以下を使用します。
+
+```bash
+sudo systemctl status omk-data-transformer.timer --no-pager
+systemctl list-timers omk-data-transformer.timer
+sudo journalctl -u omk-data-transformer.service --since today --no-pager
+sudo systemctl disable --now omk-data-transformer.timer
+```
 後続タスクの一覧は[ロードマップ](roadmap.md)も参照してください。
