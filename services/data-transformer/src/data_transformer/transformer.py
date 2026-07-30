@@ -23,6 +23,7 @@ JST = ZoneInfo("Asia/Tokyo")
 POWER = "broute_power"
 CUMULATIVE = "broute_cumulative_energy"
 SEN66 = "sen66"
+INTERVAL = "broute_interval_energy"
 
 SCHEMAS = {
     POWER: pa.schema([
@@ -48,6 +49,14 @@ SCHEMAS = {
         ("pm10_0_ug_m3", pa.float64()), ("voc_index", pa.float64()), ("nox_index", pa.float64()),
         ("topic", pa.string()), ("source_file", pa.string()), ("source_line_number", pa.int64()),
     ]),
+    INTERVAL: pa.schema([
+        ("device_id", pa.string()), ("start_at", pa.timestamp("us", tz="Asia/Tokyo")),
+        ("end_at", pa.timestamp("us", tz="Asia/Tokyo")),
+        ("collector_received_at", pa.timestamp("us", tz="Asia/Tokyo")),
+        ("import_energy_kwh", pa.float64()), ("export_energy_kwh", pa.float64()),
+        ("quality_status", pa.string()), ("topic", pa.string()), ("source_file", pa.string()),
+        ("source_line_number", pa.int64()),
+    ]),
 }
 
 
@@ -64,6 +73,7 @@ class TransformResult:
     input_file: Path
     total_lines: int = 0
     written: Counter[str] = field(default_factory=Counter)
+    ignored_topics: Counter[str] = field(default_factory=Counter)
     errors: Counter[str] = field(default_factory=Counter)
     outputs: list[Path] = field(default_factory=list)
     elapsed_seconds: float = 0.0
@@ -71,6 +81,14 @@ class TransformResult:
     @property
     def converted(self) -> int:
         return sum(self.written.values())
+
+    @property
+    def ignored(self) -> int:
+        return sum(self.ignored_topics.values())
+
+    @property
+    def skipped(self) -> int:
+        return self.total_lines - self.converted
 
 
 def _timestamp(value: Any, field_name: str) -> datetime:
@@ -149,8 +167,23 @@ def _sen66(record: dict[str, Any], source_file: Path, line_number: int) -> tuple
     return SEN66, row["measured_at"].date().isoformat(), row
 
 
+def _interval(record: dict[str, Any], source_file: Path, line_number: int) -> tuple[str, str, dict[str, Any]]:
+    _, payload, _, row = _common(record, source_file, line_number)
+    row["start_at"] = _timestamp(payload.get("start_at"), "payload.start_at")
+    row["end_at"] = _timestamp(payload.get("end_at"), "payload.end_at")
+    if row["start_at"] > row["end_at"]:
+        raise RecordError("invalid_datetime", "payload.start_at must not be after payload.end_at")
+    row["import_energy_kwh"] = _number(payload, "import_energy_kwh", required=True)
+    row["export_energy_kwh"] = _number(payload, "export_energy_kwh", required=True)
+    quality_status = payload.get("quality_status")
+    if not isinstance(quality_status, str) or not quality_status:
+        raise RecordError("missing_required_field", "payload.quality_status is required")
+    row["quality_status"] = quality_status
+    return INTERVAL, row["end_at"].date().isoformat(), row
+
+
 NORMALIZERS: dict[str, Callable[[dict[str, Any], Path, int], tuple[str, str, dict[str, Any]]]] = {
-    "power": _power, "cumulative-energy": _cumulative, "sen66": _sen66,
+    "power": _power, "cumulative-energy": _cumulative, "interval-energy": _interval, "sen66": _sen66,
 }
 
 
@@ -162,6 +195,14 @@ def _normalizer_for(record: dict[str, Any]) -> Callable[[dict[str, Any], Path, i
     if not topic.startswith("omk/") or suffix not in NORMALIZERS:
         raise RecordError("unsupported_topic", f"unsupported MQTT topic: {topic}")
     return NORMALIZERS[suffix]
+
+
+def _is_status_topic(record: dict[str, Any]) -> bool:
+    topic = record.get("topic")
+    if not isinstance(topic, str):
+        return False
+    parts = topic.split("/")
+    return len(parts) == 3 and parts[0] == "omk" and bool(parts[1]) and parts[2] == "status"
 
 
 def transform(input_file: Path, output_root: Path, *, dry_run: bool = False, error_root: Path | None = None) -> TransformResult:
@@ -192,6 +233,10 @@ def transform(input_file: Path, output_root: Path, *, dry_run: bool = False, err
                     record = json.loads(raw)
                     if not isinstance(record, dict):
                         raise RecordError("invalid_json", "record must be a JSON object")
+                    if _is_status_topic(record):
+                        result.ignored_topics[record["topic"]] += 1
+                        LOGGER.debug("Ignoring management topic %s:%s topic=%s", input_file, line_number, record["topic"])
+                        continue
                     dataset, date, row = _normalizer_for(record)(record, input_file, line_number)
                     result.written[dataset] += 1
                     if dry_run:
@@ -220,7 +265,7 @@ def transform(input_file: Path, output_root: Path, *, dry_run: bool = False, err
         if error_handle is not None:
             error_handle.close()
         result.elapsed_seconds = time.monotonic() - started
-    LOGGER.info("Transform complete input_file=%s records_read=%s records_written=%s dataset_counts=%s records_skipped=%s errors=%s unsupported_topics=%s outputs=%s elapsed_seconds=%.3f",
-                input_file, result.total_lines, result.converted, dict(result.written), sum(result.errors.values()),
-                dict(result.errors), result.errors["unsupported_topic"], result.outputs, result.elapsed_seconds)
+    LOGGER.info("Transform complete input_file=%s records_read=%s records_written=%s dataset_counts=%s records_skipped=%s records_ignored=%s ignored_topics=%s errors=%s unsupported_topics=%s outputs=%s elapsed_seconds=%.3f",
+                input_file, result.total_lines, result.converted, dict(result.written), result.skipped, result.ignored,
+                dict(result.ignored_topics), sum(result.errors.values()), result.errors["unsupported_topic"], result.outputs, result.elapsed_seconds)
     return result
