@@ -65,5 +65,6 @@ def test_verification_reports_missing_schema_column(tmp_path, capsys):
     power = data_root / "broute_power/date=2026-07-30/data.parquet"
     pq.write_table(pa.table({"device_id": ["broute-001"], "measured_at": [_time("2026-07-30T12:00:00")]}), power)
     assert verify_parquet.run(ROOT / "scripts" / "verify_parquet.sql", data_root) == 1
-    assert "broute_power' is missing required columns" in capsys.readouterr().err
-    assert "net_power_w" in capsys.readouterr().err
+    captured = capsys.readouterr()
+    assert "broute_power' is missing required columns" in captured.err
+    assert "net_power_w" in captured.err
