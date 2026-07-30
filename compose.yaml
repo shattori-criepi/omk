@@ -15,6 +15,22 @@ services:
     container_name: omk-gateway
     restart: unless-stopped
 
+  sensor-collector:
+    build:
+      context: ./services/sensor-collector
+    container_name: omk-sensor-collector
+    restart: unless-stopped
+    depends_on:
+      - mosquitto
+    environment:
+      MQTT_HOST: mosquitto
+      MQTT_PORT: "1883"
+      MQTT_TOPIC: "omk/#"
+      DATA_ROOT: /app/data/sensors
+      TZ: Asia/Tokyo
+    volumes:
+      - ./data/sensors:/app/data/sensors
+
   broute-meter-mock:
     build:
       context: ./broute-meter
