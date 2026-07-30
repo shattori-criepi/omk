@@ -24,6 +24,9 @@ services:
       - "8000:8000"
     environment:
       TZ: Asia/Tokyo
+      OMK_PROCESSED_DATA_ROOT: /app/data/processed
+    volumes:
+      - ./data/processed:/app/data/processed:ro
 
   sensor-collector:
     build:

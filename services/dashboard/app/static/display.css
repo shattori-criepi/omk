@@ -30,12 +30,14 @@ body { min-height: 100dvh; }
 
 .power-hero { display: grid; place-items: center; align-content: center; background: #172554; border-radius: 24px; min-height: 0; }
 .eyebrow, .card p { margin: 0; color: #bfdbfe; font-size: clamp(15px, 2vw, 23px); font-weight: 700; }
-.power-reading { display: flex; align-items: baseline; gap: .2em; line-height: 1; }
+.power-reading { display: flex; align-items: baseline; gap: .35em; line-height: 1; }
 .power-reading strong { font-size: clamp(64px, 13vw, 150px); letter-spacing: -.06em; }
 .power-reading span { font-size: clamp(24px, 4vw, 48px); color: #bfdbfe; }
 .power-direction { margin: clamp(6px, 1vw, 14px) 0 0; padding: .45em 1.1em; border-radius: 999px; font-size: clamp(20px, 3vw, 34px); font-weight: 800; }
 .power-direction--purchase { background: #c2410c; color: #fff7ed; }
 .power-direction--sale { background: #047857; color: #ecfdf5; }
+.power-direction--neutral { background: #334155; color: #e2e8f0; }
+.power-direction--unavailable { background: #7f1d1d; color: #fee2e2; }
 
 .cards { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: clamp(8px, 1.3vw, 16px); min-height: 0; }
 .card { padding: clamp(10px, 1.5vw, 20px); display: flex; flex-wrap: wrap; align-content: center; align-items: baseline; gap: .18em .35em; background: #1e293b; border-radius: 18px; min-width: 0; }
