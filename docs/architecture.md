@@ -346,6 +346,8 @@ QoS、retain、再送上限は実機試験で確定します。
 4. `data-transformer`が対応トピックを正規化し、日付パーティション済みParquetを生成する
 5. CSV変換、分析、可視化、外部送信がJSONLまたはParquetを後段入力として利用する
 
+`power`、`cumulative-energy`、`interval-energy`、`sen66`は計測データとして、それぞれ`broute_power`、`broute_cumulative_energy`、`broute_interval_energy`、`sen66`へ変換する。`omk/<device_id>/status`は現時点では管理情報として意図的に除外し、未知・不正トピックだけを変換エラーとして記録する。
+
 「保存前に送信する」流れを標準にしません。通信断でデータを失わないため、原則はローカル保存を先に行います。
 
 ### 9.2 通信断
@@ -372,7 +374,7 @@ QoS、retain、再送上限は実機試験で確定します。
 |---|---|---|
 | `mosquitto` | LAN内のMQTTメッセージ中継 | MQTT broker |
 | `sensor-collector` | `omk/#`の汎用受信と日次JSONL一次保存 | Python / Docker Compose |
-| `data-transformer` | JSONLの検証・トピック別正規化・Parquet出力 | Python / PyArrow |
+| `data-transformer` | JSONLの検証・トピック別正規化・Parquet出力。`status`は管理情報として除外 | Python / PyArrow |
 | Bルートsystemdサービス | USBシリアル・PANAによるBルート通信 | ホストOS |
 | CSV・分析・可視化・外部送信 | JSONLを使う後段処理 | 今後決定 |
 

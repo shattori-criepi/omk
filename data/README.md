@@ -10,8 +10,8 @@ CSV、データベースなどはGitで管理しません。Gitにはこの説�
 - `sensors/`: 温湿度など、その他のセンサ計測データ
 - `database/`: SQLiteなどのローカルデータベース（保存方式は未決定）
 - `exports/`: 外部利用や退避のために生成したエクスポート
-- `processed/`: `data-transformer`がJSONLから生成する日付パーティション済みParquet
-- `errors/transform/`: 変換時に検出した不正・未対応レコードのJSONL（一次データは変更しない）
+- `processed/`: `data-transformer`がJSONLから生成する日付パーティション済みParquet（`broute_power`、`broute_cumulative_energy`、`broute_interval_energy`、`sen66`）
+- `errors/transform/`: 変換時に検出した不正・未知トピックのJSONL（`status`は意図的に除外し、一次データは変更しない）
 
 既存コンポーネントが使用する`broute-meter/`も移行期間中はそのまま保持します。
 Docker Composeからは、原則としてOMKルート基準の`./data/...`をホスト側パスとして

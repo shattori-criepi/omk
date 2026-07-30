@@ -22,4 +22,4 @@ def main() -> None:
     logging.basicConfig(level=args.log_level, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     input_file = args.input or args.data_root / args.date.strftime("%Y") / args.date.strftime("%m") / f"{args.date:%d}.jsonl"
     result = transform(input_file, args.output, dry_run=args.dry_run, error_root=args.error_output)
-    print(f"converted={result.converted} skipped={sum(result.errors.values())} datasets={dict(result.written)}")
+    print(f"converted={result.converted} skipped={result.skipped} ignored={result.ignored} datasets={dict(result.written)}")

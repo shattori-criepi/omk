@@ -41,7 +41,7 @@ def test_invalid_records_are_reported_without_stopping(tmp_path):
     valid = _record("omk/broute-001/power", {"device_id": "broute-001", "measured_at": "2026-07-30T13:00:00+09:00", "net_power_w": 100})
     malformed = '{not json}'
     bad_time = _record("omk/broute-001/power", {"device_id": "broute-001", "measured_at": "today", "net_power_w": 1})
-    unknown = _record("omk/a/status", {"device_id": "a", "status": "online"})
+    unknown = _record("omk/test-001/raw", {"device_id": "test-001", "value": "not a supported measurement"})
     input_file.write_text("\n".join([json.dumps(valid), malformed, json.dumps(bad_time), json.dumps(unknown)]) + "\n", encoding="utf-8")
     result = transform(input_file, tmp_path / "processed")
     assert result.converted == 1
@@ -70,3 +70,54 @@ def test_invalid_numeric_value_is_reported_and_existing_parquet_is_kept(tmp_path
     result = transform(input_file, output)
     assert result.errors == {"invalid_number": 1}
     assert parquet.read_bytes() == original
+
+
+def test_interval_energy_is_partitioned_by_end_at_and_readable_by_duckdb(tmp_path):
+    input_file = tmp_path / "30.jsonl"
+    interval = _record("omk/broute-001/interval-energy", {
+        "device_id": "broute-001", "start_at": "2026-07-30T23:30:00+09:00",
+        "end_at": "2026-07-31T00:00:00+09:00", "import_energy_kwh": 0.0,
+        "export_energy_kwh": 2.6, "quality_status": "normal",
+    })
+    input_file.write_text(json.dumps(interval) + "\n", encoding="utf-8")
+    output = tmp_path / "processed"
+    assert transform(input_file, output).converted == 1
+    assert transform(input_file, output).converted == 1
+    parquet = output / "broute_interval_energy/date=2026-07-31/data.parquet"
+    table = pq.read_table(parquet)
+    assert table.num_rows == 1
+    assert table.schema.field("start_at").type.tz == "Asia/Tokyo"
+    assert table.schema.field("end_at").type.tz == "Asia/Tokyo"
+    assert table.to_pylist()[0]["export_energy_kwh"] == 2.6
+    assert table.to_pylist()[0]["quality_status"] == "normal"
+    assert duckdb.connect().execute("SELECT count(*), sum(export_energy_kwh) FROM read_parquet(?)", [str(parquet)]).fetchone() == (1, 2.6)
+
+
+def test_interval_energy_validation_errors(tmp_path):
+    valid = {"device_id": "broute-001", "start_at": "2026-07-30T12:30:00+09:00", "end_at": "2026-07-30T13:00:00+09:00", "import_energy_kwh": 0.0, "export_energy_kwh": 2.6, "quality_status": "normal"}
+    cases = [
+        ({**valid, "start_at": "not-a-date"}, "invalid_datetime"),
+        ({**valid, "end_at": "not-a-date"}, "invalid_datetime"),
+        ({**valid, "import_energy_kwh": "zero"}, "invalid_number"),
+        ({**valid, "export_energy_kwh": "two"}, "invalid_number"),
+        ({key: value for key, value in valid.items() if key != "quality_status"}, "missing_required_field"),
+    ]
+    input_file = tmp_path / "30.jsonl"
+    input_file.write_text("\n".join(json.dumps(_record("omk/broute-001/interval-energy", payload)) for payload, _ in cases) + "\n", encoding="utf-8")
+    result = transform(input_file, tmp_path / "processed")
+    assert result.converted == 0
+    assert result.errors == {"invalid_datetime": 2, "invalid_number": 2, "missing_required_field": 1}
+
+
+def test_status_topics_are_ignored_without_error_jsonl(tmp_path):
+    input_file = tmp_path / "30.jsonl"
+    power = _record("omk/broute-001/power", {"device_id": "broute-001", "measured_at": "2026-07-30T13:00:00+09:00", "net_power_w": 100})
+    broute_status = _record("omk/broute-001/status", {"device_id": "broute-001", "status": "online"})
+    sen66_status = _record("omk/sen66-001/status", {"device_id": "sen66-001", "status": "online"})
+    input_file.write_text("\n".join(json.dumps(record) for record in [power, broute_status, sen66_status]) + "\n", encoding="utf-8")
+    result = transform(input_file, tmp_path / "processed")
+    assert result.converted == 1
+    assert result.ignored == 2
+    assert result.ignored_topics == {"omk/broute-001/status": 1, "omk/sen66-001/status": 1}
+    assert not result.errors
+    assert not (tmp_path / "errors/transform/30.jsonl").exists()
