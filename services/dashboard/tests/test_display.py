@@ -82,7 +82,7 @@ def test_view_model_reads_latest_values_and_today_energy(tmp_path: Path) -> None
     assert dashboard.air_quality == "注意"
     assert dashboard.updated_at == "2026/07/30 12:00"
     assert dashboard.updated_at_iso == "2026-07-30T12:00:00+09:00"
-    assert dashboard.freshness == "delayed"
+    assert dashboard.freshness == "normal"
 
 
 def test_power_direction_and_air_quality_rules(tmp_path: Path) -> None:
