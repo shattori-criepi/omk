@@ -8,6 +8,8 @@ from zoneinfo import ZoneInfo
 from app.data.parquet_repository import EnergyTotals, LatestPower, LatestSen66, ParquetRepository
 
 JST = ZoneInfo("Asia/Tokyo")
+NORMAL_MAX_AGE_SECONDS = 6 * 60
+DELAYED_MAX_AGE_SECONDS = 10 * 60
 
 
 class FreshnessStatus(StrEnum):
@@ -74,9 +76,9 @@ def freshness_for(measured_at: datetime | None, now: datetime) -> FreshnessStatu
     if measured_at is None:
         return FreshnessStatus.UNAVAILABLE
     age_seconds = max(0.0, (_as_jst(now) - _as_jst(measured_at)).total_seconds())
-    if age_seconds <= 15:
+    if age_seconds <= NORMAL_MAX_AGE_SECONDS:
         return FreshnessStatus.NORMAL
-    if age_seconds <= 30:
+    if age_seconds <= DELAYED_MAX_AGE_SECONDS:
         return FreshnessStatus.DELAYED
     return FreshnessStatus.STALE
 
