@@ -10,7 +10,7 @@
     <main class="dashboard" aria-label="OMK ダッシュボード">
       <header class="topbar">
         <h1>OMK</h1>
-        <p class="updated">最終更新 <time datetime="{{ dashboard.updated_at }}">{{ dashboard.updated_at }}</time></p>
+        <p class="updated">最終更新 <time datetime="{{ dashboard.updated_at_iso }}">{{ dashboard.updated_at }}</time></p>
         <p class="freshness freshness--{{ dashboard.freshness }}" aria-label="データ鮮度: {{ dashboard.freshness }}">{{ dashboard.freshness }}</p>
       </header>
 
