@@ -99,10 +99,10 @@ def test_power_direction_and_air_quality_rules(tmp_path: Path) -> None:
 
 def test_freshness_status_boundaries() -> None:
     assert freshness_for(NOW, NOW) == FreshnessStatus.NORMAL
-    assert freshness_for(datetime(2026, 7, 30, 12, 0, 15, tzinfo=JST), NOW) == FreshnessStatus.NORMAL
-    assert freshness_for(datetime(2026, 7, 30, 12, 0, 14, tzinfo=JST), NOW) == FreshnessStatus.DELAYED
-    assert freshness_for(datetime(2026, 7, 30, 12, 0, 0, tzinfo=JST), NOW) == FreshnessStatus.DELAYED
-    assert freshness_for(datetime(2026, 7, 30, 11, 59, 59, tzinfo=JST), NOW) == FreshnessStatus.STALE
+    assert freshness_for(datetime(2026, 7, 30, 11, 54, 30, tzinfo=JST), NOW) == FreshnessStatus.NORMAL
+    assert freshness_for(datetime(2026, 7, 30, 11, 54, 29, tzinfo=JST), NOW) == FreshnessStatus.DELAYED
+    assert freshness_for(datetime(2026, 7, 30, 11, 50, 30, tzinfo=JST), NOW) == FreshnessStatus.DELAYED
+    assert freshness_for(datetime(2026, 7, 30, 11, 50, 29, tzinfo=JST), NOW) == FreshnessStatus.STALE
     assert freshness_for(None, NOW) == FreshnessStatus.UNAVAILABLE
     assert freshness_for(datetime(2026, 7, 30, 12, 1, tzinfo=JST), NOW) == FreshnessStatus.NORMAL
 
