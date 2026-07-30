@@ -215,3 +215,67 @@ sudo journalctl -u omk-data-transformer.service --since today --no-pager
 sudo systemctl disable --now omk-data-transformer.timer
 ```
 後続タスクの一覧は[ロードマップ](roadmap.md)も参照してください。
+
+## 14. Wi-Fiアクセスポイント（NetworkManager）
+
+`scripts/setup-wifi-access-point.sh`は、Raspberry Pi OS/DebianのNetworkManagerへOMK用の
+Wi-Fiアクセスポイント接続プロファイルを安全に作成または更新するためのスクリプトです。
+Docker、Bルート、表示、kioskなどは設定しません。既定の接続名は`omk-ap`、インター
+フェースは`wlan0`、IPv4は`192.168.50.1/24`です。プロファイルは`ipv4.method shared`と
+WPA2-PSKを使用します。
+
+まず、変更を行わないdry-runで解決済みの値を確認します。
+
+```bash
+./scripts/setup-wifi-access-point.sh --dry-run
+```
+
+通常の実行は次のとおりです。SSIDを指定しなかった場合は、既存の対象プロファイルの
+SSIDを優先し、なければ`OMK-XXXXXX`を生成します。`XXXXXX`は`/etc/machine-id`を
+SHA-256でハッシュした先頭6桁の大文字16進数であり、端末ごとに概ね安定し、生の
+machine-idやMACアドレスを公開しません。
+
+```bash
+OMK_AP_SSID='任意のSSID' ./scripts/setup-wifi-access-point.sh
+```
+
+PSKが必要な場合、環境変数に設定していなければスクリプトが非表示で入力を求めます。
+画面・ログ・`nmcli`のコマンドライン引数には出力されません。設定時は`nmcli connection
+edit`へ標準入力で渡すため、`sudo`経由でもPSKはプロセス引数に含まれません。環境変数で
+渡すこともできますが、権限のあるプロセスから環境が読める可能性があるため、可能なら
+対話入力を使い、PSKをGitへ保存しないでください。
+
+```bash
+./scripts/setup-wifi-access-point.sh
+# WPA2-PSK (input is hidden): と表示されたら画面を見ながら入力する
+```
+
+既存の`omk-ap`プロファイルがある場合、スクリプトはID、インターフェース、autoconnect、
+APモード、SSID、鍵管理、IPv4方式・アドレスを確認します。期待値と一致すれば変更せず
+終了します。相違があれば、PSKを除く変更予定を表示して明示確認を求め、削除・作り直し
+ではなく`nmcli connection modify`で更新します。更新前の秘密情報を含まない設定スナップ
+ショットと実行ログは`logs/setup/`に保存され、Git管理対象外です。
+
+通常実行はプロファイルを作成・更新するだけで、APを有効化しません。AP有効化はWi-Fi
+接続を切り替えるため、SSHが`wlan0`経由の場合は接続が切れる可能性があります。別WAN
+（たとえばモバイル回線）が有効であることを確認し、できればローカルコンソールから実施
+してください。明示的に有効化するには次を実行し、表示される確認に応答します。
+
+```bash
+./scripts/setup-wifi-access-point.sh --activate
+```
+
+状態確認、停止、autoconnect無効化、プロファイル削除は次のコマンドです。削除は復元が
+必要になるため、対象名を確認してから手動で実行してください。
+
+```bash
+nmcli connection show --active
+nmcli device status
+sudo nmcli connection down omk-ap
+sudo nmcli connection modify omk-ap connection.autoconnect no
+sudo nmcli connection delete omk-ap
+```
+
+元へ戻すには、APを停止しautoconnectを無効化します。削除前に保存した`logs/setup/`の
+スナップショットを参照して、必要なら`nmcli connection modify`で以前の非秘密設定へ
+戻してください。PSKを含む秘密情報は、この文書、ログ、Git、チケットへ記載しません。
