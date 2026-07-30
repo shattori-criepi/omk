@@ -1,0 +1,14 @@
+[Unit]
+Description=OMK sensor JSONL to Parquet transformer
+After=local-fs.target
+
+[Service]
+Type=oneshot
+User=@OMK_USER@
+Group=@OMK_GROUP@
+WorkingDirectory=@OMK_ROOT@
+Environment=TZ=Asia/Tokyo
+Environment=PYTHONPATH=@OMK_ROOT@/services/data-transformer/src
+ExecStart=@OMK_ROOT@/scripts/run-data-transformer.sh
+StandardOutput=journal
+StandardError=journal

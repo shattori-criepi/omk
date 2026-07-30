@@ -1,0 +1,12 @@
+[Unit]
+Description=Run OMK data transformer every five minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+Persistent=true
+AccuracySec=15s
+Unit=omk-data-transformer.service
+
+[Install]
+WantedBy=timers.target
