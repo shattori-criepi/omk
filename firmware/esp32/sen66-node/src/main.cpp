@@ -4,10 +4,12 @@
 #include <string.h>
 
 #include "app_config.h"
+#include "mqtt_publisher.h"
 #include "sen66_sensor.h"
 
 namespace {
 Sen66Sensor sen66(Wire);
+MqttPublisher mqtt_publisher;
 uint32_t last_measurement_attempt_ms = 0;
 uint32_t last_initialization_attempt_ms = 0;
 uint8_t consecutive_read_failures = 0;
@@ -73,6 +75,7 @@ void handleMeasurement() {
     if (sen66.readMeasurement(measurement)) {
         consecutive_read_failures = 0;
         printMeasurement(measurement);
+        mqtt_publisher.publishMeasurement(measurement);
         return;
     }
 
@@ -106,9 +109,11 @@ void setup() {
     Serial.printf("[INFO] I2C initialized: SDA=%u SCL=%u\n",
                   AppConfig::I2C_SDA_PIN, AppConfig::I2C_SCL_PIN);
     initializeSensor();
+    mqtt_publisher.begin();
 }
 
 void loop() {
+    mqtt_publisher.update();
     const uint32_t now = millis();
     if (!sen66.isReady()) {
         if (now - last_initialization_attempt_ms >=
@@ -116,10 +121,7 @@ void loop() {
             Serial.println("[INFO] Retrying SEN66 initialization");
             initializeSensor();
         }
-        return;
-    }
-
-    if (now - last_measurement_attempt_ms >= AppConfig::MEASUREMENT_INTERVAL_MS) {
+    } else if (now - last_measurement_attempt_ms >= AppConfig::MEASUREMENT_INTERVAL_MS) {
         last_measurement_attempt_ms = now;
         handleMeasurement();
     }

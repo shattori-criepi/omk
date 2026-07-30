@@ -226,6 +226,7 @@ docker compose -f compose.yaml -f compose.pi.yaml up -d --build
 - [開発ガイド](docs/development.md) — 開発手順、テスト、センサ追加、Codex利用時の規則
 - [Raspberry Pi初期セットアップ](docs/raspberry-pi-setup.md) — Raspberry Pi Imager設定後のホスト環境構築
 - [SORACOM Onyx セットアップ](docs/soracom-onyx-setup.md) — Onyx LTE モデムの認識・接続・診断
+- [MQTT仕様](docs/mqtt.md) — ESP32センサノードとゲートウェイ間のトピックとpayload
 - [ロードマップ](docs/roadmap.md) — 移行手順、完了条件、未決定事項
 
 ## 8. 実装時の必須ルール
