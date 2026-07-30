@@ -61,6 +61,28 @@ class RecordingStorage:
         pass
 
 
+class RecordingPublisher:
+    def __init__(self) -> None:
+        self.instantaneous: list[InstantaneousPowerReading] = []
+        self.cumulative: list[CumulativeEnergyReading] = []
+        self.intervals: list[IntervalEnergyReading] = []
+
+    def start(self) -> None:
+        pass
+
+    def publish_instantaneous(self, reading: InstantaneousPowerReading) -> None:
+        self.instantaneous.append(reading)
+
+    def publish_cumulative(self, reading: CumulativeEnergyReading) -> None:
+        self.cumulative.append(reading)
+
+    def publish_interval(self, reading: IntervalEnergyReading) -> None:
+        self.intervals.append(reading)
+
+    def close(self) -> None:
+        pass
+
+
 class DelayedMeter:
     def __init__(
         self,
@@ -239,3 +261,47 @@ def test_cumulative_is_requested_at_startup_and_after_half_hour_boundary() -> No
     ).run()
 
     assert meter.cumulative_times == [1_799, 1_805]
+
+
+def test_scheduler_publishes_the_saved_readings_without_refetching() -> None:
+    now = datetime.fromtimestamp(1_800, tz=UTC)
+    storage = RecordingStorage()
+    storage.cumulative.append(
+        CumulativeEnergyReading(
+            datetime.fromtimestamp(0, tz=UTC),
+            datetime.fromtimestamp(0, tz=UTC),
+            100,
+            100,
+            Decimal("1"),
+            Decimal("1"),
+        )
+    )
+    publisher = RecordingPublisher()
+
+    class Meter:
+        def get_instantaneous_power(self) -> InstantaneousPowerReading:
+            return InstantaneousPowerReading(now, 100)
+
+        def get_cumulative_energy(self) -> CumulativeEnergyReading:
+            return CumulativeEnergyReading(
+                now,
+                now,
+                110,
+                105,
+                Decimal("1.5"),
+                Decimal("1.2"),
+            )
+
+    scheduler = MeasurementScheduler(
+        Meter(),
+        storage,
+        publisher,
+        instantaneous_interval_seconds=10,
+        cumulative_fetch_delay_seconds=5,
+    )
+    scheduler._measure_instantaneous()
+    scheduler._measure_cumulative()
+
+    assert publisher.instantaneous == storage.instantaneous
+    assert publisher.cumulative == storage.cumulative[-1:]
+    assert publisher.intervals == storage.intervals

@@ -27,6 +27,7 @@ from broute_meter.echonet import EchonetFrameError
 from broute_meter.logging_config import configure_logging
 from broute_meter.meter import SmartMeterClient, SmartMeterError
 from broute_meter.models import BRouteConnection
+from broute_meter.mqtt import NullMeasurementPublisher, create_measurement_publisher
 from broute_meter.resilience import RecoveringMeterReader
 from broute_meter.scheduler import MeasurementScheduler
 from broute_meter.serial.port_detector import (
@@ -142,6 +143,11 @@ def _configure_command_logging(config: AppConfig) -> logging.Logger:
         for value in (credentials.b_route_id, credentials.password)
         if value is not None
     )
+    secrets += tuple(
+        value
+        for value in (config.mqtt.username, config.mqtt.password)
+        if value is not None
+    )
     return configure_logging(config.logging, secrets=secrets)
 
 
@@ -163,6 +169,15 @@ def _run(args: argparse.Namespace) -> int:
     logger.info("runに使用するポート: %s", port)
     adapter = _create_rs_wsuha_p_adapter(config, port)
     storage = CsvMeasurementStorage(config.storage.data_directory)
+    try:
+        publisher = create_measurement_publisher(config.mqtt)
+        publisher.start()
+    except Exception:
+        logger.warning(
+            "MQTT publisherを開始できませんでした。計測を継続します",
+            exc_info=True,
+        )
+        publisher = NullMeasurementPublisher()
     shutdown_event = threading.Event()
     previous_handlers = _install_stop_signal_handlers(shutdown_event, logger)
 
@@ -252,6 +267,7 @@ def _run(args: argparse.Namespace) -> int:
             scheduler = MeasurementScheduler(
                 recovering_meter,
                 storage,
+                publisher,
                 instantaneous_interval_seconds=(
                     config.measurement.instantaneous_interval_seconds
                 ),
@@ -285,8 +301,14 @@ def _run(args: argparse.Namespace) -> int:
                 exc,
             )
         finally:
-            storage.close()
-            adapter.close()
+            try:
+                publisher.close()
+            except Exception:
+                logger.warning("MQTT publisherの終了に失敗しました", exc_info=True)
+            try:
+                storage.close()
+            finally:
+                adapter.close()
     finally:
         _restore_signal_handlers(previous_handlers)
 

@@ -48,6 +48,14 @@ _SUPPORTED_ENVIRONMENT_KEYS = frozenset(
         "B_ROUTE_LOG_LEVEL",
         "OMK_DATA_DIR",
         "OMK_LOG_DIR",
+        "MQTT_ENABLED",
+        "MQTT_HOST",
+        "MQTT_PORT",
+        "MQTT_DEVICE_ID",
+        "MQTT_TOPIC_PREFIX",
+        "MQTT_CLIENT_ID",
+        "MQTT_USERNAME",
+        "MQTT_PASSWORD",
     }
 )
 
@@ -59,6 +67,7 @@ _SETTINGS_KEYS = frozenset(
         "retry",
         "storage",
         "logging",
+        "mqtt",
     }
 )
 _SECTION_KEYS: Mapping[str, frozenset[str]] = MappingProxyType(
@@ -82,6 +91,18 @@ _SECTION_KEYS: Mapping[str, frozenset[str]] = MappingProxyType(
         ),
         "storage": frozenset({"data_directory"}),
         "logging": frozenset({"level", "directory"}),
+        "mqtt": frozenset(
+            {
+                "enabled",
+                "host",
+                "port",
+                "device_id",
+                "topic_prefix",
+                "client_id",
+                "username",
+                "password",
+            }
+        ),
     }
 )
 
@@ -151,6 +172,20 @@ class LoggingConfig:
 
 
 @dataclass(frozen=True, slots=True, repr=False)
+class MqttConfig:
+    """MQTT real-time delivery settings."""
+
+    enabled: bool = False
+    host: str = "192.168.50.1"
+    port: int = 1883
+    device_id: str = "broute-001"
+    topic_prefix: str = "omk"
+    client_id: str = "omk-broute-001"
+    username: str | None = None
+    password: str | None = field(default=None, repr=False)
+
+
+@dataclass(frozen=True, slots=True, repr=False)
 class BRouteCredentials:
     """B-route credentials.
 
@@ -172,6 +207,7 @@ class AppConfig:
     retry: RetryConfig = field(default_factory=RetryConfig)
     storage: StorageConfig = field(default_factory=StorageConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
+    mqtt: MqttConfig = field(default_factory=MqttConfig)
     credentials: BRouteCredentials = field(
         default_factory=BRouteCredentials,
         repr=False,
@@ -320,6 +356,34 @@ def validate_config(
     if not isinstance(config.logging.directory, Path):
         errors.append("logging.directory must be a path")
 
+    mqtt = config.mqtt
+    if not isinstance(mqtt.enabled, bool):
+        errors.append("mqtt.enabled must be a boolean")
+    if not isinstance(mqtt.host, str) or not mqtt.host.strip():
+        errors.append("mqtt.host must be a non-empty string")
+    if not _is_int(mqtt.port) or not 1 <= mqtt.port <= 65535:
+        errors.append("mqtt.port must be an integer between 1 and 65535")
+    if not isinstance(mqtt.device_id, str) or not mqtt.device_id.strip():
+        errors.append("mqtt.device_id must be a non-empty string")
+    elif "/" in mqtt.device_id:
+        errors.append("mqtt.device_id must not contain '/'")
+    if not isinstance(mqtt.topic_prefix, str) or not mqtt.topic_prefix.strip():
+        errors.append("mqtt.topic_prefix must be a non-empty string")
+    elif mqtt.topic_prefix.strip("/") != mqtt.topic_prefix:
+        errors.append("mqtt.topic_prefix must not start or end with '/'")
+    if not isinstance(mqtt.client_id, str) or not mqtt.client_id.strip():
+        errors.append("mqtt.client_id must be a non-empty string")
+    for field_name, value in (
+        ("username", mqtt.username),
+        ("password", mqtt.password),
+    ):
+        if value is not None and (not isinstance(value, str) or not value.strip()):
+            errors.append(f"mqtt.{field_name} must be a non-empty string or null")
+    if (mqtt.username is None) != (mqtt.password is None):
+        errors.append(
+            "mqtt.username and mqtt.password must both be configured or both be absent"
+        )
+
     identifier = config.credentials.b_route_id
     password = config.credentials.password
     if identifier is not None and (
@@ -390,6 +454,16 @@ def safe_config_summary(config: AppConfig) -> dict[str, object]:
             "level": config.logging.level,
             "directory": str(config.logging.directory),
         },
+        "mqtt": {
+            "enabled": config.mqtt.enabled,
+            "host": config.mqtt.host,
+            "port": config.mqtt.port,
+            "device_id": config.mqtt.device_id,
+            "topic_prefix": config.mqtt.topic_prefix,
+            "client_id": config.mqtt.client_id,
+            "username_configured": config.mqtt.username is not None,
+            "password_configured": config.mqtt.password is not None,
+        },
         "b_route": {
             "id": mask_b_route_id(config.credentials.b_route_id),
             "password_configured": bool(
@@ -424,6 +498,16 @@ def _default_values() -> dict[str, dict[str, Any]]:
         },
         "storage": {"data_directory": "../data/broute-meter"},
         "logging": {"level": "INFO", "directory": "../logs/broute-meter"},
+        "mqtt": {
+            "enabled": False,
+            "host": "192.168.50.1",
+            "port": 1883,
+            "device_id": "broute-001",
+            "topic_prefix": "omk",
+            "client_id": "omk-broute-001",
+            "username": None,
+            "password": None,
+        },
         "b_route": {"id": None, "password": None},
     }
 
@@ -597,6 +681,14 @@ def _merge_environment(
             "logging",
             "directory",
         ),
+        ("MQTT_ENABLED", "mqtt", "enabled"),
+        ("MQTT_HOST", "mqtt", "host"),
+        ("MQTT_PORT", "mqtt", "port"),
+        ("MQTT_DEVICE_ID", "mqtt", "device_id"),
+        ("MQTT_TOPIC_PREFIX", "mqtt", "topic_prefix"),
+        ("MQTT_CLIENT_ID", "mqtt", "client_id"),
+        ("MQTT_USERNAME", "mqtt", "username"),
+        ("MQTT_PASSWORD", "mqtt", "password"),
     )
     for environment_key, section, field_name in environment_targets:
         if environment_key in environ:
@@ -605,6 +697,7 @@ def _merge_environment(
                 "B_ROUTE_INSTANT_INTERVAL",
                 "B_ROUTE_CUMULATIVE_INTERVAL",
                 "B_ROUTE_CUMULATIVE_DELAY",
+                "MQTT_PORT",
             }:
                 try:
                     environment_value = int(environ[environment_key], 10)
@@ -612,6 +705,8 @@ def _merge_environment(
                     raise ConfigError(
                         f"{environment_key} must be an integer"
                     ) from None
+            elif environment_key == "MQTT_ENABLED":
+                environment_value = _environment_boolean(environ[environment_key])
             values[section][field_name] = environment_value
 
 
@@ -659,6 +754,7 @@ def _build_config(values: Mapping[str, Mapping[str, Any]]) -> AppConfig:
         values["logging"]["directory"],
         "logging.directory",
     )
+    mqtt = values["mqtt"]
 
     config = AppConfig(
         measurement=MeasurementConfig(
@@ -707,6 +803,16 @@ def _build_config(values: Mapping[str, Mapping[str, Any]]) -> AppConfig:
             level=level_value.upper(),
             directory=log_directory,
         ),
+        mqtt=MqttConfig(
+            enabled=_boolean_value(mqtt["enabled"], "mqtt.enabled"),
+            host=_string_value(mqtt["host"], "mqtt.host"),
+            port=_integer_value(mqtt["port"], "mqtt.port"),
+            device_id=_string_value(mqtt["device_id"], "mqtt.device_id"),
+            topic_prefix=_string_value(mqtt["topic_prefix"], "mqtt.topic_prefix"),
+            client_id=_string_value(mqtt["client_id"], "mqtt.client_id"),
+            username=_optional_secret_string(mqtt["username"], "mqtt.username"),
+            password=_optional_secret_string(mqtt["password"], "mqtt.password"),
+        ),
         credentials=BRouteCredentials(
             b_route_id=identifier,
             password=password,
@@ -734,6 +840,15 @@ def _boolean_value(value: object, location: str) -> bool:
     if not isinstance(value, bool):
         raise ConfigError(f"{location} must be a boolean")
     return value
+
+
+def _environment_boolean(value: str) -> bool:
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise ConfigError("MQTT_ENABLED must be a boolean")
 
 
 def _string_value(value: object, location: str) -> str:

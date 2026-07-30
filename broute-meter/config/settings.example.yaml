@@ -33,3 +33,11 @@ logging:
   level: "INFO"
   # DockerではOMK_LOG_DIR=/logsで上書きする。
   directory: "../logs/broute-meter"
+
+mqtt:
+  enabled: false
+  host: "192.168.50.1"
+  port: 1883
+  device_id: "broute-001"
+  topic_prefix: "omk"
+  client_id: "omk-broute-001"

@@ -12,12 +12,63 @@ from broute_meter.config import (
     BRouteCredentials,
     ConfigError,
     MeasurementConfig,
+    MqttConfig,
     SerialConfig,
     load_config,
     mask_b_route_id,
     safe_config_summary,
     validate_config,
 )
+
+
+def test_mqtt_yaml_and_environment_are_loaded_with_safe_summary(tmp_path: Path) -> None:
+    config = _load(
+        tmp_path,
+        settings="""
+mqtt:
+  enabled: false
+  host: broker.example
+  port: 1884
+  device_id: test-meter
+  topic_prefix: test
+  client_id: test-client
+""",
+        environ={
+            "MQTT_ENABLED": "true",
+            "MQTT_PORT": "1885",
+            "MQTT_USERNAME": "mqtt-user",
+            "MQTT_PASSWORD": "mqtt-secret",
+        },
+    )
+
+    assert config.mqtt == MqttConfig(
+        enabled=True,
+        host="broker.example",
+        port=1885,
+        device_id="test-meter",
+        topic_prefix="test",
+        client_id="test-client",
+        username="mqtt-user",
+        password="mqtt-secret",
+    )
+    summary = safe_config_summary(config)
+    assert summary["mqtt"]["password_configured"] is True
+    assert "mqtt-secret" not in str(summary)
+
+
+@pytest.mark.parametrize(
+    "environ",
+    [
+        {"MQTT_ENABLED": "maybe"},
+        {"MQTT_PORT": "0"},
+        {"MQTT_DEVICE_ID": "has/slash"},
+        {"MQTT_TOPIC_PREFIX": "/omk"},
+        {"MQTT_USERNAME": "only-user"},
+    ],
+)
+def test_invalid_mqtt_environment_is_rejected(tmp_path: Path, environ: dict[str, str]) -> None:
+    with pytest.raises(ConfigError):
+        _load(tmp_path, environ=environ)
 
 
 def _write(path: Path, content: str) -> Path:

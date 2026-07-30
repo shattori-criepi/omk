@@ -103,6 +103,15 @@ storage:
 logging:
   level: "INFO"
   directory: "../logs/broute-meter"
+
+# MQTTは取得済みデータを汎用sensor-collectorへ配送する任意の経路です。
+mqtt:
+  enabled: true
+  host: "192.168.50.1"
+  port: 1883
+  device_id: "broute-001"
+  topic_prefix: "omk"
+  client_id: "omk-broute-001"
 ```
 
 `cumulative_fetch_delay_seconds`は30分境界後の待機秒数です。既存の
@@ -134,6 +143,8 @@ b_route:
 - `B_ROUTE_LOG_LEVEL`
 - `OMK_DATA_DIR`
 - `OMK_LOG_DIR`
+- `MQTT_ENABLED`, `MQTT_HOST`, `MQTT_PORT`, `MQTT_DEVICE_ID`, `MQTT_TOPIC_PREFIX`, `MQTT_CLIENT_ID`
+- `MQTT_USERNAME`, `MQTT_PASSWORD`（認証を使う場合は両方を指定）
 
 `OMK_DATA_DIR`と`OMK_LOG_DIR`は、OMK共通の実行時保存先を指定するための環境変数です。
 両方が指定されている場合は、互換用の`B_ROUTE_DATA_DIR`より`OMK_DATA_DIR`を優先します。
@@ -143,6 +154,12 @@ b_route:
 瞬時電力間隔は10秒以上でなければなりません。空の環境変数は下位設定へフォールバックせず、設定ミスとして扱います。BルートIDまたはパスワードが不足している場合、通信を開始するコマンドは設定エラーで終了します。
 
 認証情報をコマンドライン引数へ直接書くことは避けてください。シェル履歴やプロセス一覧へ残る可能性があります。`check-config`はパスワードを表示せず、BルートIDも一部だけを表示します。
+
+## MQTT配送
+
+Bルート通信はRaspberry Piホスト上のsystemdサービスで直接実行し、コンテナ化しません。取得済みの計測モデルは専用CSVへ保存した後、MQTTへもbest-effortでpublishされます。MQTT経由のデータは汎用`sensor-collector`がJSONLへ一次保存します。CSV保存は現時点では維持し、MQTT経路が安定した後に分析・受け渡し用の後段生成へ移行するかを判断します。
+
+トピックは`{topic_prefix}/{device_id}/power`、`cumulative-energy`、`interval-energy`、`status`です。測定値はQoS 0・retainなし、statusはretainありです。MQTT切断中の測定値はキューやディスクへ蓄積せず再送もしません。MQTTの接続・publish障害はBルート計測、30分値計算、CSV保存を停止させません。
 
 ## シリアルポートの確認
 

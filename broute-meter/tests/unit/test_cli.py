@@ -729,3 +729,103 @@ def test_run_treats_inflight_failure_after_stop_signal_as_graceful(
     assert exit_code == 0
     assert adapter.closed
     assert storage.closed
+
+
+def test_run_continues_when_mqtt_publisher_start_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    settings_path = tmp_path / "settings.yaml"
+    credentials_path = tmp_path / "credentials.yaml"
+    settings_path.write_text(
+        "\n".join(
+            (
+                "serial:",
+                "  port: COM5",
+                "logging:",
+                f'  directory: "{(tmp_path / "logs").as_posix()}"',
+                "storage:",
+                f'  data_directory: "{(tmp_path / "data").as_posix()}"',
+            )
+        ),
+        encoding="utf-8",
+    )
+    credentials_path.write_text(
+        "\n".join(
+            (
+                "b_route:",
+                f'  id: "{"A" * 32}"',
+                f'  password: "{"P" * 12}"',
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    class RecordingAdapter(_FakeSetupAdapter):
+        def __init__(self) -> None:
+            super().__init__(
+                AdapterConfigurationResult(
+                    expected_settings={"uart_mode": "80", "output_mode": "01"},
+                    initial_settings={"uart_mode": "80", "output_mode": "01"},
+                    final_settings={"uart_mode": "80", "output_mode": "01"},
+                    changed_settings=(),
+                    write_changes=True,
+                )
+            )
+            self.open_calls = 0
+
+        def open(self) -> None:
+            self.open_calls += 1
+            super().open()
+
+    class BrokenPublisher:
+        def start(self) -> None:
+            raise RuntimeError("test MQTT startup failure")
+
+    class FakeSession:
+        def __init__(self, _adapter: object, *, scan_max_attempts: int) -> None:
+            assert scan_max_attempts == 3
+
+        def connect(self, _identifier: str, _password: str) -> SimpleNamespace:
+            return SimpleNamespace(smart_meter_ipv6=IPv6Address("fe80::1"))
+
+    class FakeStorage:
+        def close(self) -> None:
+            pass
+
+    scheduler_started = False
+
+    class FakeScheduler:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        def run(self) -> None:
+            nonlocal scheduler_started
+            scheduler_started = True
+
+    adapter = RecordingAdapter()
+    monkeypatch.setattr(cli, "_create_rs_wsuha_p_adapter", lambda _config, _port: adapter)
+    monkeypatch.setattr(cli, "create_measurement_publisher", lambda _config: BrokenPublisher())
+    monkeypatch.setattr(cli, "BRouteSession", FakeSession)
+    monkeypatch.setattr(cli, "SmartMeterClient", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(cli, "CsvMeasurementStorage", lambda _path: FakeStorage())
+    monkeypatch.setattr(cli, "MeasurementScheduler", FakeScheduler)
+    monkeypatch.setattr(cli, "_install_stop_signal_handlers", lambda _event, _logger: {})
+    monkeypatch.setattr(cli, "_configure_command_logging", lambda _config: logging.getLogger())
+
+    with caplog.at_level(logging.WARNING):
+        exit_code = cli.main(
+            [
+                "--settings",
+                str(settings_path),
+                "--credentials",
+                str(credentials_path),
+                "run",
+            ]
+        )
+
+    assert exit_code == 0
+    assert adapter.open_calls == 1
+    assert scheduler_started
+    assert caplog.messages.count("MQTT publisherを開始できませんでした。計測を継続します") == 1
