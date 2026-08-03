@@ -87,7 +87,7 @@ PCBレイアウトのみ未着手である。
 
 今回の候補は AP63203WU-7（LCSC `C780769`）、USBLC6-2SC6（`C7519`）、
 JST SM04B-SRSS-TB(LF)(SN)（`C160404`）、ESP32-C3-MINI-1-H4X（`C41349510`）である。
-U2周辺L1の実品番、USB-C J1、J3は未確定であり、JLC在庫・PCBA可否を断定していない。
+U2周辺L1の電気的MPNは XGL4020-472MECへ選定済みである。JLC在庫・PCBA可否と正式フットプリントは未確定である。
 TPS62162DSGRは1 A級のため、要求した1.5 A以上の電源余裕を満たす採用品にはしない。
 
 | Ref | 接続 | 値・指定 | 注記 |
@@ -138,7 +138,7 @@ J1はSEN66ケーブル直接はんだ用の6個の独立スルーホール表現
 AP63203WU-7（LCSC C780769）は3.3 V固定・2 A・3.8–32 V入力の同期buck候補として回路値をレビューした。
 C2=100 nF入力バイパスとC3=100 nF BST–SWはACCEPT、C1=10 µF入力とC4/C5=22 µF×2出力は
 値を維持できる見込みだが、各MLCCのDCバイアス実効容量確認が必要なVERIFYとした。L1=4.7 µHは
-推奨範囲だが実品番・Isat・Irms・DCR・JLCPCBA可否未確定のためBLOCKERである。詳細は
+XGL4020-472MECを電気的に選定済みであるが、JLC調達と正式フットプリントがBLOCKERである。詳細は
 `hardware/pcb/esp32-c3-main/power-review.md` を正とする。回路図は変更していない。
 
 設計負荷は SEN66 350 mA peak + ESP32-C3 Wi-Fi送信時 350 mA（設計マージン値）+ Qwiic 100 mA + LED/損失 50 mA = **850 mA** とする。よって 3V3 は連続 1 A 級、短時間余裕を含み 1.5 A 級を選定する。
@@ -148,7 +148,9 @@ C2=100 nF入力バイパスとC3=100 nF BST–SWはACCEPT、C1=10 µF入力とC4
 | 1 A以上 LDO | 不採用 | 5 V→3.3 Vで 0.85 A 時に約1.45 Wを熱にする。SEN66温度へ不利。 |
 | 降圧 DC-DC | Rev.A採用予定 | 90%級なら上記設計負荷で損失は約0.3 W。部品点数とEMIを配慮してメイン基板のSEN66接続端と反対側へ置く。 |
 
-現行buckは Diodes `AP63203WU-7`（固定3.3 V / 2 A、LCSC `C780769`）である。入力はC1=10 µFとC2=100 nF、BST–SWはC3=100 nF、L1=4.7 µH、出力はC4/C5=22 µF×2である。C1/C4/C5のDCバイアス実効容量とL1実品番はPhase 3A BLOCKERであり、`power-review.md`を正とする。TPS62162DSGRは1 A級の**旧候補／不採用**である。キャリアはC1=100 nF、C2=10 µFである。
+現行buckは Diodes `AP63203WU-7`（固定3.3 V / 2 A、LCSC `C780769`）である。入力はC1=10 µFとC2=100 nF、BST–SWはC3=100 nF、L1=4.7 µH、出力はC4/C5=22 µF×2である。L1の電気的MPNはXGL4020-472MECへ選定済みで、残るBLOCKERは調達・フットプリントである。C1/C4/C5のDCバイアス実効容量は製造リリースBLOCKERであり、`power-review.md`を正とする。TPS62162DSGRは1 A級の**旧候補／不採用**である。キャリアはC1=100 nF、C2=10 µFである。
+
+Phase 3Aの電気的L1推奨は Coilcraft XGL4020-472MEC（4.7 µH、Isat 3.0 A/20% drop、Irms 5.6 A/40°C rise）である。ただしJLC実装可否と正規footprintは購入・Phase 3B前にVERIFYする。C1/C4/C5のMurata DC-bias実効容量は公式SimSurfing曲線を未取得のため数値確定せず、製造リリースBLOCKERとして維持する。
 
 ## 概略回路
 
@@ -178,7 +180,7 @@ USB-C は sink 専用（CC1/CC2 とも 5.1 kΩ Rd）、VBUS保護、シールド
 | 機能 | 候補 | 代替 | 実装 |
 | --- | --- | --- | --- |
 | MCU | ESP32-C3-MINI-1-H4X / C41349510 | ESP32-C3-MINI-1-N4X（承認・再照合必須） | JLC PCBA候補 |
-| 3V3 buck | AP63203WU-7 / C780769 | — | L1・MLCC実効容量確認待ち |
+| 3V3 buck | AP63203WU-7 / C780769 | — | L1電気選定済み。調達・FPとMLCC実効容量確認待ち |
 | USB-C | 16-pin USB2.0 receptacle | 同フットプリント品 | JLC PCBA候補 |
 | USB ESD | USBLC6-2SC6級 | PESD5V0S2UT級 | JLC PCBA候補 |
 | Qwiic | JST SH 1×4 SM04B-SRSS-TB | 互換SH 1×4 | JLC PCBA候補 |
