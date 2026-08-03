@@ -7,6 +7,10 @@ ESP32 DevKitCとSEN66を接続し、10秒ごとの測定値をUSBシリアルの
 - ボード: ESP32 DevKitC相当（PlatformIO board ID: `esp32dev`）
 - センサ: Sensirion SEN66（SDA GPIO 21、SCL GPIO 22、I2Cアドレス`0x6B`、100 kHz）
 
+専用基板 Rev.A 用には `omk-esp32-c3` 環境を追加しています。ESP32-C3-MINI-1-H4X の
+USB Serial/JTAG をコンソールおよび書き込みに使い、SDA は GPIO6、SCL は GPIO7 です。
+既存の `esp32dev` 環境とその GPIO21/22 配線は維持します。
+
 配線は[docs/wiring.md](docs/wiring.md)を参照してください。SEN66は3.3 Vで給電します。
 
 ## 接続設定
@@ -44,6 +48,7 @@ PubSubClient `2.8`を使用します。Brokerへの接続と測定値の送信�
 ```bash
 cd firmware/esp32/sen66-node
 pio run
+pio run -e omk-esp32-c3
 pio run --target upload
 pio device monitor --baud 115200
 ```

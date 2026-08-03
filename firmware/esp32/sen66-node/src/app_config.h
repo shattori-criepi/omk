@@ -4,13 +4,21 @@
 
 namespace AppConfig {
 
+#ifndef OMK_I2C_SDA_PIN
+#define OMK_I2C_SDA_PIN 21
+#endif
+
+#ifndef OMK_I2C_SCL_PIN
+#define OMK_I2C_SCL_PIN 22
+#endif
+
 constexpr char FIRMWARE_NAME[] = "omk-sen66-node";
 constexpr char FIRMWARE_VERSION[] = "0.1.0";
 
 constexpr uint32_t SERIAL_BAUD_RATE = 115200;
 
-constexpr uint8_t I2C_SDA_PIN = 21;
-constexpr uint8_t I2C_SCL_PIN = 22;
+constexpr uint8_t I2C_SDA_PIN = OMK_I2C_SDA_PIN;
+constexpr uint8_t I2C_SCL_PIN = OMK_I2C_SCL_PIN;
 constexpr uint8_t SEN66_I2C_ADDRESS = 0x6B;
 constexpr uint32_t I2C_FREQUENCY_HZ = 100000;
 
