@@ -31,6 +31,7 @@ C1 10 µF + C2 100 nF are after F1 and are appropriate local buck input decoupli
 ## Status
 
 | Item | Electrical | Procurement | Footprint | PCB layout | Manufacturing release |
+| --- | --- | --- | --- | --- | --- |
 | J1 | ACCEPT | VERIFY | VERIFY | VERIFY | BLOCKED |
 | F1 | ACCEPT | VERIFY | ACCEPT | VERIFY | BLOCKED |
 | D1 | ACCEPT | VERIFY | ACCEPT | VERIFY | BLOCKED |
