@@ -1,3 +1,5 @@
+#include <Arduino.h>
+
 #include "mqtt_publisher.h"
 
 #include <math.h>

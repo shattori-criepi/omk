@@ -1,3 +1,5 @@
+#include <Arduino.h>
+
 #include "sen66_sensor.h"
 
 #include <math.h>
