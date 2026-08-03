@@ -132,7 +132,7 @@ def add_design_notes(s: ksa.Schematic) -> None:
         ("R3: USB shield option, DNP", (260, 30)),
         ("R6/R7: optional I2C pull-ups, DNP", (260, 37)),
         ("D2/R8: status LED, DNP", (260, 44)),
-        ("L1: final MPN and saturation current TBD", (260, 51)),
+        ("L1: XGL4020-472MEC; 3D/orientation VERIFY", (260, 51)),
         ("J1: final MPN TBD; J3: JST PH selected", (260, 58)),
     ):
         s.add_text(text, position=position, size=1.27)
@@ -201,7 +201,10 @@ def add_usb_c_block(s: ksa.Schematic) -> None:
 def add_power_block(s: ksa.Schematic) -> None:
     # AP63203WU-7 is fixed 3.3 V / 2 A; FB senses VOUT directly.
     add(s, "Regulator_Switching:AP63203WU", "U2", "AP63203WU-7", (165, 65), "Package_TO_SOT_SMD:TSOT-23-6", "Diodes Inc. AP63203WU-7", LCSC="C780769")
-    add(s, "Device:L", "L1", "4.7uH", (190, 65), "Inductor_SMD:L_Vishay_IHLP-2020", "TBD", Status="Inductor candidate pending saturation-current verification")
+    add(s, "Device:L", "L1", "4.7uH", (190, 65), "Inductor_SMD:L_Coilcraft_XxL4020", "XGL4020-472MEC",
+        Manufacturer="Coilcraft", LCSC="C6012418", Assembly="SMT / PCBA candidate",
+        Status="Selected; 2D footprint accepted; manufacturing release blocked",
+        Notes="3D/start-lead orientation and procurement verify before release")
     add(s, "Device:C", "C3", "100nF", (178, 82), "Capacitor_SMD:C_0402_1005Metric", "Murata GRM155R71C104KA88D")
     add(s, "Device:C", "C4", "22uF", (208, 58), "Capacitor_SMD:C_0805_2012Metric", "Murata GRM21BR60J226ME39L")
     add(s, "Device:C", "C5", "22uF", (208, 78), "Capacitor_SMD:C_0805_2012Metric", "Murata GRM21BR60J226ME39L")
