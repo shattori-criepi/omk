@@ -18,7 +18,7 @@ AP63203WU-7 is the fixed 3.3 V member of the 2 A synchronous-buck family, with 3
 | C1 | 10 µF, 10 V X5R | VERIFY | Nominal value is suitable as bulk input; verify DC-bias effective capacitance at 5 V and place directly at IN/GND. |
 | C2 | 100 nF, 25 V X7R | ACCEPT | Local high-frequency input bypass; it supplements rather than replaces C1. |
 | C3 | 100 nF X7R | ACCEPT | Matches the BST-to-SW bootstrap capacitor value. Must be directly between BST and SW, not GND. |
-| L1 | 4.7 µH | Electrical: ACCEPT; Procurement: VERIFY; Footprint: CHANGE; Manufacturing release: BLOCKED | Electrical MPN is XGL4020-472MEC; see final status below. |
+| L1 | 4.7 µH | Electrical: ACCEPT; Procurement: VERIFY; target 2D footprint: ACCEPT; formal assignment: CHANGE; Manufacturing release: BLOCKED | Electrical MPN is XGL4020-472MEC; see final status below. |
 | C4/C5 | 22 µF, 6.3 V X5R each | VERIFY | 44 µF nominal ceramic output is not inherently excessive, but the effective value at 3.3 V, tolerance, and startup/load stability must be checked against the latest datasheet/EVM. |
 
 Murata GRM21BR60J226ME39L is 0805, 22 µF ±20%, X5R, 6.3 V. Its reference sheet does not state an application-specific 3.3 V effective capacitance in the static document; obtain SimSurfing curve/approval data before release. Treat C1’s 10 µF X5R effective value likewise as VERIFY. Do not infer an effective value from nominal capacitance.
@@ -48,7 +48,7 @@ Output power = 2.805 W. Assuming 88–93% efficiency: input current = 0.60–0.6
 ## Remaining blockers
 
 1. L1 procurement: JLCPCB SMT eligibility, LCSC/JLC part number, live stock and Basic/Extended class.
-2. L1 footprint: obtain Coilcraft package drawing/land pattern; create `hardware/pcb/esp32-c3-main/footprints/OMK.pretty/Coilcraft_XGL4020.kicad_mod`; verify courtyard, fab, silk, paste/mask, height, pads 1/2, DRC and 3D. Current `Inductor_SMD:L_Vishay_IHLP-2020` is incompatible.
+2. L1 implementation: the XGL4020 land audit accepts `Inductor_SMD:L_Coilcraft_XxL4020`; update the generator/formal schematic and verify ERC/PDF/GUI. Current `Inductor_SMD:L_Vishay_IHLP-2020` is incompatible. See [xgl4020-footprint-audit.md](xgl4020-footprint-audit.md).
 3. C1/C4/C5 effective capacitance from official DC-bias data.
 4. Latest AP63203WU-7 EVM schematic must be checked pin-for-pin during Phase 3B review.
 
@@ -56,13 +56,13 @@ Output power = 2.805 W. Assuming 88–93% efficiency: input current = 0.60–0.6
 
 ### L1
 
-**Recommended electrical part: Coilcraft XGL4020-472MEC.** Coilcraft's official product page specifies 4.7 µH ±20%, DCR 43.0 mΩ typ / 47.3 mΩ max, Isat 3.0 A at 20% inductance drop, and Irms 5.6 A for 40°C rise. It is a shielded composite 4.0×4.0×2.0 mm class part, −40 to +125°C at the 40°C-rise rating. Source and retrieval date: https://www.coilcraft.com/en-us/products/power/high-voltage-inductors/xgl/xgl4020/xgl4020-472/ (2026-08-03 JST).
+**Recommended electrical part: Coilcraft XGL4020-472MEC.** Coilcraft's official product page specifies 4.7 µH ±20%, DCR 43.0 mΩ typ / 47.3 mΩ max, Isat 3.0 A at 20% inductance drop, and Irms 5.6 A for 40°C rise. It is a shielded composite 4.0×4.0 mm part with 2.10 mm maximum height, −40 to +125°C at the 40°C-rise rating. Source and retrieval date: https://www.coilcraft.com/en-us/products/power/high-voltage-inductors/xgl/xgl4020/xgl4020-472/ (2026-08-03 JST).
 
 At 5 V → 3.3 V, 1.1 MHz, L=4.7 µH, the ideal ripple is 0.33 A p-p. Peak current is 1.02 A at 0.85 A load and 2.17 A at 2 A load. With 43 mΩ typ DCR, copper loss is approximately 31 mW at 0.85 A and 174 mW at 2 A; both are below the 5.6 A / 40°C thermal reference rating. Isat margin is 2.9× at 0.85 A peak and 1.38× at 2 A peak. Irms margin is 6.6× and 2.8× respectively. Isat is not interchangeable across makers: Coilcraft defines it by stated inductance drop at 25°C, and Irms by temperature rise.
 
-TAI-TECH UHP252010NF-4R7M / LCSC C357306 remains an **alternative only**: its official data sheet defines Isat as ≤30% inductance change and Irms as 40°C rise, but its exact 4R7 row and live PCBA listing must be checked at order. Murata LQM2MPN4R7MG0L is **rejected** for this design: public manufacturer/distributor data states 1.1 A and 175 mΩ max, below the required continuous-current margin. The original `Inductor_SMD:L_Vishay_IHLP-2020` footprint does not match the recommended Coilcraft 4×4 mm body; use a verified Coilcraft XGL4020 land pattern or create `Inductor_SMD:Coilcraft_XGL4020` from the official drawing in Phase 3B. No schematic change is made here.
+TAI-TECH UHP252010NF-4R7M / LCSC C357306 remains an **alternative only**: its official data sheet defines Isat as ≤30% inductance change and Irms as 40°C rise, but its exact 4R7 row and live PCBA listing must be checked at order. Murata LQM2MPN4R7MG0L is **rejected** for this design: public manufacturer/distributor data states 1.1 A and 175 mΩ max, below the required continuous-current margin. The original `Inductor_SMD:L_Vishay_IHLP-2020` footprint does not match the recommended Coilcraft 4×4 mm body. The completed audit accepts the standard `Inductor_SMD:L_Coilcraft_XxL4020` 2D footprint; only a generator/formal-schematic update remains. No schematic change is made by this review.
 
-JLC/LCSC did not provide a verifiable official page for XGL4020-472MEC during this review; its JLC SMT eligibility and Basic/Extended class remain **VERIFY at purchase**. This is a procurement blocker, not an electrical-selection blocker.
+The official LCSC/JLC pages identify XGL4020-472MEC as `C6012418`, SMD 4×4 mm and Extended; live stock, price, PCBA eligibility and order-time availability remain **VERIFY at purchase**. This is a procurement blocker, not an electrical-selection blocker. The 3D model/start-lead orientation remains a Phase 3B mechanical VERIFY.
 
 ### MLCC DC bias
 

@@ -5,7 +5,7 @@
 | フェーズ | 状態 |
 | --- | --- |
 | Phase 1 基本設計 | 完了 |
-| Phase 2 メイン回路図 | 完了（ERC 0 errors / 既知warning 1件） |
+| Phase 2 メイン回路図 | 完了（ERC 0 errors / 既知warning 2件） |
 | Phase 2 キャリア回路図 | 完了（ERC 0 errors / 0 warnings、PDF/SVG出力済み） |
 | Phase 3A 部品レビュー | 完了 |
 | Phase 3B PCBレイアウト | 未着手 |
@@ -78,16 +78,16 @@ GPIO21=TX、BOOTはGPIO9、status LED候補はGPIO3である。GPIO2、GPIO8、�
 公式指定NC端子はNo Connectとして明示した。USB shieldはR3（0 Ω DNP）でGNDへ接続可能な
 選択肢を残した。
 
-`kicad-cli sch erc` は正式回路図に対して **0 errors / 1 warning**、PDF出力は成功した。
-残る警告は、`kicad-sch-api 0.5.6` と現行公式KiCad 9/10シンボル形式の互換性を回避するため、
-公式Espressif KiCad 7互換ライブラリを使用した際の `lib_symbol_mismatch` のみである。
+`kicad-cli sch erc` は正式回路図に対して **0 errors / 2 known warnings**、PDF/SVG出力は成功した。
+2件はいずれも、`kicad-sch-api 0.5.6` と現行公式KiCad 9/10シンボル形式の互換性を回避するために
+公式Espressif KiCad 7互換ライブラリを使用しているU1のsymbol/footprint library設定に関するもの（`lib_symbol_issues`および`footprint_link_issues`）である。J3統合やL1監査由来ではない。
 U1のピン集合は生成前に検証済みであり、Phase 3前のGUI目視レビューで再確認する。
 ERC reportとPDFは `hardware/pcb/esp32-c3-main/` に置く。SEN66キャリア回路図も完成済みで、
 PCBレイアウトのみ未着手である。
 
 今回の候補は AP63203WU-7（LCSC `C780769`）、USBLC6-2SC6（`C7519`）、
 JST SM04B-SRSS-TB(LF)(SN)（`C160404`）、ESP32-C3-MINI-1-H4X（`C41349510`）である。
-U2周辺L1の電気的MPNは XGL4020-472MECへ選定済みである。JLC在庫・PCBA可否と正式フットプリントは未確定である。
+U2周辺L1の電気的MPNは XGL4020-472MECへ選定済みである。2D footprintは `Inductor_SMD:L_Coilcraft_XxL4020` を監査済みだが、回路図反映、3D/物理向き、JLC在庫・PCBA可否は未完了である。
 TPS62162DSGRは1 A級のため、要求した1.5 A以上の電源余裕を満たす採用品にはしない。
 
 | Ref | 接続 | 値・指定 | 注記 |
@@ -100,7 +100,7 @@ TPS62162DSGRは1 A級のため、要求した1.5 A以上の電源余裕を満た
 | R4/SW2 | GPIO9→R4→`+3V3`; SW2: GPIO9→GND | R4 10 kΩ | BOOT。GPIO9に大容量コンデンサを置かない。 |
 | R6/R7 | GPIO6/7→`+3V3` | 4.7 kΩ DNP | メイン・キャリア双方にDNP選択肢があり、必要箇所だけ実装。 |
 | J2 | GND, `+3V3`, SDA, SCL | JST SH 1×4 Qwiic | Qwiic公式ピン順をfootprintと実コネクタで最終照合。 |
-| J3 | `+3V3`, GND, SDA, SCL | 選定: JST `S4B-PH-K-S(LF)(SN)` / C157926 | キャリアJ2と同時にside-entry THへ変更。現行2.54 mmは旧案。Pin 1=`+3V3`。 |
+| J3 | `+3V3`, GND, SDA, SCL | JST `S4B-PH-K-S(LF)(SN)` / C157926、side-entry TH | キャリアJ2と同時に統合済み。Pin 1=`+3V3`、標準KiCad footprint監査済み。 |
 | TP1/TP2 | UART RX / UART TX（GPIO20 / GPIO21） | test point | 3.3 V TTL専用。USB CDCとは別。 |
 | TP3/TP4 | GND / `+3V3` | test point | UART近傍の補助TP。 |
 | TP5/TP6/TP7 | `+5V` / `+3V3` / GND | test point | 電源TP。 |
@@ -121,11 +121,11 @@ J1はSEN66ケーブル直接はんだ用の6個の独立スルーホール表現
 一致する1=`+3V3`、2=`GND`、3=`I2C_SDA`、4=`I2C_SCL`である。100 nFと10 µFのデカップリング、
 4.7 kΩ DNP I²C pull-up、4個の評価TPを配置した。ERCは0 errors、PDF/SVG出力は成功した。
 裸2.54 mm 1×4案は非ロックであるためPhase 3Aで不採用とした。Rev.Aではメイン基板J3と
-キャリアJ2を同時にJST `S4B-PH-K-S(LF)(SN)` / C157926へ変更する予定である。
+キャリアJ2へJST `S4B-PH-K-S(LF)(SN)` / C157926を同時に統合済みである。
 
 | Ref | 接続 | 値・指定 | 注記 |
 | --- | --- | --- | --- |
-| J2 | `+3V3`, GND, SDA, SCL | JST `S4B-PH-K-S(LF)(SN)` / C157926へ変更予定（**旧案**: 2.54 mm 1×4 RA） | メインJ3と同時にside-entry THへ変更。Pin 1=`+3V3`を維持。 |
+| J2 | `+3V3`, GND, SDA, SCL | JST `S4B-PH-K-S(LF)(SN)` / C157926、side-entry TH | メインJ3と同時に統合済み。Pin 1=`+3V3`を維持。 |
 | J1 | Pin 1/6→`+3V3`; 2/5→GND; 3→SDA; 4→SCL | 6個独立TH pad、直接はんだ | 1線1穴、手はんだ・PCBA DNP。 |
 | C1/C2 | `+3V3`→GND | 100 nF / 10 µF | ケーブル入口・SEN66電源近傍。R1/R2は4.7 kΩ DNP。 |
 | TP1..TP4 | `+3V3`, GND, SDA, SCL | test point（任意） | 手実装/評価用。 |
@@ -139,7 +139,7 @@ J1はSEN66ケーブル直接はんだ用の6個の独立スルーホール表現
 AP63203WU-7（LCSC C780769）は3.3 V固定・2 A・3.8–32 V入力の同期buck候補として回路値をレビューした。
 C2=100 nF入力バイパスとC3=100 nF BST–SWはACCEPT、C1=10 µF入力とC4/C5=22 µF×2出力は
 値を維持できる見込みだが、各MLCCのDCバイアス実効容量確認が必要なVERIFYとした。L1=4.7 µHは
-XGL4020-472MECを電気的に選定済みであるが、JLC調達と正式フットプリントがBLOCKERである。詳細は
+XGL4020-472MECを電気的に選定済みであり、2D footprintは監査済みだが、JLC調達、formal assignmentと3D/物理向きがBLOCKERである。詳細は
 `hardware/pcb/esp32-c3-main/power-review.md` を正とする。回路図は変更していない。
 
 ### Phase 3A USB-C入力・保護レビュー（2026-08-03 JST）
@@ -153,16 +153,16 @@ J1はJAE DX07S016JA1R1500（LCSC C3197885）、F1はBourns MF-MSMF110-2、D1はS
 | 1 A以上 LDO | 不採用 | 5 V→3.3 Vで 0.85 A 時に約1.45 Wを熱にする。SEN66温度へ不利。 |
 | 降圧 DC-DC | Rev.A採用予定 | 90%級なら上記設計負荷で損失は約0.3 W。部品点数とEMIを配慮してメイン基板のSEN66接続端と反対側へ置く。 |
 
-現行buckは Diodes `AP63203WU-7`（固定3.3 V / 2 A、LCSC `C780769`）である。入力はC1=10 µFとC2=100 nF、BST–SWはC3=100 nF、L1=4.7 µH、出力はC4/C5=22 µF×2である。L1の電気的MPNはXGL4020-472MECへ選定済みで、残るBLOCKERは調達・フットプリントである。C1/C4/C5のDCバイアス実効容量は製造リリースBLOCKERであり、`power-review.md`を正とする。TPS62162DSGRは1 A級の**旧候補／不採用**である。キャリアはC1=100 nF、C2=10 µFである。
+現行buckは Diodes `AP63203WU-7`（固定3.3 V / 2 A、LCSC `C780769`）である。入力はC1=10 µFとC2=100 nF、BST–SWはC3=100 nF、L1=4.7 µH、出力はC4/C5=22 µF×2である。L1の電気的MPNはXGL4020-472MEC、監査済み2D footprintは`Inductor_SMD:L_Coilcraft_XxL4020`であり、残るBLOCKERはformal assignment、3D/物理向きと調達である。C1/C4/C5のDCバイアス実効容量は製造リリースBLOCKERであり、`power-review.md`を正とする。TPS62162DSGRは1 A級の**旧候補／不採用**である。キャリアはC1=100 nF、C2=10 µFである。
 
-Phase 3Aの電気的L1推奨は Coilcraft XGL4020-472MEC（4.7 µH、Isat 3.0 A/20% drop、Irms 5.6 A/40°C rise）である。ただしJLC実装可否と正規footprintは購入・Phase 3B前にVERIFYする。C1/C4/C5のMurata DC-bias実効容量は公式SimSurfing曲線を未取得のため数値確定せず、製造リリースBLOCKERとして維持する。
+Phase 3Aの電気的L1推奨は Coilcraft XGL4020-472MEC（4.7 µH、Isat 3.0 A/20% drop、Irms 5.6 A/40°C rise）である。Coilcraft公式landとの数値監査で`Inductor_SMD:L_Coilcraft_XxL4020`を2D footprintとしてACCEPTした。正式回路図反映、3D/start-lead向き、JLC実装可否は購入・Phase 3B前にVERIFYする。C1/C4/C5のMurata DC-bias実効容量は公式SimSurfing曲線を未取得のため数値確定せず、製造リリースBLOCKERとして維持する。
 
 ### Phase 3A release-review結果
 
 Phase 3Aで確定した電気的部品・pin mappingと、回路図へ反映する変更セットを
 `hardware/pcb/phase-3a-release-review.md` に固定した。main J3とcarrier J2のJST PH同時変更は完了し、
 両方にS4B-PH-K-S(LF)(SN) / C157926 / `Connector_JST:JST_PH_S4B-PH-K_1x04_P2.00mm_Horizontal`を反映した。
-残る主な変更対象はL1のXGL4020-472MECプロパティと正式footprint、J1のLCSCプロパティである。
+残る主な変更対象はL1のXGL4020-472MEC / C6012418プロパティと監査済み標準footprintの正式反映、J1のLCSCプロパティである。
 接続変更はJ3/J2のpin mapping再照合だけであり、AP63203のEN/FB/BST接続、USB、SEN66直結J1、
 キャリアのC1/C2/R1/R2/TP1–TP4は変更予定がない。実装方向、footprint監査、DC-bias一次資料、
 JLC調達証跡はPhase 3Bまたは発注前ゲートで解消する。J3/J2は同時更新・再生成・ERC/PDF確認まで完了し、
@@ -206,7 +206,7 @@ headerの型式とside-entry TH方針は確定し、J3/J2の回路図統合も�
 | USB shield | R3 0 Ω DNP option | — | ESD/EMI実測までDNP OPTION |
 | Qwiic | JST SH 1×4 SM04B-SRSS-TB | 互換SH 1×4 | JLC PCBA候補 |
 | I2C pull-up | 4.7 kΩ DNP（両基板） | — | 必要箇所だけ実装 |
-| board link | JST `S4B-PH-K-S(LF)(SN)` / C157926、PHR-4、SPH-002T-P0.5S | JST GH 4ピン | Electrical ACCEPT、Mechanical CHANGE、Procurement/Footprint VERIFY、Release BLOCKED。J3/J2を同時変更し、PHR-4×2・contacts×8の両端雌ハーネスを使用。 |
+| board link | JST `S4B-PH-K-S(LF)(SN)` / C157926、PHR-4、SPH-002T-P0.5S | JST GH 4ピン | J3/J2へside-entry THを統合済み。Electrical/2D Footprint ACCEPT、3D/PCB rotation・coordinates/cable path/wave fixture/procurement VERIFY、Release BLOCKED。PHR-4×2・contacts×8の両端雌ハーネスを使用。 |
 
 ## リスク、未確定、次フェーズのゲート
 
