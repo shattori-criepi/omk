@@ -66,4 +66,5 @@ R3、R6/R7、R8/D2はDNP選択肢である。USB shieldのR3実装、I2C pull-up
 - J1、D1、J2、U1の現時点のJLC在庫・PCBA可否・CPL回転を確認する。
 - U1のアンテナkeepout、露出GND pad/thermal via、USB差動対、buck SWノードをPCBレビューする。
 - USB shieldの筐体/FG方針、J3の逆挿し対策、DNP部品の実装方針を承認する。
+- J3/J2は裸2.54 mm案を量産へ持ち込まず、JST PH 4ピンへ双方同時変更する（詳細は `../interconnect-review.md`）。
 - 実機でUSB CDC、書込み、BOOT、SEN66、Wi-Fi/MQTT、電源リップルを評価する。

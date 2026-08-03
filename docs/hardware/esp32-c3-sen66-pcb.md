@@ -100,7 +100,7 @@ TPS62162DSGRは1 A級のため、要求した1.5 A以上の電源余裕を満た
 | R4/SW2 | GPIO9→R4→`+3V3`; SW2: GPIO9→GND | R4 10 kΩ | BOOT。GPIO9に大容量コンデンサを置かない。 |
 | R6/R7 | GPIO6/7→`+3V3` | 4.7 kΩ DNP | メイン・キャリア双方にDNP選択肢があり、必要箇所だけ実装。 |
 | J2 | GND, `+3V3`, SDA, SCL | JST SH 1×4 Qwiic | Qwiic公式ピン順をfootprintと実コネクタで最終照合。 |
-| J3 | `+3V3`, GND, SDA, SCL | 2.54 mm 1×4 RA socket | キャリアへ。Pin 1を`+3V3`とする。 |
+| J3 | `+3V3`, GND, SDA, SCL | **旧案**: 2.54 mm 1×4 RA socket | Phase 3Aで裸2.54 mm案は不採用。キャリアJ2と同時にJST PH 4ピンへ変更予定。Pin 1=`+3V3`。 |
 | TP1/TP2 | UART RX / UART TX（GPIO20 / GPIO21） | test point | 3.3 V TTL専用。USB CDCとは別。 |
 | TP3/TP4 | GND / `+3V3` | test point | UART近傍の補助TP。 |
 | TP5/TP6/TP7 | `+5V` / `+3V3` / GND | test point | 電源TP。 |
@@ -120,11 +120,12 @@ J1はSEN66ケーブル直接はんだ用の6個の独立スルーホール表現
 1/6=`+3V3`、2/5=`GND`、3=`I2C_SDA`、4=`I2C_SCL`を固定検証する。J2は現行メイン基板J3と
 一致する1=`+3V3`、2=`GND`、3=`I2C_SDA`、4=`I2C_SCL`である。100 nFと10 µFのデカップリング、
 4.7 kΩ DNP I²C pull-up、4個の評価TPを配置した。ERCは0 errors、PDF/SVG出力は成功した。
-現行2.54 mm 1×4案は非ロックであるため、JST-PH/GHへ変更する場合はメイン基板側も同時変更する。
+裸2.54 mm 1×4案は非ロックであるためPhase 3Aで不採用とした。Rev.Aではメイン基板J3と
+キャリアJ2を同時にJST PH 4ピンへ変更する予定である。
 
 | Ref | 接続 | 値・指定 | 注記 |
 | --- | --- | --- | --- |
-| J2 | `+3V3`, GND, SDA, SCL | 2.54 mm 1×4 RA候補 | メインJ3とPin 1=`+3V3`を一致。ロックなしはBLOCKER。 |
+| J2 | `+3V3`, GND, SDA, SCL | JST PH 4ピンへ変更予定（**旧案**: 2.54 mm 1×4 RA） | メインJ3と同時変更。Pin 1=`+3V3`を維持。 |
 | J1 | Pin 1/6→`+3V3`; 2/5→GND; 3→SDA; 4→SCL | 6個独立TH pad、直接はんだ | 1線1穴、手はんだ・PCBA DNP。 |
 | C1/C2 | `+3V3`→GND | 100 nF / 10 µF | ケーブル入口・SEN66電源近傍。R1/R2は4.7 kΩ DNP。 |
 | TP1..TP4 | `+3V3`, GND, SDA, SCL | test point（任意） | 手実装/評価用。 |
@@ -177,7 +178,9 @@ USB-C は sink 専用（CC1/CC2 とも 5.1 kΩ Rd）、VBUS保護、シールド
 - 二枚は横並び・同一平面、各々をM3スペーサでベースへ固定する。熱源側をSEN66より上に置かず、キャリア接続端を電源回路と反対側にする。
 - SEN66ケーブル完成長は **40 mm（30–50 mm許容）**。公式の短い接続推奨に従い、Pin 1から導通確認してからはんだ付ける。色だけで配線しない。
 
-基板間コネクタは、要求どおり 2.54 mm 1×4ライトアングル（キャリア: pin header、メイン: socket）を基本案として**承認待ち**とする。安価、入手性、手直し性が利点だが、逆挿し防止がない。端部、Pin 1三角、表裏ネット名、非対称外形で誤接続リスクを下げる。極性付きJST案は確実だが、手直し性・面積・コストで不利なため、ユーザー承認なく変更しない。
+Phase 3Aレビューでは、裸2.54 mm 1×4案は逆挿し防止がないため**不採用**とした。Rev.AはJST PH 4ピンを推奨し、メイン基板J3とキャリア基板J2を同時に変更する。基板側候補はB4B-PH-K-S（top-entry TH）または正式に選定するside-entry品、ハウジングはPHR-4、コンタクトはSPH-002T-P0.5Sである。ハーネスは両端を雌ハウジングとし、PHR-4×2、コンタクト×8、AWG26–28より線×4、完成長40 mmを標準とする。電気的にはSEN66 350 mA peakに対してPHの2 A定格で余裕がある。
+
+実装方向は未確定であり、Phase 3B PCB layoutでtop-entry TH、side-entry TH、side-entry SMTを、ケーブル曲げ半径、SEN66 airflow、基板間距離、手はんだ性、JLCPCBA対応で比較して確定する。製造リリースは、回路図のJ3/J2同時変更、公式footprint照合、調達・ライブ在庫確認までBLOCKEDである。詳細は `hardware/pcb/interconnect-review.md`。
 
 ## 採用予定部品
 
@@ -192,7 +195,7 @@ USB-C は sink 専用（CC1/CC2 とも 5.1 kΩ Rd）、VBUS保護、シールド
 | USB shield | R3 0 Ω DNP option | — | ESD/EMI実測までDNP OPTION |
 | Qwiic | JST SH 1×4 SM04B-SRSS-TB | 互換SH 1×4 | JLC PCBA候補 |
 | I2C pull-up | 4.7 kΩ DNP（両基板） | — | 必要箇所だけ実装 |
-| board link | 2.54 mm 1×4 RA header/socket | 極性付きJST | 手はんだ |
+| board link | JST PH 4ピン: B4B-PH-K-Sまたは正式選定side-entry品、PHR-4、SPH-002T-P0.5S | JST GH 4ピン | Electrical ACCEPT、Mechanical CHANGE、Procurement/Footprint VERIFY、Release BLOCKED。J3/J2を同時変更し、PHR-4×2・contacts×8の両端雌ハーネスを使用。 |
 
 ## リスク、未確定、次フェーズのゲート
 

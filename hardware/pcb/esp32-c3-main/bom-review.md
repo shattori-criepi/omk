@@ -13,3 +13,7 @@ See [power-review.md](power-review.md) for sources, calculations and layout requ
 ## USB input/protection scope
 
 See [usb-power-review.md](usb-power-review.md). J1 DX07S016JA1R1500/C3197885, F1 MF-MSMF110-2, D1 USBLC6-2SC6/C7519 and R1/R2 5.1 kΩ are electrical ACCEPT; JLC live assembly status and footprint/placement audits remain manufacturing-release checks. R3 is 0 Ω DNP tuning option.
+
+## Interconnect scope
+
+See [../interconnect-review.md](../interconnect-review.md). The bare 2.54 mm concept is rejected for Rev.A. Change **main J3 and carrier J2 together** to a JST PH four-position system before manufacturing release. The planned 40 mm nominal harness has PHR-4 housings ×2, SPH-002T-P0.5S contacts ×8, and four AWG26–28 stranded wires, with female housings at both ends. Electrical: ACCEPT; Mechanical: CHANGE; Procurement/Footprint: VERIFY; Manufacturing release: BLOCKED. Phase 3B selects top-entry TH, side-entry TH, or side-entry SMT after the mechanical and PCBA review.
