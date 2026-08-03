@@ -101,6 +101,15 @@ U1のGPIO2は10 kΩ pull-up、GPIO8はNCとする。NC端子はKiCadで `No conn
 
 ### SEN66キャリア基板ネット表
 
+#### Phase 2 実装結果（SEN66キャリア）
+
+`hardware/pcb/sen66-carrier/sen66-carrier.kicad_sch` をKiCad 9.0.8空テンプレートからAPI生成した。
+J1はSEN66ケーブル直接はんだ用の6個の独立スルーホール表現で、公式pin順の
+1/6=`+3V3`、2/5=`GND`、3=`I2C_SDA`、4=`I2C_SCL`を固定検証する。J2は現行メイン基板J3と
+一致する1=`+3V3`、2=`GND`、3=`I2C_SDA`、4=`I2C_SCL`である。100 nFと10 µFのデカップリング、
+4.7 kΩ DNP I²C pull-up、4個の評価TPを配置した。ERCは0 errors、PDF/SVG出力は成功した。
+現行2.54 mm 1×4案は非ロックであるため、JST-PH/GHへ変更する場合はメイン基板側も同時変更する。
+
 | Ref | 接続 | 値・指定 | 注記 |
 | --- | --- | --- | --- |
 | J1 | `+3V3`, GND, SDA, SCL | 2.54 mm 1×4 RA header | メインJ3とPin 1=`+3V3`を一致。 |

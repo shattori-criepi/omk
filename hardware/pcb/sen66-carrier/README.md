@@ -1,12 +1,36 @@
-# OMK SEN66 CARRIER Rev.A — Phase 2 schematic input
+# OMK SEN66 CARRIER Rev.A
 
-このディレクトリはSEN66キャリア基板のKiCadプロジェクト配置である。KiCad環境が利用可能になり次第、ここへ `.kicad_pro`、`.kicad_sch`、機構用footprint、ERCレポートを追加する。
+SEN66の6線ケーブルを、ESP32-C3メイン基板の4線J3へ変換するキャリア基板のKiCad 9.0.8回路図である。PCBレイアウトは未着手である。
 
-現時点の回路図転記元は [Phase 2ネット表](../../../docs/hardware/esp32-c3-sen66-pcb.md#phase-2-回路図設計kicad転記仕様) である。
+## 正式な接続
 
-設計上の不変条件:
+| SEN66 cable pad J1 | 信号 | Main-side J2 | 信号 |
+| --- | --- | --- | --- |
+| 1 | +3V3 (VDD) | 1 | +3V3 |
+| 2 | GND | 2 | GND |
+| 3 | I2C_SDA | 3 | I2C_SDA |
+| 4 | I2C_SCL | 4 | I2C_SCL |
+| 5 | GND | — | J2 pin 2へ集約 |
+| 6 | +3V3 (VDD) | — | J2 pin 1へ集約 |
 
-- SEN66 6線は全て接続し、Pin 1/6=VDD、2/5=GND、3=SDA、4=SCL。
-- I2C pull-upはメイン基板のみ。
-- ケーブル穴にはpin番号・信号・Pin 1・引出方向をシルク表示する。
-- SEN66の吸気/排気を妨げず、交換可能なretainerおよびストレインリリーフを機構設計へ反映する。
+J1は切断したSEN66 JST-GHケーブルを直接はんだ付けする6個のスルーホール表現である。ケーブル色は規定しない。被覆を剥いた各線は**必ず1線ずつ別のスルーホール**へ入れ、組立前にPin 1から導通確認する。PCB Phaseでストレインリリーフ穴、結束バンド用スロット、線材径、引出方向、SEN66本体との干渉を決める。
+
+## 部品と選定
+
+- C1: 100 nF / Murata GRM155R71E104KE14D / LCSC C1525、PCBA basic候補
+- C2: 10 uF / Murata GRM21BR61A106KE19L / LCSC C15850、PCBA区分・在庫は発注時確認
+- R1/R2: 4.7 kΩ DNP I²C pull-up / LCSC C25900。通常はメイン基板側のpull-upを使用する。
+- J2: メイン基板J3と同一の2.54 mm 1×4、pin order 1=3V3, 2=GND, 3=SDA, 4=SCL。現行案はRA socketで手はんだ。
+
+2.54 mm案にはロックがない。次版の推奨候補はJST-PH 4ピン（B4B-PH-K-S + PHR-4）またはJST-GH 4ピンであり、採用にはメイン基板J3も同時に変更する承認が必要である。
+
+## 再生成・検証
+
+```bash
+KICAD_SYMBOL_DIR=/usr/share/kicad/symbols .venv/bin/python scripts/generate_schematic.py
+kicad-cli sch erc sen66-carrier.kicad_sch --output erc-report.txt
+kicad-cli sch export pdf sen66-carrier.kicad_sch --output sen66-carrier-schematic.pdf
+kicad-cli sch export svg sen66-carrier.kicad_sch --output rendered/
+```
+
+`kicad-sch-api==0.5.6`で空テンプレートを読込み、生成中間物のERCが0 errorsの場合だけ正式回路図へ反映する。表示はReferenceと短いValueのみで、型番・LCSC・Footprint・Statusはシンボルプロパティとして保持し非表示にする。
