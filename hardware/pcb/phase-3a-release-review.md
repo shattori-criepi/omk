@@ -10,9 +10,9 @@ Scope: final inventory before Phase 3B PCB layout. This is a review and change p
 | Buck | U2 AP63203WU-7, fixed 5 V to 3.3 V / 2 A. C2/C3=100 nF ACCEPT; C1=10 uF and C4/C5=22 uF×2 nominally ACCEPT, DC-bias VERIFY. |
 | L1 | Coilcraft XGL4020-472MEC, 4.7 uH, is Electrical ACCEPT. Procurement and footprint remain unresolved. |
 | USB | J1 JAE DX07S016JA1R1500; D1 ST USBLC6-2SC6; F1 Bourns MF-MSMF110-2; independent 5.1 kOhm Rd; R3 0 Ohm DNP. USB 2.0 Full Speed sink only; no PD. |
-| Interconnect | Bare 2.54 mm 1×4 rejected. Change main J3 and carrier J2 together to JST PH four positions, retaining 1=3V3, 2=GND, 3=SDA, 4=SCL. Harness: PHR-4×2, SPH-002T-P0.5S×8, AWG26–28 stranded wire×4, 40 mm nominal, female housings at both ends. |
+| Interconnect | Bare 2.54 mm 1×4 rejected. Selected header: JST S4B-PH-K-S(LF)(SN) / C157926, side-entry TH, for both main J3 and carrier J2. Retain 1=3V3, 2=GND, 3=SDA, 4=SCL. Harness: PHR-4×2, SPH-002T-P0.5S×8, AWG26–28 stranded wire×4, 40 mm nominal, female housings at both ends. |
 
-Header orientation is intentionally not fixed. Phase 3B must compare top-entry TH, side-entry TH and side-entry SMT by cable bend radius, SEN66 airflow, board spacing, hand-soldering and JLCPCBA compatibility.
+The MPN/form factor and electrical mapping are fixed. PCB coordinates and rotations are Phase 3B responsibilities; rotating a footprint does not change pad numbering or the schematic net mapping. See `jst-ph-header-selection.md`.
 
 ## Formal-schematic delta audit
 
@@ -20,7 +20,7 @@ Header orientation is intentionally not fixed. Phase 3B must compare top-entry T
 
 | Item | Formal schematic / generator now | Required schematic-change set | Classification |
 | --- | --- | --- | --- |
-| J3 | Generic `Conn_01x04`; 2.54 mm horizontal header footprint; MPN `TBD`; mapping 1=3V3, 2=GND, 3=SDA, 4=SCL. | Replace symbol properties, MPN and footprint with selected JST PH header; retain mapping and recheck labels after orientation. | Required connection + property + footprint |
+| J3 | Generic `Conn_01x04`; 2.54 mm horizontal header footprint; MPN `TBD`; mapping 1=3V3, 2=GND, 3=SDA, 4=SCL. | Replace with JST S4B-PH-K-S(LF)(SN) / C157926 and its audited KiCad footprint; retain mapping. | Required connection + property + footprint |
 | L1 | 4.7 uH; MPN `TBD`; `Inductor_SMD:L_Vishay_IHLP-2020`; note says TBD. | Set MPN XGL4020-472MEC; replace incompatible footprint with verified XGL4020 footprint. | Required property + footprint |
 | J1 | JAE DX07S016JA1R1500 and matching named KiCad footprint; LCSC property `TBD`. | Set LCSC C3197885 after official drawing/footprint audit. | Required property; footprint-audit gate |
 | F1 | MPN Bourns MF-MSMF110-2; 1812 footprint. | Retain electrical part; normalize manufacturer, procurement and release-status properties. | Property only |
@@ -34,7 +34,7 @@ Header orientation is intentionally not fixed. Phase 3B must compare top-entry T
 
 | Item | Formal schematic / generator now | Required schematic-change set | Classification |
 | --- | --- | --- | --- |
-| J2 | Generic `Conn_01x04`; 2.54 mm horizontal socket footprint; mapping 1=3V3, 2=GND, 3=SDA, 4=SCL. | Change together with main J3 to selected JST PH header; retain mapping and audit pin 1 after orientation selection. | Required connection + property + footprint |
+| J2 | Generic `Conn_01x04`; 2.54 mm horizontal socket footprint; mapping 1=3V3, 2=GND, 3=SDA, 4=SCL. | Change together with main J3 to S4B-PH-K-S(LF)(SN) / C157926; retain mapping and audit pin 1 in Task A. | Required connection + property + footprint |
 | J1 | Six independent TH pads: 1/6=3V3, 2/5=GND, 3=SDA, 4=SCL. | No change; this is the direct-solder SEN66 cable input, not board link. | No change |
 | C1/C2 | 100 nF GRM155R71E104KE14D / 10 uF GRM21BR61A106KE19L. | No circuit change. | No change |
 | R1/R2 | 4.7 kOhm DNP, LCSC C25900. | No circuit change. | No change |
@@ -42,15 +42,15 @@ Header orientation is intentionally not fixed. Phase 3B must compare top-entry T
 
 ## Approved schematic-change set and order
 
-1. Resolve exact PH header MPN and orientation jointly for J3/J2; retain official drawing, JLC eligibility and matching footprint evidence.
-2. Create/audit connector footprint(s), then update both generators and formal schematics together. Preserve the pin mapping; regenerate and rerun ERC.
+1. Complete the JST drawing-to-KiCad footprint audit for S4B-PH-K-S(LF)(SN) / C157926: pads 1–4, pitch, drill, pad/body outline, Pin 1, fab/courtyard/silkscreen, 3D and board-edge condition.
+2. After that audit passes, update both generators and formal schematics together. Preserve the pin mapping; regenerate and rerun ERC. PCB coordinates/rotations are not a prerequisite.
 3. Obtain Coilcraft XGL4020 drawing/land pattern; create/audit local footprint, then update L1 MPN, note and footprint. The present IHLP-2020 footprint must not be reused.
 4. Complete J1 drawing-to-footprint audit, then set its LCSC property to C3197885 if it passes.
 5. Normalize manufacturer, MPN, LCSC, DNP, assembly, status and release-note properties for F1, D1, R1/R2, R3 and C1/C4/C5 without changing nets.
 6. Archive AP63203 EVM pin-for-pin evidence and Murata DC-bias data. Change values only if that evidence disproves the present circuit.
 7. Regenerate, compare generated/formal results, run ERC, export PDF and perform GUI review before PCB placement.
 
-This plan does not implicitly approve B4B-PH-K-S on both boards or prescribe a top-entry arrangement before its mechanical review.
+This plan selects side-entry TH S4B-PH-K-S(LF)(SN). Its schematic update is independent of later PCB rotation; Phase 3B determines the rotations and mechanical arrangement.
 
 ## Remaining release blockers
 
@@ -65,15 +65,16 @@ This plan does not implicitly approve B4B-PH-K-S on both boards or prescribe a t
 | F1 | MF-MSMF110-2 electrical ACCEPT | High-temp derating, voltage drop/heat, inrush/simultaneous-start test; JLC listing. | Prototype/purchase | Yes | Lab/procurement. |
 | D1 | USBLC6-2SC6 electrical ACCEPT | JLC class/live listing, placement/return audit. | Purchase/Phase 3B | Yes | Procurement/layout. |
 | ESP32-C3 | H4X selected | H4X stock/PCBA condition, 53-pin/footprint audit, exposed-pad vias and antenna keepout. | Phase 3B/purchase | Yes | Hardware/layout. |
-| J3/J2 | JST PH concept approved | Exact header, orientation, TH/SMT, JLC eligibility, footprint, CPL rotation, cable exit/strain relief. | Before schematic/PCB | Yes | Mechanical/hardware. |
+| J3/J2 | S4B-PH-K-S(LF)(SN) selected, side-entry TH | Drawing-to-footprint audit before schematic update; JLC order-time evidence, CPL rotation, cable exit/strain relief in later gates. | Task A / Phase 3B / purchase | Yes | Hardware/mechanical. |
 | Mechanics | Coplanar boards, 40 mm harness | Board outlines, M3, SEN66 retainer/airflow, thermal separation and STEP interference. | Phase 3B | Yes | Mechanical/layout. |
 
 ## Phase gates
 
 | Gate | Must be complete |
 | --- | --- |
-| Phase 3A complete | Exact electrical MPN decisions, stable pin mappings, footprint strategy, this change plan, and every manufacturing blocker explicit. Pending PH MPN/orientation is a controlled decision point, never permission to modify only one board. |
-| Phase 3B layout | Exact placement, selected connector orientation, outlines, USB impedance/trace geometry, antenna keepout, thermal vias, CPL rotation and 3D interference. |
+| Phase 3A complete | **Complete:** component selection and change plan are complete; manufacturing blockers are explicit. |
+| Schematic consolidation | **CONDITIONAL GO:** after J3/J2 footprint audit, update both boards together, preserve mapping and regenerate/ERC both schematics. |
+| Phase 3B layout | Exact placement, connector rotation/opening direction, outlines, cable bend/airflow/antenna clearance, USB impedance/trace geometry, thermal vias, CPL rotation and 3D interference. |
 | Immediately before order | JLC stock, Basic/Extended, price, PCBA eligibility, MOQ/alternates, approved footprint audits and DC-bias evidence. |
 | Prototype evaluation | PTC startup, shield population, ripple, SEN66 voltage drop/temperature offset, EMI/ESD, USB CDC/upload, Wi-Fi/MQTT and 24-hour run. |
 
@@ -82,4 +83,5 @@ This plan does not implicitly approve B4B-PH-K-S on both boards or prescribe a t
 - `hardware/pcb/esp32-c3-main/power-review.md`
 - `hardware/pcb/esp32-c3-main/usb-power-review.md`
 - `hardware/pcb/interconnect-review.md`
+- `hardware/pcb/jst-ph-header-selection.md`
 - `docs/hardware/esp32-c3-sen66-pcb.md`

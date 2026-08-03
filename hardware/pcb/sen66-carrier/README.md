@@ -20,11 +20,11 @@ J1は切断したSEN66 JST-GHケーブルを直接はんだ付けする6個の�
 - C1: 100 nF / Murata GRM155R71E104KE14D / LCSC C1525、PCBA basic候補
 - C2: 10 uF / Murata GRM21BR61A106KE19L / LCSC C15850、PCBA区分・在庫は発注時確認
 - R1/R2: 4.7 kΩ DNP I²C pull-up / LCSC C25900。通常はメイン基板側のpull-upを使用する。
-- J2: メイン基板J3と同時にJST PH 4ピンへ変更予定。pin order 1=3V3, 2=GND, 3=SDA, 4=SCL。
+- J2: メイン基板J3と同時にJST `S4B-PH-K-S(LF)(SN)` / C157926（side-entry TH）へ変更予定。pin order 1=3V3, 2=GND, 3=SDA, 4=SCL。footprint監査合格後は回路図統合CONDITIONAL GO、物理向きはPhase 3Bで確認する。
 
-裸2.54 mm案はPhase 3Aで不採用。JST-PH 4ピン（B4B-PH-K-S + PHR-4）を推奨し、採用にはメイン基板J3とキャリア基板J2を同時に変更する承認が必要である。
+裸2.54 mm案はPhase 3Aで不採用。JST `S4B-PH-K-S(LF)(SN)` / C157926（side-entry TH）を選定し、メイン基板J3とキャリア基板J2を同時に変更する。
 
-Phase 3AのRev.A推奨はJST PH 4ピン（B4B-PH-K-S、PHR-4、SPH-002T-P0.5S）である。ハーネスは両端を雌ハウジングとし、PHR-4×2、コンタクト×8、AWG26–28より線×4、完成長40 mmとする。現行pin順は維持し、メイン基板J3とキャリア基板J2を同時に変更するまでは製造リリースBLOCKEDとする。B4B-PH-K-Sはtop-entry THであり、横並び・同一平面に最適とは未確定である。実装方向はPhase 3Bでtop-entry TH、side-entry TH、side-entry SMTを、ケーブル曲げ半径、SEN66 airflow、基板間距離、手はんだ性、JLCPCBA対応で比較して決定する。
+Phase 3AのRev.A選定はJST `S4B-PH-K-S(LF)(SN)` / C157926（side-entry TH、両基板共通）である。ハーネスは両端を雌ハウジングとし、PHR-4×2、コンタクト×8、AWG26–28より線×4、完成長40 mmとする。現行pin順は維持し、pin 1→1からpin 4→4の1:1ハーネス以外は禁止する。公式図面対KiCad footprint監査後、メイン基板J3とキャリア基板J2を同時に更新する回路図統合はCONDITIONAL GOである。Phase 3Bでは、両コネクタ開口、PCB上の回転・座標、ケーブル束の曲げ、SEN66 airflow、基板間距離、手はんだ性、JLCPCBA治具対応を確認する。
 
 メインR6/R7とキャリアR1/R2はともに4.7 kΩ DNPであり、実装時に必要な箇所だけ有効化する。キャリア電源容量はC1=100 nF、C2=10 µFであり、旧47 µF案は現行回路図には採用していない。
 
