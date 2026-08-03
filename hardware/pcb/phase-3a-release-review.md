@@ -8,7 +8,7 @@ Scope: final inventory before Phase 3B PCB layout. This is a review and change p
 | --- | --- |
 | MCU | ESP32-C3-MINI-1-H4X; USB D−/D+=GPIO18/GPIO19; SDA/SCL=GPIO6/GPIO7; BOOT=GPIO9; UART RX/TX=GPIO20/GPIO21; GPIO3 status LED remains DNP. |
 | Buck | U2 AP63203WU-7, fixed 5 V to 3.3 V / 2 A. C2/C3=100 nF ACCEPT; C1=10 uF and C4/C5=22 uF×2 nominally ACCEPT, DC-bias VERIFY. |
-| L1 | Coilcraft XGL4020-472MEC, 4.7 uH, is Electrical ACCEPT. `Inductor_SMD:L_Coilcraft_XxL4020` is 2D-footprint ACCEPT; formal integration, 3D/mechanical and procurement remain open. |
+| L1 | Coilcraft XGL4020-472MEC / C6012418, 4.7 uH, is Electrical ACCEPT. `Inductor_SMD:L_Coilcraft_XxL4020` is 2D-footprint ACCEPT and integrated; 3D/mechanical and procurement remain open. |
 | USB | J1 JAE DX07S016JA1R1500; D1 ST USBLC6-2SC6; F1 Bourns MF-MSMF110-2; independent 5.1 kOhm Rd; R3 0 Ohm DNP. USB 2.0 Full Speed sink only; no PD. |
 | Interconnect | Bare 2.54 mm 1×4 rejected. Selected header: JST S4B-PH-K-S(LF)(SN) / C157926, side-entry TH, for both main J3 and carrier J2. Retain 1=3V3, 2=GND, 3=SDA, 4=SCL. Harness: PHR-4×2, SPH-002T-P0.5S×8, AWG26–28 stranded wire×4, 40 mm nominal, female housings at both ends. |
 
@@ -21,7 +21,7 @@ The MPN/form factor and electrical mapping are fixed. PCB coordinates and rotati
 | Item | Formal schematic / generator now | Required schematic-change set | Classification |
 | --- | --- | --- | --- |
 | J3 | Generic `Conn_01x04` symbol retained; Value `JST PH 4P`; MPN `S4B-PH-K-S(LF)(SN)`; LCSC `C157926`; `Connector_JST:JST_PH_S4B-PH-K_1x04_P2.00mm_Horizontal`; mapping 1=3V3, 2=GND, 3=SDA, 4=SCL. | Integrated in generator and formal schematic; ERC/PDF/SVG checked. Only PCB placement, 3D and mechanical review remain in Phase 3B. | Integrated / no schematic change remaining |
-| L1 | 4.7 uH; MPN `TBD`; `Inductor_SMD:L_Vishay_IHLP-2020`; note says TBD. | Set MPN XGL4020-472MEC / LCSC C6012418; replace incompatible footprint with audited `Inductor_SMD:L_Coilcraft_XxL4020`. | Required property + footprint |
+| L1 | 4.7 uH; MPN `XGL4020-472MEC`; LCSC `C6012418`; `Inductor_SMD:L_Coilcraft_XxL4020`; pad 1=`SW`, pad 2=`+3V3`. | Integrated through generator and formal schematic; ERC/PDF/SVG and unchanged-netlist audit passed. 3D/mechanical and procurement remain Phase 3B/purchase gates. | Integrated / no schematic change remaining |
 | J1 | JAE DX07S016JA1R1500 and matching named KiCad footprint; LCSC property `TBD`. | Set LCSC C3197885 after official drawing/footprint audit. | Required property; footprint-audit gate |
 | F1 | MPN Bourns MF-MSMF110-2; 1812 footprint. | Retain electrical part; normalize manufacturer, procurement and release-status properties. | Property only |
 | D1 | ST USBLC6-2SC6, LCSC C7519, SOT-23-6 footprint. | Retain MPN/LCSC; normalize manufacturer, procurement and release-status properties. | Property only |
@@ -44,7 +44,7 @@ The MPN/form factor and electrical mapping are fixed. PCB coordinates and rotati
 
 1. Task A audit is recorded in `jst-ph-footprint-audit.md`: pads 1–4, pitch, 0.75 mm drill geometry, Pad-1 identification and 2D body mapping pass. The standard KiCad footprint is ACCEPT; missing STEP/drawing-view and finished-hole evidence are later gates.
 2. **Task B complete:** both generators and formal schematics were updated together with S4B-PH-K-S(LF)(SN), C157926 and the accepted KiCad footprint. The pin mapping was preserved; main ERC is 0 errors / 2 existing U1-library warnings and carrier ERC is 0 errors / 0 warnings. PCB coordinates/rotations remain Phase 3B work.
-3. **L1 2D audit complete:** the Coilcraft land pattern accepts `Inductor_SMD:L_Coilcraft_XxL4020`; update L1 MPN/LCSC/note/footprint through the generator, then regenerate/ERC/PDF/GUI-review. The present IHLP-2020 footprint must not be reused. 3D/start-lead orientation and procurement remain later gates; see `esp32-c3-main/xgl4020-footprint-audit.md`.
+3. **L1 integration complete:** the generator and formal schematic now use XGL4020-472MEC / C6012418 / `Inductor_SMD:L_Coilcraft_XxL4020`; pad mapping and complete netlist were preserved, then ERC/PDF/SVG passed. The historical IHLP-2020 footprint must not be reused. 3D/start-lead orientation and procurement remain later gates; see `esp32-c3-main/xgl4020-footprint-audit.md`.
 4. Complete J1 drawing-to-footprint audit, then set its LCSC property to C3197885 if it passes.
 5. Normalize manufacturer, MPN, LCSC, DNP, assembly, status and release-note properties for F1, D1, R1/R2, R3 and C1/C4/C5 without changing nets.
 6. Archive AP63203 EVM pin-for-pin evidence and Murata DC-bias data. Change values only if that evidence disproves the present circuit.
@@ -57,7 +57,7 @@ This plan selects side-entry TH S4B-PH-K-S(LF)(SN). Its schematic update is inde
 | Item | Current decision | Unresolved evidence/action | Phase | Release blocker | Owner/action |
 | --- | --- | --- | --- | --- | --- |
 | L1 procurement | XGL4020-472MEC Electrical ACCEPT; LCSC/JLC `C6012418`, Extended listing found | Live stock, price, MOQ and PCBA eligibility in the order flow. | Purchase | Yes | Procurement check. |
-| L1 footprint | XGL4020-472MEC | 2D land is accepted as `Inductor_SMD:L_Coilcraft_XxL4020`; integrate it through the generator and verify ERC/PDF/GUI. 3D/start-lead orientation, assembler paste/mask and placement remain. | Before schematic/PCB release | Yes | Hardware design. |
+| L1 footprint | XGL4020-472MEC / `Inductor_SMD:L_Coilcraft_XxL4020` integrated | 3D/start-lead orientation, assembler paste/mask and placement remain. | Phase 3B / before release | Yes | Hardware design. |
 | C1 DC bias | GRM21BR61A106KE19L nominal ACCEPT | Official 5 V SimSurfing/approved curve and minimum effective capacitance. | Before release | Yes | Component review. |
 | C4/C5 DC bias | GRM21BR60J226ME39L nominal ACCEPT | Official 3.3 V curves, parallel effective capacity and AP63203 stability check. | Before release | Yes | Component review. |
 | AP63203 | Current topology | Current EVM/datasheet pin-for-pin record. | Before PCB | Yes | Hardware design. |

@@ -3,7 +3,7 @@
 | Ref | Value | MPN | LCSC | Footprint | Status | JLCPCBA |
 | --- | --- | --- | --- | --- | --- | --- |
 | U2 | AP63203WU-7 | Diodes AP63203WU-7 | C780769 | TSOT-23-6 | Candidate, electrical fit | Verify live assembly listing |
-| L1 | 4.7 µH | Coilcraft XGL4020-472MEC | C6012418; live order status VERIFY | target `Inductor_SMD:L_Coilcraft_XxL4020`; current IHLP-2020 wrong | Electrical: ACCEPT; target 2D Footprint: ACCEPT; formal assignment: CHANGE; 3D/Procurement: VERIFY; Release: BLOCKED | JLC lists Extended; PCBA/order-time status VERIFY |
+| L1 | 4.7 µH | Coilcraft XGL4020-472MEC | C6012418; live order status VERIFY | `Inductor_SMD:L_Coilcraft_XxL4020` integrated; historical IHLP-2020 rejected | Electrical: ACCEPT; 2D Footprint: ACCEPT / integrated; 3D/Procurement: VERIFY; Release: BLOCKED | JLC lists Extended; PCBA/order-time status VERIFY |
 | C1 | 10 µF | Murata GRM21BR61A106KE19L | TBD | 0805 | Nominal: ACCEPT; DC bias: VERIFY; Release: BLOCKED | Verify |
 | C2/C3 | 100 nF | Murata GRM155R71C104KA88D | TBD | 0402 | ACCEPT value | Verify live listing |
 | C4/C5 | 22 µF | Murata GRM21BR60J226ME39L | C77071 | 0805 | Nominal: ACCEPT; DC bias: VERIFY; Release: BLOCKED | Verify live listing |

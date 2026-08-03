@@ -1,6 +1,6 @@
 # L1 Coilcraft XGL4020-472MEC footprint audit — 2026-08-03 JST
 
-Scope: documentation and audit only. No `.kicad_sch`, `.kicad_pcb`, generator, footprint file, BOM/CPL, commit or push was changed. The formal schematic still names `Inductor_SMD:L_Vishay_IHLP-2020` for L1; that assignment is rejected and is **not** changed by this audit.
+Initial scope was documentation and audit only. **Integration update, 2026-08-03 JST:** the generator and formal schematic now use the accepted `Inductor_SMD:L_Coilcraft_XxL4020`, MPN `XGL4020-472MEC` and LCSC `C6012418`; the generator was rerun deterministically, ERC/PDF/SVG passed, and the L1 netlist was unchanged. No PCB, footprint-library file, BOM/CPL, commit or push was changed. The earlier `Inductor_SMD:L_Vishay_IHLP-2020` assignment is retained below solely as rejected-history evidence.
 
 ## Controlled sources
 
@@ -72,14 +72,14 @@ The installed `Inductor_SMD.pretty` tree contains no `XGL4020` footprint. The tw
 | Status | Decision |
 | --- | --- |
 | Electrical | ACCEPT — unchanged, XGL4020-472MEC is the selected electrical MPN. |
-| Current formal `L_Vishay_IHLP-2020` | **REJECT / CHANGE** — body +1.18 mm in both axes, height +0.90 mm, pad centres +2.481 mm and wrong land geometry. |
-| Target 2D footprint | **ACCEPT:** `Inductor_SMD:L_Coilcraft_XxL4020` |
+| Historical `L_Vishay_IHLP-2020` | **REJECTED / replaced** — body +1.18 mm in both axes, height +0.90 mm, pad centres +2.481 mm and wrong land geometry. |
+| 2D footprint | **ACCEPT / integrated:** `Inductor_SMD:L_Coilcraft_XxL4020` |
 | Local footprint | **Not required.** No dimensional mismatch justifies creating `OMK.pretty:Coilcraft_XGL4020` for the 2D land pattern. |
 | 3D / mechanical | VERIFY — installed KiCad package lacks the referenced STEP files. Obtain Coilcraft's official XGL4020 model or install/inspect the matching KiCad model before 3D collision sign-off. This is not evidence that the 2D footprint is wrong. |
 | Procurement | VERIFY — official pages found at [LCSC C6012418](https://www.lcsc.com/product-detail/C6012418.html) and [JLCPCB C6012418](https://jlcpcb.com/partdetail/Coilcraft-XGL4020472MEC/C6012418), retrieved 2026-08-03 JST. They list SMD 4×4 mm and Extended, but live stock, price, PCBA eligibility, MOQ and order-time availability must be rechecked in the logged-in order flow. |
-| Schematic consolidation for L1 | **GO** — replace the current formal assignment through the generator, set MPN/LCSC/status properties, regenerate, ERC, PDF/SVG and GUI-check. |
-| Phase 3B placement planning | **GO** using the accepted 2D target; do not issue fabrication/manufacturing release until the generator/formal schematic update, MLCC DC-bias evidence and procurement checks are complete. |
-| Manufacturing release | BLOCKED — formal schematic still has the wrong footprint; 3D/mechanical, procurement and MLCC release gates remain. |
+| Schematic consolidation for L1 | **COMPLETE** — generator/formal assignment, MPN/LCSC/status, ERC/PDF/SVG and netlist-preservation checks completed. GUI review remains a Phase 3B pre-layout check. |
+| Phase 3B placement planning | **GO** using the integrated 2D footprint; do not issue fabrication/manufacturing release until MLCC DC-bias evidence and procurement checks are complete. |
+| Manufacturing release | BLOCKED — 3D/mechanical, procurement and MLCC release gates remain. |
 
 ## Phase 3B placement rules
 
@@ -98,14 +98,10 @@ The first four rules are direct consequences of the AP63203 layout guidance alre
 | Keep the buck/L1 magnetic and switching region away from the SEN66 airflow/temperature-sensitive zone, ESP32 antenna keepout, USB D+/D− pair and sensitive I2C routes. | OMK system rule; ESP32/SEN66 design constraints |
 | Apply fabricator-standard solder-mask expansion and paste aperture first; no Coilcraft-specific paste reduction is specified. Review stencil result and thermal balance with the selected assembler. | Controlled-source limitation + manufacturing rule |
 
-## Next task: standard-footprint integration (no local footprint task)
+## Integration result and remaining task
 
-The next authorized implementation task is **A — standard footprint adoption**, not local footprint creation:
+Standard-footprint integration is complete: the generator now holds the selected MPN/LCSC/status and `Inductor_SMD:L_Coilcraft_XxL4020`; L1 pad 1 remains `SW`, pad 2 remains `+3V3`, the complete netlist is unchanged, and the formal schematic was regenerated with 0 errors / the two existing U1 library warnings. PDF and SVG were re-exported. GUI operation is unavailable in this environment, so GUI visual review remains a Phase 3B pre-layout check.
 
-1. In the L1 generator definition, set MPN `XGL4020-472MEC`, LCSC `C6012418`, the selected status fields, and footprint `Inductor_SMD:L_Coilcraft_XxL4020`.
-2. Preserve schematic pad 1/2 and all existing nets; map the SW-side pad to the Coilcraft short/start lead only after the documented assembly-orientation check.
-3. Regenerate the intermediate and formal schematic, run ERC, export PDF/SVG, compare properties and perform GUI review.
-4. In Phase 3B, install or obtain the controlled XGL 3D model; verify origin, height, start-lead direction, courtyard/rework clearance, pick-and-place rotation and tape orientation.
-5. Before order, recheck JLC/LCSC availability/PCBA status and retain the order-time evidence. No BOM/CPL is changed by this audit.
+The remaining task is Phase 3B verification: obtain/install the controlled XGL 3D model; verify origin, height, short/start-lead direction, courtyard/rework clearance, pick-and-place rotation and tape orientation. Before order, recheck JLC/LCSC availability/PCBA status and retain the order-time evidence. No BOM/CPL is changed by this integration.
 
 If a future controlled drawing revision invalidates the 0.98 × 3.40 mm / 2.37 mm land, then create a local file only as `hardware/pcb/esp32-c3-main/footprints/OMK.pretty/Coilcraft_XGL4020.kicad_mod`, with pads 1/2 at `(-1.185,0)/(+1.185,0)`, each `0.98 × 3.40 mm`, the approved mask/paste rule, 4.00 × 4.00 mm Fab body, an assembler-approved courtyard, a documented start-lead cue, source URL/revision and DRC/3D checks. That contingency is **not** authorized or needed now.

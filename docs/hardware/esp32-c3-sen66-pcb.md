@@ -87,7 +87,7 @@ PCBレイアウトのみ未着手である。
 
 今回の候補は AP63203WU-7（LCSC `C780769`）、USBLC6-2SC6（`C7519`）、
 JST SM04B-SRSS-TB(LF)(SN)（`C160404`）、ESP32-C3-MINI-1-H4X（`C41349510`）である。
-U2周辺L1の電気的MPNは XGL4020-472MECへ選定済みである。2D footprintは `Inductor_SMD:L_Coilcraft_XxL4020` を監査済みだが、回路図反映、3D/物理向き、JLC在庫・PCBA可否は未完了である。
+U2周辺L1の電気的MPNは XGL4020-472MEC、LCSCはC6012418であり、`Inductor_SMD:L_Coilcraft_XxL4020`をgenerator・正式回路図へ統合済みである。3D/物理向き、JLC在庫・PCBA可否は未完了である。
 TPS62162DSGRは1 A級のため、要求した1.5 A以上の電源余裕を満たす採用品にはしない。
 
 | Ref | 接続 | 値・指定 | 注記 |
@@ -139,7 +139,7 @@ J1はSEN66ケーブル直接はんだ用の6個の独立スルーホール表現
 AP63203WU-7（LCSC C780769）は3.3 V固定・2 A・3.8–32 V入力の同期buck候補として回路値をレビューした。
 C2=100 nF入力バイパスとC3=100 nF BST–SWはACCEPT、C1=10 µF入力とC4/C5=22 µF×2出力は
 値を維持できる見込みだが、各MLCCのDCバイアス実効容量確認が必要なVERIFYとした。L1=4.7 µHは
-XGL4020-472MECを電気的に選定済みであり、2D footprintは監査済みだが、JLC調達、formal assignmentと3D/物理向きがBLOCKERである。詳細は
+XGL4020-472MEC / C6012418を電気的に選定し、2D footprintを正式回路図へ統合済みである。JLC調達と3D/物理向きがBLOCKERである。詳細は
 `hardware/pcb/esp32-c3-main/power-review.md` を正とする。回路図は変更していない。
 
 ### Phase 3A USB-C入力・保護レビュー（2026-08-03 JST）
@@ -153,16 +153,16 @@ J1はJAE DX07S016JA1R1500（LCSC C3197885）、F1はBourns MF-MSMF110-2、D1はS
 | 1 A以上 LDO | 不採用 | 5 V→3.3 Vで 0.85 A 時に約1.45 Wを熱にする。SEN66温度へ不利。 |
 | 降圧 DC-DC | Rev.A採用予定 | 90%級なら上記設計負荷で損失は約0.3 W。部品点数とEMIを配慮してメイン基板のSEN66接続端と反対側へ置く。 |
 
-現行buckは Diodes `AP63203WU-7`（固定3.3 V / 2 A、LCSC `C780769`）である。入力はC1=10 µFとC2=100 nF、BST–SWはC3=100 nF、L1=4.7 µH、出力はC4/C5=22 µF×2である。L1の電気的MPNはXGL4020-472MEC、監査済み2D footprintは`Inductor_SMD:L_Coilcraft_XxL4020`であり、残るBLOCKERはformal assignment、3D/物理向きと調達である。C1/C4/C5のDCバイアス実効容量は製造リリースBLOCKERであり、`power-review.md`を正とする。TPS62162DSGRは1 A級の**旧候補／不採用**である。キャリアはC1=100 nF、C2=10 µFである。
+現行buckは Diodes `AP63203WU-7`（固定3.3 V / 2 A、LCSC `C780769`）である。入力はC1=10 µFとC2=100 nF、BST–SWはC3=100 nF、L1=4.7 µH、出力はC4/C5=22 µF×2である。L1はXGL4020-472MEC / C6012418 / `Inductor_SMD:L_Coilcraft_XxL4020`をgenerator・正式回路図へ統合済みであり、残るBLOCKERは3D/物理向きと調達である。C1/C4/C5のDCバイアス実効容量は製造リリースBLOCKERであり、`power-review.md`を正とする。TPS62162DSGRは1 A級の**旧候補／不採用**である。キャリアはC1=100 nF、C2=10 µFである。
 
-Phase 3Aの電気的L1推奨は Coilcraft XGL4020-472MEC（4.7 µH、Isat 3.0 A/20% drop、Irms 5.6 A/40°C rise）である。Coilcraft公式landとの数値監査で`Inductor_SMD:L_Coilcraft_XxL4020`を2D footprintとしてACCEPTした。正式回路図反映、3D/start-lead向き、JLC実装可否は購入・Phase 3B前にVERIFYする。C1/C4/C5のMurata DC-bias実効容量は公式SimSurfing曲線を未取得のため数値確定せず、製造リリースBLOCKERとして維持する。
+Phase 3Aの電気的L1推奨は Coilcraft XGL4020-472MEC / C6012418（4.7 µH、Isat 3.0 A/20% drop、Irms 5.6 A/40°C rise）である。Coilcraft公式landとの数値監査で`Inductor_SMD:L_Coilcraft_XxL4020`を2D footprintとしてACCEPTし、generator・正式回路図へ統合した。ERC/PDF/SVGは完了し、3D/start-lead向き、JLC実装可否は購入・Phase 3B前にVERIFYする。C1/C4/C5のMurata DC-bias実効容量は公式SimSurfing曲線を未取得のため数値確定せず、製造リリースBLOCKERとして維持する。
 
 ### Phase 3A release-review結果
 
 Phase 3Aで確定した電気的部品・pin mappingと、回路図へ反映する変更セットを
 `hardware/pcb/phase-3a-release-review.md` に固定した。main J3とcarrier J2のJST PH同時変更は完了し、
 両方にS4B-PH-K-S(LF)(SN) / C157926 / `Connector_JST:JST_PH_S4B-PH-K_1x04_P2.00mm_Horizontal`を反映した。
-残る主な変更対象はL1のXGL4020-472MEC / C6012418プロパティと監査済み標準footprintの正式反映、J1のLCSCプロパティである。
+残る主な変更対象はJ1のLCSCプロパティである。L1のXGL4020-472MEC / C6012418プロパティと監査済み標準footprintは正式反映済みである。
 接続変更はJ3/J2のpin mapping再照合だけであり、AP63203のEN/FB/BST接続、USB、SEN66直結J1、
 キャリアのC1/C2/R1/R2/TP1–TP4は変更予定がない。実装方向、footprint監査、DC-bias一次資料、
 JLC調達証跡はPhase 3Bまたは発注前ゲートで解消する。J3/J2は同時更新・再生成・ERC/PDF確認まで完了し、
