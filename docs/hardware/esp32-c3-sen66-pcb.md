@@ -1,6 +1,14 @@
-# OMK ESP32-C3 / SEN66 PCB Rev.A — Phase 1
+# OMK ESP32-C3 / SEN66 PCB Rev.A
 
-更新日: 2026-08-03。これは設計指示書に対する Phase 1（調査・基本設計）の成果物である。KiCad 回路図、PCB、Gerber、BOM/CPL は Phase 2 以降に作成する。ここでの「候補」は発注承認前に固定しない。
+更新日: 2026-08-03。現行仕様は正式KiCad回路図、各基板README、`hardware/pcb/esp32-c3-main/power-review.md` を正とする。
+
+| フェーズ | 状態 |
+| --- | --- |
+| Phase 1 基本設計 | 完了 |
+| Phase 2 メイン回路図 | 完了（ERC 0 errors / 既知warning 1件） |
+| Phase 2 キャリア回路図 | 完了（ERC 0 errors / 0 warnings、PDF/SVG出力済み） |
+| Phase 3A 部品レビュー | 進行中 |
+| Phase 3B PCBレイアウト | 未着手 |
 
 ## 結論
 
@@ -39,8 +47,8 @@ C3用USB CDC定義と明示includeを含めて C3 環境のビルドは成功し
 
 | 信号 | GPIO / net | 方針 |
 | --- | --- | --- |
-| SEN66/Qwiic SDA | GPIO6 | 3V3へ 10 kΩ、SJで切離し可能 |
-| SEN66/Qwiic SCL | GPIO7 | 3V3へ 10 kΩ、SJで切離し可能 |
+| SEN66/Qwiic SDA | GPIO6 | R6 4.7 kΩ DNP pull-up選択肢 |
+| SEN66/Qwiic SCL | GPIO7 | R7 4.7 kΩ DNP pull-up選択肢 |
 | USB D- / D+ | GPIO18 / GPIO19 | USB-Cから ESD を経て短い差動配線。長いTPは置かない |
 | BOOT | GPIO9 | 10 kΩ pull-up、押下で GND。TPあり。大容量Cを置かない |
 | RESET | EN | 10 kΩ pull-up、1 µF to GND、押下で GND、TPあり |
@@ -74,8 +82,8 @@ GPIO21=TX、BOOTはGPIO9、status LED候補はGPIO3である。GPIO2、GPIO8、�
 残る警告は、`kicad-sch-api 0.5.6` と現行公式KiCad 9/10シンボル形式の互換性を回避するため、
 公式Espressif KiCad 7互換ライブラリを使用した際の `lib_symbol_mismatch` のみである。
 U1のピン集合は生成前に検証済みであり、Phase 3前のGUI目視レビューで再確認する。
-ERC reportとPDFは `hardware/pcb/esp32-c3-main/` に置く。SEN66キャリア回路図とPCBレイアウトは
-未着手である。
+ERC reportとPDFは `hardware/pcb/esp32-c3-main/` に置く。SEN66キャリア回路図も完成済みで、
+PCBレイアウトのみ未着手である。
 
 今回の候補は AP63203WU-7（LCSC `C780769`）、USBLC6-2SC6（`C7519`）、
 JST SM04B-SRSS-TB(LF)(SN)（`C160404`）、ESP32-C3-MINI-1-H4X（`C41349510`）である。
@@ -86,16 +94,20 @@ TPS62162DSGRは1 A級のため、要求した1.5 A以上の電源余裕を満た
 | --- | --- | --- | --- |
 | J1 | USB-C receptacle: VBUS→F1→`+5V`; CC1/CC2→R1/R2→GND | R1/R2 5.1 kΩ | USB 2.0 sink専用。SBU/高速信号はNC。 |
 | D1 | J1 D+/D- と U1 GPIO19/18 の間 | USB 2.0 2ch ESD | D+はGPIO19、D-はGPIO18。ESDのGNDを最短でGND面へ。 |
-| U2 | `+5V`→`+3V3` | 1 A以上 buck（候補 TPS62162DSGR） | VIN/VOUT/L/Cは**最終選定ICの参照回路どおり**に配置。 |
+| U2 | `+5V`→`+3V3` | AP63203WU-7、固定3.3 V / 2 A、LCSC C780769 | 詳細は power-review.md。 |
 | U1 | `+3V3`, GND, EN, GPIO6/7/9/18/19/20/21 | ESP32-C3-MINI-1-H4X | 公式footprint、底面GND pad/thermal via、アンテナkeepout。 |
 | R3/C1/SW1 | EN→R3→`+3V3`; EN→C1→GND; SW1: EN→GND | R3 10 kΩ, C1 1 µF | RESET。C1はU1近傍。 |
 | R4/SW2 | GPIO9→R4→`+3V3`; SW2: GPIO9→GND | R4 10 kΩ | BOOT。GPIO9に大容量コンデンサを置かない。 |
-| R5/R6/SJ1/SJ2 | GPIO6/7→SJ→R→`+3V3` | 10 kΩ 1%、SJ切離し可 | SDA/SCLプルアップはメインのみ。 |
+| R6/R7 | GPIO6/7→`+3V3` | 4.7 kΩ DNP | メイン・キャリア双方にDNP選択肢があり、必要箇所だけ実装。 |
 | J2 | GND, `+3V3`, SDA, SCL | JST SH 1×4 Qwiic | Qwiic公式ピン順をfootprintと実コネクタで最終照合。 |
 | J3 | `+3V3`, GND, SDA, SCL | 2.54 mm 1×4 RA socket | キャリアへ。Pin 1を`+3V3`とする。 |
-| TP1..TP11 | `+5V`,`+3V3`,GND,SDA,SCL,D+,D-,EN,BOOT,U0TXD,U0RXD | test point | D+/D-はESD/U1寄りに小パッド、長いstub禁止。 |
-| TP10/TP11 | GPIO21/GPIO20 | UART TX/RX | 3.3 V TTL専用。USB CDCとは別。 |
-| D2/R7 | GPIO3→R7→D2→GND | DNP, 1 kΩ | 任意status LED。 |
+| TP1/TP2 | UART RX / UART TX（GPIO20 / GPIO21） | test point | 3.3 V TTL専用。USB CDCとは別。 |
+| TP3/TP4 | GND / `+3V3` | test point | UART近傍の補助TP。 |
+| TP5/TP6/TP7 | `+5V` / `+3V3` / GND | test point | 電源TP。 |
+| TP8/TP9 | I2C_SDA / I2C_SCL | test point | I²C TP。 |
+| TP10/TP11 | USB_D+ / USB_D- | test point | ESD/U1寄りの小パッド。長いstub禁止。 |
+| TP12/TP13 | EN / BOOT | test point | RESET/BOOT評価用。 |
+| D2/R8 | GPIO3→R8→D2→GND | DNP, 2.2 kΩ | 任意status LED。R7はI2C_SCL pull-up。 |
 
 U1のGPIO2は10 kΩ pull-up、GPIO8はNCとする。NC端子はKiCadで `No connect` フラグを付ける。USBのCC、ESD、DC-DC、ESP32、SEN66コネクタは電源/信号が同名ネットで接続されることをERCで確認する。
 
@@ -112,14 +124,22 @@ J1はSEN66ケーブル直接はんだ用の6個の独立スルーホール表現
 
 | Ref | 接続 | 値・指定 | 注記 |
 | --- | --- | --- | --- |
-| J1 | `+3V3`, GND, SDA, SCL | 2.54 mm 1×4 RA header | メインJ3とPin 1=`+3V3`を一致。 |
-| H1..H6 | H1/H6→`+3V3`; H2/H5→GND; H3→SDA; H4→SCL | 6本のケーブル直接はんだ穴 | SEN66 Pin 1から導通確認する。H1=VDD、H2=GND、H3=SDA、H4=SCL、H5=GND、H6=VDD。 |
-| C1/C2 | `+3V3`→GND | 47 µF bulk / 100 nF ceramic | ケーブル入口・SEN66電源近傍。キャリアにI2C pull-upは置かない。 |
+| J2 | `+3V3`, GND, SDA, SCL | 2.54 mm 1×4 RA候補 | メインJ3とPin 1=`+3V3`を一致。ロックなしはBLOCKER。 |
+| J1 | Pin 1/6→`+3V3`; 2/5→GND; 3→SDA; 4→SCL | 6個独立TH pad、直接はんだ | 1線1穴、手はんだ・PCBA DNP。 |
+| C1/C2 | `+3V3`→GND | 100 nF / 10 µF | ケーブル入口・SEN66電源近傍。R1/R2は4.7 kΩ DNP。 |
 | TP1..TP4 | `+3V3`, GND, SDA, SCL | test point（任意） | 手実装/評価用。 |
 
 ケーブル穴のシルクには `1 VDD`, `2 GND`, `3 SDA`, `4 SCL`, `5 GND`, `6 VDD`, `PIN 1`, `TO SEN66` を明記する。保持具・M3穴・ストレインリリーフはPCB Phaseで機構レイヤに配置し、電気回路には実装穴として記載する。
 
 ## 電源方針
+
+### Phase 3A 電源部品レビュー（2026-08-03 JST）
+
+AP63203WU-7（LCSC C780769）は3.3 V固定・2 A・3.8–32 V入力の同期buck候補として回路値をレビューした。
+C2=100 nF入力バイパスとC3=100 nF BST–SWはACCEPT、C1=10 µF入力とC4/C5=22 µF×2出力は
+値を維持できる見込みだが、各MLCCのDCバイアス実効容量確認が必要なVERIFYとした。L1=4.7 µHは
+推奨範囲だが実品番・Isat・Irms・DCR・JLCPCBA可否未確定のためBLOCKERである。詳細は
+`hardware/pcb/esp32-c3-main/power-review.md` を正とする。回路図は変更していない。
 
 設計負荷は SEN66 350 mA peak + ESP32-C3 Wi-Fi送信時 350 mA（設計マージン値）+ Qwiic 100 mA + LED/損失 50 mA = **850 mA** とする。よって 3V3 は連続 1 A 級、短時間余裕を含み 1.5 A 級を選定する。
 
@@ -128,17 +148,17 @@ J1はSEN66ケーブル直接はんだ用の6個の独立スルーホール表現
 | 1 A以上 LDO | 不採用 | 5 V→3.3 Vで 0.85 A 時に約1.45 Wを熱にする。SEN66温度へ不利。 |
 | 降圧 DC-DC | Rev.A採用予定 | 90%級なら上記設計負荷で損失は約0.3 W。部品点数とEMIを配慮してメイン基板のSEN66接続端と反対側へ置く。 |
 
-採用候補は TI `TPS62162DSGR`（1 A buck、代替: Diodes `AP63203WU` 2 A）。最終選定は各データシートの推奨 L/C、実負荷過渡、JLCの在庫・PCBA区分を満たすものに限る。5 V入力には polyfuse（候補 1 A hold）、TVS/ESD、10 µF + 100 nF、3V3 出力には regulator 指定値に加えメイン基板 22 µF。キャリアのケーブル入口には 47 µF + 100 nF を SEN66 VDD/GND 直近に置く。SEN66 の 30 mVpp（100 Hz未満）要求は評価でオシロスコープ測定する。
+現行buckは Diodes `AP63203WU-7`（固定3.3 V / 2 A、LCSC `C780769`）である。入力はC1=10 µFとC2=100 nF、BST–SWはC3=100 nF、L1=4.7 µH、出力はC4/C5=22 µF×2である。C1/C4/C5のDCバイアス実効容量とL1実品番はPhase 3A BLOCKERであり、`power-review.md`を正とする。TPS62162DSGRは1 A級の**旧候補／不採用**である。キャリアはC1=100 nF、C2=10 µFである。
 
 ## 概略回路
 
 ```text
 USB-C ─ fuse/TVS ─ 5V TP ─ buck 3V3 ── ESP32-C3-MINI-1-H4X
-  CC1/CC2: 5.1k to GND                 ├─ I2C pull-up SJ+10k ─ Qwiic
+  CC1/CC2: 5.1k to GND                 ├─ I2C 4.7k DNP pull-up ─ Qwiic
   D+/D-: ESD → GPIO19/18               └─ 1x4 board connector → carrier
 BOOT: GPIO9 pull-up / switch to GND; RESET: EN RC / switch to GND
 
-carrier: 1x4 (3V3,GND,SDA,SCL) ─ 47u+0.1u ─ 6-wire cable pads
+carrier: 1x4 (3V3,GND,SDA,SCL) ─ 10u+0.1u ─ 6-wire cable pads
          SEN66 pin 1+6=3V3, 2+5=GND, 3=SDA, 4=SCL
 ```
 
@@ -158,11 +178,11 @@ USB-C は sink 専用（CC1/CC2 とも 5.1 kΩ Rd）、VBUS保護、シールド
 | 機能 | 候補 | 代替 | 実装 |
 | --- | --- | --- | --- |
 | MCU | ESP32-C3-MINI-1-H4X / C41349510 | ESP32-C3-MINI-1-N4X（承認・再照合必須） | JLC PCBA候補 |
-| 3V3 buck | TPS62162DSGR | AP63203WU | JLC PCBA候補 |
+| 3V3 buck | AP63203WU-7 / C780769 | — | L1・MLCC実効容量確認待ち |
 | USB-C | 16-pin USB2.0 receptacle | 同フットプリント品 | JLC PCBA候補 |
 | USB ESD | USBLC6-2SC6級 | PESD5V0S2UT級 | JLC PCBA候補 |
 | Qwiic | JST SH 1×4 SM04B-SRSS-TB | 互換SH 1×4 | JLC PCBA候補 |
-| I2C pull-up | 10 kΩ 1% 0402 + SJ | 4.7 kΩ（バス評価後） | JLC PCBA候補 |
+| I2C pull-up | 4.7 kΩ DNP（両基板） | — | 必要箇所だけ実装 |
 | board link | 2.54 mm 1×4 RA header/socket | 極性付きJST | 手はんだ |
 
 ## リスク、未確定、次フェーズのゲート
@@ -170,5 +190,5 @@ USB-C は sink 専用（CC1/CC2 とも 5.1 kΩ Rd）、VBUS保護、シールド
 1. H4X の発注時在庫/PCBA条件と全候補のLCSC番号・価格は未確認。見積画面で確認後にのみ BOM/CPL を確定する。
 2. DC-DC のEMI/リップル、SEN66起動時電圧降下、温度オフセットは計算だけで合格にしない。Rev.A実測が必要。
 3. SEN66 STEP、公式 retainer STEP、最新ハンドリング/温度補償資料をダウンロードし、キャリアの穴・空気流・干渉を3D確認する必要がある。
-4. USB差動インピーダンス、アンテナkeepout、公式フットプリント/thermal via、ERC/DRC、CPL回転は KiCad Phase 2 で確認する。
+4. USB差動インピーダンス、アンテナkeepout、公式フットプリント/thermal via、ERC/DRC、CPL回転は Phase 3B PCB layout で確認する。
 5. 実機の USB CDC/upload、手動 BOOT、Wi-Fi/MQTT/SEN66、24時間連続試験は未実施。OTAは現行コードにないため、将来要件化するならパーティションとセキュリティ方針を先に決める。

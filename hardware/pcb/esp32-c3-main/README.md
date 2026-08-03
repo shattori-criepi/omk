@@ -4,6 +4,9 @@ KiCad 9.0.8用のメイン基板回路図である。PCBレイアウト、BOM/CP
 回路図はA3横向き1枚に機能ブロックごとに整理し、右下のタイトルブロック領域を予約している。
 メーカー型番、LCSC番号、Footprint、選定メモはシンボルプロパティとして保持するが、PDFには
 Referenceと簡潔なValue以外を表示しない。ESP32-C3のアンテナkeepoutはPCB Phaseで確認する。
+電源の現行仕様は AP63203WU-7 / C780769、C1=10uF、C2=100nF、C3=100nF BST–SW、
+L1=4.7uH、C4/C5=22uF×2であり、L1 MPNとMLCC DCバイアスはPhase 3A BLOCKERである。
+詳細は [power-review.md](power-review.md) を正とする。R6/R7は4.7kΩ DNPで、キャリアR1/R2も同じDNP選択肢である。
 
 ## 再生成と検証
 
@@ -20,10 +23,10 @@ kicad-cli sch export pdf esp32-c3-main.kicad_sch \
 ```
 
 生成中間物は `esp32-c3-main.generated.kicad_sch`。ERCにエラーがあれば、スクリプトは正式ファイルへ反映しない。
-公式Espressifライブラリは `symbols/Espressif.kicad_sym`、公式footprintは
+Git管理するEspressifシンボルは `symbols/Espressif.kicad_sym`、公式footprintは
 `footprints/Espressif.pretty/` に同梱し、それぞれのプロジェクト表は
 `sym-lib-table` / `fp-lib-table` に登録する。生成APIとの互換性のため、シンボルは公式リポジトリの
-`legacy_kicad7`ブランチ版を用いる（現在版は `Espressif-kicad9.kicad_sym` として保存）。
+`legacy_kicad7`互換版である。
 
 ## 回路図ブロック
 
