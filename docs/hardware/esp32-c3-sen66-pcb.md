@@ -57,6 +57,31 @@ USB-C入力部については、この後にKiCad 9.0.8と `kicad-sch-api==0.5.6
 
 ### メイン基板ネット表
 
+#### Phase 2 実装結果（メイン基板のみ）
+
+KiCad 9.0.8 の空テンプレートを `kicad-sch-api==0.5.6` で読み込み、USB-C、VBUS保護、
+AP63203WU-7（3.3 V/2 A候補）の降圧電源、ESP32-C3-MINI-1-H4X、EN/BOOT、I2C、
+SEN66用J3、Qwiic用J2、UART/電源/USB/制御用TP、DNP status LEDを
+`hardware/pcb/esp32-c3-main/esp32-c3-main.kicad_sch` へ生成した。ESP32-C3の公式シンボル、
+フットプリント、53ピン集合は公式Espressifライブラリとデータシートに照合した。
+
+I2CはGPIO6=SDA、GPIO7=SCL、USBはGPIO18=D-、GPIO19=D+、UART TPはGPIO20=RX、
+GPIO21=TX、BOOTはGPIO9、status LED候補はGPIO3である。GPIO2、GPIO8、未使用GPIO、
+公式指定NC端子はNo Connectとして明示した。USB shieldはR3（0 Ω DNP）でGNDへ接続可能な
+選択肢を残した。
+
+`kicad-cli sch erc` は正式回路図に対して **0 errors / 1 warning**、PDF出力は成功した。
+残る警告は、`kicad-sch-api 0.5.6` と現行公式KiCad 9/10シンボル形式の互換性を回避するため、
+公式Espressif KiCad 7互換ライブラリを使用した際の `lib_symbol_mismatch` のみである。
+U1のピン集合は生成前に検証済みであり、Phase 3前のGUI目視レビューで再確認する。
+ERC reportとPDFは `hardware/pcb/esp32-c3-main/` に置く。SEN66キャリア回路図とPCBレイアウトは
+未着手である。
+
+今回の候補は AP63203WU-7（LCSC `C780769`）、USBLC6-2SC6（`C7519`）、
+JST SM04B-SRSS-TB(LF)(SN)（`C160404`）、ESP32-C3-MINI-1-H4X（`C41349510`）である。
+U2周辺L1の実品番、USB-C J1、J3は未確定であり、JLC在庫・PCBA可否を断定していない。
+TPS62162DSGRは1 A級のため、要求した1.5 A以上の電源余裕を満たす採用品にはしない。
+
 | Ref | 接続 | 値・指定 | 注記 |
 | --- | --- | --- | --- |
 | J1 | USB-C receptacle: VBUS→F1→`+5V`; CC1/CC2→R1/R2→GND | R1/R2 5.1 kΩ | USB 2.0 sink専用。SBU/高速信号はNC。 |

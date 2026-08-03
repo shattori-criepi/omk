@@ -5,3 +5,4 @@
 *.generated.kicad_sch
 *.blank.kicad_sch
 erc-report.txt
+rendered/
