@@ -1,0 +1,7 @@
+.venv/
+.cache/
+*.kicad_prl
+*.lck
+*.generated.kicad_sch
+*.blank.kicad_sch
+erc-report.txt
