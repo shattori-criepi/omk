@@ -22,7 +22,7 @@ The MPN/form factor and electrical mapping are fixed. PCB coordinates and rotati
 | --- | --- | --- | --- |
 | J3 | Generic `Conn_01x04` symbol retained; Value `JST PH 4P`; MPN `S4B-PH-K-S(LF)(SN)`; LCSC `C157926`; `Connector_JST:JST_PH_S4B-PH-K_1x04_P2.00mm_Horizontal`; mapping 1=3V3, 2=GND, 3=SDA, 4=SCL. | Integrated in generator and formal schematic; ERC/PDF/SVG checked. Only PCB placement, 3D and mechanical review remain in Phase 3B. | Integrated / no schematic change remaining |
 | L1 | 4.7 uH; MPN `XGL4020-472MEC`; LCSC `C6012418`; `Inductor_SMD:L_Coilcraft_XxL4020`; pad 1=`SW`, pad 2=`+3V3`. | Integrated through generator and formal schematic; ERC/PDF/SVG and unchanged-netlist audit passed. 3D/mechanical and procurement remain Phase 3B/purchase gates. | Integrated / no schematic change remaining |
-| J1 | JAE DX07S016JA1R1500 and matching named KiCad footprint; LCSC property `TBD`. | Set LCSC C3197885 after official drawing/footprint audit. | Required property; footprint-audit gate |
+| J1 | JAE DX07S016JA1R1500 and matching named KiCad footprint; LCSC property `TBD`. USB2 symbol/pad mapping is confirmed; JAE drawing `SJ121837` / spec `JACS-30413` / handling `JAHL-30353-1` contents were not anonymously available. | Obtain JAE controlled geometry, then compare land, shell/NPTH, board-edge, assembly and 3D evidence; only then decide whether to set LCSC C3197885 property. | Required property; footprint-audit gate |
 | F1 | MPN Bourns MF-MSMF110-2; 1812 footprint. | Retain electrical part; normalize manufacturer, procurement and release-status properties. | Property only |
 | D1 | ST USBLC6-2SC6, LCSC C7519, SOT-23-6 footprint. | Retain MPN/LCSC; normalize manufacturer, procurement and release-status properties. | Property only |
 | R1/R2 | 5.1 kOhm, Yageo RC0402FR-075K1L, separate CC1/CC2. | Retain circuit/MPN; add procurement/status after listing confirmation. | Property only |
@@ -45,7 +45,7 @@ The MPN/form factor and electrical mapping are fixed. PCB coordinates and rotati
 1. Task A audit is recorded in `jst-ph-footprint-audit.md`: pads 1–4, pitch, 0.75 mm drill geometry, Pad-1 identification and 2D body mapping pass. The standard KiCad footprint is ACCEPT; missing STEP/drawing-view and finished-hole evidence are later gates.
 2. **Task B complete:** both generators and formal schematics were updated together with S4B-PH-K-S(LF)(SN), C157926 and the accepted KiCad footprint. The pin mapping was preserved; main ERC is 0 errors / 2 existing U1-library warnings and carrier ERC is 0 errors / 0 warnings. PCB coordinates/rotations remain Phase 3B work.
 3. **L1 integration complete:** the generator and formal schematic now use XGL4020-472MEC / C6012418 / `Inductor_SMD:L_Coilcraft_XxL4020`; pad mapping and complete netlist were preserved, then ERC/PDF/SVG passed. The historical IHLP-2020 footprint must not be reused. 3D/start-lead orientation and procurement remain later gates; see `esp32-c3-main/xgl4020-footprint-audit.md`.
-4. Complete J1 drawing-to-footprint audit, then set its LCSC property to C3197885 if it passes.
+4. J1 audit is recorded in `esp32-c3-main/usb-c-j1-footprint-audit.md`: symbol/pad mapping is accepted, but the publicly inaccessible JAE `SJ121837` / `JACS-30413` / `JAHL-30353-1` leave official land/edge/assembly geometry VERIFY. Obtain these records and complete the comparison before setting its LCSC property to C3197885.
 5. Normalize manufacturer, MPN, LCSC, DNP, assembly, status and release-note properties for F1, D1, R1/R2, R3 and C1/C4/C5 without changing nets.
 6. Archive AP63203 EVM pin-for-pin evidence and Murata DC-bias data. Change values only if that evidence disproves the present circuit.
 7. Regenerate, compare generated/formal results, run ERC, export PDF and perform GUI review before PCB placement.
@@ -61,7 +61,7 @@ This plan selects side-entry TH S4B-PH-K-S(LF)(SN). Its schematic update is inde
 | C1 DC bias | GRM21BR61A106KE19L nominal ACCEPT | Official 5 V SimSurfing/approved curve and minimum effective capacitance. | Before release | Yes | Component review. |
 | C4/C5 DC bias | GRM21BR60J226ME39L nominal ACCEPT | Official 3.3 V curves, parallel effective capacity and AP63203 stability check. | Before release | Yes | Component review. |
 | AP63203 | Current topology | Current EVM/datasheet pin-for-pin record. | Before PCB | Yes | Hardware design. |
-| J1 | DX07S016JA1R1500 electrical ACCEPT | Board edge, shell stakes/NPTH, land, paste/mask/courtyard, 3D and JLC eligibility. | Phase 3B/purchase | Yes | Footprint/procurement. |
+| J1 | DX07S016JA1R1500 electrical ACCEPT; named KiCad USB2 mapping is coherent. | JAE controlled drawing/land/edge, shell stakes/NPTH, paste/mask, mating/3D/assembly and JLC eligibility. Electrical placement planning is conditional; final edge placement is not frozen. | Phase 3B/purchase | Yes | Footprint/procurement. |
 | F1 | MF-MSMF110-2 electrical ACCEPT | High-temp derating, voltage drop/heat, inrush/simultaneous-start test; JLC listing. | Prototype/purchase | Yes | Lab/procurement. |
 | D1 | USBLC6-2SC6 electrical ACCEPT | JLC class/live listing, placement/return audit. | Purchase/Phase 3B | Yes | Procurement/layout. |
 | ESP32-C3 | H4X selected | H4X stock/PCBA condition, 53-pin/footprint audit, exposed-pad vias and antenna keepout. | Phase 3B/purchase | Yes | Hardware/layout. |

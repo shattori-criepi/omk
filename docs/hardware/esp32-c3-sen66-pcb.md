@@ -144,7 +144,7 @@ XGL4020-472MEC / C6012418を電気的に選定し、2D footprintを正式回路�
 
 ### Phase 3A USB-C入力・保護レビュー（2026-08-03 JST）
 
-J1はJAE DX07S016JA1R1500（LCSC C3197885）、F1はBourns MF-MSMF110-2、D1はST USBLC6-2SC6（C7519）を電気的に維持する。R1/R2は独立した5.1 kΩ Rd、R3は0 Ω DNP shield optionである。JLC実装可否・ライブ在庫、J1公式寸法とのfootprint照合、PTC起動試験、shieldのESD/EMI実測は製造リリース前の確認事項である。詳細は `usb-power-review.md` を正とする。
+J1はJAE DX07S016JA1R1500（LCSC候補 C3197885）、F1はBourns MF-MSMF110-2、D1はST USBLC6-2SC6（C7519）を電気的に維持する。R1/R2は独立した5.1 kΩ Rd、R3は0 Ω DNP shield optionである。J1の標準KiCad footprintはUSB2 symbol/pad mappingを確認済みだが、JAE図面 `SJ121837`、仕様 `JACS-30413`、取扱 `JAHL-30353-1` がこの環境から取得できず、land、shell/NPTH、board-edge、3D/機構はVERIFYである。JLC実装可否・ライブ在庫、PTC起動試験、shieldのESD/EMI実測も製造リリース前の確認事項である。詳細は `usb-power-review.md` と `usb-c-j1-footprint-audit.md` を正とする。この監査では回路図・footprintを変更していない。
 
 設計負荷は SEN66 350 mA peak + ESP32-C3 Wi-Fi送信時 350 mA（設計マージン値）+ Qwiic 100 mA + LED/損失 50 mA = **850 mA** とする。よって 3V3 は連続 1 A 級、短時間余裕を含み 1.5 A 級を選定する。
 
@@ -162,7 +162,7 @@ Phase 3Aの電気的L1推奨は Coilcraft XGL4020-472MEC / C6012418（4.7 µH、
 Phase 3Aで確定した電気的部品・pin mappingと、回路図へ反映する変更セットを
 `hardware/pcb/phase-3a-release-review.md` に固定した。main J3とcarrier J2のJST PH同時変更は完了し、
 両方にS4B-PH-K-S(LF)(SN) / C157926 / `Connector_JST:JST_PH_S4B-PH-K_1x04_P2.00mm_Horizontal`を反映した。
-残る主な変更対象はJ1のLCSCプロパティである。L1のXGL4020-472MEC / C6012418プロパティと監査済み標準footprintは正式反映済みである。
+残る主な回路図property候補はJ1のLCSC C3197885であるが、JAE controlled drawingとのfootprint比較を完了するまで反映しない。L1のXGL4020-472MEC / C6012418プロパティと監査済み標準footprintは正式反映済みである。
 接続変更はJ3/J2のpin mapping再照合だけであり、AP63203のEN/FB/BST接続、USB、SEN66直結J1、
 キャリアのC1/C2/R1/R2/TP1–TP4は変更予定がない。実装方向、footprint監査、DC-bias一次資料、
 JLC調達証跡はPhase 3Bまたは発注前ゲートで解消する。J3/J2は同時更新・再生成・ERC/PDF確認まで完了し、
@@ -199,7 +199,7 @@ headerの型式とside-entry TH方針は確定し、J3/J2の回路図統合も�
 | --- | --- | --- | --- |
 | MCU | ESP32-C3-MINI-1-H4X / C41349510 | ESP32-C3-MINI-1-N4X（承認・再照合必須） | JLC PCBA候補 |
 | 3V3 buck | AP63203WU-7 / C780769 | — | L1電気選定済み。調達・FPとMLCC実効容量確認待ち |
-| USB-C | JAE DX07S016JA1R1500 / C3197885 | — | Electrical ACCEPT、mechanical/footprint/procurement VERIFY、製造リリースBLOCKED |
+| USB-C | JAE DX07S016JA1R1500 / C3197885（候補） | — | Electrical ACCEPT。USB2 pad mapping確認済み、JAE controlled land/board-edge/3D・調達VERIFY、製造リリースBLOCKED。 |
 | USB ESD | ST USBLC6-2SC6 / C7519 | — | Electrical ACCEPT、JLC実装・配置VERIFY |
 | USB PTC | Bourns MF-MSMF110-2 | — | Electrical ACCEPT、thermal/startup/procurement VERIFY |
 | USB CC | 5.1 kΩ ×2、独立Rd | — | Electrical ACCEPT、調達VERIFY |

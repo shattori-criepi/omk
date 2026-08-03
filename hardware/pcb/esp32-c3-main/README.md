@@ -47,7 +47,7 @@ Git管理するEspressifシンボルは `symbols/Espressif.kicad_sym`、公式fo
 | --- | --- | --- | --- | --- |
 | U1 | Espressif ESP32-C3-MINI-1-H4X | C41349510 | `Espressif:ESP32-C3-MINI-1` | 採用候補。JLC実装可否・在庫は発注時確認。 |
 | U2 | Diodes AP63203WU-7 | C780769 | `Package_TO_SOT_SMD:TSOT-23-6` | 3.3 V/2 A buck候補。参照回路・在庫を最終照合。 |
-| J1 | JAE DX07S016JA1R1500 | C3197885 | `Connector_USB:USB_C_Receptacle_JAE_DX07S016JA1R1500` | Electrical ACCEPT。機械/footprint/調達VERIFY。 |
+| J1 | JAE DX07S016JA1R1500 | C3197885（候補、回路図propertyは未変更） | `Connector_USB:USB_C_Receptacle_JAE_DX07S016JA1R1500` | Electrical ACCEPT。標準footprintのUSB2 pad mappingは確認済みだが、JAE `SJ121837`のland/board-edge照合、3D/機構、調達はVERIFY。製造リリースBLOCKED。 |
 | D1 | ST USBLC6-2SC6 | C7519 | `Package_TO_SOT_SMD:SOT-23-6` | USB ESD候補。 |
 | J2 | JST SM04B-SRSS-TB(LF)(SN) | C160404 | `Connector_JST:JST_SH_SM04B-SRSS-TB_1x04-1MP_P1.00mm_Horizontal` | Qwiic。 |
 | J3 | JST S4B-PH-K-S(LF)(SN) | C157926 | `Connector_JST:JST_PH_S4B-PH-K_1x04_P2.00mm_Horizontal` | キャリアJ2と同一変更セットで統合済み。物理向き/3D/mechanicalはPhase 3B VERIFY。 |
@@ -65,7 +65,7 @@ Espressif symbol/footprint library設定に関するもので、J3統合によ�
 ## Phase 3へ進む前の確認
 
 - L1のJLC調達、3D/short-start lead向き確認、C1/C4/C5の公式DC-bias曲線、AP63203 EVMとのpin-by-pin照合を完了する。
-- J1、D1、J2、U1の現時点のJLC在庫・PCBA可否・CPL回転を確認する。
+- J1のJAE `SJ121837`、`JACS-30413`、`JAHL-30353-1`を取得し、land、shell/NPTH、board-edge datum、mating/rework clearanceを `usb-c-j1-footprint-audit.md` と照合する。J1、D1、J2、U1の現時点のJLC在庫・PCBA可否・CPL回転も確認する。
 - U1のアンテナkeepout、露出GND pad/thermal via、USB差動対、buck SWノードをPCBレビューする。
 - USB shieldの筐体/FG方針、J3の逆挿し対策、DNP部品の実装方針を承認する。
 - J3/J2は裸2.54 mm案からJST `S4B-PH-K-S(LF)(SN)` / C157926へ双方同時変更済み。pin 1=3V3、2=GND、3=SDA、4=SCLを維持し、再生成/ERC/PDF確認済み。PCB上の回転・ハーネス外形・3D/mechanical確認はPhase 3Bで行う（詳細は `../jst-ph-header-selection.md`）。

@@ -13,7 +13,7 @@ The direct land audit is recorded in [xgl4020-footprint-audit.md](xgl4020-footpr
 
 ## USB input/protection scope
 
-See [usb-power-review.md](usb-power-review.md). J1 DX07S016JA1R1500/C3197885, F1 MF-MSMF110-2, D1 USBLC6-2SC6/C7519 and R1/R2 5.1 kΩ are electrical ACCEPT; JLC live assembly status and footprint/placement audits remain manufacturing-release checks. R3 is 0 Ω DNP tuning option.
+See [usb-power-review.md](usb-power-review.md) and [usb-c-j1-footprint-audit.md](usb-c-j1-footprint-audit.md). J1 DX07S016JA1R1500 (LCSC candidate C3197885), F1 MF-MSMF110-2, D1 USBLC6-2SC6/C7519 and R1/R2 5.1 kΩ are electrical ACCEPT. J1's named KiCad USB2 footprint is retained for review, but official `SJ121837` land/board-edge evidence, 3D/mechanical evidence and JLC live assembly eligibility remain manufacturing-release checks. R3 is 0 Ω DNP tuning option; this review did not modify BOM/CPL data.
 
 ## Interconnect scope
 

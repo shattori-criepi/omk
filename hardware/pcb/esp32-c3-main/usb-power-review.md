@@ -8,7 +8,7 @@ The formal schematic labels all J1 VBUS pins `+5V_USB`, all A1/A12/B1/B12 GND, A
 
 ## J1
 
-**Maintain JAE DX07S016JA1R1500 / LCSC C3197885 as the electrical recommendation.** It is a current JAE 16-position USB 2.0 SMD right-angle receptacle; LCSC lists it as USB 2.0 SMD. Official: https://products.jae.com/jp/ja/connectors/category/io/dx07-receptacle/dx07s016ja1r1500/ ; LCSC: https://www.lcsc.com/product-detail/C3197885.html . The assigned KiCad footprint name exactly matches the MPN, but Mechanical/package and Footprint remain VERIFY until the JAE drawing confirms board edge, shell stakes, NPTH, recommended land, paste/mask, courtyard, pin 1 and 3D model. JLC PCBA class/live stock: VERIFY.
+**Maintain JAE DX07S016JA1R1500 / LCSC candidate C3197885 as the electrical recommendation.** It is an active JAE 16-position USB 2.0 one-row SMT receptacle. The product page identifies drawing `SJ121837`, specification `JACS-30413` and handling instructions `JAHL-30353-1`, but their controlled contents were not anonymously retrievable on 2026-08-03 JST. The assigned KiCad footprint name exactly matches the MPN and its USB2 pad mapping is coherent; its official signal/shell/NPTH land geometry, board-edge datum, paste/mask and 3D/mechanical envelope remain VERIFY until those JAE records are obtained. JLCPCB publicly lists C3197885 as Extended / SMT Assembly / Economic and Standard / High assembly difficulty / MSL 1, but live order-flow, fixture and CPL status remain VERIFY. See [usb-c-j1-footprint-audit.md](usb-c-j1-footprint-audit.md); this audit makes no circuit or footprint change.
 
 ## CC
 
@@ -32,7 +32,7 @@ C1 10 µF + C2 100 nF are after F1 and are appropriate local buck input decoupli
 
 | Item | Electrical | Procurement | Footprint | PCB layout | Manufacturing release |
 | --- | --- | --- | --- | --- | --- |
-| J1 | ACCEPT | VERIFY | VERIFY | VERIFY | BLOCKED |
+| J1 | ACCEPT | VERIFY | VERIFY (official `SJ121837` land/edge comparison pending) | CONDITIONAL GO for electrical planning; mechanical edge freeze VERIFY | BLOCKED |
 | F1 | ACCEPT | VERIFY | ACCEPT | VERIFY | BLOCKED |
 | D1 | ACCEPT | VERIFY | ACCEPT | VERIFY | BLOCKED |
 | R1/R2 | ACCEPT | VERIFY | ACCEPT | VERIFY | BLOCKED |
