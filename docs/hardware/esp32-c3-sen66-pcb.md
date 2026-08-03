@@ -157,6 +157,16 @@ J1はJAE DX07S016JA1R1500（LCSC C3197885）、F1はBourns MF-MSMF110-2、D1はS
 
 Phase 3Aの電気的L1推奨は Coilcraft XGL4020-472MEC（4.7 µH、Isat 3.0 A/20% drop、Irms 5.6 A/40°C rise）である。ただしJLC実装可否と正規footprintは購入・Phase 3B前にVERIFYする。C1/C4/C5のMurata DC-bias実効容量は公式SimSurfing曲線を未取得のため数値確定せず、製造リリースBLOCKERとして維持する。
 
+### Phase 3A release-review結果
+
+Phase 3Aで確定した電気的部品・pin mappingと、回路図へ反映する変更セットを
+`hardware/pcb/phase-3a-release-review.md` に固定した。主な変更対象はmain J3とcarrier J2の
+JST PH同時変更、L1のXGL4020-472MECプロパティと正式footprint、J1のLCSCプロパティである。
+接続変更はJ3/J2のpin mapping再照合だけであり、AP63203のEN/FB/BST接続、USB、SEN66直結J1、
+キャリアのC1/C2/R1/R2/TP1–TP4は変更予定がない。実装方向、footprint監査、DC-bias一次資料、
+JLC調達証跡はPhase 3Bまたは発注前ゲートで解消する。これらの変更を実装・再生成・ERC/PDF確認するまで、
+PCBレイアウト開始および製造リリースはBLOCKEDである。
+
 ## 概略回路
 
 ```text

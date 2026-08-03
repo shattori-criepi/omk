@@ -5,7 +5,8 @@ KiCad 9.0.8用のメイン基板回路図である。PCBレイアウト、BOM/CP
 メーカー型番、LCSC番号、Footprint、選定メモはシンボルプロパティとして保持するが、PDFには
 Referenceと簡潔なValue以外を表示しない。ESP32-C3のアンテナkeepoutはPCB Phaseで確認する。
 電源の現行仕様は AP63203WU-7 / C780769、C1=10uF、C2=100nF、C3=100nF BST–SW、
-L1=4.7uH、C4/C5=22uF×2であり、L1 MPNとMLCC DCバイアスはPhase 3A BLOCKERである。
+L1=4.7uH、C4/C5=22uF×2である。L1の電気的MPNはCoilcraft XGL4020-472MECへ選定済みだが、
+JLC調達と正式footprintはBLOCKERである。C1/C4/C5のMLCC DCバイアスもBLOCKERである。
 詳細は [power-review.md](power-review.md) を正とする。R6/R7は4.7kΩ DNPで、キャリアR1/R2も同じDNP選択肢である。
 
 ## 再生成と検証
@@ -33,7 +34,7 @@ Git管理するEspressifシンボルは `symbols/Espressif.kicad_sym`、公式fo
 | ブロック | 実装内容 |
 | --- | --- |
 | USB-C | J1、VBUS PTC F1、CC1/CC2の5.1 kΩ Rd、USBLC6-2SC6 ESD、入力10 µF/100 nF、SBU NC、R3 0 Ω DNP shield option |
-| 電源 | AP63203WU-7（3.3 V/2 A候補）、BST C3、4.7 µH L1、出力22 µF×2。L1品番は未確定。 |
+| 電源 | AP63203WU-7（3.3 V/2 A）、BST C3、4.7 µH L1、出力22 µF×2。L1電気的MPNはXGL4020-472MEC、調達・footprintは未確定。 |
 | MCU | ESP32-C3-MINI-1-H4X、3V3デカップリング、GPIO18/19 USB、GPIO6/7 I2C、GPIO9 BOOT、GPIO20/21 UART。NC/GND padを明示。 |
 | BOOT/RESET | ENの10 kΩ pull-up、1 µF、RESETスイッチ、GPIO9の10 kΩ pull-up、BOOTスイッチ。 |
 | I2C/外部 | 4.7 kΩ DNP pull-up、SEN66 1×4 J3、Qwiic JST SH J2、SDA/SCL TP。 |
@@ -45,11 +46,11 @@ Git管理するEspressifシンボルは `symbols/Espressif.kicad_sym`、公式fo
 | --- | --- | --- | --- | --- |
 | U1 | Espressif ESP32-C3-MINI-1-H4X | C41349510 | `Espressif:ESP32-C3-MINI-1` | 採用候補。JLC実装可否・在庫は発注時確認。 |
 | U2 | Diodes AP63203WU-7 | C780769 | `Package_TO_SOT_SMD:TSOT-23-6` | 3.3 V/2 A buck候補。参照回路・在庫を最終照合。 |
-| J1 | JAE DX07S016JA1R1500 | TBD | `Connector_USB:USB_C_Receptacle_JAE_DX07S016JA1R1500` | USB2.0 sink候補。 |
+| J1 | JAE DX07S016JA1R1500 | C3197885 | `Connector_USB:USB_C_Receptacle_JAE_DX07S016JA1R1500` | Electrical ACCEPT。機械/footprint/調達VERIFY。 |
 | D1 | ST USBLC6-2SC6 | C7519 | `Package_TO_SOT_SMD:SOT-23-6` | USB ESD候補。 |
 | J2 | JST SM04B-SRSS-TB(LF)(SN) | C160404 | `Connector_JST:JST_SH_SM04B-SRSS-TB_1x04-1MP_P1.00mm_Horizontal` | Qwiic。 |
-| J3 | 2.54 mm 1×4 RA socket | TBD | `Connector_PinHeader_2.54mm:PinHeader_1x04_P2.54mm_Horizontal` | 手実装候補。品番未確定。 |
-| L1 | 4.7 µH、Isat ≥2.5 A | TBD | `Inductor_SMD:L_Vishay_IHLP-2020` | 実部品・飽和電流未確定。 |
+| J3 | JST PH 4ピン（header MPN/orientation未確定） | TBD | 未確定。現行2.54 mm footprintは置換対象。 | キャリアJ2と同時変更。 |
+| L1 | Coilcraft XGL4020-472MEC | TBD | 未確定。現行`Inductor_SMD:L_Vishay_IHLP-2020`は不一致。 | Electrical ACCEPT、調達/footprint BLOCKER。 |
 
 R3、R6/R7、R8/D2はDNP選択肢である。USB shieldのR3実装、I2C pull-up実装、LED実装は実機レビュー後に決定する。
 
@@ -62,9 +63,10 @@ R3、R6/R7、R8/D2はDNP選択肢である。USB shieldのR3実装、I2C pull-up
 
 ## Phase 3へ進む前の確認
 
-- U2/L1/L/CをAP63203WU-7の最新データシート推奨値、発熱、JLC在庫で確定する。
+- L1のJLC調達・正式footprint、C1/C4/C5の公式DC-bias曲線、AP63203 EVMとのpin-by-pin照合を完了する。
 - J1、D1、J2、U1の現時点のJLC在庫・PCBA可否・CPL回転を確認する。
 - U1のアンテナkeepout、露出GND pad/thermal via、USB差動対、buck SWノードをPCBレビューする。
 - USB shieldの筐体/FG方針、J3の逆挿し対策、DNP部品の実装方針を承認する。
 - J3/J2は裸2.54 mm案を量産へ持ち込まず、JST PH 4ピンへ双方同時変更する（詳細は `../interconnect-review.md`）。
+- 回路図へ反映する変更順序とPhase 3Bゲートは [`../phase-3a-release-review.md`](../phase-3a-release-review.md) を正とする。
 - 実機でUSB CDC、書込み、BOOT、SEN66、Wi-Fi/MQTT、電源リップルを評価する。
