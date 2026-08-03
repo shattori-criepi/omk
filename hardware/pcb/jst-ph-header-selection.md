@@ -58,12 +58,12 @@ Completed; see [jst-ph-footprint-audit.md](jst-ph-footprint-audit.md). The 2D fo
 
 ### Task B — schematic consolidation
 
-Task B may start: update main J3 and carrier J2 together, update both generators and properties, preserve the fixed net mapping, regenerate both schematics, run ERC, export PDF/SVG and complete GUI review. Use MPN `S4B-PH-K-S(LF)(SN)`, LCSC `C157926` and `Connector_JST:JST_PH_S4B-PH-K_1x04_P2.00mm_Horizontal`. The separate L1 footprint issue may proceed in its own change set; it is not a dependency of this JST PH schematic update.
+Task B is complete: main J3 and carrier J2 were updated together through their generators, with MPN `S4B-PH-K-S(LF)(SN)`, LCSC `C157926` and `Connector_JST:JST_PH_S4B-PH-K_1x04_P2.00mm_Horizontal`. The fixed mapping was preserved and both formal schematics were regenerated; main ERC is 0 errors / 2 existing U1-library warnings, carrier ERC is 0 errors / 0 warnings, and PDF/SVG outputs were regenerated. The separate L1 footprint issue may proceed in its own change set.
 
 ## Status and remaining blockers
 
 | Item | Electrical | MPN | 2D Footprint | 3D/Mechanical | Procurement | Schematic consolidation | PCB placement/orientation | Manufacturing release |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| main J3 / carrier J2, S4B-PH-K-S(LF)(SN) | ACCEPT | ACCEPT | ACCEPT | VERIFY | VERIFY | GO | Phase 3B | BLOCKED |
+| main J3 / carrier J2, S4B-PH-K-S(LF)(SN) | ACCEPT | ACCEPT | ACCEPT | VERIFY | VERIFY | COMPLETE | Phase 3B | BLOCKED |
 
 Remaining evidence for release: Phase 3B STEP/drawing-view, body/opening, mating-space, cable bend/airflow/antenna/strain-relief checks; JLC finished-hole/annular-ring, order-time stock, price, Extended classification, fixture/PCBA confirmation and CPL rotation.

@@ -49,15 +49,15 @@ Git管理するEspressifシンボルは `symbols/Espressif.kicad_sym`、公式fo
 | J1 | JAE DX07S016JA1R1500 | C3197885 | `Connector_USB:USB_C_Receptacle_JAE_DX07S016JA1R1500` | Electrical ACCEPT。機械/footprint/調達VERIFY。 |
 | D1 | ST USBLC6-2SC6 | C7519 | `Package_TO_SOT_SMD:SOT-23-6` | USB ESD候補。 |
 | J2 | JST SM04B-SRSS-TB(LF)(SN) | C160404 | `Connector_JST:JST_SH_SM04B-SRSS-TB_1x04-1MP_P1.00mm_Horizontal` | Qwiic。 |
-| J3 | JST S4B-PH-K-S(LF)(SN) | C157926 | `Connector_JST:JST_PH_S4B-PH-K_1x04_P2.00mm_Horizontal`候補。現行2.54 mm footprintは置換対象。 | キャリアJ2と同時変更。物理向き/footprint監査はVERIFY。 |
+| J3 | JST S4B-PH-K-S(LF)(SN) | C157926 | `Connector_JST:JST_PH_S4B-PH-K_1x04_P2.00mm_Horizontal` | キャリアJ2と同一変更セットで統合済み。物理向き/3D/mechanicalはPhase 3B VERIFY。 |
 | L1 | Coilcraft XGL4020-472MEC | TBD | 未確定。現行`Inductor_SMD:L_Vishay_IHLP-2020`は不一致。 | Electrical ACCEPT、調達/footprint BLOCKER。 |
 
 R3、R6/R7、R8/D2はDNP選択肢である。USB shieldのR3実装、I2C pull-up実装、LED実装は実機レビュー後に決定する。
 
 ## ERC
 
-正式回路図のKiCad CLI ERCは **0 errors / 1 warning**。警告は埋め込み済みU1シンボルとプロジェクト内の
-公式Espressifライブラリ版の比較差異（`lib_symbol_mismatch`）だけで、全ピン番号は生成前検証済みである。
+正式回路図のKiCad CLI ERCは **0 errors / 2 warnings**。警告はいずれもU1のプロジェクト内
+Espressif symbol/footprint library設定に関するもので、J3統合による警告はない。全ピン番号は生成前検証済みである。
 `kicad-sch-api`が現行KiCad 9/10形式の公式ライブラリを正しく埋め込めないため、公式KiCad 7互換版を使用したことに由来する。
 意図的に残し、GUI目視確認時にU1の53ピンとfootprint対応を再照合する。`erc-report.txt`を参照。
 
@@ -67,6 +67,6 @@ R3、R6/R7、R8/D2はDNP選択肢である。USB shieldのR3実装、I2C pull-up
 - J1、D1、J2、U1の現時点のJLC在庫・PCBA可否・CPL回転を確認する。
 - U1のアンテナkeepout、露出GND pad/thermal via、USB差動対、buck SWノードをPCBレビューする。
 - USB shieldの筐体/FG方針、J3の逆挿し対策、DNP部品の実装方針を承認する。
-- J3/J2は裸2.54 mm案を量産へ持ち込まず、JST `S4B-PH-K-S(LF)(SN)` / C157926へ双方同時変更する。公式図面対KiCad footprint監査後は回路図統合CONDITIONAL GOであり、PCB上の回転・ハーネス外形確認はPhase 3Bで行う（詳細は `../jst-ph-header-selection.md`）。
+- J3/J2は裸2.54 mm案からJST `S4B-PH-K-S(LF)(SN)` / C157926へ双方同時変更済み。pin 1=3V3、2=GND、3=SDA、4=SCLを維持し、再生成/ERC/PDF確認済み。PCB上の回転・ハーネス外形・3D/mechanical確認はPhase 3Bで行う（詳細は `../jst-ph-header-selection.md`）。
 - 回路図へ反映する変更順序とPhase 3Bゲートは [`../phase-3a-release-review.md`](../phase-3a-release-review.md) を正とする。
 - 実機でUSB CDC、書込み、BOOT、SEN66、Wi-Fi/MQTT、電源リップルを評価する。

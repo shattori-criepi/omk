@@ -43,7 +43,7 @@ The MPN/form factor and electrical mapping are fixed. PCB coordinates and rotati
 ## Approved schematic-change set and order
 
 1. Task A audit is recorded in `jst-ph-footprint-audit.md`: pads 1–4, pitch, 0.75 mm drill geometry, Pad-1 identification and 2D body mapping pass. The standard KiCad footprint is ACCEPT; missing STEP/drawing-view and finished-hole evidence are later gates.
-2. **Task B is GO:** update both generators and formal schematics together with S4B-PH-K-S(LF)(SN), C157926 and the accepted KiCad footprint. Preserve the pin mapping; regenerate and rerun ERC. PCB coordinates/rotations are not prerequisites.
+2. **Task B complete:** both generators and formal schematics were updated together with S4B-PH-K-S(LF)(SN), C157926 and the accepted KiCad footprint. The pin mapping was preserved; main ERC is 0 errors / 2 existing U1-library warnings and carrier ERC is 0 errors / 0 warnings. PCB coordinates/rotations remain Phase 3B work.
 3. Obtain Coilcraft XGL4020 drawing/land pattern; create/audit local footprint, then update L1 MPN, note and footprint. The present IHLP-2020 footprint must not be reused.
 4. Complete J1 drawing-to-footprint audit, then set its LCSC property to C3197885 if it passes.
 5. Normalize manufacturer, MPN, LCSC, DNP, assembly, status and release-note properties for F1, D1, R1/R2, R3 and C1/C4/C5 without changing nets.
@@ -65,7 +65,7 @@ This plan selects side-entry TH S4B-PH-K-S(LF)(SN). Its schematic update is inde
 | F1 | MF-MSMF110-2 electrical ACCEPT | High-temp derating, voltage drop/heat, inrush/simultaneous-start test; JLC listing. | Prototype/purchase | Yes | Lab/procurement. |
 | D1 | USBLC6-2SC6 electrical ACCEPT | JLC class/live listing, placement/return audit. | Purchase/Phase 3B | Yes | Procurement/layout. |
 | ESP32-C3 | H4X selected | H4X stock/PCBA condition, 53-pin/footprint audit, exposed-pad vias and antenna keepout. | Phase 3B/purchase | Yes | Hardware/layout. |
-| J3/J2 | S4B-PH-K-S(LF)(SN) selected, side-entry TH | 2D footprint accepted; 3D/drawing-view, finished-hole/annular-ring, JLC order-time evidence, CPL rotation and cable exit/strain relief are later gates. | Task B / Phase 3B / purchase | Yes | Hardware/mechanical. |
+| J3/J2 | S4B-PH-K-S(LF)(SN) integrated in both schematics, side-entry TH | 2D footprint accepted; 3D/drawing-view, finished-hole/annular-ring, JLC order-time evidence, CPL rotation and cable exit/strain relief are later gates. | Phase 3B / purchase | Yes | Hardware/mechanical. |
 | Mechanics | Coplanar boards, 40 mm harness | Board outlines, M3, SEN66 retainer/airflow, thermal separation and STEP interference. | Phase 3B | Yes | Mechanical/layout. |
 
 ## Phase gates
@@ -73,7 +73,7 @@ This plan selects side-entry TH S4B-PH-K-S(LF)(SN). Its schematic update is inde
 | Gate | Must be complete |
 | --- | --- |
 | Phase 3A complete | **Complete:** component selection and change plan are complete; manufacturing blockers are explicit. |
-| Schematic consolidation | **GO:** update both boards together with the accepted standard footprint, preserve mapping and regenerate/ERC both schematics. |
+| Schematic consolidation | **Complete:** both boards use the accepted standard footprint; mapping was preserved and both schematics regenerated/ERC checked. |
 | Phase 3B layout | Exact placement, connector rotation/opening direction, outlines, cable bend/airflow/antenna clearance, USB impedance/trace geometry, thermal vias, CPL rotation and 3D interference. |
 | Immediately before order | JLC stock, Basic/Extended, price, PCBA eligibility, MOQ/alternates, approved footprint audits and DC-bias evidence. |
 | Prototype evaluation | PTC startup, shield population, ripple, SEN66 voltage drop/temperature offset, EMI/ESD, USB CDC/upload, Wi-Fi/MQTT and 24-hour run. |

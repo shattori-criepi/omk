@@ -160,11 +160,12 @@ Phase 3Aの電気的L1推奨は Coilcraft XGL4020-472MEC（4.7 µH、Isat 3.0 A/
 ### Phase 3A release-review結果
 
 Phase 3Aで確定した電気的部品・pin mappingと、回路図へ反映する変更セットを
-`hardware/pcb/phase-3a-release-review.md` に固定した。主な変更対象はmain J3とcarrier J2の
-JST PH同時変更、L1のXGL4020-472MECプロパティと正式footprint、J1のLCSCプロパティである。
+`hardware/pcb/phase-3a-release-review.md` に固定した。main J3とcarrier J2のJST PH同時変更は完了し、
+両方にS4B-PH-K-S(LF)(SN) / C157926 / `Connector_JST:JST_PH_S4B-PH-K_1x04_P2.00mm_Horizontal`を反映した。
+残る主な変更対象はL1のXGL4020-472MECプロパティと正式footprint、J1のLCSCプロパティである。
 接続変更はJ3/J2のpin mapping再照合だけであり、AP63203のEN/FB/BST接続、USB、SEN66直結J1、
 キャリアのC1/C2/R1/R2/TP1–TP4は変更予定がない。実装方向、footprint監査、DC-bias一次資料、
-JLC調達証跡はPhase 3Bまたは発注前ゲートで解消する。J3/J2は公式footprint監査後に同時更新・再生成・ERC/PDF確認するCONDITIONAL GOであり、
+JLC調達証跡はPhase 3Bまたは発注前ゲートで解消する。J3/J2は同時更新・再生成・ERC/PDF確認まで完了し、
 PCB配置の回転・座標はPhase 3Bで決定する。製造リリースはBLOCKEDである。
 
 ## 概略回路
@@ -190,7 +191,7 @@ USB-C は sink 専用（CC1/CC2 とも 5.1 kΩ Rd）、VBUS保護、シールド
 
 Phase 3Aレビューでは、裸2.54 mm 1×4案は逆挿し防止がないため**不採用**とした。Rev.Aの基板側ヘッダは、メイン基板J3とキャリア基板J2共通でJST `S4B-PH-K-S(LF)(SN)`（side-entry TH、LCSC/JLCPCB `C157926`）を選定した。ハウジングはPHR-4、コンタクトはSPH-002T-P0.5Sである。ハーネスは両端を雌ハウジングとし、PHR-4×2、コンタクト×8、AWG26–28より線×4、完成長40 mmを標準とする。電気的にはSEN66 350 mA peakに対してPHの2 A定格で余裕がある。
 
-headerの型式とside-entry TH方針は確定した。J3/J2の回路図統合は、JST公式図面対KiCad footprint監査、両基板の同一変更セット、pin 1=3V3/2=GND/3=SDA/4=SCL維持、再生成/ERCを条件とするCONDITIONAL GOである。PCB上の回転・座標、両開口を基板間の隙間へ向けたケーブル束の曲げ、SEN66 airflow、基板間距離、手はんだ性、JLCPCBA治具対応はPhase 3B PCB layoutで確認する。製造リリースはBLOCKEDである。詳細は `hardware/pcb/jst-ph-header-selection.md` および `hardware/pcb/interconnect-review.md`。
+headerの型式とside-entry TH方針は確定し、J3/J2の回路図統合も完了した。両基板でpin 1=3V3/2=GND/3=SDA/4=SCLを維持し、main ERCは0 errors / U1 library警告2件、carrier ERCは0 errors / 0 warnings、PDF/SVG出力は成功した。PCB上の回転・座標、両開口を基板間の隙間へ向けたケーブル束の曲げ、SEN66 airflow、基板間距離、手はんだ性、JLCPCBA治具対応はPhase 3B PCB layoutで確認する。製造リリースはBLOCKEDである。詳細は `hardware/pcb/jst-ph-header-selection.md` および `hardware/pcb/interconnect-review.md`。
 
 ## 採用予定部品
 

@@ -63,7 +63,7 @@ For Phase 3B, place the **Fab body**, not the courtyard, within the board outlin
 | Standard KiCad footprint | **ACCEPT:** `Connector_JST:JST_PH_S4B-PH-K_1x04_P2.00mm_Horizontal` |
 | Pad OD / annular ring | Manufacturing VERIFY — official catalogue has no pad-OD requirement; selected fabricator rules apply. |
 | 3D model availability | Phase 3B mechanical VERIFY — unavailable in this installed environment. |
-| Schematic consolidation | **GO:** update main J3 and carrier J2 together, preserve mapping and regenerate/ERC both schematics. |
+| Schematic consolidation | **COMPLETE:** main J3 and carrier J2 were updated together, mapping preserved, then both schematics regenerated/ERC checked. |
 | Manufacturing release | **BLOCKED:** procurement, fabrication, PCBA and layout gates remain. |
 
 No local footprint creation is authorized or justified by this audit. The missing 3D asset is an environment/package gap, not proof that the 2D footprint is wrong. STEP/WRL installation, model origin/height/opening direction, mating insertion space, cable bend clearance, board-edge placement, airflow, antenna clearance and strain relief are Phase 3B mechanical checks. JLC drill/finished-hole treatment, annular-ring rule, wave-solder fixture, order-time PCBA eligibility, stock/price and CPL rotation are manufacturing checks.
