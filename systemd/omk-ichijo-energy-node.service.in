@@ -1,0 +1,22 @@
+[Unit]
+Description=OMK Ichijo ECHONET Lite energy node
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@OMK_USER@
+Group=@OMK_GROUP@
+WorkingDirectory=@OMK_ROOT@/services/ichijo-energy-node
+Environment=TZ=Asia/Tokyo
+Environment=PYTHONPATH=@OMK_ROOT@/services/ichijo-energy-node/src
+EnvironmentFile=/etc/omk/ichijo-energy-node.env
+ExecStart=@OMK_ROOT@/services/ichijo-energy-node/.venv/bin/python -m ichijo_energy_node
+Restart=always
+RestartSec=10s
+TimeoutStopSec=30s
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
