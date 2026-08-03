@@ -14,7 +14,7 @@ Side-entry TH is preferred over vertical TH because the boards are coplanar and 
 
 | Source | Confirmed information |
 | --- | --- |
-| JST, [PH connector catalogue (ePH.pdf)](https://www.jst-mfg.com/product/pdf/eng/ePH.pdf), retrieved 2026-08-03 JST | PH is 2.00 mm; S4B-PH-K-S is the four-circuit side-entry TH header; 2 A AC/DC (AWG24), 100 V AC/DC, −25 to +85 °C, AWG32–24, PCB thickness 0.8–1.6 mm. It identifies `S` as side-entry, shows a No. 1 circuit mark, and states the `(LF)(SN)` label notation. The illustrated TH layout uses 2.00 mm pitch and 0.7 mm finished-hole guidance; JST notes the hole size depends on board material/process. |
+| JST, [PH connector catalogue (ePH.pdf)](https://www.jst-mfg.com/product/pdf/eng/ePH.pdf), retrieved 2026-08-03 JST | PH is 2.00 mm; S4B-PH-K-S is the four-circuit side-entry TH header; 2 A AC/DC (AWG24), 100 V AC/DC, −40 to +105 °C, AWG32–24, PCB thickness 0.8–1.6 mm. It identifies `S` as side-entry, shows a No. 1 circuit mark, and states the `(LF)(SN)` label notation. The illustrated TH layout uses 2.00 mm pitch and `φ0.7 +0.1/0` hole guidance; JST notes the hole size depends on board material/process. |
 | [JST PH product page](https://www.jst-mfg.com/product/index.php?lang=2&series=199), retrieved 2026-08-03 JST | Lists B4B-PH-K-S, S4B-PH-K-S and PH SMT header families. |
 | [LCSC C157926](https://www.lcsc.com/product-detail/Wire-To-Board-Wire-To-Wire-Connector_JST-Sales-America_S4B-PH-K-S-LF-SN_JST-Sales-America-S4B-PH-K-S-LF-SN_C157926.html), checked 2026-08-03 JST | MPN, 4-position right-angle TH form, and live-stock snapshot. Live data is non-binding. |
 | [JLCPCB C157926](https://jlcpcb.com/partdetail/JST_SalesAmerica-S4B_PH_K_S_LF_SN/C157926), checked 2026-08-03 JST | Extended part; wave-solder assembly, Economic/Standard PCBA listing; JLC says a PCB-assembly fixture is required. Live listing, price and eligibility must be rechecked at order. |
@@ -38,7 +38,7 @@ The installed KiCad 9 library contains the exact candidate footprint:
 Connector_JST:JST_PH_S4B-PH-K_1x04_P2.00mm_Horizontal
 ```
 
-It has pads 1–4 at 2.00 mm pitch, through-hole attributes, silkscreen No. 1 indication, courtyard/fab layers and a matching STEP model. This is a **footprint candidate, not yet ACCEPT**: before schematic update, compare pad position/diameter, outline, pin-1 mark, board-edge clearance, solder access and 3D body against the controlled JST drawing. The current generic 2.54 mm footprints on J3/J2 are CHANGE.
+It has pads 1–4 at 2.00 mm pitch, through-hole attributes, silkscreen No. 1 indication, courtyard/fab layers and a STEP-model reference. This is a **footprint candidate, not yet ACCEPT**: before schematic update, compare pad position/diameter, outline, pin-1 mark, board-edge clearance, solder access and 3D body against the controlled JST drawing. The current generic 2.54 mm footprints on J3/J2 are CHANGE.
 
 Place each header on the board edge facing the inter-board gap. Reserve a cable-exit corridor at least the connector body/depth plus the minimum bend envelope; final clearance is a Phase 3B mechanical check. Keep the J3 corridor away from the ESP32 antenna keepout and keep the J2 corridor, strain relief and harness out of the SEN66 intake/exhaust region. Add board silk: Pin-1 triangle, `1 3V3`, `2 GND`, `3 SDA`, `4 SCL`, connector outline and a cable-exit arrow.
 
@@ -48,22 +48,22 @@ The selected electrical harness is **1:1**: pin 1→pin 1, pin 2→pin 2, pin 3�
 
 The following are Phase 3B placement/mechanical checks: opposing-edge opening direction, any bundle-level bend or gentle turn, bend radius, airflow, antenna clearance, strain relief, silk reading direction and CPL rotation. A bundle may turn as a whole; it does not require changing individual conductor order.
 
-**Schematic consolidation is CONDITIONAL GO.** Before it, pass Task A below and update J3/J2 as one change set. Manufacturing release remains BLOCKED pending the broader layout, procurement and prototype evidence.
+Task A was executed on 2026-08-03. Pad numbering, 2.00 mm pitch, 0.75 mm drill geometry, Pad-1 identification and 2D body mapping pass; the standard KiCad footprint is accepted. **Schematic consolidation is GO.** See [jst-ph-footprint-audit.md](jst-ph-footprint-audit.md). The missing STEP model is an environment-package gap and is a Phase 3B mechanical VERIFY, not a schematic blocker. Manufacturing release remains BLOCKED pending layout, procurement and prototype evidence.
 
 ## Next work
 
 ### Task A — footprint audit
 
-Compare the JST ePH drawing and `Connector_JST:JST_PH_S4B-PH-K_1x04_P2.00mm_Horizontal`: pads 1–4, 2.00 mm pitch, drill and pad diameters, body outline, Pin-1 mark, fab/courtyard/silkscreen, 3D model and board-edge condition. Record pass/fail; do not alter files during the audit.
+Completed; see [jst-ph-footprint-audit.md](jst-ph-footprint-audit.md). The 2D footprint is accepted; STEP/drawing-view and finished-hole convention are later mechanical/manufacturing checks.
 
 ### Task B — schematic consolidation
 
-After Task A passes: update main J3 and carrier J2 together, update both generators and properties, preserve the fixed net mapping, regenerate both schematics, run ERC, export PDF/SVG and complete GUI review. The separate L1 footprint issue may proceed in its own change set; it is not a dependency of this JST PH schematic update.
+Task B may start: update main J3 and carrier J2 together, update both generators and properties, preserve the fixed net mapping, regenerate both schematics, run ERC, export PDF/SVG and complete GUI review. Use MPN `S4B-PH-K-S(LF)(SN)`, LCSC `C157926` and `Connector_JST:JST_PH_S4B-PH-K_1x04_P2.00mm_Horizontal`. The separate L1 footprint issue may proceed in its own change set; it is not a dependency of this JST PH schematic update.
 
 ## Status and remaining blockers
 
-| Item | Electrical | MPN | Procurement | Footprint | PCB placement/orientation | Schematic consolidation | Manufacturing release |
+| Item | Electrical | MPN | 2D Footprint | 3D/Mechanical | Procurement | Schematic consolidation | PCB placement/orientation | Manufacturing release |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| main J3 / carrier J2, S4B-PH-K-S(LF)(SN) | ACCEPT | ACCEPT | VERIFY | VERIFY pending audit | Phase 3B | CONDITIONAL GO | BLOCKED |
+| main J3 / carrier J2, S4B-PH-K-S(LF)(SN) | ACCEPT | ACCEPT | ACCEPT | VERIFY | VERIFY | GO | Phase 3B | BLOCKED |
 
-Remaining evidence for release: JST-drawing-to-KiCad footprint audit; JLC order-time stock, price, Extended classification and fixture/PCBA confirmation; Phase 3B cable bend/airflow/antenna/strain-relief clearance and CPL rotation.
+Remaining evidence for release: Phase 3B STEP/drawing-view, body/opening, mating-space, cable bend/airflow/antenna/strain-relief checks; JLC finished-hole/annular-ring, order-time stock, price, Extended classification, fixture/PCBA confirmation and CPL rotation.
