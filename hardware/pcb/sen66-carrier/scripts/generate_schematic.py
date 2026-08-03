@@ -49,7 +49,7 @@ def add_optional_i2c_components(s):
   add(s,'Device:R',ref,'4.7k DNP',(x,120),'Resistor_SMD:R_0402_1005Metric','Yageo RC0402FR-074K7L',LCSC='C25900',Status='DNP optional pull-up')
   labels(s,'+3V3',[(ref,'1')]); labels(s,net,[(ref,'2')])
 def add_main_board_connector(s):
- add(s,'Connector_Generic:Conn_01x04','J2','TO MAIN J3',(205,90),'Connector_PinSocket_2.54mm:PinSocket_1x04_P2.54mm_Horizontal','2.54 mm 1x04 RA socket',Status='Hand solder; pin order matches main J3')
+ add(s,'Connector_Generic:Conn_01x04','J2','JST PH 4P',(205,90),'Connector_JST:JST_PH_S4B-PH-K_1x04_P2.00mm_Horizontal','S4B-PH-K-S(LF)(SN)',Manufacturer='JST',LCSC='C157926',Assembly='TH / hand solder or wave solder candidate',Status='Selected; manufacturing release blocked',Notes='Side-entry, keyed; main J3 matching')
  for pin,net in MAIN_J3.items(): labels(s,net,[('J2',pin)])
 def add_testpoints(s):
  for ref,net,value,pos in [('TP1','+3V3','3V3',(115,145)),('TP2','GND','GND',(130,145)),('TP3','I2C_SDA','SDA',(145,145)),('TP4','I2C_SCL','SCL',(160,145))]:

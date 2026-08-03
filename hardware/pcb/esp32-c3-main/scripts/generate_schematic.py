@@ -133,7 +133,7 @@ def add_design_notes(s: ksa.Schematic) -> None:
         ("R6/R7: optional I2C pull-ups, DNP", (260, 37)),
         ("D2/R8: status LED, DNP", (260, 44)),
         ("L1: final MPN and saturation current TBD", (260, 51)),
-        ("J1/J3: final connector MPN TBD", (260, 58)),
+        ("J1: final MPN TBD; J3: JST PH selected", (260, 58)),
     ):
         s.add_text(text, position=position, size=1.27)
 
@@ -251,7 +251,9 @@ def add_i2c_block(s: ksa.Schematic) -> None:
 
 
 def add_sen66_connector(s: ksa.Schematic) -> None:
-    add(s, "Connector_Generic:Conn_01x04", "J3", "SEN66 CARRIER", (270, 160), "Connector_PinHeader_2.54mm:PinHeader_1x04_P2.54mm_Horizontal", "TBD", Status="Manual solder; 2.54mm RA candidate")
+    add(s, "Connector_Generic:Conn_01x04", "J3", "JST PH 4P", (270, 160), "Connector_JST:JST_PH_S4B-PH-K_1x04_P2.00mm_Horizontal", "S4B-PH-K-S(LF)(SN)",
+        Manufacturer="JST", LCSC="C157926", Assembly="TH / hand solder or wave solder candidate",
+        Status="Selected; manufacturing release blocked", Notes="Side-entry, keyed; carrier J2 matching")
     labels(s, "+3V3", [("J3","1")]); labels(s, "GND", [("J3","2")]); labels(s, "I2C_SDA", [("J3","3")]); labels(s, "I2C_SCL", [("J3","4")])
 
 
