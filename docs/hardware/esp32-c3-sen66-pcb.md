@@ -141,6 +141,10 @@ C2=100 nF入力バイパスとC3=100 nF BST–SWはACCEPT、C1=10 µF入力とC4
 XGL4020-472MECを電気的に選定済みであるが、JLC調達と正式フットプリントがBLOCKERである。詳細は
 `hardware/pcb/esp32-c3-main/power-review.md` を正とする。回路図は変更していない。
 
+### Phase 3A USB-C入力・保護レビュー（2026-08-03 JST）
+
+J1はJAE DX07S016JA1R1500（LCSC C3197885）、F1はBourns MF-MSMF110-2、D1はST USBLC6-2SC6（C7519）を電気的に維持する。R1/R2は独立した5.1 kΩ Rd、R3は0 Ω DNP shield optionである。JLC実装可否・ライブ在庫、J1公式寸法とのfootprint照合、PTC起動試験、shieldのESD/EMI実測は製造リリース前の確認事項である。詳細は `usb-power-review.md` を正とする。
+
 設計負荷は SEN66 350 mA peak + ESP32-C3 Wi-Fi送信時 350 mA（設計マージン値）+ Qwiic 100 mA + LED/損失 50 mA = **850 mA** とする。よって 3V3 は連続 1 A 級、短時間余裕を含み 1.5 A 級を選定する。
 
 | 方式 | 判定 | 理由 |
@@ -181,8 +185,11 @@ USB-C は sink 専用（CC1/CC2 とも 5.1 kΩ Rd）、VBUS保護、シールド
 | --- | --- | --- | --- |
 | MCU | ESP32-C3-MINI-1-H4X / C41349510 | ESP32-C3-MINI-1-N4X（承認・再照合必須） | JLC PCBA候補 |
 | 3V3 buck | AP63203WU-7 / C780769 | — | L1電気選定済み。調達・FPとMLCC実効容量確認待ち |
-| USB-C | 16-pin USB2.0 receptacle | 同フットプリント品 | JLC PCBA候補 |
-| USB ESD | USBLC6-2SC6級 | PESD5V0S2UT級 | JLC PCBA候補 |
+| USB-C | JAE DX07S016JA1R1500 / C3197885 | — | Electrical ACCEPT、mechanical/footprint/procurement VERIFY、製造リリースBLOCKED |
+| USB ESD | ST USBLC6-2SC6 / C7519 | — | Electrical ACCEPT、JLC実装・配置VERIFY |
+| USB PTC | Bourns MF-MSMF110-2 | — | Electrical ACCEPT、thermal/startup/procurement VERIFY |
+| USB CC | 5.1 kΩ ×2、独立Rd | — | Electrical ACCEPT、調達VERIFY |
+| USB shield | R3 0 Ω DNP option | — | ESD/EMI実測までDNP OPTION |
 | Qwiic | JST SH 1×4 SM04B-SRSS-TB | 互換SH 1×4 | JLC PCBA候補 |
 | I2C pull-up | 4.7 kΩ DNP（両基板） | — | 必要箇所だけ実装 |
 | board link | 2.54 mm 1×4 RA header/socket | 極性付きJST | 手はんだ |
