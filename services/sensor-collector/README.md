@@ -20,6 +20,8 @@ Mosquittoの`omk/#`を購読し、payloadの機種別仕様を解釈せず日次
 
 JSONLへの保存成功後、正常なJSON payloadの`omk/<device_id>/power`、`sen66`、`power-flow`は、それぞれ`broute_power.json`、`sen66.json`、`ichijo_power_flow.json`として`LATEST_DATA_ROOT`へ保存します。値はJSONLと同じレコード全体で、同一ディレクトリ内の一時ファイルからatomic置換します。不正JSON、Base64 payload、`status`および対象外トピックは最新状態を更新しません。最新状態の保存に失敗しても、JSONL収集は継続します。
 
+latest JSONは置換後に`0644`へ設定するため、ホストユーザーおよび読み取り専用でマウントしたdashboardから読み取れます。
+
 ## 実行と確認
 
 ```bash
