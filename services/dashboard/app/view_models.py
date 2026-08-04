@@ -6,11 +6,12 @@ from enum import StrEnum
 from zoneinfo import ZoneInfo
 
 from app.data.parquet_repository import (
-    LatestIchijoPowerFlow,
     LatestPower,
     LatestSen66,
     ParquetRepository,
 )
+from app.data.latest_repository import LatestRepository
+from app.data.parquet_repository import LatestIchijoPowerFlow
 
 JST = ZoneInfo("Asia/Tokyo")
 NORMAL_MAX_AGE_SECONDS = 6 * 60
@@ -56,13 +57,17 @@ class DisplayViewModel:
     freshness: FreshnessStatus
 
 
-def get_display_view_model(repository: ParquetRepository, now: datetime | None = None) -> DisplayViewModel:
-    """Build a display-ready model from the latest processed measurements."""
+def get_display_view_model(
+    latest_repository: LatestRepository,
+    parquet_repository: ParquetRepository,
+    now: datetime | None = None,
+) -> DisplayViewModel:
+    """Build a display-ready model from latest JSON and daily Parquet totals."""
     current_time = _as_jst(now or datetime.now(JST))
-    power = repository.latest_power()
-    sen66 = repository.latest_sen66()
-    ichijo = repository.latest_ichijo_power_flow()
-    totals = repository.today_energy_totals(current_time.date())
+    power = latest_repository.latest_power()
+    sen66 = latest_repository.latest_sen66()
+    ichijo = latest_repository.latest_ichijo_power_flow()
+    totals = parquet_repository.today_energy_totals(current_time.date())
 
     power_freshness = freshness_for(power.measured_at if power else None, current_time)
     sen66_freshness = freshness_for(sen66.measured_at if sen66 else None, current_time)

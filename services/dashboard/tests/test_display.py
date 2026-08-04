@@ -1,3 +1,4 @@
+import json
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -5,7 +6,8 @@ from zoneinfo import ZoneInfo
 import duckdb
 from fastapi.testclient import TestClient
 
-from app.data.parquet_repository import LatestPower, LatestSen66, ParquetRepository
+from app.data.latest_repository import LatestRepository
+from app.data.parquet_repository import LatestPower, ParquetRepository
 from app.main import app
 from app.view_models import (
     FreshnessStatus,
@@ -33,25 +35,7 @@ def _write_parquet(root: Path, dataset: str, columns: str, rows: list[tuple]) ->
         connection.close()
 
 
-def _write_dashboard_data(root: Path) -> None:
-    _write_parquet(
-        root,
-        "broute_power",
-        "device_id VARCHAR, measured_at TIMESTAMPTZ, net_power_w DOUBLE",
-        [
-            ("broute-001", datetime(2026, 7, 30, 12, 0, 5, tzinfo=JST), 1240.0),
-            ("broute-001", datetime(2026, 7, 30, 12, 0, 20, tzinfo=JST), -3581.0),
-        ],
-    )
-    _write_parquet(
-        root,
-        "sen66",
-        "device_id VARCHAR, measured_at TIMESTAMPTZ, temperature_c DOUBLE, relative_humidity_pct DOUBLE, co2_ppm DOUBLE, pm2_5_ug_m3 DOUBLE, voc_index DOUBLE",
-        [
-            ("sen66-001", datetime(2026, 7, 30, 11, 59, 30, tzinfo=JST), 24.0, 40.0, 900.0, 10.0, 90.0),
-            ("sen66-001", datetime(2026, 7, 30, 12, 0, 0, tzinfo=JST), 26.44, 48.4, 1200.0, 20.2, 123.4),
-        ],
-    )
+def _write_energy_data(root: Path) -> None:
     _write_parquet(
         root,
         "broute_interval_energy",
@@ -64,10 +48,76 @@ def _write_dashboard_data(root: Path) -> None:
     )
 
 
-def test_view_model_reads_latest_values_and_today_energy(tmp_path: Path) -> None:
-    _write_dashboard_data(tmp_path)
+def _write_latest(root: Path, filename: str, payload: dict, received_at: datetime = NOW) -> None:
+    root.mkdir(parents=True, exist_ok=True)
+    record = {
+        "received_at": received_at.isoformat(timespec="milliseconds"),
+        "topic": "omk/test-001/example",
+        "qos": 0,
+        "retain": False,
+        "payload": payload,
+    }
+    (root / filename).write_text(json.dumps(record), encoding="utf-8")
 
-    dashboard = get_display_view_model(ParquetRepository(tmp_path), now=NOW)
+
+def _write_instantaneous_data(root: Path, *, ichijo_at: datetime | None = None) -> None:
+    _write_latest(
+        root,
+        "broute_power.json",
+        {"measured_at": "2026-07-30T12:00:20+09:00", "net_power_w": -3581.0},
+    )
+    _write_latest(
+        root,
+        "sen66.json",
+        {
+            "temperature_celsius": 26.44,
+            "relative_humidity_percent": 48.4,
+            "co2_ppm": 1200.0,
+            "pm2_5_ug_m3": 20.2,
+            "voc_index": 123.4,
+        },
+        datetime(2026, 7, 30, 12, 0, 0, tzinfo=JST),
+    )
+    if ichijo_at is not None:
+        _write_latest(
+            root,
+            "ichijo_power_flow.json",
+            {
+                "measured_at": ichijo_at.isoformat(),
+                "load_power_w": 1500.0,
+                "pv_power_w": 800.0,
+                "grid_import_power_w": 700.0,
+                "grid_export_power_w": 0.0,
+                "battery_soc_percent": 65.0,
+                "battery_charge_power_w": 100.0,
+                "battery_discharge_power_w": 0.0,
+                "battery_operating_state": "charging",
+            },
+        )
+
+
+def test_latest_repository_reads_instantaneous_values(tmp_path: Path) -> None:
+    _write_instantaneous_data(tmp_path, ichijo_at=datetime(2026, 7, 30, 12, 0, 25, tzinfo=JST))
+
+    repository = LatestRepository(tmp_path)
+    power = repository.latest_power()
+    sen66 = repository.latest_sen66()
+    ichijo = repository.latest_ichijo_power_flow()
+
+    assert power is not None and power.net_power_w == -3581.0
+    assert sen66 is not None and sen66.measured_at == datetime(2026, 7, 30, 12, 0, tzinfo=JST)
+    assert sen66.temperature_c == 26.44
+    assert ichijo is not None and ichijo.load_power_w == 1500.0
+    assert ichijo.battery_operating_state == "charging"
+
+
+def test_view_model_uses_latest_values_and_parquet_today_energy(tmp_path: Path) -> None:
+    latest_root = tmp_path / "latest"
+    processed_root = tmp_path / "processed"
+    _write_instantaneous_data(latest_root)
+    _write_energy_data(processed_root)
+
+    dashboard = get_display_view_model(LatestRepository(latest_root), ParquetRepository(processed_root), now=NOW)
 
     assert dashboard.current_power_kw == "3.58"
     assert dashboard.power_direction == "売電"
@@ -84,11 +134,34 @@ def test_view_model_reads_latest_values_and_today_energy(tmp_path: Path) -> None
     assert dashboard.freshness == "normal"
 
 
-def test_power_direction_rules(tmp_path: Path) -> None:
-    _write_dashboard_data(tmp_path)
-    repository = ParquetRepository(tmp_path)
-    dashboard = get_display_view_model(repository, now=NOW)
+def test_stale_ichijo_falls_back_to_broute_power(tmp_path: Path) -> None:
+    latest_root = tmp_path / "latest"
+    _write_instantaneous_data(latest_root, ichijo_at=datetime(2026, 7, 30, 11, 50, 29, tzinfo=JST))
+
+    dashboard = get_display_view_model(LatestRepository(latest_root), ParquetRepository(tmp_path / "processed"), now=NOW)
+
+    assert dashboard.has_ichijo_power_flow is False
+    assert dashboard.current_power_kw == "3.58"
     assert dashboard.power_direction == "売電"
+
+
+def test_broken_or_missing_latest_data_does_not_break_display(tmp_path: Path, monkeypatch) -> None:
+    latest_root = tmp_path / "latest"
+    latest_root.mkdir()
+    (latest_root / "broute_power.json").write_text("{broken", encoding="utf-8")
+    monkeypatch.setenv("OMK_LATEST_DATA_ROOT", str(latest_root))
+    monkeypatch.setenv("OMK_PROCESSED_DATA_ROOT", str(tmp_path / "processed"))
+
+    assert LatestRepository(latest_root).latest_power() is None
+    response = client.get("/display")
+
+    assert response.status_code == 200
+    assert "データなし" in response.text
+    assert "unavailable" in response.text
+    assert "--" in response.text
+
+
+def test_power_direction_rules() -> None:
     assert format_power(LatestPower(NOW, 1240.0)) == ("1.24", "買電", PowerDirection.PURCHASE)
     assert format_power(LatestPower(NOW, 0.0)) == ("0.00", "収支なし", PowerDirection.NEUTRAL)
 
@@ -101,17 +174,6 @@ def test_freshness_status_boundaries() -> None:
     assert freshness_for(datetime(2026, 7, 30, 11, 50, 29, tzinfo=JST), NOW) == FreshnessStatus.UNAVAILABLE
     assert freshness_for(None, NOW) == FreshnessStatus.UNAVAILABLE
     assert freshness_for(datetime(2026, 7, 30, 12, 1, tzinfo=JST), NOW) == FreshnessStatus.NORMAL
-
-
-def test_display_handles_missing_parquet(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setenv("OMK_PROCESSED_DATA_ROOT", str(tmp_path))
-
-    response = client.get("/display")
-
-    assert response.status_code == 200
-    assert "データなし" in response.text
-    assert "unavailable" in response.text
-    assert "--" in response.text
 
 
 def test_health_returns_ok() -> None:
