@@ -24,6 +24,7 @@ POWER = "broute_power"
 CUMULATIVE = "broute_cumulative_energy"
 SEN66 = "sen66"
 INTERVAL = "broute_interval_energy"
+ICHIJO_POWER_FLOW = "ichijo_power_flow"
 
 SCHEMAS = {
     POWER: pa.schema([
@@ -55,6 +56,25 @@ SCHEMAS = {
         ("collector_received_at", pa.timestamp("us", tz="Asia/Tokyo")),
         ("import_energy_kwh", pa.float64()), ("export_energy_kwh", pa.float64()),
         ("quality_status", pa.string()), ("topic", pa.string()), ("source_file", pa.string()),
+        ("source_line_number", pa.int64()),
+    ]),
+    ICHIJO_POWER_FLOW: pa.schema([
+        ("device_id", pa.string()),
+        ("measured_at", pa.timestamp("us", tz="Asia/Tokyo")),
+        ("collector_received_at", pa.timestamp("us", tz="Asia/Tokyo")),
+        ("pv_power_w", pa.int64()),
+        ("load_power_w", pa.int64()),
+        ("grid_import_power_w", pa.int64()),
+        ("grid_export_power_w", pa.int64()),
+        ("battery_soc_percent", pa.float64()),
+        ("battery_charge_power_w", pa.int64()),
+        ("battery_discharge_power_w", pa.int64()),
+        ("battery_operating_state", pa.string()),
+        ("battery_operating_state_raw", pa.int64()),
+        ("pcs_ac_output_power_w", pa.int64()),
+        ("quality", pa.string()),
+        ("topic", pa.string()),
+        ("source_file", pa.string()),
         ("source_line_number", pa.int64()),
     ]),
 }
@@ -182,8 +202,68 @@ def _interval(record: dict[str, Any], source_file: Path, line_number: int) -> tu
     return INTERVAL, row["end_at"].date().isoformat(), row
 
 
+def _ichijo_power_flow(
+    record: dict[str, Any],
+    source_file: Path,
+    line_number: int,
+) -> tuple[str, str, dict[str, Any]]:
+    _, payload, _, row = _common(record, source_file, line_number)
+
+    row["measured_at"] = _timestamp(
+        payload.get("measured_at"),
+        "payload.measured_at",
+    )
+
+    required_integer_fields = (
+        "pv_power_w",
+        "load_power_w",
+        "grid_import_power_w",
+        "grid_export_power_w",
+        "battery_charge_power_w",
+        "battery_discharge_power_w",
+        "pcs_ac_output_power_w",
+    )
+    for field_name in required_integer_fields:
+        row[field_name] = _number(
+            payload,
+            field_name,
+            required=True,
+            integer=True,
+        )
+
+    row["battery_soc_percent"] = _number(
+        payload,
+        "battery_soc_percent",
+        required=True,
+    )
+    row["battery_operating_state_raw"] = _number(
+        payload,
+        "battery_operating_state_raw",
+        integer=True,
+    )
+
+    battery_state = payload.get("battery_operating_state")
+    row["battery_operating_state"] = (
+        battery_state if isinstance(battery_state, str) else None
+    )
+
+    quality = payload.get("quality")
+    row["quality"] = quality if isinstance(quality, str) else None
+
+    return (
+        ICHIJO_POWER_FLOW,
+        row["measured_at"].date().isoformat(),
+        row,
+    )
+
+
+
 NORMALIZERS: dict[str, Callable[[dict[str, Any], Path, int], tuple[str, str, dict[str, Any]]]] = {
-    "power": _power, "cumulative-energy": _cumulative, "interval-energy": _interval, "sen66": _sen66,
+    "power": _power,
+    "cumulative-energy": _cumulative,
+    "interval-energy": _interval,
+    "sen66": _sen66,
+    "power-flow": _ichijo_power_flow,
 }
 
 
