@@ -309,4 +309,34 @@ CSVはUTF-8、ISO 8601のタイムゾーン付き日時を使用します。
 
 RS-WSUHA-Pのフラッシュ設定を起動ごとに読み出し、期待値と異なる場合だけ書き込み、再読出しで確認します。無条件の書込みやローカルフラグだけによる判定は行いません。通信要求の再試行、PANA再接続、シリアル再オープンはPhase 7で追加します。
 
+### USBシリアル応答停止時の自動復旧
+
+RS-WSUHA-PがOS上のUSBデバイスとして見えていても、`SerialTimeoutError`または確認済み形式の応答待ちタイムアウトで設定読出しに失敗することがあります。起動時は通常の再試行を3回行い、それでも失敗した場合だけ、1プロセスにつき1回のUSB再bindを要求します。`data/broute-meter/broute-recovery-state.json`には秘密情報を含めず、状態（`starting`、`serial_timeout`、`usb_resetting`、`connected`、`measuring`、`scan_failed`、`pana_failed`、`failed`）と最終リセット時刻を保存します。最終リセットから20分間は再リセットを抑止します。
+
+USB操作はBルート本体ではなく、root所有・引数なしの`/usr/local/lib/omk/reset-rs-wsuha-p-usb`だけが行います。このヘルパーは`/dev/serial/by-id/usb-FTDI_FT230X_Basic_UART_DM006AOS-if00-port0`からsysfsを辿り、FTDIのVID/PID/serialが`0403:6015`・`DM006AOS`と一致する場合だけ対象USBデバイスをunbind/bindします。他のUSB機器やLTEモデムは対象にしません。
+
+Raspberry Piでは次でsystemd unit、root所有ヘルパー、対象ヘルパーだけを許可するsudoers設定を導入します。Bルート本体は指定ユーザーで実行され、rootでは動作しません。
+
+```bash
+./scripts/setup-broute-meter.sh
+sudo systemctl status omk-broute-meter.service --no-pager
+sudo journalctl -u omk-broute-meter.service --no-pager
+```
+
+systemdは`Restart=on-failure`、60秒待機、15分あたり5回の起動失敗上限です。上限に達して`failed`になった場合、原因を取り除いた後に次で再開します。
+
+```bash
+sudo systemctl reset-failed omk-broute-meter.service
+sudo systemctl restart omk-broute-meter.service
+```
+
+自動復旧できない場合は、サービスを停止してからRS-WSUHA-Pだけを抜き差しし、by-idパスの再出現後にサービスを起動します。設定読出し、アクティブスキャン、PANA接続、瞬時電力の取得をjournalで確認してください。
+
+```bash
+sudo systemctl stop omk-broute-meter.service
+# RS-WSUHA-Pを抜き差しする
+ls -l /dev/serial/by-id/usb-FTDI_FT230X_Basic_UART_DM006AOS-if00-port0
+sudo systemctl start omk-broute-meter.service
+```
+
 実際のBルートID・パスワードを、ソース、テスト、ログ、README、Issue、コミットへ含めないでください。
