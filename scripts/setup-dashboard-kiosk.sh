@@ -273,7 +273,6 @@ fi
 [[ "${CHROMIUM_PATH}" != "not found" && -x "${CHROMIUM_PATH}" ]] || fail "Chromium is unavailable. Install chromium or set DASHBOARD_KIOSK_CHROMIUM_PATH."
 command -v curl >/dev/null 2>&1 || fail "curl is required to wait for the dashboard health endpoint."
 command -v systemctl >/dev/null 2>&1 || fail "systemctl is required."
-command -v pgrep >/dev/null 2>&1 || fail "pgrep is required to verify Chromium."
 command -v python3 >/dev/null 2>&1 || fail "python3 is required to update the labwc XML configuration."
 
 if [[ "${WTYPE_PATH}" == "not found" || ! -x "${WTYPE_PATH}" ]]; then
@@ -345,16 +344,15 @@ else
   log "WARN: Could not confirm the wtype cursor-hide exit status; inspect the user journal if the cursor remains visible."
 fi
 
-for _attempt in 1 2 3 4 5; do
-  if "${AS_TARGET[@]}" pgrep -u "${TARGET_USER}" -f "${CHROMIUM_PATH}.*${DASHBOARD_URL}display" >/dev/null; then
-    log "Chromium kiosk process is running."
-    log "Setup completed. Check with:"
-    log "  systemctl --user status ${UNIT_NAME} --no-pager"
-    log "  systemctl --user restart ${UNIT_NAME}"
-    log "  journalctl --user -u ${UNIT_NAME} --no-pager"
-    log "Stop with: systemctl --user disable --now ${UNIT_NAME}"
-    exit 0
-  fi
-  sleep 1
-done
-fail "Kiosk service is active but Chromium was not detected; inspect the user journal."
+MAIN_PID="$(user_systemctl show -p MainPID --value "${UNIT_NAME}")"
+if [[ "${MAIN_PID}" =~ ^[1-9][0-9]*$ ]] && kill -0 "${MAIN_PID}" 2>/dev/null; then
+  log "Chromium kiosk process is running: PID=${MAIN_PID}"
+else
+  fail "Kiosk service is active but its MainPID is unavailable; inspect the user journal."
+fi
+
+log "Setup completed. Check with:"
+log "  systemctl --user status ${UNIT_NAME} --no-pager"
+log "  systemctl --user restart ${UNIT_NAME}"
+log "  journalctl --user -u ${UNIT_NAME} --no-pager"
+log "Stop with: systemctl --user disable --now ${UNIT_NAME}"
