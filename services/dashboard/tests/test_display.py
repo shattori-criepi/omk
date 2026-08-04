@@ -1,5 +1,5 @@
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -159,6 +159,95 @@ def test_broken_or_missing_latest_data_does_not_break_display(tmp_path: Path, mo
     assert "データなし" in response.text
     assert "unavailable" in response.text
     assert "--" in response.text
+
+
+def test_display_api_returns_ichijo_and_broute_fallback_snapshots(tmp_path: Path, monkeypatch) -> None:
+    latest_root = tmp_path / "latest"
+    current_time = datetime.now(JST)
+    _write_latest(
+        latest_root,
+        "broute_power.json",
+        {"measured_at": current_time.isoformat(), "net_power_w": 1240.0},
+        current_time,
+    )
+    _write_latest(
+        latest_root,
+        "sen66.json",
+        {
+            "temperature_celsius": 25.0,
+            "relative_humidity_percent": 45.0,
+            "co2_ppm": 600.0,
+            "pm2_5_ug_m3": 3.0,
+            "voc_index": 90.0,
+        },
+        current_time,
+    )
+    _write_latest(
+        latest_root,
+        "ichijo_power_flow.json",
+        {
+            "measured_at": current_time.isoformat(),
+            "load_power_w": 1500.0,
+            "pv_power_w": 800.0,
+            "grid_import_power_w": 700.0,
+            "grid_export_power_w": 0.0,
+            "battery_soc_percent": 65.0,
+            "battery_charge_power_w": 100.0,
+            "battery_discharge_power_w": 0.0,
+            "battery_operating_state": "charging",
+        },
+        current_time,
+    )
+    monkeypatch.setenv("OMK_LATEST_DATA_ROOT", str(latest_root))
+    monkeypatch.setenv("OMK_PROCESSED_DATA_ROOT", str(tmp_path / "processed"))
+
+    response = client.get("/api/display")
+
+    assert response.status_code == 200
+    snapshot = response.json()
+    assert snapshot["has_ichijo_power_flow"] is True
+    assert snapshot["current_power_label"] == "現在の消費電力"
+    assert snapshot["grid_flow_label"] == "買電中"
+    assert snapshot["purchased_today_kwh"] == "0.0"
+    assert snapshot["freshness"] in {"normal", "delayed", "unavailable"}
+
+    _write_latest(
+        latest_root,
+        "ichijo_power_flow.json",
+        {
+            "measured_at": (current_time - timedelta(seconds=601)).isoformat(),
+            "load_power_w": 1500.0,
+            "pv_power_w": 800.0,
+            "grid_import_power_w": 700.0,
+            "grid_export_power_w": 0.0,
+            "battery_soc_percent": 65.0,
+            "battery_charge_power_w": 100.0,
+            "battery_discharge_power_w": 0.0,
+            "battery_operating_state": "charging",
+        },
+        current_time,
+    )
+
+    fallback = client.get("/api/display").json()
+    assert fallback["has_ichijo_power_flow"] is False
+    assert fallback["current_power_label"] == "現在の買電"
+    assert fallback["power_direction"] == "買電"
+
+
+def test_display_html_and_javascript_expose_polling_targets() -> None:
+    response = client.get("/display")
+    javascript = (Path(__file__).parents[1] / "app" / "static" / "display.js").read_text(encoding="utf-8")
+
+    assert response.status_code == 200
+    for element_id in (
+        "current-power-kw", "current-power-label", "power-direction", "grid-flow",
+        "pv-power-kw", "battery-soc-percent", "battery-power-kw", "purchased-today-kwh",
+        "sold-today-kwh", "temperature-c", "humidity-percent", "co2-ppm", "pm25-ug-m3",
+        "voc-index", "updated-at", "freshness",
+    ):
+        assert f'id="{element_id}"' in response.text
+    assert 'fetch("/api/display", { cache: "no-store" })' in javascript
+    assert "DISPLAY_POLL_INTERVAL_MS = 10_000" in javascript
 
 
 def test_power_direction_rules() -> None:

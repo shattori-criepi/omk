@@ -29,14 +29,25 @@ def get_latest_repository() -> LatestRepository:
     return LatestRepository(Path(os.environ.get("OMK_LATEST_DATA_ROOT", "data/latest")))
 
 
+def get_dashboard_view_model():
+    """Build one consistent snapshot for both HTML and polling API responses."""
+    return get_display_view_model(get_latest_repository(), get_parquet_repository())
+
+
 @app.get("/display", response_class=HTMLResponse)
 async def display(request: Request) -> HTMLResponse:
     """Render the dashboard from latest JSON and daily Parquet totals."""
     return templates.TemplateResponse(
         request=request,
         name="display.html",
-        context={"dashboard": get_display_view_model(get_latest_repository(), get_parquet_repository())},
+        context={"dashboard": get_dashboard_view_model()},
     )
+
+
+@app.get("/api/display")
+async def display_api() -> dict[str, str | bool]:
+    """Return the current dashboard snapshot for in-page refreshes."""
+    return get_dashboard_view_model().as_dict()
 
 
 @app.get("/health")

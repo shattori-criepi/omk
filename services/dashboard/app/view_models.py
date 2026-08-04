@@ -56,6 +56,33 @@ class DisplayViewModel:
     updated_at_iso: str
     freshness: FreshnessStatus
 
+    def as_dict(self) -> dict[str, str | bool]:
+        """Return JSON-ready values used by the display polling API."""
+        return {
+            "current_power_kw": self.current_power_kw,
+            "current_power_label": self.current_power_label,
+            "power_direction": self.power_direction,
+            "power_flow": self.power_flow.value,
+            "has_ichijo_power_flow": self.has_ichijo_power_flow,
+            "pv_power_kw": self.pv_power_kw,
+            "battery_soc_percent": self.battery_soc_percent,
+            "battery_power_label": self.battery_power_label,
+            "battery_power_kw": self.battery_power_kw,
+            "grid_flow_label": self.grid_flow_label,
+            "grid_flow_kw": self.grid_flow_kw,
+            "grid_flow": self.grid_flow.value,
+            "purchased_today_kwh": self.purchased_today_kwh,
+            "sold_today_kwh": self.sold_today_kwh,
+            "temperature_c": self.temperature_c,
+            "humidity_percent": self.humidity_percent,
+            "co2_ppm": self.co2_ppm,
+            "pm25_ug_m3": self.pm25_ug_m3,
+            "voc_index": self.voc_index,
+            "updated_at": self.updated_at,
+            "updated_at_iso": self.updated_at_iso,
+            "freshness": self.freshness.value,
+        }
+
 
 def get_display_view_model(
     latest_repository: LatestRepository,
