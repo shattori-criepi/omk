@@ -11,6 +11,7 @@ import signal
 import sys
 import threading
 from collections.abc import Callable, Sequence
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +19,9 @@ from broute_meter import __version__
 from broute_meter.adapter import (
     AdapterConfigurationResult,
     AdapterError,
+    AdapterPanaJoinError,
+    AdapterResponseTimeoutError,
+    AdapterScanError,
     MockAdapter,
     RsWsuhaPAdapter,
 )
@@ -37,8 +41,15 @@ from broute_meter.serial.port_detector import (
     list_serial_ports,
     resolve_serial_port,
 )
-from broute_meter.serial.transport import PySerialTransport, TransportError
+from broute_meter.serial.transport import PySerialTransport, SerialTimeoutError, TransportError
 from broute_meter.storage import CsvMeasurementStorage, StorageError
+from broute_meter.usb_recovery import (
+    STARTUP_RETRY_ATTEMPTS,
+    RecoveryStateStore,
+    RsWsuhaPUsbResetter,
+    UsbRecoveryError,
+    usb_reset_allowed,
+)
 
 DEFAULT_SETTINGS_PATH = Path("config/settings.yaml")
 DEFAULT_CREDENTIALS_PATH = Path("config/credentials.yaml")
@@ -182,11 +193,17 @@ def _run(args: argparse.Namespace) -> int:
     previous_handlers = _install_stop_signal_handlers(shutdown_event, logger)
 
     try:
-        adapter.open()
+        recovery_state = RecoveryStateStore(
+            config.storage.data_directory / "broute-recovery-state.json"
+        )
         try:
-            setup_result = adapter.configure(
-                config.adapter.expected_settings,
-                write_changes=config.adapter.auto_configure,
+            setup_result = _configure_adapter_with_usb_recovery(
+                adapter,
+                config,
+                port,
+                recovery_state,
+                shutdown_event,
+                logger,
             )
             if not setup_result.is_configured:
                 mismatched = ", ".join(setup_result.mismatched_settings)
@@ -204,6 +221,7 @@ def _run(args: argparse.Namespace) -> int:
                 config,
                 shutdown_event,
                 logger,
+                recovery_state,
             )
             if connection is None:
                 logger.info("初期Bルート接続の再試行を終了します")
@@ -282,6 +300,7 @@ def _run(args: argparse.Namespace) -> int:
                 config.measurement.instantaneous_interval_seconds,
                 config.measurement.cumulative_fetch_delay_seconds,
             )
+            recovery_state.write("measuring", now=datetime.now().astimezone())
             scheduler.run()
         except KeyboardInterrupt:
             logger.info("Ctrl+Cによる終了要求を受けました")
@@ -316,11 +335,100 @@ def _run(args: argparse.Namespace) -> int:
     return 0
 
 
+def _configure_adapter_with_usb_recovery(
+    adapter: RsWsuhaPAdapter,
+    config: AppConfig,
+    port: str,
+    state: RecoveryStateStore,
+    stop_event: threading.Event,
+    logger: logging.Logger,
+) -> AdapterConfigurationResult:
+    """Retry startup communication, then request one bounded USB reset if needed."""
+
+    state.write("starting", now=datetime.now().astimezone())
+    last_error: Exception | None = None
+    for attempt in range(1, STARTUP_RETRY_ATTEMPTS + 1):
+        try:
+            adapter.open()
+            result = adapter.configure(
+                config.adapter.expected_settings,
+                write_changes=config.adapter.auto_configure,
+            )
+            logger.info("RS-WSUHA-P設定読出しに成功しました startup_attempt=%d", attempt)
+            return result
+        except (SerialTimeoutError, AdapterResponseTimeoutError) as exc:
+            last_error = exc
+            state.write("serial_timeout", now=datetime.now().astimezone())
+            logger.warning(
+                "RS-WSUHA-P設定読出しがタイムアウトしました startup_attempt=%d/%d",
+                attempt,
+                STARTUP_RETRY_ATTEMPTS,
+            )
+            try:
+                adapter.close()
+            except AdapterError as close_error:
+                state.write("failed", now=datetime.now().astimezone())
+                logger.error(
+                    "タイムアウト後のシリアルポートcloseに失敗したためUSBリセットを中止します",
+                    exc_info=True,
+                )
+                raise AdapterResponseTimeoutError(
+                    "Cannot safely reset RS-WSUHA-P while serial close failed."
+                ) from close_error
+            if attempt < STARTUP_RETRY_ATTEMPTS and stop_event.wait(2):
+                raise AdapterResponseTimeoutError(
+                    "終了要求により起動時再試行を中止しました。"
+                ) from exc
+
+    assert last_error is not None
+    now = datetime.now().astimezone()
+    if not usb_reset_allowed(STARTUP_RETRY_ATTEMPTS, 0, state, now=now):
+        logger.error("USBリセットはクールダウン中のため抑止しました reason=startup_serial_timeout")
+        state.write("failed", now=now)
+        raise AdapterResponseTimeoutError(
+            "RS-WSUHA-P USB reset cooldown is active."
+        ) from last_error
+
+    logger.warning("通常再試行が失敗したためRS-WSUHA-P USBリセットを実行します")
+    state.write("usb_resetting", now=now, reset_at=now)
+    resetter = RsWsuhaPUsbResetter(
+        Path(port),
+        Path(
+            os.environ.get(
+                "OMK_RS_WSUHA_USB_RESET_HELPER",
+                "/usr/local/lib/omk/reset-rs-wsuha-p-usb",
+            )
+        ),
+    )
+    try:
+        device = resetter.reset()
+        logger.warning(
+            "RS-WSUHA-P USBリセット完了 vendor=%s product=%s serial=%s sysfs=%s",
+            device.vendor,
+            device.product,
+            device.serial,
+            device.sysfs_path,
+        )
+        adapter.open()
+        result = adapter.configure(
+            config.adapter.expected_settings,
+            write_changes=config.adapter.auto_configure,
+        )
+    except (AdapterError, SerialTimeoutError, UsbRecoveryError) as exc:
+        state.write("failed", now=datetime.now().astimezone())
+        logger.error("USBリセット後のRS-WSUHA-P設定読出しに失敗しました", exc_info=True)
+        raise AdapterResponseTimeoutError("RS-WSUHA-P recovery failed after USB reset.") from exc
+
+    logger.info("USBリセット後のRS-WSUHA-P設定読出しに成功しました")
+    return result
+
+
 def _connect_broute_until_ready(
     adapter: RsWsuhaPAdapter,
     config: AppConfig,
     stop_event: threading.Event,
     logger: logging.Logger,
+    recovery_state: RecoveryStateStore | None = None,
 ) -> BRouteConnection | None:
     """終了要求までBルート接続シーケンス全体を再試行する。
 
@@ -337,14 +445,27 @@ def _connect_broute_until_ready(
     while not stop_event.is_set():
         attempt += 1
         try:
-            return BRouteSession(
+            connection = BRouteSession(
                 adapter,
                 scan_max_attempts=config.retry.request_max_attempts,
             ).connect(
                 credentials.b_route_id,
                 credentials.password,
             )
+            if recovery_state is not None:
+                recovery_state.write("connected", now=datetime.now().astimezone())
+            logger.info("アクティブスキャンとPANA接続に成功しました")
+            return connection
         except (AdapterError, BRouteSessionError, TransportError) as exc:
+            if recovery_state is not None:
+                status = (
+                    "scan_failed"
+                    if isinstance(exc, AdapterScanError)
+                    else "pana_failed"
+                    if isinstance(exc, AdapterPanaJoinError)
+                    else "failed"
+                )
+                recovery_state.write(status, now=datetime.now().astimezone())
             logger.warning(
                 "初期Bルート接続に失敗しました。再試行します "
                 "connection_attempt=%d retry_wait_seconds=%s error=%s",
