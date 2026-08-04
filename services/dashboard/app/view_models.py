@@ -110,20 +110,23 @@ def get_display_view_model(
         else None
     )
 
-    updated_at = oldest_available(
-        power.measured_at if power else None,
-        sen66.measured_at if sen66 else None,
-        active_ichijo.measured_at if active_ichijo else None,
-    )
-
     if active_ichijo is not None:
         power_value = f"{active_ichijo.load_power_w / 1000:.2f}"
         direction_label = ""
         direction = PowerDirection.NEUTRAL
         current_power_label = "現在の消費電力"
+        displayed_power_updated_at = active_ichijo.measured_at
+        displayed_power_freshness = ichijo_freshness
     else:
         power_value, direction_label, direction = format_power(power)
         current_power_label = power_label(direction)
+        displayed_power_updated_at = power.measured_at if power else None
+        displayed_power_freshness = power_freshness
+
+    updated_at = oldest_available(
+        displayed_power_updated_at,
+        sen66.measured_at if sen66 else None,
+    )
 
     battery_label, battery_power = format_battery_power(active_ichijo)
     grid_label, grid_power, grid_direction = format_grid_flow(active_ichijo)
@@ -157,13 +160,8 @@ def get_display_view_model(
         updated_at=updated_at.strftime("%Y/%m/%d %H:%M:%S") if updated_at else "--",
         updated_at_iso=updated_at.isoformat() if updated_at else "",
         freshness=worst_freshness(
-            power_freshness,
+            displayed_power_freshness,
             sen66_freshness,
-            *(
-                [ichijo_freshness]
-                if active_ichijo is not None and ichijo_freshness is not None
-                else []
-            ),
         ),
     )
 

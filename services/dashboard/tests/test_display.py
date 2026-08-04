@@ -60,11 +60,20 @@ def _write_latest(root: Path, filename: str, payload: dict, received_at: datetim
     (root / filename).write_text(json.dumps(record), encoding="utf-8")
 
 
-def _write_instantaneous_data(root: Path, *, ichijo_at: datetime | None = None) -> None:
+def _write_instantaneous_data(
+    root: Path,
+    *,
+    power_at: datetime | None = None,
+    sen66_at: datetime | None = None,
+    ichijo_at: datetime | None = None,
+) -> None:
     _write_latest(
         root,
         "broute_power.json",
-        {"measured_at": "2026-07-30T12:00:20+09:00", "net_power_w": -3581.0},
+        {
+            "measured_at": (power_at or datetime(2026, 7, 30, 12, 0, 20, tzinfo=JST)).isoformat(),
+            "net_power_w": -3581.0,
+        },
     )
     _write_latest(
         root,
@@ -76,7 +85,7 @@ def _write_instantaneous_data(root: Path, *, ichijo_at: datetime | None = None) 
             "pm2_5_ug_m3": 20.2,
             "voc_index": 123.4,
         },
-        datetime(2026, 7, 30, 12, 0, 0, tzinfo=JST),
+        sen66_at or datetime(2026, 7, 30, 12, 0, 0, tzinfo=JST),
     )
     if ichijo_at is not None:
         _write_latest(
@@ -143,6 +152,42 @@ def test_stale_ichijo_falls_back_to_broute_power(tmp_path: Path) -> None:
     assert dashboard.has_ichijo_power_flow is False
     assert dashboard.current_power_kw == "3.58"
     assert dashboard.power_direction == "売電"
+
+
+def test_fresh_ichijo_excludes_stale_broute_from_global_status(tmp_path: Path) -> None:
+    latest_root = tmp_path / "latest"
+    _write_instantaneous_data(
+        latest_root,
+        power_at=datetime(2026, 7, 30, 11, 0, tzinfo=JST),
+        sen66_at=datetime(2026, 7, 30, 12, 0, tzinfo=JST),
+        ichijo_at=datetime(2026, 7, 30, 12, 0, 25, tzinfo=JST),
+    )
+
+    dashboard = get_display_view_model(LatestRepository(latest_root), ParquetRepository(tmp_path / "processed"), now=NOW)
+
+    assert dashboard.has_ichijo_power_flow is True
+    assert dashboard.current_power_label == "現在の消費電力"
+    assert dashboard.updated_at == "2026/07/30 12:00:00"
+    assert dashboard.updated_at_iso == "2026-07-30T12:00:00+09:00"
+    assert dashboard.freshness == FreshnessStatus.NORMAL
+
+
+def test_stale_ichijo_uses_fresh_broute_for_global_status(tmp_path: Path) -> None:
+    latest_root = tmp_path / "latest"
+    _write_instantaneous_data(
+        latest_root,
+        power_at=datetime(2026, 7, 30, 12, 0, 20, tzinfo=JST),
+        sen66_at=datetime(2026, 7, 30, 12, 0, tzinfo=JST),
+        ichijo_at=datetime(2026, 7, 30, 11, 50, 29, tzinfo=JST),
+    )
+
+    dashboard = get_display_view_model(LatestRepository(latest_root), ParquetRepository(tmp_path / "processed"), now=NOW)
+
+    assert dashboard.has_ichijo_power_flow is False
+    assert dashboard.current_power_label == "現在の売電"
+    assert dashboard.updated_at == "2026/07/30 12:00:00"
+    assert dashboard.updated_at_iso == "2026-07-30T12:00:00+09:00"
+    assert dashboard.freshness == FreshnessStatus.NORMAL
 
 
 def test_broken_or_missing_latest_data_does_not_break_display(tmp_path: Path, monkeypatch) -> None:
