@@ -280,7 +280,7 @@ cd ~/projects/omk
 ./scripts/setup-data-transformer.sh
 ```
 
-timerは起動後約2分、その後5分ごとにJST当日と前日の既存JSONLを変換します。確認、ログ確認、停止は以下を使用します。
+timerは起動後約2分、その後1時間ごとにJST当日と前日の既存JSONLを変換します。確認、ログ確認、停止は以下を使用します。
 
 ```bash
 sudo systemctl status omk-data-transformer.timer --no-pager

@@ -28,7 +28,7 @@ services/data-transformer/.venv/bin/python scripts/verify_parquet.py
 
 出力は `data/processed/<dataset>/date=YYYY-MM-DD/data.parquet` です。データセットは`broute_power`、`broute_cumulative_energy`、`broute_interval_energy`、`sen66`です。日付はBルート瞬時電力では計測時刻、積算電力量では計量時刻、30分値では終了時刻、SEN66ではファームウェアが時計を持たないためcollector受信時刻のJST日付を使用します。各ファイルは一時ファイルから原子的に置換するので、同じ入力の再実行で重複しません。
 
-## Raspberry Piでの5分間隔実行
+## Raspberry Piでの1時間間隔実行
 
 DockerではなくRaspberry Piホストのsystemd timerで実行します。リポジトリルートで次を実行してください。runtime依存のみを使うため、セットアップは`requirements.txt`をインストールします（`requirements-dev.txt`は使いません）。
 
@@ -39,7 +39,7 @@ chmod +x scripts/setup-data-transformer.sh scripts/run-data-transformer.sh
 
 セットアップはPython、venv、pip、`flock`を提供する`util-linux`を確認し、不足時だけ導入します。`services/data-transformer/.venv`、`data/processed`、`data/errors/transform`を作成し、実行ユーザーとリポジトリパスを埋め込んだunitを`/etc/systemd/system`へ配置します。実行ログは`logs/setup/`にも保存されます。
 
-`omk-data-transformer.timer`は起動約2分後に開始し、その後5分ごとに動作します。JST当日と前日をこの順で処理します。前日処理は日付切替直後に遅れて到着したレコードを取り込むためで、JSONLが存在しない日は「処理対象なし」として正常終了します。一方の日付で失敗してももう一方を処理し、最後に失敗があれば終了コード1として次回timerで再試行します。
+`omk-data-transformer.timer`は起動約2分後に開始し、その後1時間ごとに動作します。JST当日と前日をこの順で処理します。前日処理は日付切替直後に遅れて到着したレコードを取り込むためで、JSONLが存在しない日は「処理対象なし」として正常終了します。一方の日付で失敗してももう一方を処理し、最後に失敗があれば終了コード1として次回timerで再試行します。
 
 同時起動は`data/.data-transformer.lock`への`flock`で防止します。すでに実行中ならその回は正常終了でスキップします。進行中の追記の末尾行が一時的に`invalid_json`になっても、次回の全量再変換で回復します。NULバイトなどの不正行は`data/errors/transform`へ記録され、正常行の変換は継続します。
 
