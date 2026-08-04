@@ -87,6 +87,7 @@ class LatestDataWriter:
                 temporary.flush()
                 os.fsync(temporary.fileno())
             os.replace(temporary_path, path)
+            os.chmod(path, 0o644)
             LOGGER.debug("Updated latest MQTT data topic=%s path=%s", record["topic"], path)
         except (OSError, TypeError, ValueError) as error:
             LOGGER.error("Failed to write latest MQTT data %s: %s", path, error)

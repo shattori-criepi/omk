@@ -1,4 +1,5 @@
 import json
+import stat
 import sys
 import tempfile
 import unittest
@@ -76,6 +77,7 @@ class CollectorTests(unittest.TestCase):
 
             output = Path(directory) / "broute_power.json"
             self.assertEqual(json.loads(output.read_text(encoding="utf-8")), second)
+            self.assertEqual(stat.S_IMODE(output.stat().st_mode), 0o644)
             self.assertEqual(list(Path(directory).iterdir()), [output])
 
 
