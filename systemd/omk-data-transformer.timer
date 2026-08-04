@@ -1,5 +1,5 @@
 [Unit]
-Description=Run OMK data transformer every five minutes
+Description=Run OMK data transformer every hour
 
 [Timer]
 OnBootSec=2min
