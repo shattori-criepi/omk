@@ -302,7 +302,7 @@ cd ~/projects/omk
 ./scripts/setup-dashboard-kiosk.sh
 ```
 
-スクリプトは`chromium`、`curl`、user managerのbus、`/run/user/<UID>`、Waylandソケットを確認し、`~/.config/systemd/user/omk-dashboard-kiosk.service`を更新します。`WAYLAND_DISPLAY`はuser manager環境から取得し、未設定時だけ`wayland-0`を使います。異なる場合は`DASHBOARD_KIOSK_WAYLAND_DISPLAY=...`を付けて実行してください。既存の手動unitは内容が異なる場合にバックアップして置き換え、旧`graphical-session.target.wants`のsymlinkは安全に削除します。
+スクリプトは`chromium`、`curl`、`wtype`、user managerのbus、`/run/user/<UID>`、Waylandソケットを確認し、`wtype`がなければ`apt`で導入します。`~/.config/systemd/user/omk-dashboard-kiosk.service`を更新するとともに、`~/.config/labwc/rc.xml`へカーソル非表示用の`A-W-h`キーバインドを追加します。既存のタッチ設定などは保持し、変更時だけ日時付きバックアップを作成します。`openbox_config`のルート要素はlabwc用の`labwc_config`へ変換します。`WAYLAND_DISPLAY`はuser manager環境から取得し、未設定時だけ`wayland-0`を使います。異なる場合は`DASHBOARD_KIOSK_WAYLAND_DISPLAY=...`を付けて実行してください。既存の手動unitは内容が異なる場合にバックアップして置き換え、旧`graphical-session.target.wants`のsymlinkは安全に削除します。
 
 GUI自動ログイン時にuser managerの`default.target`が起動し、キオスクunitも有効化されます。unit自身がWaylandソケットとdashboard healthを待つため、表示準備前にChromiumを起動しません。lingerは不要です。GUIセッションがなくuser managerが停止している状態ではChromiumは起動しません。確認、再起動、ログ、停止は以下です。
 
@@ -315,7 +315,17 @@ journalctl --user -u omk-dashboard-kiosk.service --no-pager
 systemctl --user disable --now omk-dashboard-kiosk.service
 ```
 
-Chromiumを終了またはkillした場合は、systemdが約5秒後に再起動します。dashboard未起動時はhealth endpointの応答まで待機します。
+Chromiumを終了またはkillした場合は、systemdが約5秒後に再起動します。dashboard未起動時はhealth endpointの応答まで待機します。Chromium起動後はunitの`ExecStartPost`が`wtype -M alt -M logo -P h`を実行し、labwcの`HideCursor`と`WarpCursor`によりカーソルを非表示にします。
+
+カーソル非表示が効かない場合は、次を確認してください。
+
+```bash
+command -v wtype
+grep -E 'labwc_config|HideCursor|WarpCursor' ~/.config/labwc/rc.xml
+systemctl --user cat omk-dashboard-kiosk.service
+```
+
+SSH経由でlabwc設定の即時再読込が必要な場合は、GUIセッションのlabwc PIDを指定して`LABWC_PID=<pid> ./scripts/setup-dashboard-kiosk.sh`を実行します。再読込できなくても、次のGUIセッションまたは再起動で設定が反映されます。
 後続タスクの一覧は[ロードマップ](roadmap.md)も参照してください。
 
 ## 14. Wi-Fiアクセスポイント（NetworkManager）

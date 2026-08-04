@@ -30,7 +30,7 @@ dashboardサーバーはDocker Compose、表示用Chromiumは別のuser systemd�
 ./scripts/setup-dashboard-kiosk.sh
 ```
 
-このサービスはdashboardのhealth応答を待ってからChromiumを起動し、Chromium終了時は5秒後に自動再起動します。SSHやNapterの接続には依存しません。状態確認、再起動、ログ確認、停止は次のとおりです。
+このサービスはdashboardのhealth応答を待ってからChromiumを起動し、Chromium終了時は5秒後に自動再起動します。セットアップは`wtype`を確認・導入し、labwcの`HideCursor`/`WarpCursor`キーバインドを既存のタッチ設定を残して`~/.config/labwc/rc.xml`へ追加します。Chromiumの起動後に`wtype`でこのキーバインドを実行するため、カーソルは自動的に非表示になります。SSHやNapterの接続には依存しません。状態確認、再起動、ログ確認、停止は次のとおりです。
 
 ```bash
 systemctl --user status omk-dashboard-kiosk.service --no-pager
@@ -40,6 +40,8 @@ systemctl --user disable --now omk-dashboard-kiosk.service
 ```
 
 Waylandセッションが起動していない場合はセットアップを実行せず、GUIへログインしてから実行してください。セットアップ時にソケットがなければ安全に停止し、GUIログイン後の再実行を求めます。GUI自動ログイン時にuser managerの`default.target`から起動し、unit内ではWaylandソケットを待ちます。lingerは不要です。SSHやNapterの切断には依存しません。
+
+カーソルが残る場合は、`command -v wtype`、`~/.config/labwc/rc.xml`の`labwc_config`ルートと`HideCursor`・`WarpCursor`アクション、ならびに`systemctl --user cat omk-dashboard-kiosk.service`の`ExecStartPost`を確認してください。SSHからlabwcを即時再読込する場合は、GUIセッションのPIDを`LABWC_PID=<pid>`としてセットアップを再実行します。再読込に失敗した場合も、次回GUIログインまたは再起動で反映されます。
 
 ## URL
 
