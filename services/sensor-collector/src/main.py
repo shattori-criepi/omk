@@ -22,7 +22,7 @@ LOGGER = logging.getLogger(__name__)
 JST = ZoneInfo("Asia/Tokyo")
 LATEST_FILES = {
     "power": "broute_power.json",
-    "environment": "sen66.json",
+    "sen66": "sen66.json",
     "power-flow": "ichijo_power_flow.json",
 }
 

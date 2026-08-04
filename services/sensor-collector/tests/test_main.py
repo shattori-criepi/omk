@@ -47,7 +47,7 @@ class CollectorTests(unittest.TestCase):
     def test_latest_writer_saves_each_supported_topic_with_full_record(self) -> None:
         cases = {
             "omk/broute-001/power": "broute_power.json",
-            "omk/sen66-001/environment": "sen66.json",
+            "omk/sen66-001/sen66": "sen66.json",
             "omk/ichijo-001/power-flow": "ichijo_power_flow.json",
         }
         with tempfile.TemporaryDirectory() as directory:
