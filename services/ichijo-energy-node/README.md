@@ -16,7 +16,7 @@
 Ichijo ECHONET node -- UDP/3610, GET only --> Raspberry Pi --> MQTT --> OMK collector (omk/#)
 ```
 
-`sensor-collector`はすでに`omk/#`を購読しているため、`power-flow`と`status`は変更なしでJSONL一次保存されます。
+`sensor-collector`はすでに`omk/#`を購読しているため、`power-flow`と`status`は変更なしでJSONL一次保存されます。正常な`power-flow`は表示用の`data/latest/ichijo_power_flow.json`も更新し、dashboardの一条表示に使用されます。
 
 ## 対象と変換
 
@@ -99,4 +99,4 @@ QoSは0です。`omk/<device_id>/power-flow`はサイクルごとに1件、retai
 
 `Network configuration error`は対象インターフェースにIPv4がない状態です。`ECHONET timeout`は対象IP、同一L2接続、UDP 3610、送信元が3610であることを確認します。DEBUGログで生フレームを確認できますが、通常ログへは出しません。
 
-対象IPの将来的な変更、自動探索、E7正値の意味、長期連続運転、ネットワーク切断からの実機復旧、OMK専用AP経由のMQTT、data-transformer対応、dashboard対応は未実装・未確認です。
+対象IPの将来的な変更、自動探索、E7正値の意味、長期連続運転、ネットワーク切断からの実機復旧、OMK専用AP経由のMQTTは未実装・未確認です。`power-flow`のJSONL→Parquet変換とlatest JSON経由のdashboard表示は対応済みです。dashboardは一条データが10分を超えて古い場合、Bルート電力へフォールバックします。

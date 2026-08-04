@@ -16,7 +16,7 @@ OMKは周辺機器の種類が多く、Raspberry Pi OS、USB、Bluetooth、Wi-SU
 | ハードウェア連携 | 採用 | Ports and Adapters方式でドライバを交換可能にする |
 | データ集約 | 採用 | 各取得処理はMQTTでRaspberry Piへ集約し、`sensor-collector`が`omk/#`を収集 |
 | 一次保存 | 採用 | センサ固有項目を解釈しないJSONL保存。CSV、分析、DB、外部送信は後段責務 |
-| Bルート通信 | 採用 | USBシリアル・PANA依存のためホスト上systemdで実行。MQTT publishは今後追加 |
+| Bルート通信 | 採用 | USBシリアル・PANA依存のためホスト上systemdで実行。MQTT publishとcollector保存は実装済み |
 | Windows開発 | 採用 | モックを標準とし、BルートUSB接続は開発中のスマートメータ実機確認に限る任意経路 |
 | Raspberry Pi | 採用 | Raspberry Pi 4とRaspberry Pi 5の両方を正式対応。Raspberry Pi 3以前と未評価の将来モデルは正式対象外 |
 | Raspberry Pi OS | 採用 | 64-bit Raspberry Pi OSのみを正式対象とし、32-bit版は対象外 |
@@ -100,6 +100,7 @@ flowchart LR
     subgraph Collection[汎用収集・一次保存層]
         COL[sensor-collector<br/>omk/#]
         JSONL[(日次JSONL)]
+        LATEST[(latest JSON)]
     end
     subgraph Downstream[後段処理]
         CSV[CSV変換・分析]
@@ -107,12 +108,14 @@ flowchart LR
         SEND[外部送信]
     end
     ESP -->|publish| MQ
-    BR -. 将来: publish .-> MQ
+    BR -->|publish| MQ
     MQ --> COL --> JSONL
+    COL --> LATEST
     JSONL --> TRANSFORM[data-transformer]
     TRANSFORM --> PARQUET[(partitioned Parquet)]
     JSONL --> CSV
-    PARQUET --> VIEW
+    LATEST -->|瞬時値| VIEW
+    PARQUET -->|日計・履歴| VIEW
     JSONL --> SEND
 ```
 
@@ -343,8 +346,10 @@ QoS、retain、再送上限は実機試験で確定します。
 1. 各データ取得処理がJSON payloadをMQTTへpublishする
 2. `sensor-collector`が`omk/#`を受信する
 3. collectorがRaspberry Pi受信時刻とMQTTメタデータを付与してJSONLへ追記する
-4. `data-transformer`が対応トピックを正規化し、日付パーティション済みParquetを生成する
-5. CSV変換、分析、可視化、外部送信がJSONLまたはParquetを後段入力として利用する
+4. collectorは対象計測値をlatest JSONへatomic置換し、dashboardはこれを瞬時値として読む
+5. `data-transformer`が対応トピックを正規化し、日付パーティション済みParquetを生成する
+6. dashboardはParquetを今日の買電量・売電量と履歴用途に使い、`/api/display`を10秒ごとに更新する。一条`power-flow`が10分超で古い場合はBルート値へフォールバックする
+7. CSV変換、分析、外部送信がJSONLまたはParquetを後段入力として利用する
 
 `power`、`cumulative-energy`、`interval-energy`、`sen66`は計測データとして、それぞれ`broute_power`、`broute_cumulative_energy`、`broute_interval_energy`、`sen66`へ変換する。`omk/<device_id>/status`は現時点では管理情報として意図的に除外し、未知・不正トピックだけを変換エラーとして記録する。
 
@@ -373,8 +378,9 @@ QoS、retain、再送上限は実機試験で確定します。
 | サービス | 主な責務 | 言語／実装 |
 |---|---|---|
 | `mosquitto` | LAN内のMQTTメッセージ中継 | MQTT broker |
-| `sensor-collector` | `omk/#`の汎用受信と日次JSONL一次保存 | Python / Docker Compose |
+| `sensor-collector` | `omk/#`の汎用受信と日次JSONL一次保存、対象計測値のlatest JSON更新 | Python / Docker Compose |
 | `data-transformer` | JSONLの検証・トピック別正規化・Parquet出力。`status`は管理情報として除外 | Python / PyArrow |
+| `dashboard` | latest JSONによる瞬時値、Parquetによる日計・履歴の表示 | Python / Docker Compose |
 | Bルートsystemdサービス | USBシリアル・PANAによるBルート通信 | ホストOS |
 | CSV・分析・可視化・外部送信 | JSONLを使う後段処理 | 今後決定 |
 

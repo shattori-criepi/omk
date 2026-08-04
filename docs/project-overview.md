@@ -126,7 +126,7 @@ Bルート対応USBドングルをWindowsへ接続し、WSL2またはDockerコ�
 
 データ取得処理と保存処理を分離する。各取得処理は原則としてMQTTでRaspberry Piへデータを集約し、汎用`sensor-collector`が`omk/#`を購読して日次JSONLへ一次保存する。collectorはセンサ固有項目を解釈しないため、未知のセンサ、device ID、測定項目の追加にcollector変更なしで対応できる。
 
-CSVは分析・受け渡し用の派生形式であり、DB化、可視化、外部送信もJSONL保存より後段の責務とする。センサノードはクラウドへ直接接続せず、外部通信はRaspberry Pi側へ集約する。
+collectorはJSONL保存後、表示対象の計測値をlatest JSONへatomic置換する。dashboardは瞬時値をlatest JSONから読み、`/api/display`を10秒ごとに取得して更新する。今日の買電量・売電量と履歴はParquetを使う。センサノードはクラウドへ直接接続せず、外部通信はRaspberry Pi側へ集約する。
 
 ```mermaid
 flowchart LR
@@ -147,6 +147,8 @@ flowchart LR
         MQTT["Mosquitto"]
         COL["sensor-collector"]
         JSONL["JSONL一次保存"]
+        LATEST["latest JSON"]
+        PARQUET["Parquet"]
     end
 
     subgraph Use["データ利用"]
@@ -161,16 +163,17 @@ flowchart LR
     ENV --> ESP
     OPT --> ESP
     WIN --> USB
-    USB -->|将来: MQTT publish| MQTT
+    USB -->|MQTT publish| MQTT
     ESP -->|Wi-Fi + MQTT| MQTT
     AP --> ESP
     MQTT --> COL --> JSONL
-    JSONL --> DASH
+    COL --> LATEST -->|瞬時値| DASH
+    JSONL --> PARQUET -->|日計・履歴| DASH
     JSONL --> EXPORT
     JSONL -->|Raspberry Pi側で送信| CLOUD
 ```
 
-Bルート通信はUSBシリアル、OS権限、認証、PANA通信への依存が強いため、当面ホスト上のsystemdサービスで実行し、コンテナ化しない。将来、Bルート取得値をMQTTへpublishしてcollectorで保存する。移行時は既存の専用保存とMQTT→JSONL保存を二重化して検証し、安定後に既存保存の廃止可否を判断する。
+Bルート通信はUSBシリアル、OS権限、認証、PANA通信への依存が強いため、当面ホスト上のsystemdサービスで実行し、コンテナ化しない。Bルート取得値のMQTT publishとcollectorによるJSONL保存は実装済みである。既存の専用保存の扱いは、並行運用の検証後に判断する。一条`power-flow`はlatest JSON経由でdashboardへ表示し、10分を超えて古い場合はBルート値へフォールバックする。
 
 ---
 

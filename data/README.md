@@ -8,6 +8,7 @@ CSV、データベースなどはGitで管理しません。Gitにはこの説�
 
 - `broute/`: Bルート／スマートメータの計測データ
 - `sensors/`: 温湿度など、その他のセンサ計測データ
+- `latest/`: collectorがatomic置換する表示用最新状態JSON。`broute_power.json`、`sen66.json`、`ichijo_power_flow.json`だけを保持し、dashboardが読み込む
 - `database/`: SQLiteなどのローカルデータベース（保存方式は未決定）
 - `exports/`: 外部利用や退避のために生成したエクスポート
 - `processed/`: `data-transformer`がJSONLから生成する日付パーティション済みParquet（`broute_power`、`broute_cumulative_energy`、`broute_interval_energy`、`sen66`）
@@ -16,6 +17,8 @@ CSV、データベースなどはGitで管理しません。Gitにはこの説�
 既存コンポーネントが使用する`broute-meter/`も移行期間中はそのまま保持します。
 Docker Composeからは、原則としてOMKルート基準の`./data/...`をホスト側パスとして
 参照してください。`/opt/omk/data`や`/var/lib/omk`は使用しません。
+
+`latest/`はJSONLの代替や履歴保存ではなく、画面の瞬時値用キャッシュです。collectorが書き込み、dashboardは読み取り専用で参照します。実測JSON本体はGit管理対象外で、読取り途中の内容を公開しないようファイルは同一ディレクトリ内の一時ファイルから原子的に置換されます。
 
 データの保持期間、削除、バックアップ、復元は、運用開始前に別途ルールを定めて
 ください。ログは現在もOMKルートの`logs/`へ分離していますが、将来の運用要件に
