@@ -9,8 +9,9 @@ TARGET_USER="${SUDO_USER:-$(id -un)}"
 TARGET_UID=""
 TARGET_GROUP=""
 USER_HOME=""
-WAYLAND_DISPLAY="${DASHBOARD_KIOSK_WAYLAND_DISPLAY:-wayland-0}"
+WAYLAND_DISPLAY="${DASHBOARD_KIOSK_WAYLAND_DISPLAY:-}"
 DASHBOARD_URL="${DASHBOARD_KIOSK_URL:-http://localhost:8000/}"
+DASHBOARD_HEALTH_URL=""
 CHROMIUM_PATH="${DASHBOARD_KIOSK_CHROMIUM_PATH:-}"
 UNIT_NAME="omk-dashboard-kiosk.service"
 UNIT_TEMPLATE="${OMK_ROOT}/systemd/omk-dashboard-kiosk.service.in"
@@ -70,6 +71,7 @@ if [[ -z "${CHROMIUM_PATH}" ]]; then
   CHROMIUM_PATH="not found"
 fi
 DASHBOARD_URL="${DASHBOARD_URL%/}/"
+DASHBOARD_HEALTH_URL="${DASHBOARD_URL}health"
 
 if ((EUID == 0)) && [[ "${TARGET_USER}" != root ]]; then
   if command -v runuser >/dev/null 2>&1; then
@@ -84,12 +86,28 @@ elif ((EUID != 0)) && [[ "${TARGET_USER}" != "$(id -un)" ]]; then
 fi
 
 USER_SYSTEMD_ENV=(env "XDG_RUNTIME_DIR=/run/user/${TARGET_UID}" "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/${TARGET_UID}/bus")
+user_systemctl() { "${AS_TARGET[@]}" "${USER_SYSTEMD_ENV[@]}" systemctl --user "$@"; }
+
+resolve_wayland_display() {
+  local manager_display
+  if [[ -n "${WAYLAND_DISPLAY}" ]]; then
+    return
+  fi
+  manager_display="$(user_systemctl show-environment | sed -n 's/^WAYLAND_DISPLAY=//p' | head -n 1)"
+  WAYLAND_DISPLAY="${manager_display:-wayland-0}"
+  if [[ -n "${manager_display}" ]]; then
+    log "Using WAYLAND_DISPLAY from user manager: ${WAYLAND_DISPLAY}"
+  else
+    log "WARN: User manager has no WAYLAND_DISPLAY; using fallback: ${WAYLAND_DISPLAY}"
+  fi
+}
 
 render_unit() {
   sed \
     -e "s|@OMK_UID@|${TARGET_UID}|g" \
     -e "s|@CHROMIUM_PATH@|${CHROMIUM_PATH}|g" \
     -e "s|@DASHBOARD_URL@|${DASHBOARD_URL}|g" \
+    -e "s|@DASHBOARD_HEALTH_URL@|${DASHBOARD_HEALTH_URL}|g" \
     -e "s|@WAYLAND_DISPLAY@|${WAYLAND_DISPLAY}|g" \
     "${UNIT_TEMPLATE}"
 }
@@ -104,10 +122,11 @@ print_plan() {
     "Dashboard URL: ${DASHBOARD_URL}" \
     "Unit destination: ${UNIT_DESTINATION}" \
     "Planned action: daemon-reload, enable, and start/restart ${UNIT_NAME}" \
-    "Planned check: graphical-session.target and /run/user/${TARGET_UID}/${WAYLAND_DISPLAY}"
+    "Planned check: user systemd bus and /run/user/${TARGET_UID}/${WAYLAND_DISPLAY:-wayland-0}"
 }
 
 if "${PRINT_UNIT}"; then
+  WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-wayland-0}"
   print_plan
   printf '\n# %s\n' "${UNIT_NAME}"
   render_unit
@@ -115,11 +134,12 @@ if "${PRINT_UNIT}"; then
 fi
 
 if "${DRY_RUN}"; then
+  WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-wayland-0}"
   print_plan
   if [[ "${CHROMIUM_PATH}" == "not found" ]]; then
     log "WARN: Chromium is not installed or not on PATH; a real run would stop."
   fi
-  log "Would confirm curl, the active user manager, graphical-session.target, and Wayland socket before changing the unit."
+  log "Would read WAYLAND_DISPLAY from the active user manager and confirm its Wayland socket before changing the unit."
   exit 0
 fi
 
@@ -128,11 +148,10 @@ command -v curl >/dev/null 2>&1 || fail "curl is required to wait for the dashbo
 command -v systemctl >/dev/null 2>&1 || fail "systemctl is required."
 command -v pgrep >/dev/null 2>&1 || fail "pgrep is required to verify Chromium."
 
-user_systemctl() { "${AS_TARGET[@]}" "${USER_SYSTEMD_ENV[@]}" systemctl --user "$@"; }
-
 [[ -S "/run/user/${TARGET_UID}/bus" ]] || fail "No user systemd bus for ${TARGET_USER}. Log into the graphical session first."
+[[ -d "/run/user/${TARGET_UID}" ]] || fail "Runtime directory is unavailable for ${TARGET_USER}. Log into the graphical session first."
+resolve_wayland_display
 [[ -S "/run/user/${TARGET_UID}/${WAYLAND_DISPLAY}" ]] || fail "Wayland socket is unavailable. Confirm a Wayland GUI session and DASHBOARD_KIOSK_WAYLAND_DISPLAY."
-user_systemctl is-active --quiet graphical-session.target || fail "graphical-session.target is inactive. Run this from or after the target user's GUI login."
 
 CONFIG_DIRECTORY="${USER_HOME}/.config/systemd/user"
 "${AS_TARGET[@]}" mkdir -p "${CONFIG_DIRECTORY}"
@@ -151,6 +170,15 @@ else
   "${AS_TARGET[@]}" install -m 0644 "${TEMP_UNIT}" "${UNIT_DESTINATION}"
   UNIT_CHANGED=true
   log "Installed user unit: ${UNIT_DESTINATION}"
+fi
+
+OLD_WANTS_DIRECTORY="${USER_HOME}/.config/systemd/user/graphical-session.target.wants"
+OLD_WANTS_LINK="${OLD_WANTS_DIRECTORY}/${UNIT_NAME}"
+if [[ -L "${OLD_WANTS_LINK}" ]]; then
+  "${AS_TARGET[@]}" rm -f -- "${OLD_WANTS_LINK}"
+  log "Removed obsolete graphical-session.target symlink: ${OLD_WANTS_LINK}"
+elif [[ -e "${OLD_WANTS_LINK}" ]]; then
+  log "WARN: Obsolete target entry is not a symlink; leaving it unchanged: ${OLD_WANTS_LINK}"
 fi
 
 curl --fail --silent --show-error "${DASHBOARD_URL}health" >/dev/null || fail "Dashboard health endpoint is unavailable: ${DASHBOARD_URL}health"
