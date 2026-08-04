@@ -4,32 +4,111 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <title>OMK ダッシュボード</title>
-    <link rel="stylesheet" href="{{ url_for('static', path='/display.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', path='/display.css') }}?v=20260804-7">
   </head>
   <body>
     <main class="dashboard" aria-label="OMK ダッシュボード">
       <header class="topbar">
-        <h1>OMK</h1>
-        <p class="updated">最終更新 <time datetime="{{ dashboard.updated_at_iso }}">{{ dashboard.updated_at }}</time></p>
-        <p class="freshness freshness--{{ dashboard.freshness }}" aria-label="データ鮮度: {{ dashboard.freshness }}">{{ dashboard.freshness }}</p>
+        <time id="current-datetime" class="current-datetime" aria-label="現在日時"></time>
+
+        <div class="status-area">
+          <p class="updated">
+            最終更新
+            <time datetime="{{ dashboard.updated_at_iso }}">{{ dashboard.updated_at }}</time>
+          </p>
+          <p
+            class="freshness freshness--{{ dashboard.freshness }}"
+            aria-label="データ鮮度: {{ dashboard.freshness }}"
+          >
+            {{ dashboard.freshness }}
+          </p>
+        </div>
       </header>
 
       <section class="power-hero" aria-labelledby="power-title">
-        <p id="power-title" class="eyebrow">現在の電力</p>
-        <div class="power-reading"><strong>{{ dashboard.current_power_kw }}</strong><span>kW</span></div>
-        <p class="power-direction power-direction--{{ dashboard.power_flow }}">{{ dashboard.power_direction }}</p>
+        <div class="power-primary">
+          <p id="power-title" class="eyebrow">{{ dashboard.current_power_label }}</p>
+          <div class="power-reading">
+            <strong>{{ dashboard.current_power_kw }}</strong>
+            <span>kW</span>
+          </div>
+          {% if dashboard.power_direction %}
+          <p class="power-direction power-direction--{{ dashboard.power_flow }}">
+            {{ dashboard.power_direction }}
+          </p>
+          {% endif %}
+
+          {% if dashboard.has_ichijo_power_flow %}
+          <div class="grid-flow grid-flow--{{ dashboard.grid_flow }}">
+            <span>{{ dashboard.grid_flow_label }}</span>
+            <strong>{{ dashboard.grid_flow_kw }}</strong>
+            <small>kW</small>
+          </div>
+          {% endif %}
+        </div>
+
+        {% if dashboard.has_ichijo_power_flow %}
+        <aside class="power-details" aria-label="発電・蓄電池情報">
+          <div class="power-detail">
+            <span>PV発電</span>
+            <strong>{{ dashboard.pv_power_kw }}</strong>
+            <small>kW</small>
+          </div>
+
+          <div class="power-detail">
+            <span>今日の売電量</span>
+            <strong>{{ dashboard.sold_today_kwh }}</strong>
+            <small>kWh</small>
+          </div>
+
+          <div class="power-detail">
+            <span>蓄電池残量</span>
+            <strong>{{ dashboard.battery_soc_percent }}</strong>
+            <small>%</small>
+          </div>
+
+          <div class="power-detail">
+            <span>{{ dashboard.battery_power_label }}</span>
+            <strong>{{ dashboard.battery_power_kw }}</strong>
+            <small>kW</small>
+          </div>
+        </aside>
+        {% endif %}
       </section>
 
       <section class="cards" aria-label="電力と室内環境">
-        <article class="card card--energy"><p>今日の買電量</p><strong>{{ dashboard.purchased_today_kwh }}</strong><span>kWh</span></article>
-        <article class="card card--energy"><p>今日の売電量</p><strong>{{ dashboard.sold_today_kwh }}</strong><span>kWh</span></article>
-        <article class="card"><p>温度</p><strong>{{ dashboard.temperature_c }}</strong><span>℃</span></article>
-        <article class="card"><p>湿度</p><strong>{{ dashboard.humidity_percent }}</strong><span>%</span></article>
-        <article class="card"><p>CO2</p><strong>{{ dashboard.co2_ppm }}</strong><span>ppm</span></article>
-        <article class="card"><p>PM2.5</p><strong>{{ dashboard.pm25_ug_m3 }}</strong><span>µg/m³</span></article>
-        <article class="card card--air"><p>空気環境</p><strong>{{ dashboard.air_quality }}</strong></article>
+        <article class="card card--energy">
+          <p>今日の買電量</p>
+          <strong>{{ dashboard.purchased_today_kwh }}</strong>
+          <span>kWh</span>
+        </article>
+        <article class="card">
+          <p>温度</p>
+          <strong>{{ dashboard.temperature_c }}</strong>
+          <span>℃</span>
+        </article>
+        <article class="card">
+          <p>湿度</p>
+          <strong>{{ dashboard.humidity_percent }}</strong>
+          <span>%</span>
+        </article>
+        <article class="card">
+          <p>CO2</p>
+          <strong>{{ dashboard.co2_ppm }}</strong>
+          <span>ppm</span>
+        </article>
+        <article class="card">
+          <p>PM2.5</p>
+          <strong>{{ dashboard.pm25_ug_m3 }}</strong>
+          <span>µg/m³</span>
+        </article>
+        <article class="card">
+          <p>VOC Index</p>
+          <strong>{{ dashboard.voc_index }}</strong>
+        </article>
       </section>
     </main>
-    <script src="{{ url_for('static', path='/display.js') }}" defer></script>
+
+    <script src="{{ url_for('static', path='/display.js') }}?v=20260804-7" defer></script>
   </body>
 </html>
