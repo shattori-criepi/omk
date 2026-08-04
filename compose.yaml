@@ -25,8 +25,10 @@ services:
     environment:
       TZ: Asia/Tokyo
       OMK_PROCESSED_DATA_ROOT: /app/data/processed
+      OMK_LATEST_DATA_ROOT: /app/data/latest
     volumes:
       - ./data/processed:/app/data/processed:ro
+      - ./data/latest:/app/data/latest:ro
 
   sensor-collector:
     build:
@@ -40,9 +42,11 @@ services:
       MQTT_PORT: "1883"
       MQTT_TOPIC: "omk/#"
       DATA_ROOT: /app/data/sensors
+      LATEST_DATA_ROOT: /app/data/latest
       TZ: Asia/Tokyo
     volumes:
       - ./data/sensors:/app/data/sensors
+      - ./data/latest:/app/data/latest
 
   broute-meter-mock:
     build:
