@@ -9,6 +9,7 @@ Environment=XDG_RUNTIME_DIR=/run/user/@OMK_UID@
 ExecStartPre=/bin/sh -c 'until [ -S /run/user/@OMK_UID@/@WAYLAND_DISPLAY@ ]; do sleep 2; done'
 ExecStartPre=/bin/sh -c 'until curl -fsS @DASHBOARD_HEALTH_URL@ >/dev/null; do sleep 2; done'
 ExecStart=@CHROMIUM_PATH@ --kiosk --no-first-run --noerrdialogs --disable-session-crashed-bubble --password-store=basic --ozone-platform=wayland @DASHBOARD_URL@display
+ExecStartPost=/bin/sh -c 'sleep 2; @WTYPE_PATH@ -M alt -M logo -P h'
 Restart=always
 RestartSec=5
 
