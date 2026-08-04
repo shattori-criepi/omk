@@ -22,6 +22,27 @@ OMK_PROCESSED_DATA_ROOT=../../data/processed OMK_LATEST_DATA_ROOT=../../data/lat
 docker compose up --build dashboard
 ```
 
+## Raspberry Pi Chromiumキオスク
+
+dashboardサーバーはDocker Compose、表示用Chromiumは別のuser systemdサービスです。GUI自動ログイン済みのWaylandセッションで、リポジトリルートから次を実行します。
+
+```bash
+./scripts/setup-dashboard-kiosk.sh
+```
+
+このサービスはdashboardのhealth応答を待ってからChromiumを起動し、Chromium終了時は5秒後に自動再起動します。セットアップは`wtype`を確認・導入し、labwcの`HideCursor`/`WarpCursor`キーバインドを既存のタッチ設定を残して`~/.config/labwc/rc.xml`へ追加します。Chromiumの起動後に`wtype`でこのキーバインドを実行するため、カーソルは自動的に非表示になります。SSHやNapterの接続には依存しません。状態確認、再起動、ログ確認、停止は次のとおりです。
+
+```bash
+systemctl --user status omk-dashboard-kiosk.service --no-pager
+systemctl --user restart omk-dashboard-kiosk.service
+journalctl --user -u omk-dashboard-kiosk.service --no-pager
+systemctl --user disable --now omk-dashboard-kiosk.service
+```
+
+Waylandセッションが起動していない場合はセットアップを実行せず、GUIへログインしてから実行してください。セットアップ時にソケットがなければ安全に停止し、GUIログイン後の再実行を求めます。GUI自動ログイン時にuser managerの`default.target`から起動し、unit内ではWaylandソケットを待ちます。lingerは不要です。SSHやNapterの切断には依存しません。
+
+カーソルが残る場合は、`command -v wtype`、`~/.config/labwc/rc.xml`の`labwc_config`ルートと`HideCursor`・`WarpCursor`アクション、ならびに`systemctl --user cat omk-dashboard-kiosk.service`の`ExecStartPost`を確認してください。SSHからlabwcを即時再読込する場合は、GUIセッションのPIDを`LABWC_PID=<pid>`としてセットアップを再実行します。再読込に失敗した場合も、次回GUIログインまたは再起動で反映されます。
+
 ## URL
 
 - 表示画面: http://localhost:8000/display
@@ -51,4 +72,4 @@ docker compose run --rm dashboard pytest -q
 
 ## 現状と未実装事項
 
-latest JSONとDuckDB／Parquet実データ接続済みです。画面は10秒ごとに`/api/display`から値を更新します。MQTT購読、WebSocket、管理者画面、認証、グラフ、自動起動設定、systemdは未実装です。
+latest JSONとDuckDB／Parquet実データ接続済みです。画面は10秒ごとに`/api/display`から値を更新します。MQTT購読、WebSocket、管理者画面、認証、グラフは未実装です。

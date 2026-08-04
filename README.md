@@ -32,7 +32,8 @@ Windows PCです。初期設定はSSHで行えるため、キーボードとデ�
 3. `/home/omkdev/projects/omk`へこのリポジトリをcloneする
 4. `./scripts/setup-raspberry-pi.sh`を実行し、再ログイン後にDockerを確認する
 5. Onyx を使う場合は [SORACOM Onyx セットアップ](docs/soracom-onyx-setup.md)を実行する
-6. 後続タスクとして、周辺機器、秘密情報、OMKサービス、表示・ネットワーク機能を個別に設定する
+6. OMKのデータ収集サービスを起動後、GUI自動ログイン中に`./scripts/setup-dashboard-kiosk.sh`を実行して、表示用Chromiumとlabwcのカーソル非表示設定をuser systemdへ登録する
+7. 後続タスクとして、周辺機器、秘密情報、ネットワーク機能を個別に設定する
 
 現時点のセットアップスクリプトは、OS更新、Docker、データ保存領域までを準備します。
 OMKアプリケーションやDocker Composeサービスは起動しません。実機用Compose構成、秘密情報、

@@ -381,6 +381,7 @@ QoS、retain、再送上限は実機試験で確定します。
 | `sensor-collector` | `omk/#`の汎用受信と日次JSONL一次保存、対象計測値のlatest JSON更新 | Python / Docker Compose |
 | `data-transformer` | JSONLの検証・トピック別正規化・Parquet出力。`status`は管理情報として除外 | Python / PyArrow |
 | `dashboard` | latest JSONによる瞬時値、Parquetによる日計・履歴の表示 | Python / Docker Compose |
+| `omk-dashboard-kiosk.service` | Wayland GUIセッション内でChromiumキオスクを起動・監視し、labwcのカーソル非表示操作を実行 | user systemd / wtype |
 | Bルートsystemdサービス | USBシリアル・PANAによるBルート通信 | ホストOS |
 | CSV・分析・可視化・外部送信 | JSONLを使う後段処理 | 今後決定 |
 
