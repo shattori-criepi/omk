@@ -50,4 +50,4 @@ docker compose run --rm dashboard pytest -q
 
 ## 現状と未実装事項
 
-DuckDB／Parquet実データ接続済みです。MQTT購読、WebSocket、管理者画面、自動更新、認証、グラフ、自動起動設定、systemdは未実装です。
+latest JSONとDuckDB／Parquet実データ接続済みです。画面は10秒ごとに`/api/display`から値を更新します。MQTT購読、WebSocket、管理者画面、認証、グラフ、自動起動設定、systemdは未実装です。
