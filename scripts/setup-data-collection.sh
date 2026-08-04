@@ -8,7 +8,7 @@ COMPOSE_FILE="${OMK_ROOT}/compose.yaml"
 TARGET_USER="${SUDO_USER:-$(id -un)}"
 PRODUCTION_SERVICES=(mosquitto sensor-collector dashboard)
 EXCLUDED_SERVICES=(gateway broute-meter-mock broute-meter-tests)
-REQUIRED_DIRECTORIES=(data/sensors data/processed services/mosquitto/data logs/setup)
+REQUIRED_DIRECTORIES=(data/sensors data/latest data/processed services/mosquitto/data logs/setup)
 MOSQUITTO_BIND_ADDRESS="192.168.50.1"
 MQTT_PORT="1883"
 DASHBOARD_PORT="8000"
@@ -78,9 +78,9 @@ check_directory() {
   ownership="$(stat -c 'owner=%U:%G uid=%u gid=%g mode=%a' "${path}")"
   log "Directory state: ${path} (${ownership})"
   case "${relative}" in
-    data/sensors|logs/setup)
+    data/sensors|data/latest|logs/setup)
       target_can_write "${path}" || fail "${TARGET_USER} cannot write required directory: ${path}. Review ownership and permissions without using chown -R."
-      if [[ "${relative}" == "data/sensors" ]]; then
+      if [[ "${relative}" == "data/sensors" || "${relative}" == "data/latest" ]]; then
         target_can_read_directory "${path}" || fail "${TARGET_USER} cannot read/manage required directory: ${path}. Review ownership and permissions without using chown -R."
       fi
       log "PASS: ${TARGET_USER} can write ${path}"
@@ -167,6 +167,8 @@ check_dashboard() {
       log "PASS: Dashboard health endpoint responded"
       curl --fail --silent --show-error --max-time 5 "http://127.0.0.1:${DASHBOARD_PORT}/display" -o /dev/null
       log "PASS: Dashboard display endpoint is reachable"
+      curl --fail --silent --show-error --max-time 5 "http://127.0.0.1:${DASHBOARD_PORT}/api/display" -o /dev/null
+      log "PASS: Dashboard display API is reachable"
       return 0
     fi
     sleep 2
@@ -176,12 +178,23 @@ check_dashboard() {
 }
 
 check_container_paths() {
+  local dashboard_id latest_read_only
   docker_compose exec -T sensor-collector sh -c 'test -w /app/data/sensors' ||
     fail "sensor-collector cannot write /app/data/sensors."
   log "PASS: sensor-collector can write its data mount"
+  docker_compose exec -T sensor-collector sh -c 'test -w /app/data/latest' ||
+    fail "sensor-collector cannot write /app/data/latest."
+  log "PASS: sensor-collector can write its latest-data mount"
   docker_compose exec -T dashboard sh -c 'test -r /app/data/processed' ||
     fail "dashboard cannot read /app/data/processed."
   log "PASS: dashboard can read its processed-data mount"
+  docker_compose exec -T dashboard sh -c 'test -r /app/data/latest' ||
+    fail "dashboard cannot read /app/data/latest."
+  log "PASS: dashboard can read its latest-data mount"
+  dashboard_id="$(docker_compose ps -q dashboard)"
+  latest_read_only="$("${DOCKER_CMD[@]}" inspect -f '{{range .Mounts}}{{if eq .Destination "/app/data/latest"}}{{.RW}}{{end}}{{end}}' "${dashboard_id}")"
+  [[ "${latest_read_only}" == false ]] || fail "dashboard latest-data mount is not read-only."
+  log "PASS: dashboard latest-data mount is read-only"
   docker_compose exec -T mosquitto sh -c 'test -w /mosquitto/data' ||
     fail "mosquitto cannot write /mosquitto/data. Preserve existing container ownership; inspect its UID with 'docker compose exec mosquitto id' and adjust only this directory if required (never chown -R)."
   log "PASS: mosquitto can use its data mount"
@@ -245,8 +258,8 @@ if "${DRY_RUN}"; then
     fi
   fi
   "${RESTART}" && log "Would run: docker compose restart ${PRODUCTION_SERVICES[*]}"
-  log "Would verify container mounts after startup: sensor-collector write /app/data/sensors; dashboard read /app/data/processed; mosquitto write /mosquitto/data."
-  log "Would check ${MOSQUITTO_BIND_ADDRESS}:${MQTT_PORT}, http://127.0.0.1:${DASHBOARD_PORT}/health, and /display."
+  log "Would verify container mounts after startup: sensor-collector write /app/data/sensors and /app/data/latest; dashboard read /app/data/processed and read-only /app/data/latest; mosquitto write /mosquitto/data."
+  log "Would check ${MOSQUITTO_BIND_ADDRESS}:${MQTT_PORT}, http://127.0.0.1:${DASHBOARD_PORT}/health, /display, and /api/display."
   exit 0
 fi
 
@@ -276,7 +289,7 @@ docker_compose logs --tail 30 sensor-collector | grep -Eqi 'connection refused|c
 check_dashboard
 log "SUCCESS: running omk-mosquitto, omk-sensor-collector, omk-dashboard"
 log "MQTT: ${MOSQUITTO_BIND_ADDRESS}:${MQTT_PORT}; Dashboard: http://localhost:${DASHBOARD_PORT}/display"
-log "Data: data/sensors (JSONL), data/processed (processed data)"
+log "Data: data/sensors (JSONL), data/latest (live cache), data/processed (processed data)"
 log "Status: docker compose ps mosquitto sensor-collector dashboard"
 log "Logs: docker compose logs --tail 100 mosquitto sensor-collector dashboard"
 log "Stop only these services: docker compose stop mosquitto sensor-collector dashboard"

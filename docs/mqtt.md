@@ -45,9 +45,13 @@ Raspberry Pi側でAsia/Tokyoの受信時刻をミリ秒付きISO 8601形式で�
 
 JSONとして解析できないUTF-8 payloadは`payload_raw`と`payload_parse_error`を記録する。UTF-8でないpayloadは`payload_base64`と`payload_encoding: "base64"`で保持し、メッセージを破棄しない。CSVは一次保存形式ではなく、必要に応じてこのJSONLから後段で生成する。
 
-## Bルートの将来接続
+## latest状態キャッシュ
 
-Bルート通信はUSBシリアル、OS権限、認証、PANA通信に依存するため、当面はホスト上のsystemdサービスで実行し、コンテナ化しない。BルートのMQTT publishは未実装である。対応時は`omk/<device_id>/<data_type>`へpublishし、既存の専用保存を残したままcollectorのJSONL保存を並行して検証する。MQTT経由の保存が安定した後に、既存保存を廃止するか判断する。
+JSONL保存に成功した正常JSON payloadのうち、`omk/<device_id>/power`、`sen66`、`power-flow`は、それぞれ`data/latest/broute_power.json`、`sen66.json`、`ichijo_power_flow.json`へ更新される。collectorは同一ディレクトリの一時ファイルをatomic置換するため、dashboardは読取り途中のJSONを参照しない。latest更新が失敗してもJSONL収集は継続する。詳細な保存条件と権限は[sensor-collector README](../services/sensor-collector/README.md)を参照する。
+
+## Bルート接続
+
+Bルート通信はUSBシリアル、OS権限、認証、PANA通信に依存するため、当面はホスト上のsystemdサービスで実行し、コンテナ化しない。Bルート値は`omk/<device_id>/power`などへpublishされ、collectorのJSONL保存とlatest状態キャッシュへ反映される。既存の専用保存の扱いは、MQTT経由の保存を並行検証した後に判断する。
 
 ## セキュリティと運用
 

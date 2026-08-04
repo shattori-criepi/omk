@@ -20,7 +20,7 @@ usage() {
   cat <<'EOF'
 Usage: scripts/setup-data-transformer.sh [--print-units]
 
-Installs the OMK data-transformer systemd service and five-minute timer.
+Installs the OMK data-transformer systemd service and hourly timer.
 --print-units renders the service template to standard output without writing /etc.
 EOF
 }

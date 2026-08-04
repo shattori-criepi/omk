@@ -25,13 +25,14 @@ docker compose up --build dashboard
 ## URL
 
 - 表示画面: http://localhost:8000/display
+- 表示更新API: http://localhost:8000/api/display
 - ヘルスチェック: http://localhost:8000/health
 
 Raspberry Pi自身またはLAN内からは、`localhost` をPiのIPアドレスに置き換えてください。
 
 ## データ
 
-`OMK_LATEST_DATA_ROOT`（既定: `data/latest`）はcollectorが原子的に置換する瞬時値JSONのルートです。`OMK_PROCESSED_DATA_ROOT` は日計電力量用の処理済みParquetのルートです。Composeでは両方をdashboardへ読み取り専用でマウントします。
+`OMK_LATEST_DATA_ROOT`（既定: `data/latest`）はcollectorが原子的に置換する瞬時値JSONのルートです。対象は`broute_power.json`、`sen66.json`、`ichijo_power_flow.json`です。`OMK_PROCESSED_DATA_ROOT` は日計電力量用の処理済みParquetのルートです。Composeでは両方をdashboardへ読み取り専用でマウントします。一条`power-flow`が10分を超えて古い場合、画面はBルート電力へフォールバックします。
 
 データセットまたは値がない場合も画面は表示され、数値は `--`、電力状態は「データなし」、鮮度は `unavailable` になります。日計電力量は該当データがない場合 `0.0 kWh` です。
 

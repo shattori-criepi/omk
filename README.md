@@ -62,13 +62,15 @@ OMKは、次の処理を一つの製品・開発基盤として扱います。
 
 OMKのデータは、原則としてMQTTでRaspberry Piへ集約し、汎用`sensor-collector`がJSON Lines（JSONL）で一次保存します。collectorは`omk/#`を購読し、センサ機種や測定項目を解釈せずに、受信時刻・トピック・MQTTメタデータとpayloadを保存します。保存先は`data/sensors/YYYY/MM/DD.jsonl`です。測定値とstatusメッセージの両方が対象です。
 
+JSONL保存に成功した計測値のうち、Bルート`power`、SEN66`sen66`、一条`power-flow`は、表示用の最新状態JSON（`data/latest/broute_power.json`、`sen66.json`、`ichijo_power_flow.json`）もatomic置換で更新します。dashboardは瞬時値をlatest JSONから読み、`/api/display`を10秒ごとに取得して画面を更新します。今日の買電量・売電量と履歴用途は、JSONLから変換したParquetを使用します。
+
 ```text
-各データ取得処理 → MQTT → sensor-collector → JSONL一次保存
+各データ取得処理 → MQTT → sensor-collector → JSONL一次保存 → Parquet（日計・履歴）
                                       ↓
-                     CSV変換・分析・可視化・外部送信
+                          latest JSON（瞬時値）→ dashboard
 ```
 
-ESP32などのセンサ系サービスとMosquitto、collectorはDocker Composeで運用します。一方、USBシリアル、OS権限、PANA認証に強く依存するBルート通信は、当面ホスト上のsystemdサービスで実行します。BルートのMQTT publishは今後追加し、既存の専用保存とJSONL保存を並行して検証した後に統一を判断します。
+ESP32などのセンサ系サービスとMosquitto、collectorはDocker Composeで運用します。一方、USBシリアル、OS権限、PANA認証に強く依存するBルート通信は、当面ホスト上のsystemdサービスで実行します。Bルート値のMQTT publishとcollectorによるJSONL保存は実装済みです。既存の専用保存の扱いは、並行運用の検証結果に基づいて判断します。
 
 起動とログ確認は次のとおりです。
 

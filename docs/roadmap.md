@@ -24,17 +24,18 @@
 
 ### 2.1 MQTT・JSONLへのデータ収集統一
 
-各データ取得処理は原則としてMQTTでRaspberry Piへ集約し、汎用`sensor-collector`が`omk/#`を購読してJSONLへ一次保存する。collectorはセンサ固有payloadを解釈せず、CSV変換、分析、可視化、外部送信は後段に置く。
+各データ取得処理は原則としてMQTTでRaspberry Piへ集約し、汎用`sensor-collector`が`omk/#`を購読してJSONLへ一次保存する。表示対象の瞬時値はlatest JSONへも更新し、dashboardは10秒ポーリングでこれを表示する。日計・履歴はParquetを後段に置く。
 
 | 段階 | 状態 | 内容 |
 |---|---|---|
 | 1. ESP32＋SEN66 MQTT連携 | 完了 | `omk/sen66-001/sen66`へのpublishと再接続を確認済み |
 | 2. 汎用collectorによるJSONL保存 | 完了 | `omk/#`を購読し、日次JSONLへ一次保存 |
-| 3. BルートのMQTT publish追加 | 今後 | ホスト上のsystemdサービスからMQTTへpublish |
-| 4. 二重保存による検証 | 今後 | 既存のBルート専用保存とMQTT→JSONL保存を並行実行 |
-| 5. Bルート保存のJSONL統一判断 | 今後 | 安定性と欠損状況を評価して専用保存の扱いを決定 |
-| 6. CSV変換機能 | 今後 | JSONLから分析・受け渡し用CSVを生成 |
-| 7. 可視化・外部送信 | 今後 | JSONL保存後のデータを利用する後段処理 |
+| 3. BルートのMQTT publish | 完了 | ホスト上のBルートサービスからMQTTへpublishし、collectorがJSONL保存 |
+| 4. latest JSON経路 | 完了 | Bルート、SEN66、一条power-flowを表示用latest JSONへatomic更新 |
+| 5. ライブダッシュボード | 完了 | latest JSONの瞬時値とParquetの日計を表示し、10秒ごとに更新。一条鮮度切れ時はBルートへフォールバック |
+| 6. Bルート専用保存の扱い判断 | 要評価 | 並行運用の安定性と欠損状況を評価して移行方針を決定 |
+| 7. CSV変換機能 | 今後 | JSONLから分析・受け渡し用CSVを生成 |
+| 8. 外部送信 | 今後 | JSONLまたはParquetを利用する後段処理 |
 
 Bルート通信自体はUSBシリアル、OS権限、認証、PANA通信への依存があるため、当面ホスト上のsystemdサービスとして維持し、コンテナ化しない。段階3以降が完了するまで、BルートがMQTT対応済みであるとは扱わない。
 

@@ -254,9 +254,11 @@ docker compose stop mosquitto sensor-collector dashboard
 docker compose restart mosquitto sensor-collector dashboard
 ```
 
-`data/sensors`（JSONL）と`data/processed`（処理済みデータ）、
+`data/sensors`（JSONL）、`data/latest`（表示用最新状態JSON）、`data/processed`（処理済みデータ）、
 `services/mosquitto/data` は運用データです。削除せず、バックアップと保持方針に従って
 管理してください。スクリプトは既存ディレクトリを再帰的にchownしません。
+
+`data/latest`はcollectorが書き込み、dashboardは読み取り専用で参照します。初回の計測後に`ls -l data/latest/`で`broute_power.json`、`sen66.json`、`ichijo_power_flow.json`の生成状況と読取り権限を確認してください。未生成でもdashboardは起動し、欠損値として表示します。
 
 ### トラブルシューティング
 
@@ -266,7 +268,7 @@ docker compose restart mosquitto sensor-collector dashboard
 - Docker権限エラー: `systemctl status docker` を確認し、`docker` group追加後はSSHから
   ログアウト・再接続します。恒常的に `sudo docker` で運用しないでください。
 - Dashboard health失敗: `docker compose logs --tail 100 dashboard` とポート8000の利用状況を
-  確認します。processedデータがまだなくてもDashboard自体は起動できます。
+  確認します。`ls -l data/latest/`でlatest JSONと権限を、`docker compose exec dashboard sh -c 'test -r /app/data/latest'`で読取りマウントを、`curl http://localhost:8000/api/display`でAPI応答を確認します。latestまたはprocessedデータがまだなくてもDashboard自体は起動できます。
 - sensor-collectorのMQTT接続失敗: Mosquittoの状態、`192.168.50.1:1883`、および
   `MQTT_HOST=mosquitto`、`MQTT_PORT=1883`、`MQTT_TOPIC=omk/#` を確認します。センサが
   未送信でもセットアップは成功します。

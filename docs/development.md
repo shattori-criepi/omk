@@ -79,6 +79,13 @@ tail -n 1 data/sensors/$(date +%Y)/$(date +%m)/$(date +%d).jsonl | python3 -m js
 
 CSV変換、分析、可視化、外部送信はJSONL保存後の処理として扱う。
 
+表示用の瞬時値は`data/latest/*.json`から確認できます。collectorが更新し、dashboardは読み取り専用で参照します。日計・履歴はParquetを使います。dashboard起動後は次でAPI応答を確認できます。
+
+```bash
+ls -l data/latest/
+curl http://localhost:8000/api/display
+```
+
 ### 4.1 Windows／モック
 
 ```bash
@@ -150,7 +157,7 @@ Raspberry Pi 4またはRaspberry Pi 5の実機で問題が起きた場合は、�
 5. 共通データへ変換できるか
 6. 保存・送信できるか
 
-Bルート通信はDocker Composeへ移さず、ホスト上のsystemdサービスとして確認する。将来のBルートMQTT対応では、既存保存を維持したままMQTT publishとcollectorによるJSONL保存を並行検証する。
+Bルート通信はDocker Composeへ移さず、ホスト上のsystemdサービスとして確認する。Bルート値のMQTT publishとcollectorによるJSONL保存は実装済みであり、既存保存を維持したまま並行運用を検証する。
 
 ## 5. 設定管理
 
