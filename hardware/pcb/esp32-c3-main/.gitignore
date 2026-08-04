@@ -6,3 +6,7 @@
 *.blank.kicad_sch
 erc-report.txt
 rendered/
+
+.history/
+*-backups/
+fp-info-cache
