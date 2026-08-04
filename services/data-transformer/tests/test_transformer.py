@@ -121,3 +121,53 @@ def test_status_topics_are_ignored_without_error_jsonl(tmp_path):
     assert result.ignored_topics == {"omk/broute-001/status": 1, "omk/sen66-001/status": 1}
     assert not result.errors
     assert not (tmp_path / "errors/transform/30.jsonl").exists()
+
+
+def test_ichijo_power_flow_is_written_to_partitioned_parquet(tmp_path):
+    input_file = tmp_path / "04.jsonl"
+    record = _record(
+        "omk/ichijo-001/power-flow",
+        {
+            "device_id": "ichijo-001",
+            "measured_at": "2026-08-04T08:38:52+09:00",
+            "pv_power_w": 1610,
+            "battery_soc_percent": 73,
+            "battery_charge_power_w": 0,
+            "battery_discharge_power_w": 87,
+            "battery_operating_state": "discharging",
+            "battery_operating_state_raw": 67,
+            "grid_import_power_w": 3,
+            "grid_export_power_w": 0,
+            "pcs_ac_output_power_w": 1697,
+            "load_power_w": 1700,
+            "quality": "normal",
+            "errors": [],
+        },
+        received_at="2026-08-04T08:38:51.970+09:00",
+    )
+    input_file.write_text(json.dumps(record) + "\n", encoding="utf-8")
+
+    output = tmp_path / "processed"
+    result = transform(input_file, output)
+
+    assert result.converted == 1
+    assert result.written == {"ichijo_power_flow": 1}
+
+    parquet = (
+        output
+        / "ichijo_power_flow"
+        / "date=2026-08-04"
+        / "data.parquet"
+    )
+    row = pq.read_table(parquet).to_pylist()[0]
+
+    assert row["device_id"] == "ichijo-001"
+    assert row["measured_at"].isoformat() == "2026-08-04T08:38:52+09:00"
+    assert row["load_power_w"] == 1700
+    assert row["pv_power_w"] == 1610
+    assert row["battery_soc_percent"] == 73.0
+    assert row["battery_discharge_power_w"] == 87
+    assert row["battery_operating_state"] == "discharging"
+    assert row["grid_import_power_w"] == 3
+    assert row["grid_export_power_w"] == 0
+    assert row["quality"] == "normal"

@@ -23,6 +23,20 @@ class LatestSen66:
     relative_humidity_pct: float | None
     co2_ppm: float | None
     pm2_5_ug_m3: float | None
+    voc_index: float | None
+
+
+@dataclass(frozen=True)
+class LatestIchijoPowerFlow:
+    measured_at: datetime
+    load_power_w: float
+    pv_power_w: float
+    grid_import_power_w: float
+    grid_export_power_w: float
+    battery_soc_percent: float
+    battery_charge_power_w: float
+    battery_discharge_power_w: float
+    battery_operating_state: str | None
 
 
 @dataclass(frozen=True)
@@ -55,7 +69,7 @@ class ParquetRepository:
         row = self._one(
             "sen66",
             """
-            SELECT measured_at, temperature_c, relative_humidity_pct, co2_ppm, pm2_5_ug_m3
+            SELECT measured_at, temperature_c, relative_humidity_pct, co2_ppm, pm2_5_ug_m3, voc_index
             FROM read_parquet(?, hive_partitioning = true)
             ORDER BY measured_at DESC
             LIMIT 1
@@ -69,6 +83,41 @@ class ParquetRepository:
             relative_humidity_pct=_optional_float(row[2]),
             co2_ppm=_optional_float(row[3]),
             pm2_5_ug_m3=_optional_float(row[4]),
+            voc_index=_optional_float(row[5]),
+        )
+
+    def latest_ichijo_power_flow(self) -> LatestIchijoPowerFlow | None:
+        row = self._one(
+            "ichijo_power_flow",
+            """
+            SELECT
+                measured_at,
+                load_power_w,
+                pv_power_w,
+                grid_import_power_w,
+                grid_export_power_w,
+                battery_soc_percent,
+                battery_charge_power_w,
+                battery_discharge_power_w,
+                battery_operating_state
+            FROM read_parquet(?, hive_partitioning = true)
+            ORDER BY measured_at DESC
+            LIMIT 1
+            """,
+        )
+        if row is None:
+            return None
+
+        return LatestIchijoPowerFlow(
+            measured_at=row[0],
+            load_power_w=float(row[1]),
+            pv_power_w=float(row[2]),
+            grid_import_power_w=float(row[3]),
+            grid_export_power_w=float(row[4]),
+            battery_soc_percent=float(row[5]),
+            battery_charge_power_w=float(row[6]),
+            battery_discharge_power_w=float(row[7]),
+            battery_operating_state=row[8],
         )
 
     def today_energy_totals(self, today: date) -> EnergyTotals:
