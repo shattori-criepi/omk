@@ -1,0 +1,16 @@
+[Unit]
+Description=OMK dashboard kiosk
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+Environment=WAYLAND_DISPLAY=@WAYLAND_DISPLAY@
+Environment=XDG_RUNTIME_DIR=/run/user/@OMK_UID@
+ExecStartPre=/bin/sh -c 'until curl -fsS @DASHBOARD_URL@health >/dev/null; do sleep 2; done'
+ExecStart=@CHROMIUM_PATH@ --kiosk --no-first-run --noerrdialogs --disable-session-crashed-bubble --password-store=basic --ozone-platform=wayland @DASHBOARD_URL@display
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=graphical-session.target

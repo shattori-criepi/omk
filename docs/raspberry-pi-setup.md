@@ -290,6 +290,30 @@ systemctl list-timers omk-data-transformer.timer
 sudo journalctl -u omk-data-transformer.service --since today --no-pager
 sudo systemctl disable --now omk-data-transformer.timer
 ```
+
+## Dashboard Chromiumキオスク
+
+dashboardコンテナは画面データを提供し、Chromiumは別のuser systemdサービスとしてWayland GUIセッション内で表示します。SSHからChromiumを直接起動しないため、NapterやSSHの切断では画面は停止しません。
+
+先に`dashboard`を含むComposeサービスを起動し、Raspberry PiのGUIへ対象ユーザーで自動ログインした状態で次を実行します。
+
+```bash
+cd ~/projects/omk
+./scripts/setup-dashboard-kiosk.sh
+```
+
+スクリプトは`chromium`、`curl`、user manager、`graphical-session.target`、Waylandソケットを確認し、`~/.config/systemd/user/omk-dashboard-kiosk.service`を更新します。既存の手動unitは内容が異なる場合にバックアップして置き換えます。`WAYLAND_DISPLAY`は既定で`wayland-0`です。異なる場合は`DASHBOARD_KIOSK_WAYLAND_DISPLAY=...`を付けて実行してください。
+
+GUI自動ログイン時にuser managerと`graphical-session.target`が起動するため、lingerは不要です。GUIログアウト時はキオスクも停止します。確認、再起動、ログ、停止は以下です。
+
+```bash
+systemctl --user status omk-dashboard-kiosk.service --no-pager
+systemctl --user restart omk-dashboard-kiosk.service
+journalctl --user -u omk-dashboard-kiosk.service --no-pager
+systemctl --user disable --now omk-dashboard-kiosk.service
+```
+
+Chromiumを終了またはkillした場合は、systemdが約5秒後に再起動します。dashboard未起動時はhealth endpointの応答まで待機します。
 後続タスクの一覧は[ロードマップ](roadmap.md)も参照してください。
 
 ## 14. Wi-Fiアクセスポイント（NetworkManager）

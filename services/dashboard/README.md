@@ -22,6 +22,25 @@ OMK_PROCESSED_DATA_ROOT=../../data/processed OMK_LATEST_DATA_ROOT=../../data/lat
 docker compose up --build dashboard
 ```
 
+## Raspberry Pi Chromiumキオスク
+
+dashboardサーバーはDocker Compose、表示用Chromiumは別のuser systemdサービスです。GUI自動ログイン済みのWaylandセッションで、リポジトリルートから次を実行します。
+
+```bash
+./scripts/setup-dashboard-kiosk.sh
+```
+
+このサービスはdashboardのhealth応答を待ってからChromiumを起動し、Chromium終了時は5秒後に自動再起動します。SSHやNapterの接続には依存しません。状態確認、再起動、ログ確認、停止は次のとおりです。
+
+```bash
+systemctl --user status omk-dashboard-kiosk.service --no-pager
+systemctl --user restart omk-dashboard-kiosk.service
+journalctl --user -u omk-dashboard-kiosk.service --no-pager
+systemctl --user disable --now omk-dashboard-kiosk.service
+```
+
+Waylandセッションが起動していない場合はセットアップを実行せず、GUIへログインしてから実行してください。lingerは不要で、GUIログアウト時は`graphical-session.target`と連動して停止します。
+
 ## URL
 
 - 表示画面: http://localhost:8000/display
@@ -51,4 +70,4 @@ docker compose run --rm dashboard pytest -q
 
 ## 現状と未実装事項
 
-latest JSONとDuckDB／Parquet実データ接続済みです。画面は10秒ごとに`/api/display`から値を更新します。MQTT購読、WebSocket、管理者画面、認証、グラフ、自動起動設定、systemdは未実装です。
+latest JSONとDuckDB／Parquet実データ接続済みです。画面は10秒ごとに`/api/display`から値を更新します。MQTT購読、WebSocket、管理者画面、認証、グラフは未実装です。
