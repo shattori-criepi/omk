@@ -3,7 +3,7 @@ Description=Run OMK data transformer every five minutes
 
 [Timer]
 OnBootSec=2min
-OnUnitActiveSec=5min
+OnUnitActiveSec=1h
 Persistent=true
 AccuracySec=15s
 Unit=omk-data-transformer.service
