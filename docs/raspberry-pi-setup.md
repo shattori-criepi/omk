@@ -302,9 +302,11 @@ cd ~/projects/omk
 ./scripts/setup-dashboard-kiosk.sh
 ```
 
-スクリプトは`chromium`、`curl`、user manager、`graphical-session.target`、Waylandソケットを確認し、`~/.config/systemd/user/omk-dashboard-kiosk.service`を更新します。既存の手動unitは内容が異なる場合にバックアップして置き換えます。`WAYLAND_DISPLAY`は既定で`wayland-0`です。異なる場合は`DASHBOARD_KIOSK_WAYLAND_DISPLAY=...`を付けて実行してください。
+スクリプトは`chromium`、`curl`、user managerのbus、`/run/user/<UID>`、Waylandソケットを確認し、`~/.config/systemd/user/omk-dashboard-kiosk.service`を更新します。`WAYLAND_DISPLAY`はuser manager環境から取得し、未設定時だけ`wayland-0`を使います。異なる場合は`DASHBOARD_KIOSK_WAYLAND_DISPLAY=...`を付けて実行してください。既存の手動unitは内容が異なる場合にバックアップして置き換え、旧`graphical-session.target.wants`のsymlinkは安全に削除します。
 
-GUI自動ログイン時にuser managerと`graphical-session.target`が起動するため、lingerは不要です。GUIログアウト時はキオスクも停止します。確認、再起動、ログ、停止は以下です。
+GUI自動ログイン時にuser managerの`default.target`が起動し、キオスクunitも有効化されます。unit自身がWaylandソケットとdashboard healthを待つため、表示準備前にChromiumを起動しません。lingerは不要です。GUIセッションがなくuser managerが停止している状態ではChromiumは起動しません。確認、再起動、ログ、停止は以下です。
+
+セットアップ実行時にWaylandソケットがまだない場合は安全にエラー終了します。GUIログイン後に再実行してください。いったん有効化されたunitは、以後の自動起動時にはソケットとhealth応答を待機します。
 
 ```bash
 systemctl --user status omk-dashboard-kiosk.service --no-pager

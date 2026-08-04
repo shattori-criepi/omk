@@ -39,7 +39,7 @@ journalctl --user -u omk-dashboard-kiosk.service --no-pager
 systemctl --user disable --now omk-dashboard-kiosk.service
 ```
 
-Waylandセッションが起動していない場合はセットアップを実行せず、GUIへログインしてから実行してください。lingerは不要で、GUIログアウト時は`graphical-session.target`と連動して停止します。
+Waylandセッションが起動していない場合はセットアップを実行せず、GUIへログインしてから実行してください。セットアップ時にソケットがなければ安全に停止し、GUIログイン後の再実行を求めます。GUI自動ログイン時にuser managerの`default.target`から起動し、unit内ではWaylandソケットを待ちます。lingerは不要です。SSHやNapterの切断には依存しません。
 
 ## URL
 
