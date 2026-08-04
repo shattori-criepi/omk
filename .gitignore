@@ -17,6 +17,9 @@ data/broute/*
 !data/sensors/
 data/sensors/*
 !data/sensors/.gitkeep
+!data/latest/
+data/latest/*
+!data/latest/.gitkeep
 !data/database/
 data/database/*
 !data/database/.gitkeep

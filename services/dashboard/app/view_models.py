@@ -6,11 +6,12 @@ from enum import StrEnum
 from zoneinfo import ZoneInfo
 
 from app.data.parquet_repository import (
-    LatestIchijoPowerFlow,
     LatestPower,
     LatestSen66,
     ParquetRepository,
 )
+from app.data.latest_repository import LatestRepository
+from app.data.parquet_repository import LatestIchijoPowerFlow
 
 JST = ZoneInfo("Asia/Tokyo")
 NORMAL_MAX_AGE_SECONDS = 6 * 60
@@ -55,14 +56,45 @@ class DisplayViewModel:
     updated_at_iso: str
     freshness: FreshnessStatus
 
+    def as_dict(self) -> dict[str, str | bool]:
+        """Return JSON-ready values used by the display polling API."""
+        return {
+            "current_power_kw": self.current_power_kw,
+            "current_power_label": self.current_power_label,
+            "power_direction": self.power_direction,
+            "power_flow": self.power_flow.value,
+            "has_ichijo_power_flow": self.has_ichijo_power_flow,
+            "pv_power_kw": self.pv_power_kw,
+            "battery_soc_percent": self.battery_soc_percent,
+            "battery_power_label": self.battery_power_label,
+            "battery_power_kw": self.battery_power_kw,
+            "grid_flow_label": self.grid_flow_label,
+            "grid_flow_kw": self.grid_flow_kw,
+            "grid_flow": self.grid_flow.value,
+            "purchased_today_kwh": self.purchased_today_kwh,
+            "sold_today_kwh": self.sold_today_kwh,
+            "temperature_c": self.temperature_c,
+            "humidity_percent": self.humidity_percent,
+            "co2_ppm": self.co2_ppm,
+            "pm25_ug_m3": self.pm25_ug_m3,
+            "voc_index": self.voc_index,
+            "updated_at": self.updated_at,
+            "updated_at_iso": self.updated_at_iso,
+            "freshness": self.freshness.value,
+        }
 
-def get_display_view_model(repository: ParquetRepository, now: datetime | None = None) -> DisplayViewModel:
-    """Build a display-ready model from the latest processed measurements."""
+
+def get_display_view_model(
+    latest_repository: LatestRepository,
+    parquet_repository: ParquetRepository,
+    now: datetime | None = None,
+) -> DisplayViewModel:
+    """Build a display-ready model from latest JSON and daily Parquet totals."""
     current_time = _as_jst(now or datetime.now(JST))
-    power = repository.latest_power()
-    sen66 = repository.latest_sen66()
-    ichijo = repository.latest_ichijo_power_flow()
-    totals = repository.today_energy_totals(current_time.date())
+    power = latest_repository.latest_power()
+    sen66 = latest_repository.latest_sen66()
+    ichijo = latest_repository.latest_ichijo_power_flow()
+    totals = parquet_repository.today_energy_totals(current_time.date())
 
     power_freshness = freshness_for(power.measured_at if power else None, current_time)
     sen66_freshness = freshness_for(sen66.measured_at if sen66 else None, current_time)
