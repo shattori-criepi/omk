@@ -1,6 +1,10 @@
-# OMK ESP32-C3 / SEN66 PCB Rev.A
+# OMK ESP32-C3 / SEN66 PCB Rev.A — CANCELLED reference design
 
-更新日: 2026-08-03。現行仕様は正式KiCad回路図、各基板README、`hardware/pcb/esp32-c3-main/power-review.md` を正とする。
+> **Status: CANCELLED — NOT FOR FABRICATION**
+>
+> 2026-08-04にESP32-C3＋SEN66一体型PCB計画を正式中止した。以下は中止時点の設計・監査履歴であり、現行仕様、製造承認、実装予定または後継構成への自動適用を示さない。製造リリースは**CANCELLED**、fabrication permittedは**NO**である。後継構成は未決定であり、M5StickS3を含む既製デバイスは候補であって採用決定ではない。詳細は[中止決定記録](../decisions/esp32-c3-integrated-pcb-cancellation.md)を参照。
+
+更新日: 2026-08-04。中止前の正は正式KiCad回路図、各基板README、`hardware/pcb/esp32-c3-main/power-review.md` だった。
 
 | フェーズ | 状態 |
 | --- | --- |
@@ -8,9 +12,9 @@
 | Phase 2 メイン回路図 | 完了（ERC 0 errors / 既知warning 2件） |
 | Phase 2 キャリア回路図 | 完了（ERC 0 errors / 0 warnings、PDF/SVG出力済み） |
 | Phase 3A 部品レビュー | 完了 |
-| Phase 3B PCBレイアウト | 未着手 |
+| Phase 3B PCBレイアウト | CANCELLED（主要部品の仮配置までを履歴保存。配線・via・zone・最終外形・製造データは未完了） |
 
-## 結論
+## 中止前の設計結論（履歴）
 
 Rev.A は `ESP32-C3-MINI-1-H4X`（LCSC `C41349510`）を表面実装する。4 MB 内蔵フラッシュ、RISC-V、内蔵 PCB アンテナおよび USB Serial/JTAG を備える公式モジュールであり、USB D-=`GPIO18`、D+=`GPIO19` とする。`ESP32-C3-MINI-1-N4` / `-H4` は設計指示どおり採用しない。N4X は H4X と同一の電源・フットプリントを再照合した場合だけ代替候補とする。
 
@@ -164,9 +168,9 @@ Phase 3Aで確定した電気的部品・pin mappingと、回路図へ反映す�
 両方にS4B-PH-K-S(LF)(SN) / C157926 / `Connector_JST:JST_PH_S4B-PH-K_1x04_P2.00mm_Horizontal`を反映した。
 残る主な回路図property候補はJ1のLCSC C3197885であるが、JAE controlled drawingとのfootprint比較を完了するまで反映しない。L1のXGL4020-472MEC / C6012418プロパティと監査済み標準footprintは正式反映済みである。
 接続変更はJ3/J2のpin mapping再照合だけであり、AP63203のEN/FB/BST接続、USB、SEN66直結J1、
-キャリアのC1/C2/R1/R2/TP1–TP4は変更予定がない。実装方向、footprint監査、DC-bias一次資料、
-JLC調達証跡はPhase 3Bまたは発注前ゲートで解消する。J3/J2は同時更新・再生成・ERC/PDF確認まで完了し、
-PCB配置の回転・座標はPhase 3Bで決定する。製造リリースはBLOCKEDである。
+キャリアのC1/C2/R1/R2/TP1–TP4は変更予定がなかった。実装方向、footprint監査、DC-bias一次資料、
+JLC調達証跡は中止前にはPhase 3Bまたは発注前ゲートで解消する計画だったが、実施しない。J3/J2は同時更新・再生成・ERC/PDF確認まで完了した。
+PCB配置の回転・座標は未確定のまま履歴保存し、製造リリースはCANCELLEDである。
 
 ## 概略回路
 
@@ -191,7 +195,7 @@ USB-C は sink 専用（CC1/CC2 とも 5.1 kΩ Rd）、VBUS保護、シールド
 
 Phase 3Aレビューでは、裸2.54 mm 1×4案は逆挿し防止がないため**不採用**とした。Rev.Aの基板側ヘッダは、メイン基板J3とキャリア基板J2共通でJST `S4B-PH-K-S(LF)(SN)`（side-entry TH、LCSC/JLCPCB `C157926`）を選定した。ハウジングはPHR-4、コンタクトはSPH-002T-P0.5Sである。ハーネスは両端を雌ハウジングとし、PHR-4×2、コンタクト×8、AWG26–28より線×4、完成長40 mmを標準とする。電気的にはSEN66 350 mA peakに対してPHの2 A定格で余裕がある。
 
-headerの型式とside-entry TH方針は確定し、J3/J2の回路図統合も完了した。両基板でpin 1=3V3/2=GND/3=SDA/4=SCLを維持し、main ERCは0 errors / U1 library警告2件、carrier ERCは0 errors / 0 warnings、PDF/SVG出力は成功した。PCB上の回転・座標、両開口を基板間の隙間へ向けたケーブル束の曲げ、SEN66 airflow、基板間距離、手はんだ性、JLCPCBA治具対応はPhase 3B PCB layoutで確認する。製造リリースはBLOCKEDである。詳細は `hardware/pcb/jst-ph-header-selection.md` および `hardware/pcb/interconnect-review.md`。
+headerの型式とside-entry TH方針は確定し、J3/J2の回路図統合も完了した。両基板でpin 1=3V3/2=GND/3=SDA/4=SCLを維持し、main ERCは0 errors / U1 library警告2件、carrier ERCは0 errors / 0 warnings、PDF/SVG出力は成功した。PCB上の回転・座標、両開口を基板間の隙間へ向けたケーブル束の曲げ、SEN66 airflow、基板間距離、手はんだ性、JLCPCBA治具対応は中止前にPhase 3B PCB layoutで確認する計画だったが、未実施のまま履歴保存する。製造リリースはCANCELLEDである。詳細は `hardware/pcb/jst-ph-header-selection.md` および `hardware/pcb/interconnect-review.md`。
 
 ## 採用予定部品
 
@@ -199,7 +203,7 @@ headerの型式とside-entry TH方針は確定し、J3/J2の回路図統合も�
 | --- | --- | --- | --- |
 | MCU | ESP32-C3-MINI-1-H4X / C41349510 | ESP32-C3-MINI-1-N4X（承認・再照合必須） | JLC PCBA候補 |
 | 3V3 buck | AP63203WU-7 / C780769 | — | L1電気選定済み。調達・FPとMLCC実効容量確認待ち |
-| USB-C | JAE DX07S016JA1R1500 / C3197885（候補） | — | Electrical ACCEPT。USB2 pad mapping確認済み、JAE controlled land/board-edge/3D・調達VERIFY、製造リリースBLOCKED。 |
+| USB-C | JAE DX07S016JA1R1500 / C3197885（候補） | — | 中止前の評価はElectrical ACCEPT、USB2 pad mapping確認済み、JAE controlled land/board-edge/3D・調達VERIFY。現行の製造リリース状態はCANCELLED。 |
 | USB ESD | ST USBLC6-2SC6 / C7519 | — | Electrical ACCEPT、JLC実装・配置VERIFY |
 | USB PTC | Bourns MF-MSMF110-2 | — | Electrical ACCEPT、thermal/startup/procurement VERIFY |
 | USB CC | 5.1 kΩ ×2、独立Rd | — | Electrical ACCEPT、調達VERIFY |

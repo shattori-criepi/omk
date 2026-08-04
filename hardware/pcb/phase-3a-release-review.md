@@ -1,6 +1,10 @@
-# Phase 3A release review and schematic-change plan — 2026-08-03 JST
+# Phase 3A release review and schematic-change plan — historical record
 
-Scope: final inventory before Phase 3B PCB layout. This is a review and change plan only: no schematic, PCB, generator, footprint, BOM/CPL, commit or push is changed.
+> **Project status: CANCELLED (2026-08-04). Manufacturing release: CANCELLED. Fabrication permitted: NO.**
+>
+> 本文は中止前の部品・回路図統合レビューの履歴である。本文中の`BLOCKED`、Phase 3B、発注前またはprototype gateは当時の未完了事項を示すだけで、現在の製造承認や次作業を意味しない。後継構成へ自動適用してはならない。詳細は[中止決定記録](../../docs/decisions/esp32-c3-integrated-pcb-cancellation.md)を参照。
+
+Scope at the time: final inventory before Phase 3B PCB layout. This is a historical review and change plan only.
 
 ## Decisions fixed by Phase 3A
 

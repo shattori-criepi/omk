@@ -1,6 +1,10 @@
-# OMK SEN66 CARRIER Rev.A
+# OMK SEN66 CARRIER Rev.A — CANCELLED reference design
 
-SEN66の6線ケーブルを、ESP32-C3メイン基板の4線J3へ変換するキャリア基板のKiCad 9.0.8回路図である。PCBレイアウトは未着手である。
+> **Status: CANCELLED — NOT FOR FABRICATION**
+>
+> ESP32-C3＋SEN66一体型PCB計画は2026-08-04に正式中止された。このキャリア回路図と関連資料は履歴・参考資料として保持するが、製造可能または動作検証済みではない。後継構成は未決定であり、M5StickS3を含む既製デバイスは候補であって採用決定ではない。詳細は[中止決定記録](../../../docs/decisions/esp32-c3-integrated-pcb-cancellation.md)を参照。
+
+以下は、SEN66の6線ケーブルをESP32-C3メイン基板の4線J3へ変換するキャリア基板の履歴回路図である。PCBレイアウトと製造データは未完了のまま終了した。
 
 ## 正式な接続
 

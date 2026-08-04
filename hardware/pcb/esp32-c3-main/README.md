@@ -1,6 +1,10 @@
-# OMK ESP32-C3 MAIN Rev.A — Phase 2 schematic
+# OMK ESP32-C3 MAIN Rev.A — CANCELLED reference design
 
-KiCad 9.0.8用のメイン基板回路図である。PCBレイアウト、BOM/CPL、Gerberはまだ作成しない。
+> **Status: CANCELLED — NOT FOR FABRICATION**
+>
+> この一体型PCB計画は2026-08-04に正式中止された。回路図、PCB、footprint、生成スクリプトおよび監査資料は履歴・参考資料として保持するが、電気的・物理的に検証済みではなく、製造や発注に使用してはならない。後継構成は未決定である。決定記録は[ESP32-C3＋SEN66一体型PCB Rev.A 計画中止](../../../docs/decisions/esp32-c3-integrated-pcb-cancellation.md)を参照。
+
+以下は中止時点のKiCad 9.0.8メイン基板回路図に関する履歴記録である。PCBレイアウト、BOM/CPL、Gerberは未完了であり、今後の作業計画を示すものではない。
 回路図はA3横向き1枚に機能ブロックごとに整理し、右下のタイトルブロック領域を予約している。
 メーカー型番、LCSC番号、Footprint、選定メモはシンボルプロパティとして保持するが、PDFには
 Referenceと簡潔なValue以外を表示しない。ESP32-C3のアンテナkeepoutはPCB Phaseで確認する。
@@ -47,7 +51,7 @@ Git管理するEspressifシンボルは `symbols/Espressif.kicad_sym`、公式fo
 | --- | --- | --- | --- | --- |
 | U1 | Espressif ESP32-C3-MINI-1-H4X | C41349510 | `Espressif:ESP32-C3-MINI-1` | 採用候補。JLC実装可否・在庫は発注時確認。 |
 | U2 | Diodes AP63203WU-7 | C780769 | `Package_TO_SOT_SMD:TSOT-23-6` | 3.3 V/2 A buck候補。参照回路・在庫を最終照合。 |
-| J1 | JAE DX07S016JA1R1500 | C3197885（候補、回路図propertyは未変更） | `Connector_USB:USB_C_Receptacle_JAE_DX07S016JA1R1500` | Electrical ACCEPT。標準footprintのUSB2 pad mappingは確認済みだが、JAE `SJ121837`のland/board-edge照合、3D/機構、調達はVERIFY。製造リリースBLOCKED。 |
+| J1 | JAE DX07S016JA1R1500 | C3197885（候補、回路図propertyは未変更） | `Connector_USB:USB_C_Receptacle_JAE_DX07S016JA1R1500` | 中止前の評価はElectrical ACCEPT、JAE `SJ121837`のland/board-edge照合、3D/機構、調達はVERIFY。現行の製造リリース状態はCANCELLED。 |
 | D1 | ST USBLC6-2SC6 | C7519 | `Package_TO_SOT_SMD:SOT-23-6` | USB ESD候補。 |
 | J2 | JST SM04B-SRSS-TB(LF)(SN) | C160404 | `Connector_JST:JST_SH_SM04B-SRSS-TB_1x04-1MP_P1.00mm_Horizontal` | Qwiic。 |
 | J3 | JST S4B-PH-K-S(LF)(SN) | C157926 | `Connector_JST:JST_PH_S4B-PH-K_1x04_P2.00mm_Horizontal` | キャリアJ2と同一変更セットで統合済み。物理向き/3D/mechanicalはPhase 3B VERIFY。 |
@@ -62,7 +66,9 @@ Espressif symbol/footprint library設定に関するもので、J3統合によ�
 `kicad-sch-api`が現行KiCad 9/10形式の公式ライブラリを正しく埋め込めないため、公式KiCad 7互換版を使用したことに由来する。
 意図的に残し、GUI目視確認時にU1の53ピンとfootprint対応を再照合する。`erc-report.txt`を参照。
 
-## Phase 3へ進む前の確認
+## 中止時点の未完了確認事項（履歴）
+
+以下は完了しておらず、計画中止により終了した項目である。後継設計で自動的に引き継がない。
 
 - L1のJLC調達、3D/short-start lead向き確認、C1/C4/C5の公式DC-bias曲線、AP63203 EVMとのpin-by-pin照合を完了する。
 - J1のJAE `SJ121837`、`JACS-30413`、`JAHL-30353-1`を取得し、land、shell/NPTH、board-edge datum、mating/rework clearanceを `usb-c-j1-footprint-audit.md` と照合する。J1、D1、J2、U1の現時点のJLC在庫・PCBA可否・CPL回転も確認する。

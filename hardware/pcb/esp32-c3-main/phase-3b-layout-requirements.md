@@ -1,4 +1,8 @@
-# Phase 3B PCB layout requirements
+# Phase 3B PCB layout requirements — historical record
+
+> **Project status: CANCELLED (2026-08-04). Manufacturing release: CANCELLED. Fabrication permitted: NO.**
+>
+> 本文は中止前に整理した実装要件であり、配線、stack-up選定、製造データ作成または後継設計への自動適用を指示しない。未配線PCB、仮配置座標、未確定stack-upおよびUSB geometryは参考資料としてのみ保持する。詳細は[中止決定記録](../../../docs/decisions/esp32-c3-integrated-pcb-cancellation.md)を参照。
 
 **Prepared:** 2026-08-03 JST
 
@@ -19,7 +23,7 @@ Implement and review the main-board placement, routing, copper/keepout rules and
 
 ### Gate status
 
-**PCB implementation may start conditionally.** Schematic changes are not authorized by this document. Manufacturing release is **BLOCKED** by the open items in Sections 12 and 14, including J1 controlled geometry, MLCC worst-condition margin/sufficiency, stack-up-dependent constraints, final mechanical/3D review, procurement/PCBA evidence and prototype testing.
+**Historical Phase 3B gate (superseded):** PCB implementation had been planned conditionally. The integrated-PCB plan is now **CANCELLED**; do not start or resume implementation from this document. The then-open items in Sections 12 and 14 remain incomplete and do not constitute a manufacturing-release gate for any successor design.
 
 ## 2. Board-level constraints
 
@@ -204,7 +208,7 @@ After DRC/3D/mechanical review and assembly, verify:
 | J1 physical footprint/edge data | VERIFY | Obtain and audit controlled JAE documents before freezing edge/assembly. |
 | U1 EPAD, antenna external zone, stack-up and PCB mechanics | VERIFY | Define board rules; run DRC/3D review. |
 | MLCC effective capacitance | VERIFY | Official Murata representative DC-bias data is obtained; approve worst-condition margin or complete prototype transient/stability evaluation before BOM freeze. No circuit change is currently required. |
-| Manufacturing release | BLOCKED | Close all manufacturing/assembly/procurement and prototype gates. |
+| Manufacturing release | CANCELLED | Fabrication is not permitted. The then-open manufacturing, assembly, procurement and prototype checks remain historical, incomplete records. |
 
 ## 15. Recommended Phase 3B implementation sequence
 
