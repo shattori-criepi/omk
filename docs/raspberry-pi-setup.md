@@ -204,14 +204,20 @@ Wi-Fiアクセスポイントを先に設定し、`wlan0` に `192.168.50.1/24` 
 いるため、APが未設定のまま起動すると安全に失敗します。APの設定は
 `scripts/setup-wifi-access-point.sh` を使用してください。
 
-このスクリプトが本番起動するのは、次の3サービスだけです。
+このスクリプトが本番起動するのは、次の4サービスだけです。
 
 - `mosquitto` (`omk-mosquitto`)
 - `sensor-collector` (`omk-sensor-collector`)
 - `dashboard` (`omk-dashboard`)
+- `harvest-uploader` (`omk-harvest-uploader`)
 
 `gateway`、`broute-meter-mock`、`broute-meter-tests` は起動しません。Bルート本体は
 ホストのsystemdサービスとして動作し、Docker化しません。
+
+`harvest-uploader` はMQTTの1分集約データをSORACOM Harvest Dataへ送信する独立した
+クライアントです。`sensor-collector`によるJSONL保存やdata-transformerによるParquet化とは
+別経路であり、それらのデータを読んだり変更したりしません。Harvest送信に失敗したレコードは
+`data/harvest-uploader/queue.sqlite3` のSQLite再送キューへ保存され、後で再送されます。
 
 Docker EngineとCompose pluginが利用でき、実行ユーザーがDocker groupを反映済みである
 こと、`curl`、Compose設定、各Dockerfileが存在することが前提です。最初に予定と
@@ -232,17 +238,18 @@ Docker EngineとCompose pluginが利用でき、実行ユーザーがDocker grou
 ./scripts/setup-data-collection.sh --restart
 ```
 
-`--pull` は配布イメージであるMosquittoだけを取得します。`sensor-collector` と
-`dashboard` はレジストリからpullしないローカルbuildサービスです。これらのベースイメージも
-更新して再buildする場合は、`--pull --build` を併用してください。
+`--pull` は配布イメージであるMosquittoだけを取得します。`sensor-collector`、`dashboard`、
+`harvest-uploader` はレジストリからpullしないローカルbuildサービスです。これらのベース
+イメージも更新して再buildする場合は、`--pull --build` を併用してください。
 
 実行ログは `logs/setup/setup-data-collection-YYYYMMDD-HHMMSS.log` に保存されます。
 Dashboardは [http://localhost:8000/display](http://localhost:8000/display)、health確認は
 [http://localhost:8000/health](http://localhost:8000/health) です。状態とログは次で確認します。
 
 ```bash
-docker compose ps mosquitto sensor-collector dashboard
-docker compose logs --tail 100 mosquitto sensor-collector dashboard
+docker compose ps mosquitto sensor-collector dashboard harvest-uploader
+docker compose logs --tail 100 mosquitto sensor-collector dashboard harvest-uploader
+docker compose logs --tail 100 harvest-uploader
 ```
 
 停止・再起動も必ず対象サービスを明示します。`docker compose down` や特に
@@ -250,13 +257,14 @@ docker compose logs --tail 100 mosquitto sensor-collector dashboard
 使用しないでください。
 
 ```bash
-docker compose stop mosquitto sensor-collector dashboard
-docker compose restart mosquitto sensor-collector dashboard
+docker compose stop mosquitto sensor-collector dashboard harvest-uploader
+docker compose restart mosquitto sensor-collector dashboard harvest-uploader
 ```
 
 `data/sensors`（JSONL）、`data/latest`（表示用最新状態JSON）、`data/processed`（処理済みデータ）、
-`services/mosquitto/data` は運用データです。削除せず、バックアップと保持方針に従って
-管理してください。スクリプトは既存ディレクトリを再帰的にchownしません。
+`data/harvest-uploader/queue.sqlite3`（Harvest再送キュー）、`services/mosquitto/data` は運用
+データです。キューを含め削除せず、バックアップと保持方針に従って管理してください。
+スクリプトは既存ディレクトリを再帰的にchownしません。
 
 `data/latest`はcollectorが書き込み、dashboardは読み取り専用で参照します。初回の計測後に`ls -l data/latest/`で`broute_power.json`、`sen66.json`、`ichijo_power_flow.json`の生成状況と読取り権限を確認してください。未生成でもdashboardは起動し、欠損値として表示します。
 
@@ -272,6 +280,12 @@ docker compose restart mosquitto sensor-collector dashboard
 - sensor-collectorのMQTT接続失敗: Mosquittoの状態、`192.168.50.1:1883`、および
   `MQTT_HOST=mosquitto`、`MQTT_PORT=1883`、`MQTT_TOPIC=omk/#` を確認します。センサが
   未送信でもセットアップは成功します。
+- harvest-uploaderのMQTT接続失敗: `docker compose logs --tail 100 harvest-uploader` で
+  `MQTT connected; subscribed to omk/#` を確認します。起動直後の再接続はWARNに留まります。
+  `Harvest send failed; queued for retry` は送信失敗をSQLiteキューへ保存した状態であり、
+  コンテナが稼働しqueue mountへ書き込める限りsetupのFAIL条件ではありません。setupは実Harvestへ
+  テストデータを送信しません。Harvest Data側の保持期間（731日）とカスタムタイムスタンプの利用設定は
+  別途実施してください。
 
 ## 14. data-transformerの定期実行
 
