@@ -25,6 +25,7 @@ DASHBOARD_PORT="8000"
 HARVEST_ENDPOINT="${HARVEST_ENDPOINT:-http://harvest.soracom.io}"
 HARVEST_QUEUE_HOST_PATH="data/harvest-uploader/queue.sqlite3"
 HARVEST_QUEUE_CONTAINER_PATH="/app/data/harvest-uploader/queue.sqlite3"
+HARVEST_QUEUE_CONTAINER_DIR="${HARVEST_QUEUE_CONTAINER_PATH%/*}"
 HARVEST_LOG_TAIL=100
 DRY_RUN=false
 PRINT_CONFIG=false
@@ -218,10 +219,14 @@ check_container_paths() {
   docker_compose exec -T mosquitto sh -c 'test -w /mosquitto/data' ||
     fail "mosquitto cannot write /mosquitto/data. Preserve existing container ownership; inspect its UID with 'docker compose exec mosquitto id' and adjust only this directory if required (never chown -R)."
   log "PASS: mosquitto can use its data mount"
-  docker_compose exec -T harvest-uploader sh -c 'test -w /app/data/harvest-uploader' ||
-    fail "harvest-uploader cannot write /app/data/harvest-uploader. Review only data/harvest-uploader ownership and permissions; never use chown -R."
+  check_harvest_queue_mount
+}
+
+check_harvest_queue_mount() {
+  docker_compose exec -T harvest-uploader sh -c "test -w ${HARVEST_QUEUE_CONTAINER_DIR}" ||
+    fail "harvest-uploader cannot write ${HARVEST_QUEUE_CONTAINER_DIR}. Review only data/harvest-uploader ownership and permissions; never use chown -R."
   log "PASS: harvest-uploader can write its queue-data mount"
-  docker_compose exec -T harvest-uploader sh -c 'if test -e /app/data/harvest-uploader/queue.sqlite3; then test -r /app/data/harvest-uploader/queue.sqlite3 && test -w /app/data/harvest-uploader/queue.sqlite3; fi' ||
+  docker_compose exec -T harvest-uploader sh -c "if test -e ${HARVEST_QUEUE_CONTAINER_PATH}; then test -r ${HARVEST_QUEUE_CONTAINER_PATH} && test -w ${HARVEST_QUEUE_CONTAINER_PATH}; fi" ||
     fail "harvest-uploader cannot read/write its existing queue.sqlite3. Review only that file and its parent directory permissions."
   log "PASS: harvest-uploader queue.sqlite3 is writable when present"
 }
