@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <title>OMK ダッシュボード</title>
-    <link rel="stylesheet" href="{{ url_for('static', path='/display.css') }}?v=20260804-8">
+    <link rel="stylesheet" href="{{ url_for('static', path='/display.css') }}?v=20260805-1">
   </head>
   <body>
     <main class="dashboard" aria-label="OMK ダッシュボード">
@@ -26,12 +26,17 @@
         </div>
       </header>
 
-      <section class="power-hero" aria-labelledby="current-power-label">
+      <section id="power-section" class="power-hero source--{{ dashboard.power_freshness }}" aria-labelledby="current-power-label">
         <div class="power-primary">
-          <p id="current-power-label" class="eyebrow">{{ dashboard.current_power_label }}</p>
+          <p class="eyebrow">
+            <span id="current-power-label">{{ dashboard.current_power_label }}</span>
+            <span id="power-source-badge" class="source-badge source-badge--{{ dashboard.power_freshness }}" {% if dashboard.power_freshness == 'normal' %}hidden{% endif %}>
+              {% if dashboard.power_freshness == 'delayed' %}遅延{% elif dashboard.power_freshness == 'unavailable' %}取得不可{% endif %}
+            </span>
+          </p>
           <div class="power-reading">
             <strong id="current-power-kw">{{ dashboard.current_power_kw }}</strong>
-            <span>kW</span>
+            <span class="source-unit" {% if dashboard.power_freshness == 'unavailable' %}hidden{% endif %}>kW</span>
           </div>
           <p id="power-direction" class="power-direction power-direction--{{ dashboard.power_flow }}" {% if not dashboard.power_direction %}hidden{% endif %}>
             {{ dashboard.power_direction }}
@@ -71,31 +76,31 @@
         </aside>
       </section>
 
-      <section class="cards" aria-label="電力と室内環境">
+      <section id="sen66-section" class="cards source--{{ dashboard.sen66_freshness }}" aria-label="電力と室内環境">
         <article class="card card--energy">
           <p>今日の買電量</p>
           <strong id="purchased-today-kwh">{{ dashboard.purchased_today_kwh }}</strong>
           <span>kWh</span>
         </article>
         <article class="card">
-          <p>温度</p>
+          <p>温度 <span id="sen66-source-badge" class="source-badge source-badge--{{ dashboard.sen66_freshness }}" {% if dashboard.sen66_freshness == 'normal' %}hidden{% endif %}>{% if dashboard.sen66_freshness == 'delayed' %}遅延{% elif dashboard.sen66_freshness == 'unavailable' %}取得不可{% endif %}</span></p>
           <strong id="temperature-c">{{ dashboard.temperature_c }}</strong>
-          <span>℃</span>
+          <span class="source-unit" {% if dashboard.sen66_freshness == 'unavailable' %}hidden{% endif %}>℃</span>
         </article>
         <article class="card">
           <p>湿度</p>
           <strong id="humidity-percent">{{ dashboard.humidity_percent }}</strong>
-          <span>%</span>
+          <span class="source-unit" {% if dashboard.sen66_freshness == 'unavailable' %}hidden{% endif %}>%</span>
         </article>
         <article class="card">
           <p>CO2</p>
           <strong id="co2-ppm">{{ dashboard.co2_ppm }}</strong>
-          <span>ppm</span>
+          <span class="source-unit" {% if dashboard.sen66_freshness == 'unavailable' %}hidden{% endif %}>ppm</span>
         </article>
         <article class="card">
           <p>PM2.5</p>
           <strong id="pm25-ug-m3">{{ dashboard.pm25_ug_m3 }}</strong>
-          <span>µg/m³</span>
+          <span class="source-unit" {% if dashboard.sen66_freshness == 'unavailable' %}hidden{% endif %}>µg/m³</span>
         </article>
         <article class="card">
           <p>VOC Index</p>
@@ -104,6 +109,6 @@
       </section>
     </main>
 
-    <script src="{{ url_for('static', path='/display.js') }}?v=20260804-8" defer></script>
+    <script src="{{ url_for('static', path='/display.js') }}?v=20260805-1" defer></script>
   </body>
 </html>

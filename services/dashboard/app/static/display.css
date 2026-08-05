@@ -125,6 +125,27 @@ body {
   font-weight: 700;
 }
 
+.source-badge {
+  display: inline-block;
+  margin-left: 0.45em;
+  padding: 0.2em 0.55em;
+  border-radius: 999px;
+  font-size: 0.68em;
+  font-weight: 800;
+  letter-spacing: 0;
+  vertical-align: middle;
+}
+
+.source-badge--delayed {
+  background: #854d0e;
+  color: #fef3c7;
+}
+
+.source-badge--unavailable {
+  background: #475569;
+  color: #e2e8f0;
+}
+
 .power-reading {
   display: flex;
   align-items: baseline;

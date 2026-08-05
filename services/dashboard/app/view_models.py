@@ -55,6 +55,8 @@ class DisplayViewModel:
     updated_at: str
     updated_at_iso: str
     freshness: FreshnessStatus
+    power_freshness: FreshnessStatus
+    sen66_freshness: FreshnessStatus
 
     def as_dict(self) -> dict[str, str | bool]:
         """Return JSON-ready values used by the display polling API."""
@@ -81,6 +83,8 @@ class DisplayViewModel:
             "updated_at": self.updated_at,
             "updated_at_iso": self.updated_at_iso,
             "freshness": self.freshness.value,
+            "power_freshness": self.power_freshness.value,
+            "sen66_freshness": self.sen66_freshness.value,
         }
 
 
@@ -123,6 +127,12 @@ def get_display_view_model(
         displayed_power_updated_at = power.measured_at if power else None
         displayed_power_freshness = power_freshness
 
+    assert displayed_power_freshness is not None
+    if displayed_power_freshness == FreshnessStatus.UNAVAILABLE:
+        power_value = "-"
+        direction_label = ""
+        direction = PowerDirection.UNAVAILABLE
+
     updated_at = oldest_available(
         displayed_power_updated_at,
         sen66.measured_at if sen66 else None,
@@ -152,17 +162,25 @@ def get_display_view_model(
         grid_flow=grid_direction,
         purchased_today_kwh=f"{totals.import_energy_kwh:.1f}",
         sold_today_kwh=f"{totals.export_energy_kwh:.1f}",
-        temperature_c=format_optional(sen66.temperature_c if sen66 else None, 1),
-        humidity_percent=format_optional(sen66.relative_humidity_pct if sen66 else None, 0),
-        co2_ppm=format_optional(sen66.co2_ppm if sen66 else None, 0),
-        pm25_ug_m3=format_optional(sen66.pm2_5_ug_m3 if sen66 else None, 1),
-        voc_index=format_optional(sen66.voc_index if sen66 else None, 0),
+        temperature_c=format_for_freshness(
+            sen66.temperature_c if sen66 else None, 1, sen66_freshness
+        ),
+        humidity_percent=format_for_freshness(
+            sen66.relative_humidity_pct if sen66 else None, 0, sen66_freshness
+        ),
+        co2_ppm=format_for_freshness(sen66.co2_ppm if sen66 else None, 0, sen66_freshness),
+        pm25_ug_m3=format_for_freshness(
+            sen66.pm2_5_ug_m3 if sen66 else None, 1, sen66_freshness
+        ),
+        voc_index=format_for_freshness(sen66.voc_index if sen66 else None, 0, sen66_freshness),
         updated_at=updated_at.strftime("%Y/%m/%d %H:%M:%S") if updated_at else "--",
         updated_at_iso=updated_at.isoformat() if updated_at else "",
         freshness=worst_freshness(
             displayed_power_freshness,
             sen66_freshness,
         ),
+        power_freshness=displayed_power_freshness,
+        sen66_freshness=sen66_freshness,
     )
 
 
@@ -244,6 +262,26 @@ def format_power(power: LatestPower | None) -> tuple[str, str, PowerDirection]:
 
 def format_optional(value: float | None, decimals: int) -> str:
     return "--" if value is None else f"{value:.{decimals}f}"
+
+
+def format_for_freshness(
+    value: float | None,
+    decimals: int,
+    freshness: FreshnessStatus,
+) -> str:
+    """Keep delayed values, but never present unavailable values as current."""
+
+    if freshness == FreshnessStatus.UNAVAILABLE:
+        return "-"
+    return format_optional(value, decimals)
+
+
+def freshness_badge_text(freshness: FreshnessStatus) -> str:
+    return {
+        FreshnessStatus.NORMAL: "",
+        FreshnessStatus.DELAYED: "遅延",
+        FreshnessStatus.UNAVAILABLE: "取得不可",
+    }[freshness]
 
 
 def oldest_available(*timestamps: datetime | None) -> datetime | None:
