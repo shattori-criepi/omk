@@ -17,7 +17,7 @@ BUILD_SERVICES=(
   dashboard
   harvest-uploader
 )
-EXCLUDED_SERVICES=(gateway broute-meter-mock broute-meter-tests)
+EXCLUDED_SERVICES=(broute-meter-mock broute-meter-tests)
 REQUIRED_DIRECTORIES=(data/sensors data/latest data/processed data/harvest-uploader services/mosquitto/data logs/setup)
 MOSQUITTO_BIND_ADDRESS="192.168.50.1"
 MQTT_PORT="1883"

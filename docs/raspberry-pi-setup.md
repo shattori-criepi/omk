@@ -221,7 +221,7 @@ Wi-Fiアクセスポイントを先に設定し、`wlan0` に `192.168.50.1/24` 
 - `dashboard` (`omk-dashboard`)
 - `harvest-uploader` (`omk-harvest-uploader`)
 
-`gateway`、`broute-meter-mock`、`broute-meter-tests` は起動しません。Bルート本体は
+`broute-meter-mock`、`broute-meter-tests` は起動しません。Bルート本体は
 ホストのsystemdサービスとして動作し、Docker化しません。
 
 `harvest-uploader` はMQTTの1分集約データをSORACOM Harvest Dataへ送信する独立した
