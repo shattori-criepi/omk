@@ -59,16 +59,16 @@
           </article>
 
           <div id="power-details" class="power-details" aria-label="発電・蓄電池情報" {% if not dashboard.has_ichijo_power_flow %}hidden{% endif %}>
+            <div class="today-energy-card">
+              <span>今日の売電量</span>
+              <strong id="sold-today-kwh">{{ dashboard.sold_today_kwh }}</strong>
+              <small>kWh</small>
+            </div>
+
             <div class="power-detail">
               <span>PV発電</span>
               <strong id="pv-power-kw">{{ dashboard.pv_power_kw }}</strong>
               <small>kW</small>
-            </div>
-
-            <div class="power-detail">
-              <span>今日の売電量</span>
-              <strong id="sold-today-kwh">{{ dashboard.sold_today_kwh }}</strong>
-              <small>kWh</small>
             </div>
 
             <div class="power-detail">

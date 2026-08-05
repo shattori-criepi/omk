@@ -352,6 +352,11 @@ def test_display_api_returns_ichijo_and_broute_fallback_snapshots(tmp_path: Path
     assert 'id="sen66-source-badge"' not in normal_html[
         normal_html.index("<p>温度</p>") : normal_html.index("</article>", temperature_card)
     ]
+    assert normal_html.index('id="purchased-today-kwh"') < normal_html.index('id="sold-today-kwh"')
+    assert normal_html.index('id="sold-today-kwh"') < normal_html.index('id="pv-power-kw"')
+    assert normal_html.index('id="pv-power-kw"') < normal_html.index('id="battery-soc-percent"')
+    assert normal_html.index('id="battery-soc-percent"') < normal_html.index('id="battery-power-kw"')
+    assert normal_html.count('class="today-energy-card"') == 2
     assert snapshot["freshness"] in {"normal", "delayed", "unavailable"}
 
     _write_latest(
