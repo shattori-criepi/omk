@@ -52,35 +52,35 @@
         </div>
 
         <aside class="power-sidebar" aria-label="電力関連情報">
-          <article class="today-energy-card">
-            <span>今日の買電量</span>
-            <strong id="purchased-today-kwh">{{ dashboard.purchased_today_kwh }}</strong>
-            <small>kWh</small>
+          <article class="power-detail-row">
+            <span class="power-detail-label">今日の買電量</span>
+            <strong id="purchased-today-kwh" class="power-detail-value">{{ dashboard.purchased_today_kwh }}</strong>
+            <small class="power-detail-unit">kWh</small>
           </article>
 
           <div id="power-details" class="power-details" aria-label="発電・蓄電池情報" {% if not dashboard.has_ichijo_power_flow %}hidden{% endif %}>
-            <div class="today-energy-card">
-              <span>今日の売電量</span>
-              <strong id="sold-today-kwh">{{ dashboard.sold_today_kwh }}</strong>
-              <small>kWh</small>
+            <div class="power-detail-row">
+              <span class="power-detail-label">今日の売電量</span>
+              <strong id="sold-today-kwh" class="power-detail-value">{{ dashboard.sold_today_kwh }}</strong>
+              <small class="power-detail-unit">kWh</small>
             </div>
 
-            <div class="power-detail">
-              <span>PV発電</span>
-              <strong id="pv-power-kw">{{ dashboard.pv_power_kw }}</strong>
-              <small>kW</small>
+            <div class="power-detail-row">
+              <span class="power-detail-label">PV発電</span>
+              <strong id="pv-power-kw" class="power-detail-value">{{ dashboard.pv_power_kw }}</strong>
+              <small class="power-detail-unit">kW</small>
             </div>
 
-            <div class="power-detail">
-              <span>蓄電池残量</span>
-              <strong id="battery-soc-percent">{{ dashboard.battery_soc_percent }}</strong>
-              <small>%</small>
+            <div class="power-detail-row">
+              <span class="power-detail-label">蓄電池残量</span>
+              <strong id="battery-soc-percent" class="power-detail-value">{{ dashboard.battery_soc_percent }}</strong>
+              <small class="power-detail-unit">%</small>
             </div>
 
-            <div class="power-detail">
-              <span id="battery-power-label">{{ dashboard.battery_power_label }}</span>
-              <strong id="battery-power-kw">{{ dashboard.battery_power_kw }}</strong>
-              <small>kW</small>
+            <div class="power-detail-row">
+              <span id="battery-power-label" class="power-detail-label">{{ dashboard.battery_power_label }}</span>
+              <strong id="battery-power-kw" class="power-detail-value">{{ dashboard.battery_power_kw }}</strong>
+              <small class="power-detail-unit">kW</small>
             </div>
           </div>
         </aside>
