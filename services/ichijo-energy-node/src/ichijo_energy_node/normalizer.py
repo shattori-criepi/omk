@@ -42,8 +42,8 @@ def normalize(raw: dict[str, Any], *, device_id: str, measured_at: datetime, err
     exported = max(-grid, 0) if grid is not None else None
     # Confirmed equipment behavior: negative E7 is AC-side output. Positive E7 is unverified.
     output = max(-pcs, 0) if pcs is not None else None
-    required = (pv, charge, discharge, imported, exported)
-    load = None if any(value is None for value in required) else pv + imported + discharge - exported - charge
+    required = (output, imported, exported)
+    load = None if any(value is None for value in required) else output + imported - exported
     quality = "degraded" if errors or (load is not None and load < 0) else "normal"
     if load is not None and load < 0:
         errors = [*errors, "negative_load_power"]
