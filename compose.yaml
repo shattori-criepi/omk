@@ -9,12 +9,6 @@ services:
       - ./services/mosquitto/config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
       - ./services/mosquitto/data:/mosquitto/data
 
-  gateway:
-    build:
-      context: ./services/gateway
-    container_name: omk-gateway
-    restart: unless-stopped
-
   dashboard:
     build:
       context: ./services/dashboard

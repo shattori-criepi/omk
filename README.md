@@ -184,7 +184,7 @@ flowchart LR
 ├── docs/
 ├── data/                      # Git管理外: data/broute-meter/ など
 ├── logs/                      # Git管理外: logs/broute-meter/ など
-└── services/gateway/           # 既存コンポーネント（この変更では移動しない）
+└── services/                   # Docker services（mosquitto、collector、dashboard、Harvest）
 ```
 
 計測・収集プログラムは、原則として機能単位の独立フォルダをOMKルート直下へ追加します。
@@ -192,9 +192,6 @@ flowchart LR
 実行時の計測データとログは、各サブプロジェクト内へ保存せず、OMKルートの
 `data/<機能名>/`と`logs/<機能名>/`へ保存します。保存先は設定または環境変数で
 切り替え可能にし、Dockerでは同じホスト領域をコンテナへマウントします。
-
-既存の`services/gateway/`はこの方針策定前からあるため、現時点では不要な移動を
-行いません。変更が必要になった時点で、責務と移行手順を明確にして扱います。
 
 ## 5. 開発環境
 
