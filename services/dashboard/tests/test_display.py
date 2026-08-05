@@ -341,6 +341,17 @@ def test_display_api_returns_ichijo_and_broute_fallback_snapshots(tmp_path: Path
     normal_html = client.get("/display").text
     assert 'source-badge--normal" hidden' in normal_html
     assert "取得不可" not in normal_html
+    sen66_section = normal_html.index('<section id="sen66-section"')
+    sen66_section_end = normal_html.index("</section>", sen66_section)
+    purchased_today = normal_html.index('id="purchased-today-kwh"')
+    sen66_badge = normal_html.index('id="sen66-source-badge"')
+    temperature_card = normal_html.index("<p>温度</p>")
+    assert not sen66_section < purchased_today < sen66_section_end
+    assert normal_html[sen66_section:sen66_section_end].count('<article class="card">') == 5
+    assert sen66_section < sen66_badge < temperature_card
+    assert 'id="sen66-source-badge"' not in normal_html[
+        normal_html.index("<p>温度</p>") : normal_html.index("</article>", temperature_card)
+    ]
     assert snapshot["freshness"] in {"normal", "delayed", "unavailable"}
 
     _write_latest(
