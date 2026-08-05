@@ -102,12 +102,16 @@ OSの更新とパッケージ取得を行うため、完了まで時間がかか
 - Docker公式DebianリポジトリからDocker Engine、Buildx、Compose pluginの導入
 - Dockerサービスの有効化と起動、バージョン確認
 - 実行ユーザーの`docker`グループへの追加
-- OMKルート直下の`data/`と標準サブディレクトリの作成
+- OMKルート直下の標準ランタイムディレクトリ（`data/`、`logs/`、Mosquittoデータ）の初期作成
 - `logs/setup/setup-YYYYmmdd-HHMMSS.log`への実行結果の記録
 - OSが要求する再起動と、Dockerグループ反映に必要な再ログインの案内
 
 Docker EngineとCompose pluginがすでに利用可能なら、Dockerの再導入を省略します。
-既存のデータディレクトリ、ファイル、所有者は変更しません。
+初期作成の対象は、`data/broute-meter`、`data/sensors`、`data/latest`、`data/processed`、
+`data/errors/transform`、`data/harvest-uploader`、`logs/broute-meter`、`logs/setup`、
+`services/mosquitto/data`です。既存のデータディレクトリ、ファイル、所有者は変更せず、
+再帰的な`chown`も行いません。特にMosquittoのコンテナ用所有権、BルートCSV、Harvestの
+SQLite再送キューを保護します。各個別setupスクリプトも必要なディレクトリを再確認します。
 Docker公式パッケージと競合する別方式のパッケージを検出した場合は、既存環境を
 暗黙に置き換えずエラー終了します。
 
@@ -179,7 +183,13 @@ OMKの計測データ保存先は、リポジトリルート直下の`data/`で�
 `/home/omkdev/projects/omk/data`であり、Docker Composeからは原則として
 `./data/...`をマウントします。`/opt/omk/data`や`/var/lib/omk`は使用しません。
 
-実測データ、データベース、CSV、ログはGit管理対象外です。BルートID・パスワード、
+初期セットアップは基礎構造だけを作成します。`setup-data-collection.sh`はComposeの
+mountと`data/sensors`、`data/latest`、`data/processed`、`data/harvest-uploader`、
+`services/mosquitto/data`を確認します。`setup-data-transformer.sh`は`data/processed`と
+`data/errors/transform`、venv、systemd timerを、`setup-broute-meter.sh`は
+`data/broute-meter`と`logs/broute-meter`、Bルートsystemd設定を確認します。
+
+実測データ、Parquet、SQLite、CSV、ログはGit管理対象外です。BルートID・パスワード、
 Wi-Fiパスワード、SSH秘密鍵、APIキーなどの秘密情報を、リポジトリやセットアップ
 ログへ保存しないでください。
 

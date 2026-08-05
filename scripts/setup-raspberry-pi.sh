@@ -63,7 +63,14 @@ finish() {
 trap finish EXIT
 
 # Keep setup logs outside Git while retaining them with other OMK runtime logs.
-mkdir -p "${LOG_DIR}"
+# A newly created log directory belongs to the target user; existing ownership
+# (including container-oriented ownership elsewhere in the runtime tree) is preserved.
+if [[ ! -d "${LOG_DIR}" ]]; then
+  mkdir -p "${LOG_DIR}"
+  if id "${CURRENT_USER}" >/dev/null 2>&1; then
+    chown "${CURRENT_USER}:$(id -gn "${CURRENT_USER}")" "${LOG_DIR}"
+  fi
+fi
 LOG_FILE="${LOG_DIR}/setup-$(date '+%Y%m%d-%H%M%S').log"
 exec > >(tee -a "${LOG_FILE}") 2>&1
 
@@ -237,22 +244,28 @@ else
   RELOGIN_REQUIRED="yes"
 fi
 
-# Create only missing runtime directories and preserve all existing data/ownership.
-DATA_DIRECTORIES=(
+# Create only missing standard runtime directories. Service-specific setup scripts
+# re-check their own paths; neither script changes existing data or ownership.
+RUNTIME_DIRECTORIES=(
   "${OMK_ROOT}/data"
-  "${OMK_ROOT}/data/broute"
+  "${OMK_ROOT}/data/broute-meter"
   "${OMK_ROOT}/data/sensors"
-  "${OMK_ROOT}/data/database"
-  "${OMK_ROOT}/data/exports"
+  "${OMK_ROOT}/data/latest"
+  "${OMK_ROOT}/data/processed"
+  "${OMK_ROOT}/data/errors/transform"
+  "${OMK_ROOT}/data/harvest-uploader"
+  "${OMK_ROOT}/logs/broute-meter"
+  "${OMK_ROOT}/logs/setup"
+  "${OMK_ROOT}/services/mosquitto/data"
 )
-for directory in "${DATA_DIRECTORIES[@]}"; do
+for directory in "${RUNTIME_DIRECTORIES[@]}"; do
   if [[ -d "${directory}" ]]; then
-    log "Data directory already exists; preserving it: ${directory}"
+    log "Runtime directory already exists; preserving it: ${directory} ($(stat -c 'owner=%U:%G uid=%u gid=%g mode=%a' "${directory}"))"
   elif [[ -e "${directory}" ]]; then
     log "ERROR: Required directory path is occupied by a non-directory: ${directory}"
     exit 1
   else
-    log "Creating data directory: ${directory}"
+    log "Creating runtime directory: ${directory}"
     mkdir -p "${directory}"
     "${SUDO[@]}" chown "${CURRENT_USER}:$(id -gn "${CURRENT_USER}")" "${directory}"
   fi
