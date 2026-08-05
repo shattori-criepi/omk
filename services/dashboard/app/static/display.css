@@ -125,28 +125,33 @@ body {
   gap: 10px;
 }
 
-.today-energy-card {
+.power-detail-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr) auto 3.5rem;
   align-items: baseline;
-  gap: 0.35em;
-  padding: 0.5em 0;
-  color: #bfdbfe;
+  column-gap: 0.4rem;
+  padding: 0.35em 0;
 }
 
-.today-energy-card span {
+.power-detail-label {
+  color: #bfdbfe;
   font-size: clamp(16px, 1.8vw, 22px);
   font-weight: 700;
+  white-space: nowrap;
 }
 
-.today-energy-card strong {
+.power-detail-value {
+  justify-self: end;
   color: #f8fafc;
-  font-size: clamp(30px, 3.8vw, 48px);
+  font-size: clamp(24px, 3vw, 38px);
+  font-weight: 700;
   line-height: 1;
   letter-spacing: -0.04em;
+  font-variant-numeric: tabular-nums;
 }
 
-.today-energy-card small {
+.power-detail-unit {
+  justify-self: start;
   color: #cbd5e1;
   font-size: clamp(13px, 1.4vw, 18px);
 }
@@ -346,29 +351,6 @@ body {
   font-size: clamp(16px, 1.7vw, 22px);
 }
 
-.power-detail {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  align-items: baseline;
-  gap: 0.35em;
-  padding: 0.35em 0;
-}
-
-.power-detail span {
-  color: #bfdbfe;
-  font-weight: 700;
-}
-
-.power-detail strong {
-  font-size: clamp(24px, 3vw, 38px);
-  line-height: 1;
-  letter-spacing: -0.03em;
-}
-
-.power-detail small {
-  color: #cbd5e1;
-  font-size: clamp(13px, 1.4vw, 18px);
-}
 
 .grid-flow {
   display: inline-flex;

@@ -356,7 +356,10 @@ def test_display_api_returns_ichijo_and_broute_fallback_snapshots(tmp_path: Path
     assert normal_html.index('id="sold-today-kwh"') < normal_html.index('id="pv-power-kw"')
     assert normal_html.index('id="pv-power-kw"') < normal_html.index('id="battery-soc-percent"')
     assert normal_html.index('id="battery-soc-percent"') < normal_html.index('id="battery-power-kw"')
-    assert normal_html.count('class="today-energy-card"') == 2
+    assert normal_html.count('class="power-detail-row"') == 5
+    assert normal_html.count('class="power-detail-value"') == 5
+    assert normal_html.count('class="power-detail-unit"') == 5
+    assert "today-energy-card" not in normal_html
     assert snapshot["freshness"] in {"normal", "delayed", "unavailable"}
 
     _write_latest(
@@ -385,6 +388,7 @@ def test_display_api_returns_ichijo_and_broute_fallback_snapshots(tmp_path: Path
 def test_display_html_and_javascript_expose_polling_targets() -> None:
     response = client.get("/display")
     javascript = (Path(__file__).parents[1] / "app" / "static" / "display.js").read_text(encoding="utf-8")
+    stylesheet = (Path(__file__).parents[1] / "app" / "static" / "display.css").read_text(encoding="utf-8")
 
     assert response.status_code == 200
     for element_id in (
@@ -400,6 +404,9 @@ def test_display_html_and_javascript_expose_polling_targets() -> None:
     assert "DISPLAY_POLL_INTERVAL_MS = 10_000" in javascript
     assert "headerWeekday.textContent" in javascript
     assert 'WEEKDAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]' in javascript
+    assert ".power-detail-row" in stylesheet
+    assert "font-variant-numeric: tabular-nums" in stylesheet
+    assert ".today-energy-card" not in stylesheet
     assert "取得不可" in javascript
     assert "source--unavailable" in javascript
 
