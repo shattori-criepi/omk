@@ -31,7 +31,7 @@ Ichijo ECHONET node -- UDP/3610, GET only --> Raspberry Pi --> MQTT --> OMK coll
 
 未知の状態コードは`unknown`とし、`battery_operating_state_raw`にも生コードを残します。PCS E7は現時点の実機確認範囲に基づき`pcs_ac_output_power_w = max(-raw, 0)`とします。正値の意味（系統から蓄電池への充電など）は未確認です。
 
-電力収支は`PV + 買電 + 放電 - 売電 - 充電`です。必須値が欠けた場合は`load_power_w`を`null`、`quality`を`degraded`にします。負の収支値は0に丸めず保持し、同じく`degraded`とします。`measured_at`は全プロパティを読み終えた取得サイクル終了時刻で、JSTのISO 8601です。
+住宅消費電力は`PCS交流出力 + 買電 - 売電`で計算します。PVと蓄電池電力は個別の計測値として保持しますが、各ECHONET Liteプロパティは順次取得されるため、急変時の時刻差の影響を抑える目的で住宅消費の計算には使いません。必須値が欠けた場合は`load_power_w`を`null`、`quality`を`degraded`にします。負の収支値は0に丸めず保持し、同じく`degraded`とします。`measured_at`は全プロパティを読み終えた取得サイクル終了時刻で、JSTのISO 8601です。
 
 ## 設定と起動
 
