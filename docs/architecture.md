@@ -116,10 +116,13 @@ flowchart LR
     JSONL --> CSV
     LATEST -->|瞬時値| VIEW
     PARQUET -->|日計・履歴| VIEW
-    JSONL --> SEND
+    MQ --> HARVEST[harvest-uploader<br/>1分集約・SQLite再送]
+    HARVEST --> SEND[Harvest Data / Lagoon<br/>遠隔可視化]
 ```
 
 取得処理と保存処理は分離する。collectorはpayloadの機種別スキーマを持たず、MQTT受信時刻、トピック、QoS、retain、payloadをそのまま記録する。したがって、測定項目の増減や未知のセンサ追加はcollector変更を必要としない。
+
+JSONLは10秒程度の生データを保存する一次記録、Parquetは将来の分析・CSV抽出用の派生データである。`harvest-uploader`はこの二つから独立してMQTTを購読し、住宅全体の1分データをHarvest Dataへ送信する。Harvest DataとLagoonは遠隔可視化のために使い、一次保存の代替にはしない。
 
 ## 5. モジュール境界
 
