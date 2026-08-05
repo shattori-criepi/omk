@@ -4,12 +4,14 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <title>OMK ダッシュボード</title>
-    <link rel="stylesheet" href="{{ url_for('static', path='/display.css') }}?v=20260804-8">
+    <link rel="stylesheet" href="{{ url_for('static', path='/display.css') }}?v=20260805-1">
   </head>
   <body>
     <main class="dashboard" aria-label="OMK ダッシュボード">
       <header class="topbar">
-        <time id="current-datetime" class="current-datetime" aria-label="現在日時"></time>
+        <time id="current-datetime" class="current-datetime" aria-label="現在日時">
+          <span id="header-date-main" class="header-date-main"></span><span id="header-weekday" class="header-weekday"></span><span id="header-time" class="header-time"></span>
+        </time>
 
         <div class="status-area">
           <p class="updated">
@@ -26,12 +28,17 @@
         </div>
       </header>
 
-      <section class="power-hero" aria-labelledby="current-power-label">
+      <section id="power-section" class="power-hero source--{{ dashboard.power_freshness }}" aria-labelledby="current-power-label">
         <div class="power-primary">
-          <p id="current-power-label" class="eyebrow">{{ dashboard.current_power_label }}</p>
+          <p class="eyebrow">
+            <span id="current-power-label">{{ dashboard.current_power_label }}</span>
+            <span id="power-source-badge" class="source-badge source-badge--{{ dashboard.power_freshness }}" {% if dashboard.power_freshness == 'normal' %}hidden{% endif %}>
+              {% if dashboard.power_freshness == 'delayed' %}遅延{% elif dashboard.power_freshness == 'unavailable' %}取得不可{% endif %}
+            </span>
+          </p>
           <div class="power-reading">
             <strong id="current-power-kw">{{ dashboard.current_power_kw }}</strong>
-            <span>kW</span>
+            <span class="source-unit" {% if dashboard.power_freshness == 'unavailable' %}hidden{% endif %}>kW</span>
           </div>
           <p id="power-direction" class="power-direction power-direction--{{ dashboard.power_flow }}" {% if not dashboard.power_direction %}hidden{% endif %}>
             {{ dashboard.power_direction }}
@@ -44,66 +51,77 @@
           </div>
         </div>
 
-        <aside id="power-details" class="power-details" aria-label="発電・蓄電池情報" {% if not dashboard.has_ichijo_power_flow %}hidden{% endif %}>
-          <div class="power-detail">
-            <span>PV発電</span>
-            <strong id="pv-power-kw">{{ dashboard.pv_power_kw }}</strong>
-            <small>kW</small>
-          </div>
+        <aside class="power-sidebar" aria-label="電力関連情報">
+          <article class="power-detail-row">
+            <span class="power-detail-label">今日の買電量</span>
+            <strong id="purchased-today-kwh" class="power-detail-value">{{ dashboard.purchased_today_kwh }}</strong>
+            <small class="power-detail-unit">kWh</small>
+          </article>
 
-          <div class="power-detail">
-            <span>今日の売電量</span>
-            <strong id="sold-today-kwh">{{ dashboard.sold_today_kwh }}</strong>
-            <small>kWh</small>
-          </div>
+          <div id="power-details" class="power-details" aria-label="発電・蓄電池情報" {% if not dashboard.has_ichijo_power_flow %}hidden{% endif %}>
+            <div class="power-detail-row">
+              <span class="power-detail-label">今日の売電量</span>
+              <strong id="sold-today-kwh" class="power-detail-value">{{ dashboard.sold_today_kwh }}</strong>
+              <small class="power-detail-unit">kWh</small>
+            </div>
 
-          <div class="power-detail">
-            <span>蓄電池残量</span>
-            <strong id="battery-soc-percent">{{ dashboard.battery_soc_percent }}</strong>
-            <small>%</small>
-          </div>
+            <div class="power-detail-row">
+              <span class="power-detail-label">PV発電</span>
+              <strong id="pv-power-kw" class="power-detail-value">{{ dashboard.pv_power_kw }}</strong>
+              <small class="power-detail-unit">kW</small>
+            </div>
 
-          <div class="power-detail">
-            <span id="battery-power-label">{{ dashboard.battery_power_label }}</span>
-            <strong id="battery-power-kw">{{ dashboard.battery_power_kw }}</strong>
-            <small>kW</small>
+            <div class="power-detail-row">
+              <span class="power-detail-label">蓄電池残量</span>
+              <strong id="battery-soc-percent" class="power-detail-value">{{ dashboard.battery_soc_percent }}</strong>
+              <small class="power-detail-unit">%</small>
+            </div>
+
+            <div class="power-detail-row">
+              <span id="battery-power-label" class="power-detail-label">{{ dashboard.battery_power_label }}</span>
+              <strong id="battery-power-kw" class="power-detail-value">{{ dashboard.battery_power_kw }}</strong>
+              <small class="power-detail-unit">kW</small>
+            </div>
           </div>
         </aside>
       </section>
 
-      <section class="cards" aria-label="電力と室内環境">
-        <article class="card card--energy">
-          <p>今日の買電量</p>
-          <strong id="purchased-today-kwh">{{ dashboard.purchased_today_kwh }}</strong>
-          <span>kWh</span>
-        </article>
-        <article class="card">
-          <p>温度</p>
-          <strong id="temperature-c">{{ dashboard.temperature_c }}</strong>
-          <span>℃</span>
-        </article>
-        <article class="card">
-          <p>湿度</p>
-          <strong id="humidity-percent">{{ dashboard.humidity_percent }}</strong>
-          <span>%</span>
-        </article>
-        <article class="card">
-          <p>CO2</p>
-          <strong id="co2-ppm">{{ dashboard.co2_ppm }}</strong>
-          <span>ppm</span>
-        </article>
-        <article class="card">
-          <p>PM2.5</p>
-          <strong id="pm25-ug-m3">{{ dashboard.pm25_ug_m3 }}</strong>
-          <span>µg/m³</span>
-        </article>
-        <article class="card">
-          <p>VOC Index</p>
-          <strong id="voc-index">{{ dashboard.voc_index }}</strong>
-        </article>
+      <section class="cards-layout" aria-label="電力と室内環境">
+        <section id="sen66-section" class="sen66-cards source--{{ dashboard.sen66_freshness }}" aria-label="SEN66 室内環境">
+          <header class="sen66-heading">
+            <span>室内環境</span>
+            <span id="sen66-source-badge" class="source-badge source-badge--{{ dashboard.sen66_freshness }}" {% if dashboard.sen66_freshness == 'normal' %}hidden{% endif %}>{% if dashboard.sen66_freshness == 'delayed' %}遅延{% elif dashboard.sen66_freshness == 'unavailable' %}取得不可{% endif %}</span>
+          </header>
+          <div class="sen66-card-grid">
+            <article class="card">
+              <p>温度</p>
+              <strong id="temperature-c">{{ dashboard.temperature_c }}</strong>
+              <span class="source-unit" {% if dashboard.sen66_freshness == 'unavailable' %}hidden{% endif %}>℃</span>
+            </article>
+            <article class="card">
+              <p>湿度</p>
+              <strong id="humidity-percent">{{ dashboard.humidity_percent }}</strong>
+              <span class="source-unit" {% if dashboard.sen66_freshness == 'unavailable' %}hidden{% endif %}>%</span>
+            </article>
+            <article class="card">
+              <p>CO2</p>
+              <strong id="co2-ppm">{{ dashboard.co2_ppm }}</strong>
+              <span class="source-unit" {% if dashboard.sen66_freshness == 'unavailable' %}hidden{% endif %}>ppm</span>
+            </article>
+            <article class="card">
+              <p>PM2.5</p>
+              <strong id="pm25-ug-m3">{{ dashboard.pm25_ug_m3 }}</strong>
+              <span class="source-unit" {% if dashboard.sen66_freshness == 'unavailable' %}hidden{% endif %}>µg/m³</span>
+            </article>
+            <article class="card">
+              <p>VOC Index</p>
+              <strong id="voc-index">{{ dashboard.voc_index }}</strong>
+            </article>
+          </div>
+        </section>
       </section>
     </main>
 
-    <script src="{{ url_for('static', path='/display.js') }}?v=20260804-8" defer></script>
+    <script src="{{ url_for('static', path='/display.js') }}?v=20260805-1" defer></script>
   </body>
 </html>
