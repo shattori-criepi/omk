@@ -394,6 +394,7 @@ def test_display_html_and_javascript_expose_polling_targets() -> None:
     assert 'fetch("/api/display", { cache: "no-store" })' in javascript
     assert "DISPLAY_POLL_INTERVAL_MS = 10_000" in javascript
     assert "headerWeekday.textContent" in javascript
+    assert 'WEEKDAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]' in javascript
     assert "取得不可" in javascript
     assert "source--unavailable" in javascript
 
