@@ -1,4 +1,5 @@
 import json
+import re
 from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -274,9 +275,16 @@ def test_broken_or_missing_latest_data_does_not_break_display(tmp_path: Path, mo
     response = client.get("/display")
 
     assert response.status_code == 200
-    assert "データなし" in response.text
-    assert "unavailable" in response.text
-    assert ">-<" in response.text
+    assert re.search(r'<strong id="current-power-kw">-</strong>', response.text)
+    assert re.search(
+        r'id="power-source-badge"[^>]*source-badge--unavailable', response.text
+    )
+    assert re.search(r'<strong id="temperature-c">-</strong>', response.text)
+    assert re.search(
+        r'id="sen66-source-badge"[^>]*source-badge--unavailable', response.text
+    )
+    assert "取得不可" in response.text
+    assert "データなし" not in response.text
 
 
 def test_display_api_returns_ichijo_and_broute_fallback_snapshots(tmp_path: Path, monkeypatch) -> None:
