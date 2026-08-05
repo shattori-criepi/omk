@@ -25,6 +25,28 @@ function setText(id, value) {
   if (element) element.textContent = value;
 }
 
+function sourceBadgeText(freshness) {
+  return freshness === "delayed" ? "遅延" : freshness === "unavailable" ? "取得不可" : "";
+}
+
+function updateSourceStatus(sectionId, badgeId, freshness) {
+  const section = document.querySelector(`#${sectionId}`);
+  if (section) {
+    section.classList.remove("source--normal", "source--delayed", "source--unavailable");
+    section.classList.add(`source--${freshness}`);
+    section.querySelectorAll(".source-unit").forEach((unit) => {
+      unit.hidden = freshness === "unavailable";
+    });
+  }
+
+  const badge = document.querySelector(`#${badgeId}`);
+  if (badge) {
+    badge.textContent = sourceBadgeText(freshness);
+    badge.hidden = freshness === "normal";
+    badge.className = `source-badge source-badge--${freshness}`;
+  }
+}
+
 function updateDisplay(data) {
   for (const [id, value] of Object.entries({
     "current-power-label": data.current_power_label,
@@ -72,6 +94,9 @@ function updateDisplay(data) {
     gridFlow.className = `grid-flow grid-flow--${data.grid_flow}`;
   }
   if (powerDetails) powerDetails.hidden = !hasIchijo;
+
+  updateSourceStatus("power-section", "power-source-badge", data.power_freshness);
+  updateSourceStatus("sen66-section", "sen66-source-badge", data.sen66_freshness);
 }
 
 async function refreshDisplay() {
