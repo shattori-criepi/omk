@@ -26,6 +26,9 @@ data/database/*
 !data/exports/
 data/exports/*
 !data/exports/.gitkeep
+!data/harvest-uploader/
+data/harvest-uploader/*
+!data/harvest-uploader/.gitkeep
 logs/
 
 # Mosquitto runtime persistence data
