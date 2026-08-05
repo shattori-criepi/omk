@@ -6,12 +6,26 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 OMK_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd -P)"
 COMPOSE_FILE="${OMK_ROOT}/compose.yaml"
 TARGET_USER="${SUDO_USER:-$(id -un)}"
-PRODUCTION_SERVICES=(mosquitto sensor-collector dashboard)
+PRODUCTION_SERVICES=(
+  mosquitto
+  sensor-collector
+  dashboard
+  harvest-uploader
+)
+BUILD_SERVICES=(
+  sensor-collector
+  dashboard
+  harvest-uploader
+)
 EXCLUDED_SERVICES=(gateway broute-meter-mock broute-meter-tests)
-REQUIRED_DIRECTORIES=(data/sensors data/latest data/processed services/mosquitto/data logs/setup)
+REQUIRED_DIRECTORIES=(data/sensors data/latest data/processed data/harvest-uploader services/mosquitto/data logs/setup)
 MOSQUITTO_BIND_ADDRESS="192.168.50.1"
 MQTT_PORT="1883"
 DASHBOARD_PORT="8000"
+HARVEST_ENDPOINT="${HARVEST_ENDPOINT:-http://harvest.soracom.io}"
+HARVEST_QUEUE_HOST_PATH="data/harvest-uploader/queue.sqlite3"
+HARVEST_QUEUE_CONTAINER_PATH="/app/data/harvest-uploader/queue.sqlite3"
+HARVEST_LOG_TAIL=100
 DRY_RUN=false
 PRINT_CONFIG=false
 PULL=false
@@ -24,14 +38,14 @@ usage() {
   cat <<'EOF'
 Usage: scripts/setup-data-collection.sh [OPTIONS]
 
-Safely start only OMK's production containers: mosquitto, sensor-collector,
-and dashboard. B-route remains a host systemd service.
+Safely start only OMK's production containers. B-route remains a host systemd
+service.
 
 Options:
   --dry-run       Show checks and Docker operations without changing anything.
   --print-config  Print non-secret configuration and exit.
   --pull          Pull Mosquitto; with --build, also refresh build base images.
-  --build         Build only sensor-collector and dashboard locally.
+  --build         Build local application services.
   --restart       Explicitly restart only the production services after startup.
   -h, --help      Show this help.
 EOF
@@ -78,9 +92,9 @@ check_directory() {
   ownership="$(stat -c 'owner=%U:%G uid=%u gid=%g mode=%a' "${path}")"
   log "Directory state: ${path} (${ownership})"
   case "${relative}" in
-    data/sensors|data/latest|logs/setup)
+    data/sensors|data/latest|data/harvest-uploader|logs/setup)
       target_can_write "${path}" || fail "${TARGET_USER} cannot write required directory: ${path}. Review ownership and permissions without using chown -R."
-      if [[ "${relative}" == "data/sensors" || "${relative}" == "data/latest" ]]; then
+      if [[ "${relative}" == "data/sensors" || "${relative}" == "data/latest" || "${relative}" == "data/harvest-uploader" ]]; then
         target_can_read_directory "${path}" || fail "${TARGET_USER} cannot read/manage required directory: ${path}. Review ownership and permissions without using chown -R."
       fi
       log "PASS: ${TARGET_USER} can write ${path}"
@@ -102,8 +116,11 @@ print_config() {
   uid="$(id -u "${TARGET_USER}")"; gid="$(id -g "${TARGET_USER}")"
   printf '%s\n' "Repository root: ${OMK_ROOT}" "Target user: ${TARGET_USER}" "UID/GID: ${uid}/${gid}" \
     "Compose file: ${COMPOSE_FILE}" "Production services: ${PRODUCTION_SERVICES[*]}" \
+    "Build services: ${BUILD_SERVICES[*]}" \
     "Mosquitto bind address: ${MOSQUITTO_BIND_ADDRESS}" "MQTT port: ${MQTT_PORT}" \
-    "Dashboard port: ${DASHBOARD_PORT}" "dry-run=${DRY_RUN} pull=${PULL} build=${BUILD} restart=${RESTART}"
+    "Dashboard port: ${DASHBOARD_PORT}" "Harvest endpoint: ${HARVEST_ENDPOINT}" \
+    "Harvest queue host path: ${HARVEST_QUEUE_HOST_PATH}" "Harvest queue container path: ${HARVEST_QUEUE_CONTAINER_PATH}" \
+    "dry-run=${DRY_RUN} pull=${PULL} build=${BUILD} restart=${RESTART}"
   printf 'Required directories:\n'
   for directory in "${REQUIRED_DIRECTORIES[@]}"; do printf '  %s\n' "${OMK_ROOT}/${directory}"; done
 }
@@ -115,6 +132,9 @@ validate_static_files() {
   [[ -f "${OMK_ROOT}/services/mosquitto/config/mosquitto.conf" ]] || fail "Mosquitto configuration is missing."
   [[ -f "${OMK_ROOT}/services/sensor-collector/Dockerfile" ]] || fail "sensor-collector Dockerfile is missing."
   [[ -f "${OMK_ROOT}/services/dashboard/Dockerfile" ]] || fail "dashboard Dockerfile is missing."
+  [[ -f "${OMK_ROOT}/services/harvest-uploader/Dockerfile" ]] || fail "harvest-uploader Dockerfile is missing."
+  [[ -f "${OMK_ROOT}/services/harvest-uploader/requirements.txt" ]] || fail "harvest-uploader requirements.txt is missing."
+  [[ -f "${OMK_ROOT}/services/harvest-uploader/src/harvest_uploader/__main__.py" ]] || fail "harvest-uploader entry point is missing."
   for service in "${PRODUCTION_SERVICES[@]}"; do
     grep -q "^  ${service}:" "${COMPOSE_FILE}" || fail "Production service is absent from compose.yaml: ${service}"
   done
@@ -198,6 +218,46 @@ check_container_paths() {
   docker_compose exec -T mosquitto sh -c 'test -w /mosquitto/data' ||
     fail "mosquitto cannot write /mosquitto/data. Preserve existing container ownership; inspect its UID with 'docker compose exec mosquitto id' and adjust only this directory if required (never chown -R)."
   log "PASS: mosquitto can use its data mount"
+  docker_compose exec -T harvest-uploader sh -c 'test -w /app/data/harvest-uploader' ||
+    fail "harvest-uploader cannot write /app/data/harvest-uploader. Review only data/harvest-uploader ownership and permissions; never use chown -R."
+  log "PASS: harvest-uploader can write its queue-data mount"
+  docker_compose exec -T harvest-uploader sh -c 'if test -e /app/data/harvest-uploader/queue.sqlite3; then test -r /app/data/harvest-uploader/queue.sqlite3 && test -w /app/data/harvest-uploader/queue.sqlite3; fi' ||
+    fail "harvest-uploader cannot read/write its existing queue.sqlite3. Review only that file and its parent directory permissions."
+  log "PASS: harvest-uploader queue.sqlite3 is writable when present"
+}
+
+check_harvest_mqtt_evidence() {
+  local recent_logs="$1"
+  if grep -Fq 'MQTT connected; subscribed to omk/#' <<<"${recent_logs}"; then
+    log "PASS: harvest-uploader MQTT connection is confirmed"
+  elif grep -Fq 'Harvest send succeeded' <<<"${recent_logs}" ||
+    grep -Fq 'Harvest send failed; queued for retry' <<<"${recent_logs}"; then
+    log "PASS: harvest-uploader has processed MQTT data"
+  elif grep -Eqi 'MQTT connection refused|MQTT disconnected|connection error|connection refused' <<<"${recent_logs}"; then
+    warn "harvest-uploader has recent MQTT connection errors; it remains running and may reconnect."
+  else
+    log "INFO: harvest-uploader MQTT connection evidence is not visible in recent logs"
+  fi
+}
+
+check_harvest_uploader() {
+  local queue_path="${OMK_ROOT}/${HARVEST_QUEUE_HOST_PATH}" recent_logs
+  if [[ -e "${queue_path}" ]]; then
+    [[ -f "${queue_path}" ]] || fail "Harvest queue path is not a regular file: ${queue_path}"
+    log "INFO: Harvest queue state: $(stat -c 'exists=yes size=%s uid=%u gid=%g mode=%a' "${queue_path}")"
+  else
+    log "INFO: Harvest queue has not been created yet: ${HARVEST_QUEUE_HOST_PATH}"
+  fi
+
+  recent_logs="$(docker_compose logs --tail "${HARVEST_LOG_TAIL}" harvest-uploader 2>&1 || true)"
+  check_harvest_mqtt_evidence "${recent_logs}"
+  if grep -Fq 'Harvest send failed; queued for retry' <<<"${recent_logs}"; then
+    warn "Harvest delivery has failed recently; records are queued for retry."
+  elif grep -Fq 'Harvest send succeeded' <<<"${recent_logs}"; then
+    log "PASS: harvest-uploader has recent successful Harvest delivery"
+  else
+    log "INFO: No Harvest delivery result is visible; there may be no completed one-minute record yet."
+  fi
 }
 
 warn_for_running_excluded_services() {
@@ -252,13 +312,14 @@ if "${DRY_RUN}"; then
   "${PULL}" && log "Would run: docker compose pull mosquitto"
   if "${BUILD}"; then
     if "${PULL}"; then
-      log "Would run: docker compose build --pull sensor-collector dashboard"
+      log "Would run: docker compose build --pull ${BUILD_SERVICES[*]}"
     else
-      log "Would run: docker compose build sensor-collector dashboard"
+      log "Would run: docker compose build ${BUILD_SERVICES[*]}"
     fi
   fi
   "${RESTART}" && log "Would run: docker compose restart ${PRODUCTION_SERVICES[*]}"
-  log "Would verify container mounts after startup: sensor-collector write /app/data/sensors and /app/data/latest; dashboard read /app/data/processed and read-only /app/data/latest; mosquitto write /mosquitto/data."
+  log "Would verify container mounts after startup: sensor-collector write /app/data/sensors and /app/data/latest; dashboard read /app/data/processed and read-only /app/data/latest; mosquitto write /mosquitto/data; harvest-uploader write /app/data/harvest-uploader."
+  log "Would inspect harvest-uploader MQTT and Harvest retry logs, and queue.sqlite3 metadata without reading payloads."
   log "Would check ${MOSQUITTO_BIND_ADDRESS}:${MQTT_PORT}, http://127.0.0.1:${DASHBOARD_PORT}/health, /display, and /api/display."
   exit 0
 fi
@@ -273,24 +334,26 @@ for directory in "${REQUIRED_DIRECTORIES[@]}"; do check_directory "${directory}"
 "${PULL}" && docker_compose pull mosquitto
 if "${BUILD}"; then
   if "${PULL}"; then
-    docker_compose build --pull sensor-collector dashboard
+    docker_compose build --pull "${BUILD_SERVICES[@]}"
   else
-    docker_compose build sensor-collector dashboard
+    docker_compose build "${BUILD_SERVICES[@]}"
   fi
 fi
 docker_compose up -d "${PRODUCTION_SERVICES[@]}"
 "${RESTART}" && docker_compose restart "${PRODUCTION_SERVICES[@]}"
 for service in "${PRODUCTION_SERVICES[@]}"; do container_status "${service}"; done
 check_container_paths
+check_harvest_uploader
 warn_for_running_excluded_services
 if ! ss -ltn | grep -q "${MOSQUITTO_BIND_ADDRESS}:${MQTT_PORT}"; then warn "Mosquitto TCP listener was not visible at ${MOSQUITTO_BIND_ADDRESS}:${MQTT_PORT}"; else log "PASS: Mosquitto listener is present"; fi
 docker_compose logs --tail 30 mosquitto | grep -Eqi 'fatal|error' && warn "Mosquitto logs contain error text; review the log." || log "PASS: No fatal/error text in recent Mosquitto logs"
 docker_compose logs --tail 30 sensor-collector | grep -Eqi 'connection refused|connection error' && warn "sensor-collector shows MQTT connection errors; it may recover when Mosquitto is ready." || log "PASS: No persistent MQTT connection text in recent collector logs"
 check_dashboard
-log "SUCCESS: running omk-mosquitto, omk-sensor-collector, omk-dashboard"
-log "MQTT: ${MOSQUITTO_BIND_ADDRESS}:${MQTT_PORT}; Dashboard: http://localhost:${DASHBOARD_PORT}/display"
-log "Data: data/sensors (JSONL), data/latest (live cache), data/processed (processed data)"
-log "Status: docker compose ps mosquitto sensor-collector dashboard"
-log "Logs: docker compose logs --tail 100 mosquitto sensor-collector dashboard"
-log "Stop only these services: docker compose stop mosquitto sensor-collector dashboard"
-log "Restart only these services: docker compose restart mosquitto sensor-collector dashboard"
+log "SUCCESS: running omk-mosquitto, omk-sensor-collector, omk-dashboard, omk-harvest-uploader"
+log "MQTT: ${MOSQUITTO_BIND_ADDRESS}:${MQTT_PORT}; Dashboard: http://localhost:${DASHBOARD_PORT}/display; Harvest: ${HARVEST_ENDPOINT}"
+log "Data: data/sensors (JSONL), data/latest (live cache), data/processed (processed data), ${HARVEST_QUEUE_HOST_PATH} (Harvest retry queue)"
+log "Status: docker compose ps ${PRODUCTION_SERVICES[*]}"
+log "Logs: docker compose logs --tail 100 ${PRODUCTION_SERVICES[*]}"
+log "Harvest logs: docker compose logs --tail 100 harvest-uploader"
+log "Stop only these services: docker compose stop ${PRODUCTION_SERVICES[*]}"
+log "Restart only these services: docker compose restart ${PRODUCTION_SERVICES[*]}"
