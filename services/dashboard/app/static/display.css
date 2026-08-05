@@ -48,7 +48,8 @@ body {
 
 .header-weekday {
   display: inline-block;
-  margin-left: 0.05em;
+  margin-left: 0.35em;
+  margin-right: 0.35em;
   vertical-align: baseline;
 }
 
