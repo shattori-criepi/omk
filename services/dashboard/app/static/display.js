@@ -1,6 +1,9 @@
 document.documentElement.classList.add("js-enabled");
 
 const currentDatetime = document.querySelector("#current-datetime");
+const headerDateMain = document.querySelector("#header-date-main");
+const headerWeekday = document.querySelector("#header-weekday");
+const headerTime = document.querySelector("#header-time");
 const DISPLAY_POLL_INTERVAL_MS = 10_000;
 let displayFetchInProgress = false;
 
@@ -16,7 +19,11 @@ function updateCurrentDatetime() {
   const time = new Intl.DateTimeFormat("ja-JP", {
     timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
   }).format(now);
-  currentDatetime.textContent = `${values.year}/${values.month}/${values.day}(${weekday}) ${time}`;
+  const dateText = `${values.year}/${values.month}/${values.day}`;
+  if (headerDateMain) headerDateMain.textContent = dateText;
+  if (headerWeekday) headerWeekday.textContent = `(${weekday})`;
+  if (headerTime) headerTime.textContent = ` ${time}`;
+  currentDatetime.setAttribute("aria-label", `${dateText}(${weekday}) ${time}`);
   currentDatetime.dateTime = now.toISOString();
 }
 
