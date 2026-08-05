@@ -32,6 +32,30 @@ def test_power_flow_normalization(raw, expected_load):
     assert message["quality"] == "normal"
 
 
-def test_missing_required_power_degrades_and_nulls_load():
-    message = normalize({"pv_power_w": 410, "battery_raw_w": -683}, device_id="id", measured_at=datetime.now(ZoneInfo("Asia/Tokyo")), errors=["grid_power_read_failed"])
-    assert message["load_power_w"] is None and message["quality"] == "degraded"
+def test_pcs_based_load_ignores_pv_and_battery_sampling_skew():
+    message = normalize(
+        {"pv_power_w": 2407, "battery_raw_w": 5431, "grid_raw_w": -698, "pcs_raw_w": -3421},
+        device_id="id", measured_at=datetime.now(ZoneInfo("Asia/Tokyo")), errors=[],
+    )
+    assert message["load_power_w"] == 2723
+    assert message["quality"] == "normal"
+    assert message["errors"] == []
+
+
+def test_pcs_based_load_does_not_require_pv_or_battery_values():
+    message = normalize(
+        {"grid_raw_w": -28, "pcs_raw_w": -1148},
+        device_id="id", measured_at=datetime.now(ZoneInfo("Asia/Tokyo")), errors=[],
+    )
+    assert message["load_power_w"] == 1120
+    assert message["quality"] == "normal"
+
+
+@pytest.mark.parametrize("raw", [
+    {"pv_power_w": 410, "battery_raw_w": -683, "grid_raw_w": 14},
+    {"pv_power_w": 410, "battery_raw_w": -683, "pcs_raw_w": -1093},
+])
+def test_missing_pcs_or_grid_power_nulls_load(raw):
+    message = normalize(raw, device_id="id", measured_at=datetime.now(ZoneInfo("Asia/Tokyo")), errors=["read_failed"])
+    assert message["load_power_w"] is None
+    assert message["quality"] == "degraded"

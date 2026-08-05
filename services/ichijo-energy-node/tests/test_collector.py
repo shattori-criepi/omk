@@ -1,4 +1,5 @@
 from datetime import datetime
+import logging
 from zoneinfo import ZoneInfo
 
 from ichijo_energy_node.collector import Collector
@@ -34,3 +35,15 @@ def test_collector_keeps_partial_cycle():
     assert result["battery_soc_percent"] is None
     assert result["quality"] == "degraded"
     assert result["errors"] == ["battery_soc_read_failed"]
+
+
+def test_collector_log_includes_normalizer_added_error(caplog):
+    class NegativeLoad(Reader):
+        values = {**Reader.values,
+                  (bytes.fromhex("028701"), 0xC6): bytes.fromhex("ffffff38"),
+                  (bytes.fromhex("02a501"), 0xE7): bytes.fromhex("ffffff9c")}
+
+    with caplog.at_level(logging.INFO, logger="ichijo_energy_node.collector"):
+        result = Collector(NegativeLoad(), device_id="id", property_interval_seconds=0, sleep=lambda _: None).collect()
+    assert result["errors"] == ["negative_load_power"]
+    assert "Collection completed quality=degraded errors=1" in caplog.text

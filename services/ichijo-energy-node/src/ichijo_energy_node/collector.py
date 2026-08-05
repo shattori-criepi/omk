@@ -52,5 +52,5 @@ class Collector:
             if index < len(PROPERTIES) - 1:
                 self._sleep(self._property_interval)
         message = normalize(raw, device_id=self._device_id, measured_at=self._now(), errors=errors)
-        LOGGER.info("Collection completed quality=%s errors=%s", message["quality"], len(errors))
+        LOGGER.info("Collection completed quality=%s errors=%s", message["quality"], len(message["errors"]))
         return message
