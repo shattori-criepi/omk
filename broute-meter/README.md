@@ -318,10 +318,21 @@ USB操作はBルート本体ではなく、root所有・引数なしの`/usr/loc
 Raspberry Piでは次でsystemd unit、root所有ヘルパー、対象ヘルパーだけを許可するsudoers設定を導入します。Bルート本体は指定ユーザーで実行され、rootでは動作しません。
 
 ```bash
+./scripts/setup-broute-meter.sh --dry-run
+./scripts/setup-broute-meter.sh --print-unit
 ./scripts/setup-broute-meter.sh
 sudo systemctl status omk-broute-meter.service --no-pager
-sudo journalctl -u omk-broute-meter.service --no-pager
+sudo journalctl -u omk-broute-meter.service -n 100 --no-pager
 ```
+
+通常実行のログは`logs/setup/broute-meter-setup-YYYYMMDD-HHMMSS.log`へ保存されます。再実行時は
+helper、sudoers、unitの内容を比較し、同一なら維持します。変更があるunitだけをdaemon-reloadし、
+すでにactiveなサービスはunit変更時だけrestartします。スクリプトは既存CSV、認証情報、
+`broute-recovery-state.json`、Bルートログを変更・削除しません。
+
+`--dry-run`はsudoや書込みを実行せず、前提条件をすべて表示します。不足があれば予定を可能な
+範囲で表示した後、変更なしで非ゼロ終了します。root専用の既存sudoersはdry-runでは内容を読まず、
+通常実行時に権限付き比較で判定します。
 
 systemdは`Restart=on-failure`、60秒待機、15分あたり5回の起動失敗上限です。上限に達して`failed`になった場合、原因を取り除いた後に次で再開します。
 
