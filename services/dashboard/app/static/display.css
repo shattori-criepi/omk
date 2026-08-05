@@ -87,7 +87,7 @@ body {
 
 .power-hero {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 30%);
   min-height: 0;
   overflow: hidden;
   background: #172554;
@@ -103,7 +103,7 @@ body {
   padding: clamp(14px, 2vw, 28px);
 }
 
-.power-details:not([hidden]) {
+.power-sidebar {
   display: grid;
   align-content: center;
   gap: 10px;
@@ -113,8 +113,35 @@ body {
   border-left: 1px solid rgba(191, 219, 254, 0.18);
 }
 
-.power-hero:has(.power-details:not([hidden])) {
-  grid-template-columns: minmax(0, 1fr) minmax(220px, 30%);
+.power-details:not([hidden]) {
+  display: grid;
+  gap: 10px;
+}
+
+.today-energy-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: baseline;
+  gap: 0.35em;
+  padding: 0.5em 0;
+  color: #bfdbfe;
+}
+
+.today-energy-card span {
+  font-size: clamp(16px, 1.8vw, 22px);
+  font-weight: 700;
+}
+
+.today-energy-card strong {
+  color: #f8fafc;
+  font-size: clamp(30px, 3.8vw, 48px);
+  line-height: 1;
+  letter-spacing: -0.04em;
+}
+
+.today-energy-card small {
+  color: #cbd5e1;
+  font-size: clamp(13px, 1.4vw, 18px);
 }
 
 .eyebrow,
@@ -191,9 +218,36 @@ body {
   color: #fee2e2;
 }
 
-.cards {
+.cards-layout {
+  min-height: 0;
+}
+
+.sen66-cards {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 6px;
+  min-width: 0;
+}
+
+.sen66-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+  padding: 0 0.2em;
+  color: #bfdbfe;
+  font-size: clamp(13px, 1.6vw, 19px);
+  font-weight: 700;
+}
+
+.sen66-heading .source-badge {
+  margin-left: 0.5em;
+  font-size: 0.78em;
+}
+
+.sen66-card-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: clamp(8px, 1.3vw, 16px);
   min-height: 0;
 }
@@ -239,7 +293,15 @@ body {
     font-size: clamp(24px, 3.8vw, 34px);
   }
 
-  .cards {
+  .cards-layout {
+    min-height: 0;
+  }
+
+  .power-hero {
+    grid-template-columns: minmax(0, 1fr) minmax(180px, 32%);
+  }
+
+  .sen66-card-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
@@ -261,6 +323,15 @@ body {
 
   .updated {
     font-size: 10px;
+  }
+
+  .power-hero {
+    grid-template-columns: minmax(0, 1fr) minmax(140px, 34%);
+  }
+
+  .power-sidebar {
+    min-width: 140px;
+    padding: 12px;
   }
 }
 

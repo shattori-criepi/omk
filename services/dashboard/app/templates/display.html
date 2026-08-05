@@ -49,63 +49,74 @@
           </div>
         </div>
 
-        <aside id="power-details" class="power-details" aria-label="発電・蓄電池情報" {% if not dashboard.has_ichijo_power_flow %}hidden{% endif %}>
-          <div class="power-detail">
-            <span>PV発電</span>
-            <strong id="pv-power-kw">{{ dashboard.pv_power_kw }}</strong>
-            <small>kW</small>
-          </div>
-
-          <div class="power-detail">
-            <span>今日の売電量</span>
-            <strong id="sold-today-kwh">{{ dashboard.sold_today_kwh }}</strong>
+        <aside class="power-sidebar" aria-label="電力関連情報">
+          <article class="today-energy-card">
+            <span>今日の買電量</span>
+            <strong id="purchased-today-kwh">{{ dashboard.purchased_today_kwh }}</strong>
             <small>kWh</small>
-          </div>
+          </article>
 
-          <div class="power-detail">
-            <span>蓄電池残量</span>
-            <strong id="battery-soc-percent">{{ dashboard.battery_soc_percent }}</strong>
-            <small>%</small>
-          </div>
+          <div id="power-details" class="power-details" aria-label="発電・蓄電池情報" {% if not dashboard.has_ichijo_power_flow %}hidden{% endif %}>
+            <div class="power-detail">
+              <span>PV発電</span>
+              <strong id="pv-power-kw">{{ dashboard.pv_power_kw }}</strong>
+              <small>kW</small>
+            </div>
 
-          <div class="power-detail">
-            <span id="battery-power-label">{{ dashboard.battery_power_label }}</span>
-            <strong id="battery-power-kw">{{ dashboard.battery_power_kw }}</strong>
-            <small>kW</small>
+            <div class="power-detail">
+              <span>今日の売電量</span>
+              <strong id="sold-today-kwh">{{ dashboard.sold_today_kwh }}</strong>
+              <small>kWh</small>
+            </div>
+
+            <div class="power-detail">
+              <span>蓄電池残量</span>
+              <strong id="battery-soc-percent">{{ dashboard.battery_soc_percent }}</strong>
+              <small>%</small>
+            </div>
+
+            <div class="power-detail">
+              <span id="battery-power-label">{{ dashboard.battery_power_label }}</span>
+              <strong id="battery-power-kw">{{ dashboard.battery_power_kw }}</strong>
+              <small>kW</small>
+            </div>
           </div>
         </aside>
       </section>
 
-      <section id="sen66-section" class="cards source--{{ dashboard.sen66_freshness }}" aria-label="電力と室内環境">
-        <article class="card card--energy">
-          <p>今日の買電量</p>
-          <strong id="purchased-today-kwh">{{ dashboard.purchased_today_kwh }}</strong>
-          <span>kWh</span>
-        </article>
-        <article class="card">
-          <p>温度 <span id="sen66-source-badge" class="source-badge source-badge--{{ dashboard.sen66_freshness }}" {% if dashboard.sen66_freshness == 'normal' %}hidden{% endif %}>{% if dashboard.sen66_freshness == 'delayed' %}遅延{% elif dashboard.sen66_freshness == 'unavailable' %}取得不可{% endif %}</span></p>
-          <strong id="temperature-c">{{ dashboard.temperature_c }}</strong>
-          <span class="source-unit" {% if dashboard.sen66_freshness == 'unavailable' %}hidden{% endif %}>℃</span>
-        </article>
-        <article class="card">
-          <p>湿度</p>
-          <strong id="humidity-percent">{{ dashboard.humidity_percent }}</strong>
-          <span class="source-unit" {% if dashboard.sen66_freshness == 'unavailable' %}hidden{% endif %}>%</span>
-        </article>
-        <article class="card">
-          <p>CO2</p>
-          <strong id="co2-ppm">{{ dashboard.co2_ppm }}</strong>
-          <span class="source-unit" {% if dashboard.sen66_freshness == 'unavailable' %}hidden{% endif %}>ppm</span>
-        </article>
-        <article class="card">
-          <p>PM2.5</p>
-          <strong id="pm25-ug-m3">{{ dashboard.pm25_ug_m3 }}</strong>
-          <span class="source-unit" {% if dashboard.sen66_freshness == 'unavailable' %}hidden{% endif %}>µg/m³</span>
-        </article>
-        <article class="card">
-          <p>VOC Index</p>
-          <strong id="voc-index">{{ dashboard.voc_index }}</strong>
-        </article>
+      <section class="cards-layout" aria-label="電力と室内環境">
+        <section id="sen66-section" class="sen66-cards source--{{ dashboard.sen66_freshness }}" aria-label="SEN66 室内環境">
+          <header class="sen66-heading">
+            <span>室内環境</span>
+            <span id="sen66-source-badge" class="source-badge source-badge--{{ dashboard.sen66_freshness }}" {% if dashboard.sen66_freshness == 'normal' %}hidden{% endif %}>{% if dashboard.sen66_freshness == 'delayed' %}遅延{% elif dashboard.sen66_freshness == 'unavailable' %}取得不可{% endif %}</span>
+          </header>
+          <div class="sen66-card-grid">
+            <article class="card">
+              <p>温度</p>
+              <strong id="temperature-c">{{ dashboard.temperature_c }}</strong>
+              <span class="source-unit" {% if dashboard.sen66_freshness == 'unavailable' %}hidden{% endif %}>℃</span>
+            </article>
+            <article class="card">
+              <p>湿度</p>
+              <strong id="humidity-percent">{{ dashboard.humidity_percent }}</strong>
+              <span class="source-unit" {% if dashboard.sen66_freshness == 'unavailable' %}hidden{% endif %}>%</span>
+            </article>
+            <article class="card">
+              <p>CO2</p>
+              <strong id="co2-ppm">{{ dashboard.co2_ppm }}</strong>
+              <span class="source-unit" {% if dashboard.sen66_freshness == 'unavailable' %}hidden{% endif %}>ppm</span>
+            </article>
+            <article class="card">
+              <p>PM2.5</p>
+              <strong id="pm25-ug-m3">{{ dashboard.pm25_ug_m3 }}</strong>
+              <span class="source-unit" {% if dashboard.sen66_freshness == 'unavailable' %}hidden{% endif %}>µg/m³</span>
+            </article>
+            <article class="card">
+              <p>VOC Index</p>
+              <strong id="voc-index">{{ dashboard.voc_index }}</strong>
+            </article>
+          </div>
+        </section>
       </section>
     </main>
 
