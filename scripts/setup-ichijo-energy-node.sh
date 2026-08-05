@@ -88,11 +88,50 @@ compare_files() {
 
 directory_state() { stat -c 'owner=%U:%G uid=%u gid=%g mode=%a' "$1"; }
 
+target_can_write_directory() {
+  local path="$1"
+  if ((EUID == 0)) && [[ "${TARGET_USER}" != root ]]; then
+    "${AS_TARGET[@]}" test -w "${path}" -a -x "${path}"
+  else
+    test -w "${path}" -a -x "${path}"
+  fi
+}
+
+environment_mode_has_group_or_world_permissions() {
+  local mode="$1"
+  (( (8#${mode} & 8#077) != 0 ))
+}
+
+plan_log_directory() {
+  if [[ -d "${LOG_DIR}" ]]; then
+    if target_can_write_directory "${LOG_DIR}"; then
+      log "Would preserve writable setup log directory: ${LOG_DIR} ($(directory_state "${LOG_DIR}"))"
+    else
+      log "Would repair only setup log directory ownership/owner permissions for ${TARGET_USER}:${TARGET_GROUP}: ${LOG_DIR}"
+    fi
+  elif [[ -e "${LOG_DIR}" ]]; then
+    fail "Setup log path is occupied by a non-directory: ${LOG_DIR}"
+  else
+    log "Would create setup log directory owned by ${TARGET_USER}:${TARGET_GROUP}: ${LOG_DIR}"
+  fi
+}
+
 ensure_log_directory() {
-  if [[ -d "${LOG_DIR}" ]]; then return; fi
-  [[ ! -e "${LOG_DIR}" ]] || fail "Setup log path is occupied by a non-directory: ${LOG_DIR}"
-  mkdir -p "${LOG_DIR}"
-  "${SUDO[@]}" chown "${TARGET_USER}:${TARGET_GROUP}" "${LOG_DIR}"
+  if [[ -d "${LOG_DIR}" ]]; then
+    if target_can_write_directory "${LOG_DIR}"; then
+      log "Setup log directory is writable; preserving it: ${LOG_DIR} ($(directory_state "${LOG_DIR}"))"
+      return
+    fi
+    log "Repairing only setup log directory ownership/owner permissions: ${LOG_DIR}"
+    "${SUDO[@]}" chown "${TARGET_USER}:${TARGET_GROUP}" "${LOG_DIR}"
+    "${SUDO[@]}" chmod u+rwx "${LOG_DIR}"
+  elif [[ -e "${LOG_DIR}" ]]; then
+    fail "Setup log path is occupied by a non-directory: ${LOG_DIR}"
+  else
+    log "Creating setup log directory: ${LOG_DIR}"
+    "${SUDO[@]}" install -d -o "${TARGET_USER}" -g "${TARGET_GROUP}" -m 0775 "${LOG_DIR}"
+  fi
+  target_can_write_directory "${LOG_DIR}" || fail "${TARGET_USER} cannot create setup logs in ${LOG_DIR} after limited directory repair."
 }
 
 ensure_system_directory() {
@@ -171,7 +210,7 @@ ensure_environment_file() {
   if [[ -e "${ENV_DESTINATION}" ]]; then
     [[ -f "${ENV_DESTINATION}" ]] || fail "Environment file path is not a regular file: ${ENV_DESTINATION}"
     mode="$(stat -c '%a' "${ENV_DESTINATION}")"
-    if (( (10#${mode} & 077) != 0 )); then warn "Existing environment file has group/world permissions (${mode}); preserving it without reading or changing it."; fi
+    if environment_mode_has_group_or_world_permissions "${mode}"; then warn "Existing environment file has group/world permissions (${mode}); preserving it without reading or changing it."; fi
     log "Environment file exists; preserving it without reading: ${ENV_DESTINATION}"
     return
   fi
@@ -274,6 +313,7 @@ preflight
 if "${DRY_RUN}"; then
   log "Repository root: ${OMK_ROOT}"
   log "Target user/group: ${TARGET_USER}:${TARGET_GROUP}"
+  plan_log_directory
   if command -v dpkg-query >/dev/null 2>&1 && command -v grep >/dev/null 2>&1; then
     check_packages
     if ((${#MISSING_PACKAGES[@]})); then
