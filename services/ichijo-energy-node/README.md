@@ -52,10 +52,14 @@ PYTHONPATH=src .venv/bin/python -m pytest
 
 ## Raspberry Piでのsystemd常時運用
 
-実運用では、リポジトリルートから次を実行します。セットアップはruntime依存だけを`requirements.txt`から導入し、systemdサービスを有効化して起動します。
+実運用では、リポジトリルートから次を実行します。スクリプト全体を`sudo`で起動せず、
+必要な管理操作だけでsudoを使います。runtime依存だけを`requirements.txt`から導入し、
+systemdサービスを有効化して起動します。
 
 ```bash
-sudo scripts/setup-ichijo-energy-node.sh
+./scripts/setup-ichijo-energy-node.sh --dry-run
+./scripts/setup-ichijo-energy-node.sh --print-unit
+./scripts/setup-ichijo-energy-node.sh
 ```
 
 事前にsystemdユニットの展開結果だけを確認する場合は、root権限やファイル変更を必要としません。
@@ -64,13 +68,19 @@ sudo scripts/setup-ichijo-energy-node.sh
 scripts/setup-ichijo-energy-node.sh --print-unit
 ```
 
-実運用の設定は`/etc/omk/ichijo-energy-node.env`に置きます。初回セットアップ時に`.env.example`から生成され、既存ファイルは上書きされません。このファイルはGit管理外です。systemdの`EnvironmentFile`として読むため、`KEY=value`だけを記述し、`export`やshell展開には依存しないでください。設定を編集しただけでは反映されないため、次で再起動します。
+実運用の設定は`/etc/omk/ichijo-energy-node.env`に置きます。初回セットアップ時だけ`.env.example`から
+`root:root`・`0600`で生成され、既存ファイルは内容を読まず上書きしません。このファイルはGit管理外です。
+dry-runも設定値を表示しません。systemdの`EnvironmentFile`として読むため、`KEY=value`だけを記述し、
+`export`やshell展開には依存しないでください。設定を編集しただけでは反映されないため、次で再起動します。
 
 ```bash
 sudo systemctl restart omk-ichijo-energy-node.service
 ```
 
-状態とログは次で確認できます。
+unitは内容が異なる場合だけ更新され、同一なら維持されます。通常setupはpipを実行するため、
+activeなサービスへ依存関係を反映する目的でrestartします。setupログは
+`logs/setup/ichijo-energy-node-setup-YYYYMMDD-HHMMSS.log`です。既存の実測データや
+`data/latest/ichijo_power_flow.json`には影響しません。状態とログは次で確認できます。
 
 ```bash
 sudo systemctl status omk-ichijo-energy-node.service --no-pager
