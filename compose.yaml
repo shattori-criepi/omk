@@ -48,6 +48,26 @@ services:
       - ./data/sensors:/app/data/sensors
       - ./data/latest:/app/data/latest
 
+  harvest-uploader:
+    build:
+      context: ./services/harvest-uploader
+    container_name: omk-harvest-uploader
+    restart: unless-stopped
+    depends_on:
+      - mosquitto
+    environment:
+      MQTT_HOST: mosquitto
+      MQTT_PORT: "1883"
+      MQTT_CLIENT_ID: omk-harvest-uploader
+      MQTT_TOPIC: omk/#
+      HARVEST_ENDPOINT: ${HARVEST_ENDPOINT:-http://harvest.soracom.io}
+      HARVEST_TIMEOUT_SECONDS: ${HARVEST_TIMEOUT_SECONDS:-10}
+      HARVEST_RETRY_MAX_AGE_SECONDS: ${HARVEST_RETRY_MAX_AGE_SECONDS:-3600}
+      HARVEST_QUEUE_PATH: /app/data/harvest-uploader/queue.sqlite3
+      TZ: Asia/Tokyo
+    volumes:
+      - ./data/harvest-uploader:/app/data/harvest-uploader
+
   broute-meter-mock:
     build:
       context: ./broute-meter
