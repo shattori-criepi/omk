@@ -5,6 +5,8 @@ const headerDateMain = document.querySelector("#header-date-main");
 const headerWeekday = document.querySelector("#header-weekday");
 const headerTime = document.querySelector("#header-time");
 const DISPLAY_POLL_INTERVAL_MS = 10_000;
+const WEEKDAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const WEEKDAY_ARIA_NAMES = ["日曜日", "月曜日", "火曜日", "水曜日", "木曜日", "金曜日", "土曜日"];
 let displayFetchInProgress = false;
 
 function updateCurrentDatetime() {
@@ -15,15 +17,21 @@ function updateCurrentDatetime() {
     timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit",
   }).formatToParts(now);
   const values = Object.fromEntries(parts.map(({ type, value }) => [type, value]));
-  const weekday = new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", weekday: "short" }).format(now);
+  const weekdayIndex = new Date(Date.UTC(
+    Number(values.year), Number(values.month) - 1, Number(values.day),
+  )).getUTCDay();
+  const weekday = WEEKDAY_NAMES[weekdayIndex];
   const time = new Intl.DateTimeFormat("ja-JP", {
     timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
   }).format(now);
   const dateText = `${values.year}/${values.month}/${values.day}`;
   if (headerDateMain) headerDateMain.textContent = dateText;
-  if (headerWeekday) headerWeekday.textContent = `(${weekday})`;
+  if (headerWeekday) headerWeekday.textContent = weekday;
   if (headerTime) headerTime.textContent = ` ${time}`;
-  currentDatetime.setAttribute("aria-label", `${dateText}(${weekday}) ${time}`);
+  currentDatetime.setAttribute(
+    "aria-label",
+    `${values.year}年${values.month}月${values.day}日 ${WEEKDAY_ARIA_NAMES[weekdayIndex]} ${time}`,
+  );
   currentDatetime.dateTime = now.toISOString();
 }
 
