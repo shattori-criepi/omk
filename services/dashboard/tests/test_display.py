@@ -1,4 +1,5 @@
 import json
+import re
 from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -141,6 +142,8 @@ def test_view_model_uses_latest_values_and_parquet_today_energy(tmp_path: Path) 
     assert dashboard.updated_at == "2026/07/30 12:00:00"
     assert dashboard.updated_at_iso == "2026-07-30T12:00:00+09:00"
     assert dashboard.freshness == "normal"
+    assert dashboard.power_freshness == FreshnessStatus.NORMAL
+    assert dashboard.sen66_freshness == FreshnessStatus.NORMAL
 
 
 def test_stale_ichijo_falls_back_to_broute_power(tmp_path: Path) -> None:
@@ -152,6 +155,77 @@ def test_stale_ichijo_falls_back_to_broute_power(tmp_path: Path) -> None:
     assert dashboard.has_ichijo_power_flow is False
     assert dashboard.current_power_kw == "3.58"
     assert dashboard.power_direction == "売電"
+
+
+def test_delayed_ichijo_keeps_values_and_marks_power_source(tmp_path: Path) -> None:
+    latest_root = tmp_path / "latest"
+    _write_instantaneous_data(
+        latest_root,
+        ichijo_at=datetime(2026, 7, 30, 11, 53, 30, tzinfo=JST),
+    )
+
+    dashboard = get_display_view_model(LatestRepository(latest_root), ParquetRepository(tmp_path / "processed"), now=NOW)
+
+    assert dashboard.has_ichijo_power_flow is True
+    assert dashboard.current_power_kw == "1.50"
+    assert dashboard.pv_power_kw == "0.80"
+    assert dashboard.power_freshness == FreshnessStatus.DELAYED
+
+
+def test_unavailable_ichijo_and_broute_hides_power_value(tmp_path: Path) -> None:
+    latest_root = tmp_path / "latest"
+    _write_instantaneous_data(
+        latest_root,
+        power_at=datetime(2026, 7, 30, 11, 50, 29, tzinfo=JST),
+        ichijo_at=datetime(2026, 7, 30, 11, 50, 29, tzinfo=JST),
+    )
+
+    dashboard = get_display_view_model(LatestRepository(latest_root), ParquetRepository(tmp_path / "processed"), now=NOW)
+
+    assert dashboard.has_ichijo_power_flow is False
+    assert dashboard.current_power_kw == "-"
+    assert dashboard.power_freshness == FreshnessStatus.UNAVAILABLE
+
+
+def test_delayed_broute_keeps_value_when_ichijo_is_unavailable(tmp_path: Path) -> None:
+    latest_root = tmp_path / "latest"
+    _write_instantaneous_data(
+        latest_root,
+        power_at=datetime(2026, 7, 30, 11, 53, 30, tzinfo=JST),
+        ichijo_at=datetime(2026, 7, 30, 11, 50, 29, tzinfo=JST),
+    )
+
+    dashboard = get_display_view_model(LatestRepository(latest_root), ParquetRepository(tmp_path / "processed"), now=NOW)
+
+    assert dashboard.has_ichijo_power_flow is False
+    assert dashboard.current_power_kw == "3.58"
+    assert dashboard.power_freshness == FreshnessStatus.DELAYED
+
+
+def test_sen66_delayed_and_unavailable_are_isolated_from_power(tmp_path: Path) -> None:
+    latest_root = tmp_path / "latest"
+    _write_instantaneous_data(
+        latest_root,
+        ichijo_at=datetime(2026, 7, 30, 12, 0, 25, tzinfo=JST),
+        sen66_at=datetime(2026, 7, 30, 11, 53, 30, tzinfo=JST),
+    )
+
+    delayed = get_display_view_model(LatestRepository(latest_root), ParquetRepository(tmp_path / "processed"), now=NOW)
+    assert delayed.temperature_c == "26.4"
+    assert delayed.sen66_freshness == FreshnessStatus.DELAYED
+    assert delayed.current_power_kw == "1.50"
+
+    _write_instantaneous_data(
+        latest_root,
+        ichijo_at=datetime(2026, 7, 30, 12, 0, 25, tzinfo=JST),
+        sen66_at=datetime(2026, 7, 30, 11, 50, 29, tzinfo=JST),
+    )
+    unavailable = get_display_view_model(LatestRepository(latest_root), ParquetRepository(tmp_path / "processed"), now=NOW)
+    assert unavailable.temperature_c == "-"
+    assert unavailable.humidity_percent == "-"
+    assert unavailable.voc_index == "-"
+    assert unavailable.sen66_freshness == FreshnessStatus.UNAVAILABLE
+    assert unavailable.current_power_kw == "1.50"
 
 
 def test_fresh_ichijo_excludes_stale_broute_from_global_status(tmp_path: Path) -> None:
@@ -201,9 +275,16 @@ def test_broken_or_missing_latest_data_does_not_break_display(tmp_path: Path, mo
     response = client.get("/display")
 
     assert response.status_code == 200
-    assert "データなし" in response.text
-    assert "unavailable" in response.text
-    assert "--" in response.text
+    assert re.search(r'<strong id="current-power-kw">-</strong>', response.text)
+    assert re.search(
+        r'id="power-source-badge"[^>]*source-badge--unavailable', response.text
+    )
+    assert re.search(r'<strong id="temperature-c">-</strong>', response.text)
+    assert re.search(
+        r'id="sen66-source-badge"[^>]*source-badge--unavailable', response.text
+    )
+    assert "取得不可" in response.text
+    assert "データなし" not in response.text
 
 
 def test_display_api_returns_ichijo_and_broute_fallback_snapshots(tmp_path: Path, monkeypatch) -> None:
@@ -254,6 +335,31 @@ def test_display_api_returns_ichijo_and_broute_fallback_snapshots(tmp_path: Path
     assert snapshot["current_power_label"] == "現在の消費電力"
     assert snapshot["grid_flow_label"] == "買電中"
     assert snapshot["purchased_today_kwh"] == "0.0"
+    assert snapshot["power_freshness"] == "normal"
+    assert snapshot["sen66_freshness"] == "normal"
+
+    normal_html = client.get("/display").text
+    assert 'source-badge--normal" hidden' in normal_html
+    assert "取得不可" not in normal_html
+    sen66_section = normal_html.index('<section id="sen66-section"')
+    sen66_section_end = normal_html.index("</section>", sen66_section)
+    purchased_today = normal_html.index('id="purchased-today-kwh"')
+    sen66_badge = normal_html.index('id="sen66-source-badge"')
+    temperature_card = normal_html.index("<p>温度</p>")
+    assert not sen66_section < purchased_today < sen66_section_end
+    assert normal_html[sen66_section:sen66_section_end].count('<article class="card">') == 5
+    assert sen66_section < sen66_badge < temperature_card
+    assert 'id="sen66-source-badge"' not in normal_html[
+        normal_html.index("<p>温度</p>") : normal_html.index("</article>", temperature_card)
+    ]
+    assert normal_html.index('id="purchased-today-kwh"') < normal_html.index('id="sold-today-kwh"')
+    assert normal_html.index('id="sold-today-kwh"') < normal_html.index('id="pv-power-kw"')
+    assert normal_html.index('id="pv-power-kw"') < normal_html.index('id="battery-soc-percent"')
+    assert normal_html.index('id="battery-soc-percent"') < normal_html.index('id="battery-power-kw"')
+    assert normal_html.count('class="power-detail-row"') == 5
+    assert normal_html.count('class="power-detail-value"') == 5
+    assert normal_html.count('class="power-detail-unit"') == 5
+    assert "today-energy-card" not in normal_html
     assert snapshot["freshness"] in {"normal", "delayed", "unavailable"}
 
     _write_latest(
@@ -282,17 +388,27 @@ def test_display_api_returns_ichijo_and_broute_fallback_snapshots(tmp_path: Path
 def test_display_html_and_javascript_expose_polling_targets() -> None:
     response = client.get("/display")
     javascript = (Path(__file__).parents[1] / "app" / "static" / "display.js").read_text(encoding="utf-8")
+    stylesheet = (Path(__file__).parents[1] / "app" / "static" / "display.css").read_text(encoding="utf-8")
 
     assert response.status_code == 200
     for element_id in (
+        "header-date-main", "header-weekday", "header-time",
         "current-power-kw", "current-power-label", "power-direction", "grid-flow",
         "pv-power-kw", "battery-soc-percent", "battery-power-kw", "purchased-today-kwh",
         "sold-today-kwh", "temperature-c", "humidity-percent", "co2-ppm", "pm25-ug-m3",
         "voc-index", "updated-at", "freshness",
+        "power-source-badge", "sen66-source-badge",
     ):
         assert f'id="{element_id}"' in response.text
     assert 'fetch("/api/display", { cache: "no-store" })' in javascript
     assert "DISPLAY_POLL_INTERVAL_MS = 10_000" in javascript
+    assert "headerWeekday.textContent" in javascript
+    assert 'WEEKDAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]' in javascript
+    assert ".power-detail-row" in stylesheet
+    assert "font-variant-numeric: tabular-nums" in stylesheet
+    assert ".today-energy-card" not in stylesheet
+    assert "取得不可" in javascript
+    assert "source--unavailable" in javascript
 
 
 def test_power_direction_rules() -> None:
