@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 
+// Template only. Copy to network_config.h and keep real credentials out of Git.
 namespace NetworkConfig {
 
 constexpr char WIFI_SSID[] = "OMK-XXXXXX";

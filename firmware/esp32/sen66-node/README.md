@@ -11,6 +11,7 @@ M5Stack AtomS3 LiteとSEN66を接続し、10秒ごとの測定値をUSBシリア
 AtomS3 LiteのGroveポートでは、実機確認済みの配線としてYellow / GPIO2をSDA、White / GPIO1をSCLとして明示的に初期化します。
 I2C速度はSEN66の上限に合わせて100 kHzです。USB-C経由の起動ログとシリアルモニタを有効にするため、
 AtomS3 Lite環境には`ARDUINO_USB_CDC_ON_BOOT=1`を設定しています。
+WSL2 + usbipd経由の書き込み安定化のため、AtomS3 Lite環境の`upload_speed`は115200 baudです。これはfirmware書き込み用の速度であり、SEN66のI2Cクロック（100 kHz）とは別の設定です。
 
 従来の`esp32dev`（GPIO21/22）および`omk-esp32-c3`（GPIO6/7）環境は、既存ハードウェア用として残しています。
 
@@ -58,6 +59,23 @@ pio device monitor --baud 115200
 既定環境はAtomS3 Liteです。ポートを明示する場合は`--upload-port`または`--port`を追加します。
 従来ボードをビルドする場合だけ、例えば`pio run -e esp32dev`または`pio run -e omk-esp32-c3`を指定します。
 
+### WSL2 + usbipdでのUSB接続
+
+AtomS3 Liteを抜き差しすると、WSL側のシリアルデバイスが消えることがあります。その場合はWindows側で対象デバイスを再attachします。
+
+```powershell
+usbipd list
+usbipd attach --wsl --busid <BUSID>
+```
+
+WSL側では次で接続先を確認します。
+
+```bash
+ls -l /dev/ttyACM*
+```
+
+実機確認では`/dev/ttyACM0`を使用しましたが、BUSIDおよびtty番号は環境ごとに異なります。確認したデバイスを`--upload-port`または`--port`へ指定してください。
+
 ### AtomS3 Liteの実機確認手順
 
 1. AtomS3 Lite Groveポートを、Grove / STEMMA QT変換ケーブルでAdafruit SEN6x Breakoutへ接続する。
@@ -94,9 +112,13 @@ Wi-Fi断、Broker停止、ESP32再起動後も、接続が戻れば自動復旧�
 - AtomS3 LiteへのUSB書き込み
 - USB Serial monitorでの起動ログ確認
 - SEN66とのI2C通信（SDA=GPIO2、SCL=GPIO1、アドレス`0x6B`、100 kHz）
-- SEN66測定値の取得
+- SEN66測定値の取得（PM1.0、PM2.5、PM4.0、PM10、相対湿度、温度、VOC Index、NOx Index、CO2）
+- Wi-Fi接続（SSID `OMK-1CA9A8`、IPアドレス `192.168.50.125`）
+- Broker `192.168.50.1:1883`へのMQTT接続と測定値の継続publish
+- OMK Gatewayでの測定値受信
+- OMK DashboardでのSEN66測定値表示
 
-Wi-Fiは`Wi-Fi connecting: SSID=OMK-1CA9A8`のログ出力までを確認しています。Wi-Fi接続完了、MQTT publish、およびGateway側`sensor-collector`によるJSONL保存は未確認です。
+`network_config.h`はこのプロジェクトとリポジトリルートの`.gitignore`で除外しています。実環境のSSID・パスワードはこのローカルファイルへだけ設定し、Git管理するのは`network_config.example.h`のみです。
 
 ## ライブラリ
 

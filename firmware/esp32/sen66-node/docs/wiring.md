@@ -17,4 +17,4 @@ Grove → STEMMA QT変換ケーブルを使用した実機で、SDA=GPIO2（Yell
 
 起動時の`SEN66 detected at 0x6B`ログは、全アドレスを走査せずに対象アドレスへI2C疎通確認した結果です。検出できない場合は、SDA/SCLの対応、GND、Breakoutの給電、SEN66のJST GHケーブル接続を確認してください。
 
-実機ではAtomS3 LiteへのUSB書き込み、USB Serial monitor、SEN66 I2C通信、および測定値取得までを確認済みです。Wi-Fiは接続開始ログまで確認済みですが、接続完了、MQTT publish、Gateway側のJSONL保存は未確認です。
+実機ではAtomS3 LiteへのUSB書き込み、USB Serial monitor、SEN66 I2C通信、およびPM1.0、PM2.5、PM4.0、PM10、相対湿度、温度、VOC Index、NOx Index、CO2の測定値取得を確認済みです。Wi-Fi接続、MQTT Brokerへの継続publish、OMK Gatewayでの受信、およびOMK Dashboardでの測定値表示も確認済みです。
