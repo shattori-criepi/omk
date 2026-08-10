@@ -1,15 +1,18 @@
 # OMK SEN66 node
 
-ESP32 DevKitCとSEN66を接続し、10秒ごとの測定値をUSBシリアルのJSON Linesと、Raspberry Pi上のMosquittoへ送信するPlatformIOプロジェクトです。SEN66の計測とシリアル出力はWi-Fi/MQTTの接続状態に関係なく継続します。
+M5Stack AtomS3 LiteとSEN66を接続し、10秒ごとの測定値をUSBシリアルのJSON Linesと、Raspberry Pi上のMosquittoへ送信するPlatformIOプロジェクトです。SEN66の計測とシリアル出力はWi-Fi/MQTTの接続状態に関係なく継続します。
 
 ## ハードウェア
 
-- ボード: ESP32 DevKitC相当（PlatformIO board ID: `esp32dev`）
-- センサ: Sensirion SEN66（SDA GPIO 21、SCL GPIO 22、I2Cアドレス`0x6B`、100 kHz）
+- ボード: M5Stack AtomS3 Lite（ESP32-S3、PlatformIO board ID: `m5stack-atoms3`）
+- センサ: Sensirion SEN66（I2Cアドレス`0x6B`、100 kHz）
+- 接続: AtomS3 Lite Grove（HY2.0-4P）→ Grove / STEMMA QT変換 → Adafruit SEN6x Breakout → JST GH 6-pin cable → SEN66
 
-専用基板 Rev.A 用には `omk-esp32-c3` 環境を追加しています。ESP32-C3-MINI-1-H4X の
-USB Serial/JTAG をコンソールおよび書き込みに使い、SDA は GPIO6、SCL は GPIO7 です。
-既存の `esp32dev` 環境とその GPIO21/22 配線は維持します。
+AtomS3 LiteのGroveポートでは、White / GPIO1をSDA、Yellow / GPIO2をSCLとして明示的に初期化します。
+I2C速度はSEN66の上限に合わせて100 kHzです。USB-C経由の起動ログとシリアルモニタを有効にするため、
+AtomS3 Lite環境には`ARDUINO_USB_CDC_ON_BOOT=1`を設定しています。
+
+従来の`esp32dev`（GPIO21/22）および`omk-esp32-c3`（GPIO6/7）環境は、既存ハードウェア用として残しています。
 
 配線は[docs/wiring.md](docs/wiring.md)を参照してください。SEN66は3.3 Vで給電します。
 
@@ -48,12 +51,30 @@ PubSubClient `2.8`を使用します。Brokerへの接続と測定値の送信�
 ```bash
 cd firmware/esp32/sen66-node
 pio run
-pio run -e omk-esp32-c3
 pio run --target upload
 pio device monitor --baud 115200
 ```
 
-ポートを明示する場合は`--upload-port`または`--port`を追加します。起動後はSEN66初期化ログ、Wi-FiのIP/RSSI、MQTT接続ログ、JSON Linesを確認します。測定publishの成功ログは毎秒出力せず、失敗時だけ警告します。
+既定環境はAtomS3 Liteです。ポートを明示する場合は`--upload-port`または`--port`を追加します。
+従来ボードをビルドする場合だけ、例えば`pio run -e esp32dev`または`pio run -e omk-esp32-c3`を指定します。
+
+### AtomS3 Liteの実機確認手順
+
+1. AtomS3 Lite Groveポートを、Grove / STEMMA QT変換ケーブルでAdafruit SEN6x Breakoutへ接続する。
+2. SEN66をJST GH 6-pin cableでBreakoutへ接続する。
+3. AtomS3 LiteをUSB-CでPCへ接続する。
+4. `pio run`を実行する。
+5. `pio run --target upload`を実行する。
+6. `pio device monitor --baud 115200`を実行する。
+7. 起動ログの`I2C initialized: SDA=1 SCL=2`および`SEN66 detected at 0x6B`を確認する。
+8. `Continuous measurement started`と測定JSON Linesを確認する。
+9. Wi-Fi接続ログとMQTT接続ログを確認する。
+10. Gateway側で`mosquitto_sub -h 192.168.50.1 -p 1883 -t 'omk/#' -v`を実行し、測定topicを確認する。
+11. Gatewayの`sensor-collector`がJSONLを保存したことを確認する。
+
+Grove / STEMMA QT変換ケーブルの実配線は必ず確認してください。標準のGrove色配列（White=SDA、Yellow=SCL）を前提にしていますが、`0x6B`を検出できない場合は、変換ケーブルの仕様を確認してSDA/SCLの対応を見直します。実機確認が終わるまでは、ここに記載した手順の完了を動作確認済みとは扱いません。
+
+起動後はSEN66初期化ログ、Wi-FiのIP/RSSI、MQTT接続ログ、JSON Linesを確認します。測定publishの成功ログは毎秒出力せず、失敗時だけ警告します。
 
 Mosquitto側はリポジトリのルートで起動できます。
 
