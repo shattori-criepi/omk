@@ -1,15 +1,19 @@
 # OMK SEN66 node
 
-ESP32 DevKitCとSEN66を接続し、10秒ごとの測定値をUSBシリアルのJSON Linesと、Raspberry Pi上のMosquittoへ送信するPlatformIOプロジェクトです。SEN66の計測とシリアル出力はWi-Fi/MQTTの接続状態に関係なく継続します。
+M5Stack AtomS3 LiteとSEN66を接続し、10秒ごとの測定値をUSBシリアルのJSON Linesと、Raspberry Pi上のMosquittoへ送信するPlatformIOプロジェクトです。SEN66の計測とシリアル出力はWi-Fi/MQTTの接続状態に関係なく継続します。
 
 ## ハードウェア
 
-- ボード: ESP32 DevKitC相当（PlatformIO board ID: `esp32dev`）
-- センサ: Sensirion SEN66（SDA GPIO 21、SCL GPIO 22、I2Cアドレス`0x6B`、100 kHz）
+- ボード: M5Stack AtomS3 Lite（ESP32-S3、PlatformIO board ID: `m5stack-atoms3`）
+- センサ: Sensirion SEN66（I2Cアドレス`0x6B`、100 kHz）
+- 接続: AtomS3 Lite Grove（HY2.0-4P）→ Grove / STEMMA QT変換 → Adafruit SEN6x Breakout → JST GH 6-pin cable → SEN66
 
-専用基板 Rev.A 用には `omk-esp32-c3` 環境を追加しています。ESP32-C3-MINI-1-H4X の
-USB Serial/JTAG をコンソールおよび書き込みに使い、SDA は GPIO6、SCL は GPIO7 です。
-既存の `esp32dev` 環境とその GPIO21/22 配線は維持します。
+AtomS3 LiteのGroveポートでは、実機確認済みの配線としてYellow / GPIO2をSDA、White / GPIO1をSCLとして明示的に初期化します。
+I2C速度はSEN66の上限に合わせて100 kHzです。USB-C経由の起動ログとシリアルモニタを有効にするため、
+AtomS3 Lite環境には`ARDUINO_USB_CDC_ON_BOOT=1`を設定しています。
+WSL2 + usbipd経由の書き込み安定化のため、AtomS3 Lite環境の`upload_speed`は115200 baudです。これはfirmware書き込み用の速度であり、SEN66のI2Cクロック（100 kHz）とは別の設定です。
+
+従来の`esp32dev`（GPIO21/22）および`omk-esp32-c3`（GPIO6/7）環境は、既存ハードウェア用として残しています。
 
 配線は[docs/wiring.md](docs/wiring.md)を参照してください。SEN66は3.3 Vで給電します。
 
@@ -48,12 +52,47 @@ PubSubClient `2.8`を使用します。Brokerへの接続と測定値の送信�
 ```bash
 cd firmware/esp32/sen66-node
 pio run
-pio run -e omk-esp32-c3
 pio run --target upload
 pio device monitor --baud 115200
 ```
 
-ポートを明示する場合は`--upload-port`または`--port`を追加します。起動後はSEN66初期化ログ、Wi-FiのIP/RSSI、MQTT接続ログ、JSON Linesを確認します。測定publishの成功ログは毎秒出力せず、失敗時だけ警告します。
+既定環境はAtomS3 Liteです。ポートを明示する場合は`--upload-port`または`--port`を追加します。
+従来ボードをビルドする場合だけ、例えば`pio run -e esp32dev`または`pio run -e omk-esp32-c3`を指定します。
+
+### WSL2 + usbipdでのUSB接続
+
+AtomS3 Liteを抜き差しすると、WSL側のシリアルデバイスが消えることがあります。その場合はWindows側で対象デバイスを再attachします。
+
+```powershell
+usbipd list
+usbipd attach --wsl --busid <BUSID>
+```
+
+WSL側では次で接続先を確認します。
+
+```bash
+ls -l /dev/ttyACM*
+```
+
+実機確認では`/dev/ttyACM0`を使用しましたが、BUSIDおよびtty番号は環境ごとに異なります。確認したデバイスを`--upload-port`または`--port`へ指定してください。
+
+### AtomS3 Liteの実機確認手順
+
+1. AtomS3 Lite Groveポートを、Grove / STEMMA QT変換ケーブルでAdafruit SEN6x Breakoutへ接続する。
+2. SEN66をJST GH 6-pin cableでBreakoutへ接続する。
+3. AtomS3 LiteをUSB-CでPCへ接続する。
+4. `pio run`を実行する。
+5. `pio run --target upload`を実行する。
+6. `pio device monitor --baud 115200`を実行する。
+7. 起動ログの`I2C initialized: SDA=2 SCL=1`および`SEN66 detected at 0x6B`を確認する。
+8. `Continuous measurement started`と測定JSON Linesを確認する。
+9. Wi-Fi接続ログとMQTT接続ログを確認する。
+10. Gateway側で`mosquitto_sub -h 192.168.50.1 -p 1883 -t 'omk/#' -v`を実行し、測定topicを確認する。
+11. Gatewayの`sensor-collector`がJSONLを保存したことを確認する。
+
+Grove / STEMMA QT変換ケーブルを介した実機配線では、Yellow / GPIO2がSDA、White / GPIO1がSCLです。`0x6B`を検出できない場合は、GND、Breakoutの給電、SEN66のJST GHケーブル接続を確認してください。
+
+起動後はSEN66初期化ログ、Wi-FiのIP/RSSI、MQTT接続ログ、JSON Linesを確認します。測定publishの成功ログは毎秒出力せず、失敗時だけ警告します。
 
 Mosquitto側はリポジトリのルートで起動できます。
 
@@ -65,6 +104,21 @@ docker compose logs --tail=100 mosquitto
 ホスト上での受信確認には、`mosquitto_sub -h 192.168.50.1 -p 1883 -t 'omk/#' -v`を使います（クライアントが既にある場合）。ComposeはポートをAP側の`192.168.50.1:1883`だけにbindするため、`127.0.0.1`では接続できない場合があります。
 
 Wi-Fi断、Broker停止、ESP32再起動後も、接続が戻れば自動復旧します。通信断中もSEN66測定とシリアル出力は継続することを実機で確認してください。
+
+## AtomS3 Lite 実機確認結果
+
+以下は確認済みです。
+
+- AtomS3 LiteへのUSB書き込み
+- USB Serial monitorでの起動ログ確認
+- SEN66とのI2C通信（SDA=GPIO2、SCL=GPIO1、アドレス`0x6B`、100 kHz）
+- SEN66測定値の取得（PM1.0、PM2.5、PM4.0、PM10、相対湿度、温度、VOC Index、NOx Index、CO2）
+- Wi-Fi接続（SSID `OMK-1CA9A8`、IPアドレス `192.168.50.125`）
+- Broker `192.168.50.1:1883`へのMQTT接続と測定値の継続publish
+- OMK Gatewayでの測定値受信
+- OMK DashboardでのSEN66測定値表示
+
+`network_config.h`はこのプロジェクトとリポジトリルートの`.gitignore`で除外しています。実環境のSSID・パスワードはこのローカルファイルへだけ設定し、Git管理するのは`network_config.example.h`のみです。
 
 ## ライブラリ
 
