@@ -18,6 +18,9 @@ LABWC_PID="${LABWC_PID:-}"
 UNIT_NAME="omk-dashboard-kiosk.service"
 UNIT_TEMPLATE="${OMK_ROOT}/systemd/omk-dashboard-kiosk.service.in"
 UNIT_DESTINATION=""
+KANSHI_DIRECTORY=""
+KANSHI_CONFIG=""
+KANSHI_DSI_OUTPUT='output DSI-1 enable scale 1.000000 mode 720x1280@60.038 position 0,0 transform 90'
 DRY_RUN=false
 PRINT_UNIT=false
 AS_TARGET=()
@@ -68,6 +71,8 @@ TARGET_GROUP="$(id -gn "${TARGET_USER}")"
 USER_HOME="$(getent passwd "${TARGET_USER}" | cut -d: -f6)"
 [[ -n "${USER_HOME}" && -d "${USER_HOME}" ]] || fail "Home directory is unavailable for ${TARGET_USER}."
 UNIT_DESTINATION="${USER_HOME}/.config/systemd/user/${UNIT_NAME}"
+KANSHI_DIRECTORY="${USER_HOME}/.config/kanshi"
+KANSHI_CONFIG="${KANSHI_DIRECTORY}/config"
 
 if [[ -z "${CHROMIUM_PATH}" ]]; then
   CHROMIUM_PATH="$(command -v chromium || true)"
@@ -136,6 +141,61 @@ install_for_target_user() {
 
 validate_xml() {
   python3 -c 'import sys, xml.etree.ElementTree as ET; ET.parse(sys.argv[1])' "$1"
+}
+
+render_kanshi_config() {
+  local source_path="$1"
+  local destination_path="$2"
+
+  python3 - "${source_path}" "${destination_path}" "${KANSHI_DSI_OUTPUT}" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+source = Path(sys.argv[1])
+destination = Path(sys.argv[2])
+desired = sys.argv[3]
+lines = source.read_text(encoding="utf-8").splitlines(keepends=True) if source.exists() else []
+dsi_output = re.compile(r"^\s*output\s+DSI-1(?:\s|$)")
+rendered = []
+replaced = False
+
+for line in lines:
+    if dsi_output.match(line):
+        if not replaced:
+            rendered.append(f"{desired}\n")
+            replaced = True
+        continue
+    rendered.append(line)
+
+if not replaced:
+    if rendered and not rendered[-1].endswith("\n"):
+        rendered[-1] += "\n"
+    rendered.append(f"{desired}\n")
+
+destination.write_text("".join(rendered), encoding="utf-8")
+PY
+}
+
+update_kanshi_config() {
+  local candidate
+
+  "${AS_TARGET[@]}" mkdir -p "${KANSHI_DIRECTORY}"
+  candidate="$(mktemp)"
+  if ! render_kanshi_config "${KANSHI_CONFIG}" "${candidate}"; then
+    rm -f -- "${candidate}"
+    fail "Could not render the kanshi configuration: ${KANSHI_CONFIG}"
+  fi
+
+  if [[ -f "${KANSHI_CONFIG}" ]] && cmp -s "${candidate}" "${KANSHI_CONFIG}"; then
+    rm -f -- "${candidate}"
+    log "kanshi DSI-1 rotation is unchanged: ${KANSHI_CONFIG}"
+    return
+  fi
+
+  install_for_target_user "${candidate}" "${KANSHI_CONFIG}"
+  rm -f -- "${candidate}"
+  log "Updated kanshi DSI-1 rotation to transform 90: ${KANSHI_CONFIG}"
 }
 
 update_labwc_config() {
@@ -241,8 +301,10 @@ print_plan() {
     "Wayland display: ${WAYLAND_DISPLAY}" \
     "Dashboard URL: ${DASHBOARD_URL}" \
     "Unit destination: ${UNIT_DESTINATION}" \
+    "kanshi config: ${KANSHI_CONFIG}" \
     "labwc config: ${USER_HOME}/.config/labwc/rc.xml" \
     "Planned action: daemon-reload, enable, and start/restart ${UNIT_NAME}" \
+    "Planned action: set only the DSI-1 kanshi output to transform 90" \
     "Planned action: update labwc HideCursor keybind and request labwc --reconfigure" \
     "Planned check: user systemd bus and /run/user/${TARGET_UID}/${WAYLAND_DISPLAY:-wayland-0}"
 }
@@ -264,6 +326,7 @@ if "${DRY_RUN}"; then
   if [[ "${WTYPE_PATH}" == "not found" ]]; then
     log "Would install package: wtype"
   fi
+  log "Would update only the DSI-1 output in ${KANSHI_CONFIG} to transform 90; config.init and config.bak are untouched."
   log "Would back up and update ${USER_HOME}/.config/labwc/rc.xml when its cursor keybind changes."
   log "Would validate the labwc XML and request labwc --reconfigure (or apply it at the next GUI session)."
   log "Would read WAYLAND_DISPLAY from the active user manager and confirm its Wayland socket before changing the unit."
@@ -295,6 +358,7 @@ resolve_wayland_display
 
 CONFIG_DIRECTORY="${USER_HOME}/.config/systemd/user"
 "${AS_TARGET[@]}" mkdir -p "${CONFIG_DIRECTORY}"
+update_kanshi_config
 update_labwc_config
 reconfigure_labwc
 
