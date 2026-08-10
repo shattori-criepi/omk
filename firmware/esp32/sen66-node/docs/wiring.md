@@ -6,13 +6,15 @@ AtomS3 LiteとSEN66本体を直接配線しません。Adafruit SEN6x Breakout�
 | --- | --- | --- |
 | AtomS3 Lite Grove Black | GND | Grove / STEMMA QT変換 → Adafruit Breakout GND |
 | AtomS3 Lite Grove Red | 5 V | Grove / STEMMA QT変換 → Adafruit Breakout VIN |
-| AtomS3 Lite Grove White | GPIO1 / SDA | Grove / STEMMA QT変換 → Adafruit Breakout SDA |
-| AtomS3 Lite Grove Yellow | GPIO2 / SCL | Grove / STEMMA QT変換 → Adafruit Breakout SCL |
+| AtomS3 Lite Grove White | GPIO1 / SCL | Grove / STEMMA QT変換 → Adafruit Breakout SCL |
+| AtomS3 Lite Grove Yellow | GPIO2 / SDA | Grove / STEMMA QT変換 → Adafruit Breakout SDA |
 | Adafruit SEN6x Breakout JST GH | 6-pin sensor cable | SEN66 |
 
 I2Cアドレスは`0x6B`、周波数は100 kHzです。GPIOはAtomS3 Lite用PlatformIO環境で明示的に設定し、
 [`src/app_config.h`](../src/app_config.h)から一元的に使用します。`Wire.begin()`のデフォルトピンには依存しません。
 
-Grove → STEMMA QT変換ケーブルについて、White/GPIO1がSDA、Yellow/GPIO2がSCLへ接続されることを、使用する製品の配線資料または導通確認で必ず確認してください。ケーブルの実配線が異なる場合は、`platformio.ini`のAtomS3 Lite環境にある`OMK_I2C_SDA_PIN`と`OMK_I2C_SCL_PIN`を交換します。
+Grove → STEMMA QT変換ケーブルを使用した実機で、SDA=GPIO2（Yellow）、SCL=GPIO1（White）によりSEN66の測定値取得を確認しました。この対応をAtomS3 Liteの正式な配線仕様とします。`esp32dev`および`omk-esp32-c3`環境のGPIO設定には影響しません。
 
 起動時の`SEN66 detected at 0x6B`ログは、全アドレスを走査せずに対象アドレスへI2C疎通確認した結果です。検出できない場合は、SDA/SCLの対応、GND、Breakoutの給電、SEN66のJST GHケーブル接続を確認してください。
+
+実機ではAtomS3 LiteへのUSB書き込み、USB Serial monitor、SEN66 I2C通信、および測定値取得までを確認済みです。Wi-Fiは接続開始ログまで確認済みですが、接続完了、MQTT publish、Gateway側のJSONL保存は未確認です。

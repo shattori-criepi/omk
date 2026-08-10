@@ -8,7 +8,7 @@ M5Stack AtomS3 LiteとSEN66を接続し、10秒ごとの測定値をUSBシリア
 - センサ: Sensirion SEN66（I2Cアドレス`0x6B`、100 kHz）
 - 接続: AtomS3 Lite Grove（HY2.0-4P）→ Grove / STEMMA QT変換 → Adafruit SEN6x Breakout → JST GH 6-pin cable → SEN66
 
-AtomS3 LiteのGroveポートでは、White / GPIO1をSDA、Yellow / GPIO2をSCLとして明示的に初期化します。
+AtomS3 LiteのGroveポートでは、実機確認済みの配線としてYellow / GPIO2をSDA、White / GPIO1をSCLとして明示的に初期化します。
 I2C速度はSEN66の上限に合わせて100 kHzです。USB-C経由の起動ログとシリアルモニタを有効にするため、
 AtomS3 Lite環境には`ARDUINO_USB_CDC_ON_BOOT=1`を設定しています。
 
@@ -66,13 +66,13 @@ pio device monitor --baud 115200
 4. `pio run`を実行する。
 5. `pio run --target upload`を実行する。
 6. `pio device monitor --baud 115200`を実行する。
-7. 起動ログの`I2C initialized: SDA=1 SCL=2`および`SEN66 detected at 0x6B`を確認する。
+7. 起動ログの`I2C initialized: SDA=2 SCL=1`および`SEN66 detected at 0x6B`を確認する。
 8. `Continuous measurement started`と測定JSON Linesを確認する。
 9. Wi-Fi接続ログとMQTT接続ログを確認する。
 10. Gateway側で`mosquitto_sub -h 192.168.50.1 -p 1883 -t 'omk/#' -v`を実行し、測定topicを確認する。
 11. Gatewayの`sensor-collector`がJSONLを保存したことを確認する。
 
-Grove / STEMMA QT変換ケーブルの実配線は必ず確認してください。標準のGrove色配列（White=SDA、Yellow=SCL）を前提にしていますが、`0x6B`を検出できない場合は、変換ケーブルの仕様を確認してSDA/SCLの対応を見直します。実機確認が終わるまでは、ここに記載した手順の完了を動作確認済みとは扱いません。
+Grove / STEMMA QT変換ケーブルを介した実機配線では、Yellow / GPIO2がSDA、White / GPIO1がSCLです。`0x6B`を検出できない場合は、GND、Breakoutの給電、SEN66のJST GHケーブル接続を確認してください。
 
 起動後はSEN66初期化ログ、Wi-FiのIP/RSSI、MQTT接続ログ、JSON Linesを確認します。測定publishの成功ログは毎秒出力せず、失敗時だけ警告します。
 
@@ -86,6 +86,17 @@ docker compose logs --tail=100 mosquitto
 ホスト上での受信確認には、`mosquitto_sub -h 192.168.50.1 -p 1883 -t 'omk/#' -v`を使います（クライアントが既にある場合）。ComposeはポートをAP側の`192.168.50.1:1883`だけにbindするため、`127.0.0.1`では接続できない場合があります。
 
 Wi-Fi断、Broker停止、ESP32再起動後も、接続が戻れば自動復旧します。通信断中もSEN66測定とシリアル出力は継続することを実機で確認してください。
+
+## AtomS3 Lite 実機確認結果
+
+以下は確認済みです。
+
+- AtomS3 LiteへのUSB書き込み
+- USB Serial monitorでの起動ログ確認
+- SEN66とのI2C通信（SDA=GPIO2、SCL=GPIO1、アドレス`0x6B`、100 kHz）
+- SEN66測定値の取得
+
+Wi-Fiは`Wi-Fi connecting: SSID=OMK-1CA9A8`のログ出力までを確認しています。Wi-Fi接続完了、MQTT publish、およびGateway側`sensor-collector`によるJSONL保存は未確認です。
 
 ## ライブラリ
 
