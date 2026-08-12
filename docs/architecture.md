@@ -370,6 +370,10 @@ MQTT publishはenvironmentが初回即時・以後最短10秒間隔、motion/con
 contactは変化有無と最後の状態として、SEN66等と同じHarvest recordに併存する。
 Plug Miniはpowerを平均、switch stateを分内の最後の状態として併存する。
 
+Plug Miniについては、Raspberry Pi実機と実デバイスで、ペアリング不要のBLE
+advertisement受信、decoder、Dashboard setup、registry、MQTT、sensor-collectorの
+JSONL保存、Harvest 1分集約、SORACOM Harvest Data送信までの経路を確認済みである。
+
 ## 9. データフロー
 
 ### 9.1 通常計測

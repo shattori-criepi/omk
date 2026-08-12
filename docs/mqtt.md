@@ -78,6 +78,9 @@ runtime更新を継続する一方、MQTT publishは停止する。したがっ�
 Plug Miniは`{"device_id":"plug-001","measured_at":"...","power_w":173.2,
 "switch_state":1}`を`omk/<sensor_id>/power`へpublishする。`switch_state`は
 0=OFF、1=ONで、初回は即時、同一状態は最短10秒間隔、状態変化は即時publishする。
+Pi実機では`omk/plug-001/power`がsensor-collectorの日次JSONLへ保存され、`power_w`と
+`switch_state`がpayloadのまま記録されることを確認した。広告時刻に依存するため厳密な
+10秒固定ではないが、通常は最短約10秒間隔で保存される。
 
 ## Bルート接続
 

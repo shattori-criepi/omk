@@ -97,5 +97,24 @@ Verified on a Raspberry Pi:
   observed domestic `0x6a` service-data values are supplementary only. Power
   masks the overload flag from the MSB before applying the 0.1 W scale.
 
+### SwitchBot プラグミニ実機確認
+
+Raspberry Piと実Plug Miniで、ペアリングなしのBLE advertisement受信からDashboardの
+BLEセットアップ、`plug-001`登録、MQTT、JSONL保存、Harvest 1分集約、SORACOM
+Harvest Data送信までを確認した。内部modelは`plug_sensor`、sensor typeは`power`、
+Dashboard表示名は「SwitchBot プラグミニ」である。
+
+manufacturer dataではstate byteのbit 7を`switch_state`として用い、0=OFF、1=ONを
+実機のOFF→ON操作と照合した。電力は公式仕様に従い
+`raw_power = ((byte10 & 0x7f) << 8) | byte11`、`power_w = raw_power / 10.0`
+でdecodeする。byte10のbit 7はoverload flagであり電力値から除外する。低負荷で
+`0x0034`=5.2 W、`0x0035`=5.3 W（アプリ表示約5.1〜5.2 W）、高負荷で
+`0x05f2`=152.2 W、`0x06c4`=173.2 W、`0x06cd`=174.1 W（実負荷約170 W）を確認し、
+低負荷・高負荷とも0.1 W scaleが成立した。
+
+国内実機ではfd3d Service Dataとして`6a0064`を観測したが、これは公式device typeと
+は記載しない。Service Dataは補助識別に留め、Plug Mini判定とmeasurement decodeは
+manufacturer dataの12-byte layoutを主根拠にする。
+
 For a line-oriented raw capture on a Pi, use
 `PYTHONPATH=src .venv/bin/python -m omk_ble.raw_scan --seconds 30`.
