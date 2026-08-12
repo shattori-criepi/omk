@@ -84,6 +84,10 @@ docker compose logs --tail=100 sensor-collector
 
 遠隔可視化用には、独立した`services/harvest-uploader`が同じMQTTを専用client IDで購読し、SEN66、Bルート、一条電力フロー、およびBLE environment / motion / contact / powerセンサを1分単位で集約してSORACOM Harvest Dataへ送信します。JSONLはMQTTの一次保存、Parquetは将来の分析・CSV抽出用派生データ、Harvest Data／Lagoonは遠隔可視化という役割分担です。Harvest uploaderはJSONLやParquetを読まずMQTTから直接集約します。詳細は[harvest-uploader README](services/harvest-uploader/README.md)を参照してください。
 
+SwitchBot Plug Miniは、ペアリング不要のBLE advertisementから`power_w`と
+`switch_state`を取得し、Dashboard登録、MQTT、JSONL、Harvest 1分集約、SORACOM
+Harvest Data送信までRaspberry Pi実機で確認済みです。
+
 分析用には、独立した`services/data-transformer`でJSONLを`data/processed/`配下の日時・データセット別Parquetへ変換できます。Bルートの瞬時電力・積算電力量・30分値とSEN66を正規化します。`status`は管理情報として意図的に除外し、未知のトピックや不正レコードだけを`data/errors/transform/`へ追跡情報付きで記録します。実行方法とスキーマは[サービスREADME](services/data-transformer/README.md)を参照してください。
 
 ## 2. 採用する設計方針
