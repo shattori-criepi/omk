@@ -12,6 +12,7 @@ MQTTは、各データ取得処理をRaspberry Piへ集約するLAN内の内部�
 | 接続状態 | `omk/<device_id>/status` | 0 | true |
 | BLE環境センサ | `omk/<sensor_id>/environment` | 0 | false |
 | BLE人感状態変化 | `omk/<sensor_id>/motion` | 0 | false |
+| BLE開閉状態変化 | `omk/<sensor_id>/contact` | 0 | false |
 
 初期ノードの例は`omk/sen66-001/sen66`と`omk/sen66-001/status`である。
 
@@ -64,6 +65,11 @@ Motion Sensor は advertisement ごとの測定値を publish せず、状態が
 ときだけ `{"device_id":"motion-001","measured_at":"...","motion_state":1}`
 の形で publish する。サービス起動後の初回 advertisement は状態初期化のみで、
 publish しない。
+
+Contact Sensor も状態変化時だけ
+`{"device_id":"contact-001","measured_at":"...","contact_state":1}` を
+publish する。`contact_state` は 0=閉、1=開で、公式の timeout-not-close も
+開（1）として正規化する。
 
 ## Bルート接続
 
