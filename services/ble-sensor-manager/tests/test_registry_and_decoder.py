@@ -355,6 +355,16 @@ def test_contact_sensor_decodes_official_service_data_and_manufacturer_layouts()
     assert manufacturer_closed is not None and manufacturer_closed.values == {"contact_state": 0}
 
 
+def test_contact_prefers_current_manufacturer_state_over_stale_service_data() -> None:
+    stale_open_service_data = {METER_SERVICE_UUID: bytes.fromhex("64006405011300d981")}
+    manufacturer_closed = {SWITCHBOT_COMPANY_ID: bytes.fromhex("d3b204e23125865c004a000041")}
+    manufacturer_open = {SWITCHBOT_COMPANY_ID: bytes.fromhex("d3b204e23125854c00450035c1")}
+    closed = decode("D3:B2:04:E2:31:25", -31, manufacturer_closed, stale_open_service_data, "now")
+    opened = decode("D3:B2:04:E2:31:25", -31, manufacturer_open, {METER_SERVICE_UUID: bytes([0x64, 0, 0x64, 0x01])}, "now")
+    assert closed is not None and closed.model == "contact_sensor" and closed.values == {"contact_state": 0}
+    assert opened is not None and opened.model == "contact_sensor" and opened.values == {"contact_state": 1}
+
+
 def test_contact_decoder_does_not_misclassify_existing_sensor_layouts() -> None:
     meter = decode("CF:39:41:C7:ED:79", -40, {SWITCHBOT_COMPANY_ID: bytes.fromhex("cf3941c7ed79f40304992c")}, {}, "now")
     co2 = decode("B0:E9:FE:58:15:CC", -40, {SWITCHBOT_COMPANY_ID: bytes.fromhex("b0e9fe5815ccf6e405982e0024020e00")}, {}, "now")
