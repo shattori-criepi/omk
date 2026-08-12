@@ -20,9 +20,11 @@ class BleManager:
     def __init__(self, registry: SensorRegistry, mqtt_client: mqtt.Client | None = None) -> None:
         self.registry = registry
         # Observations run continuously for registered-sensor health. Setup
-        # candidates are a separate, per-session insertion-ordered mapping.
+        # candidate order and candidate payloads are deliberately separate:
+        # updates never affect position during a session.
         self.observations: dict[str, DecodedAdvertisement] = {}
         self.setup_candidates: dict[str, DecodedAdvertisement] = {}
+        self._setup_candidate_order: list[str] = []
         self.scanning = False
         self._scanner: Any = None
         self._timeout_task: asyncio.Task[None] | None = None
@@ -61,19 +63,26 @@ class BleManager:
     def begin_setup_session(self) -> None:
         """Reset only setup candidates; passive observations remain intact."""
         self.setup_candidates.clear()
+        self._setup_candidate_order.clear()
 
     def _on_detection(self, device: Any, advertisement: Any) -> None:
-        decoded = decode(device.address, advertisement.rssi, advertisement.manufacturer_data, advertisement.service_data, now_iso())
-        if decoded:
-            self.record_advertisement(decoded)
+        try:
+            decoded = decode(device.address, advertisement.rssi, advertisement.manufacturer_data, advertisement.service_data, now_iso())
+            if decoded:
+                self.record_advertisement(decoded)
+        except Exception:
+            # A malformed packet must not prevent later BlueZ callbacks.
+            LOGGER.exception("Ignoring malformed BLE advertisement")
 
     def record_advertisement(self, decoded: DecodedAdvertisement) -> None:
         """Record an advertisement without ever reordering setup candidates."""
         self.observations[decoded.device_key] = decoded
         registered_keys = {sensor.device_key for sensor in self.registry.list()}
         if self.scanning and decoded.device_key not in registered_keys:
-            # Assigning an existing key updates values in place; Python dict
-            # insertion order stays unchanged throughout this setup session.
+            if decoded.device_key not in self.setup_candidates:
+                self._setup_candidate_order.append(decoded.device_key)
+            # Always replace the complete snapshot: RSSI, receive time, values,
+            # raw packet, and visual highlighting all use the latest packet.
             self.setup_candidates[decoded.device_key] = decoded
         self._publish_if_registered(decoded)
 
@@ -99,7 +108,10 @@ class BleManager:
     def candidate_list(self) -> list[dict[str, Any]]:
         registered_keys = {item.device_key for item in self.registry.list()}
         items = []
-        for candidate in self.setup_candidates.values():
+        for device_key in self._setup_candidate_order:
+            candidate = self.setup_candidates.get(device_key)
+            if candidate is None:
+                continue
             # Registration can occur while an API response is in flight.
             if candidate.device_key in registered_keys:
                 continue
@@ -121,6 +133,7 @@ class BleManager:
         registered = self.registry.register(sensor)
         # Remove it immediately; remaining candidates retain their order.
         self.setup_candidates.pop(candidate.device_key, None)
+        self._setup_candidate_order.remove(candidate.device_key)
         return registered
 
     def suggested_sensor_id(self, device_key: str) -> str:
