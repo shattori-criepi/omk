@@ -157,7 +157,7 @@ class BleManager:
         if not candidate:
             raise ValueError("device was not found in the current setup scan")
         prefix = {
-            "meter": "th", "meter_plus": "th", "meter_pro_co2": "co2",
+            "meter": "th", "meter_plus": "th", "waterproof_sensor": "th", "meter_pro_co2": "co2",
             "motion_sensor": "motion", "contact_sensor": "contact",
         }.get(candidate.model, "sensor")
         used_ids = {sensor.sensor_id for sensor in self.registry.list()}
@@ -190,7 +190,7 @@ class BleManager:
             return
         if not sensor.enabled or not self._mqtt:
             return
-        payload = {"sensor_id": sensor.sensor_id, "measured_at": advertisement.received_at, "quality": "normal", **advertisement.values}
+        payload = {"device_id": sensor.sensor_id, "measured_at": advertisement.received_at, "quality": "normal", **advertisement.values}
         self._mqtt.publish(f"omk/{sensor.sensor_id}/{sensor.sensor_type}", json.dumps(payload), qos=0, retain=False)
 
     def _publish_motion_change(self, sensor: RegisteredSensor, advertisement: DecodedAdvertisement) -> None:
