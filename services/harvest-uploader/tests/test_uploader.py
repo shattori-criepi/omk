@@ -69,16 +69,56 @@ def test_environment_sensors_average_independently_and_coexist_with_sen66():
     }
 
 
-def test_environment_ignores_missing_none_nonfinite_invalid_and_state_topics():
+def test_environment_ignores_missing_none_nonfinite_invalid_and_excluded_topics():
     aggregator = MinuteAggregator()
     aggregator.ingest("omk/th-001/environment", {"temperature_c": None, "relative_humidity_percent": float("nan")}, at(5))
     aggregator.ingest("omk/th-001/environment", {"temperature_c": 25}, at(10))
     aggregator.ingest("omk/bad.id/environment", {"temperature_c": 99}, at(15))
-    aggregator.ingest("omk/motion-001/motion", {"motion_state": 1}, at(20))
-    aggregator.ingest("omk/contact-001/contact", {"contact_state": 0}, at(25))
     aggregator.ingest("omk/th-001/status", {"temperature_c": 99}, at(30))
     assert aggregator.flush_due(at(0, 35)) == {
         "time": "2026-08-05T10:34:00+09:00", "th-001_temperature_c": 25,
+    }
+
+
+def test_motion_and_contact_states_are_aggregated_per_sensor_with_environment():
+    aggregator = MinuteAggregator()
+    aggregator.ingest("omk/th-001/environment", {"temperature_c": 28}, at(5))
+    for second, state in ((10, 0), (20, 1), (30, 0)):
+        aggregator.ingest("omk/motion-001/motion", {"motion_state": state}, at(second))
+    aggregator.ingest("omk/motion-002/motion", {"motion_state": 0}, at(35))
+    for second, state in ((10, 0), (20, 1), (30, 1), (40, 0)):
+        aggregator.ingest("omk/contact-001/contact", {"contact_state": state}, at(second))
+    for second in (15, 45):
+        aggregator.ingest("omk/contact-002/contact", {"contact_state": 1}, at(second))
+    assert aggregator.flush_due(at(0, 35)) == {
+        "time": "2026-08-05T10:34:00+09:00",
+        "th-001_temperature_c": 28,
+        "motion-001_motion_state": 1,
+        "motion-002_motion_state": 0,
+        "contact-001_contact_changed": 1,
+        "contact-001_contact_state": 0,
+        "contact-002_contact_changed": 0,
+        "contact-002_contact_state": 1,
+    }
+
+
+def test_contact_tracks_state_changes_across_minute_boundaries_and_ignores_invalid_states():
+    aggregator = MinuteAggregator()
+    aggregator.ingest("omk/contact-001/contact", {"contact_state": 0}, at(50))
+    first = aggregator.ingest("omk/contact-001/contact", {"contact_state": 1}, at(5, 35))
+    assert first == {
+        "time": "2026-08-05T10:34:00+09:00",
+        "contact-001_contact_changed": 0,
+        "contact-001_contact_state": 0,
+    }
+    aggregator.ingest("omk/contact-001/contact", {"contact_state": None}, at(10, 35))
+    aggregator.ingest("omk/contact-001/contact", {"contact_state": True}, at(15, 35))
+    aggregator.ingest("omk/contact-001/contact", {"contact_state": 2}, at(20, 35))
+    aggregator.ingest("omk/bad.id/contact", {"contact_state": 0}, at(25, 35))
+    assert aggregator.flush_due(at(0, 36)) == {
+        "time": "2026-08-05T10:35:00+09:00",
+        "contact-001_contact_changed": 1,
+        "contact-001_contact_state": 1,
     }
 
 
