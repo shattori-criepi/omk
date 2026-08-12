@@ -317,11 +317,52 @@ def test_updated_sensor_id_is_used_for_next_mqtt_publish_and_disabled_sensor_is_
     assert len(publisher.messages) == 1
 
 
+def test_environment_publish_is_rate_limited_per_device_with_latest_values(tmp_path: Path) -> None:
+    registry = SensorRegistry(tmp_path / "sensors.json")
+    registry.register(RegisteredSensor("switchbot:th", "th-001", "environment", "switchbot", "temperature_humidity_sensor", "", "温湿度計"))
+    registry.register(RegisteredSensor("switchbot:co2", "co2-001", "environment", "switchbot", "co2_sensor", "", "CO2"))
+    registry.register(RegisteredSensor("switchbot:waterproof", "th-002", "environment", "switchbot", "waterproof_sensor", "", "防水温湿度計"))
+    clock = [0.0]
+    publisher = _MqttPublisher()
+    manager = BleManager(registry, publisher, monotonic_provider=lambda: clock[0])
+
+    def advertisement(device_key: str, model: str, received_at: str, value: int) -> DecodedAdvertisement:
+        values = {"co2_ppm": value} if model == "co2_sensor" else {"temperature_c": value / 10, "relative_humidity_percent": value % 100}
+        return DecodedAdvertisement(device_key, "switchbot", model, "environment", -50, received_at, values, {"raw": received_at})
+
+    manager.record_advertisement(advertisement("switchbot:th", "temperature_humidity_sensor", "first", 200))
+    manager.record_advertisement(advertisement("switchbot:co2", "co2_sensor", "first", 600))
+    manager.record_advertisement(advertisement("switchbot:waterproof", "waterproof_sensor", "first", 80))
+    assert len(publisher.messages) == 3
+    clock[0] = 2.0
+    manager.record_advertisement(advertisement("switchbot:th", "temperature_humidity_sensor", "two-seconds", 210))
+    manager.record_advertisement(advertisement("switchbot:co2", "co2_sensor", "two-seconds", 601))
+    manager.record_advertisement(advertisement("switchbot:waterproof", "waterproof_sensor", "two-seconds", 81))
+    clock[0] = 9.0
+    manager.record_advertisement(advertisement("switchbot:th", "temperature_humidity_sensor", "nine-seconds", 220))
+    assert len(publisher.messages) == 3
+    assert manager.registered_list()[0]["latest"] == {"received_at": "nine-seconds", "rssi": -50, "values": {"temperature_c": 22.0, "relative_humidity_percent": 20}}
+    clock[0] = 10.0
+    manager.record_advertisement(advertisement("switchbot:th", "temperature_humidity_sensor", "ten-seconds", 230))
+    assert len(publisher.messages) == 4
+    assert json.loads(publisher.messages[-1][1])["temperature_c"] == 23.0
+    manager.update_registered_sensor("switchbot:th", {"sensor_id": "th-003", "display_name": "温湿度計", "location": "", "enabled": True})
+    clock[0] = 20.0
+    manager.record_advertisement(advertisement("switchbot:th", "temperature_humidity_sensor", "renamed", 240))
+    assert publisher.messages[-1][0] == "omk/th-003/environment"
+    manager.update_registered_sensor("switchbot:co2", {"sensor_id": "co2-001", "display_name": "CO2", "location": "", "enabled": False})
+    clock[0] = 11.0
+    manager.record_advertisement(advertisement("switchbot:co2", "co2_sensor", "disabled", 601))
+    assert len(publisher.messages) == 5
+    assert manager.registered_list()[1]["latest"]["values"] == {"co2_ppm": 601}
+
+
 def test_waterproof_sensor_setup_uses_th_ids_and_runtime_uses_environment_topic(tmp_path: Path) -> None:
     registry = SensorRegistry(tmp_path / "sensors.json")
     registry.register(RegisteredSensor("switchbot:meter", "th-001", "environment", "switchbot", "temperature_humidity_sensor", "", "室内"))
     publisher = _MqttPublisher()
-    manager = BleManager(registry, publisher)
+    clock = [0.0]
+    manager = BleManager(registry, publisher, monotonic_provider=lambda: clock[0])
     outdoor = DecodedAdvertisement(
         "switchbot:waterproof", "switchbot", "waterproof_sensor", "environment", -53, "now",
         {"temperature_c": 27.6, "relative_humidity_percent": 82}, {"manufacturer_data": {"0969": "raw"}},
@@ -339,6 +380,7 @@ def test_waterproof_sensor_setup_uses_th_ids_and_runtime_uses_environment_topic(
         "temperature_c": 27.6, "relative_humidity_percent": 82,
     }
     manager.update_registered_sensor("switchbot:waterproof", {"sensor_id": "th-003", "display_name": "浴室温湿度", "location": "浴室", "enabled": True})
+    clock[0] = 10.0
     manager.record_advertisement(outdoor)
     assert publisher.messages[-1][0] == "omk/th-003/environment"
 
