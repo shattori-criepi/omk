@@ -45,7 +45,7 @@ CONTACT_SERVICE_DEVICE_TYPE = 0x64
 CONTACT_MANUFACTURER_LENGTH = 13
 CONTACT_SENSOR_DATA_INDEX = 9
 CONTACT_RESERVED_INDEX = 8
-CONTACT_TRAILER = 0x41
+CONTACT_TRAILER_LOW_BITS = 0x01
 
 
 def _hex_map(values: dict[str, bytes]) -> dict[str, str]:
@@ -153,7 +153,11 @@ def _decode_contact_manufacturer_data(data: bytes) -> tuple[str, str, dict[str, 
     """Decode the observed manufacturer-only Contact Sensor layout safely."""
     if len(data) != CONTACT_MANUFACTURER_LENGTH:
         return None
-    if data[CONTACT_RESERVED_INDEX] != 0 or data[-1] != CONTACT_TRAILER:
+    # Captures show bytes 8 and 10 are reserved zeroes. The final byte changed
+    # from 0x41 to 0xc1, so only its stable lower-six-bit structure is used.
+    if data[CONTACT_RESERVED_INDEX] != 0 or data[10] != 0:
+        return None
+    if (data[-1] & 0x3F) != CONTACT_TRAILER_LOW_BITS:
         return None
     state = _contact_state_from_sensor_data(data[CONTACT_SENSOR_DATA_INDEX])
     if state is None:
