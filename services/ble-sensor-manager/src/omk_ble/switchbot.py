@@ -41,6 +41,12 @@ MOTION_STATUS_INDEX = 7
 MOTION_RESERVED_INDEX = 8
 MOTION_STATUS_LOW_BITS = 0x2C
 
+CONTACT_SERVICE_DEVICE_TYPE = 0x64
+CONTACT_MANUFACTURER_LENGTH = 13
+CONTACT_SENSOR_DATA_INDEX = 9
+CONTACT_RESERVED_INDEX = 8
+CONTACT_TRAILER = 0x41
+
 
 def _hex_map(values: dict[str, bytes]) -> dict[str, str]:
     return {key: value.hex() for key, value in values.items()}
@@ -62,6 +68,26 @@ def _decode_service_data(data: bytes | None) -> tuple[str, str, dict[str, Any]] 
         "relative_humidity_percent": data[5] & 0x7F,
         "battery_percent": data[2] & 0x7F,
     }
+
+
+def _contact_state_from_sensor_data(sensor_data: int) -> int | None:
+    """Map official HAL states: closed=0, open/timeout-not-close=1."""
+    hal_state = (sensor_data >> 1) & 0x03
+    if hal_state == 0:
+        return 0
+    if hal_state in (1, 2):
+        return 1
+    return None
+
+
+def _decode_contact_service_data(data: bytes | None) -> tuple[str, str, dict[str, Any]] | None:
+    """Decode official Contact Sensor service data with device type 0x64."""
+    if not data or len(data) < 4 or (data[0] & 0x7F) != CONTACT_SERVICE_DEVICE_TYPE:
+        return None
+    state = _contact_state_from_sensor_data(data[3])
+    if state is None:
+        return None
+    return "contact_sensor", "contact", {"contact_state": state}
 
 
 def _decode_meter_expression(fraction: int, signed_integer: int, humidity: int) -> tuple[float, int] | None:
@@ -123,6 +149,18 @@ def _decode_motion_manufacturer_data(data: bytes) -> tuple[str, str, dict[str, A
     return "motion_sensor", "motion", {"motion_state": 1 if status & 0x40 else 0}
 
 
+def _decode_contact_manufacturer_data(data: bytes) -> tuple[str, str, dict[str, Any]] | None:
+    """Decode the observed manufacturer-only Contact Sensor layout safely."""
+    if len(data) != CONTACT_MANUFACTURER_LENGTH:
+        return None
+    if data[CONTACT_RESERVED_INDEX] != 0 or data[-1] != CONTACT_TRAILER:
+        return None
+    state = _contact_state_from_sensor_data(data[CONTACT_SENSOR_DATA_INDEX])
+    if state is None:
+        return None
+    return "contact_sensor", "contact", {"contact_state": state}
+
+
 def _decode_manufacturer_data(data: bytes | None) -> tuple[str, str, dict[str, Any]] | None:
     if not data:
         return None
@@ -130,6 +168,7 @@ def _decode_manufacturer_data(data: bytes | None) -> tuple[str, str, dict[str, A
         _decode_meter_manufacturer_data(data)
         or _decode_co2_manufacturer_data(data)
         or _decode_motion_manufacturer_data(data)
+        or _decode_contact_manufacturer_data(data)
     )
 
 
@@ -145,7 +184,7 @@ def decode(address: str, rssi: int, manufacturer_data: dict[int, bytes], service
         "manufacturer_data": _hex_map({f"{key:04x}": value for key, value in manufacturer_data.items()}),
         "service_data": _hex_map(service_data),
     }
-    decoded = _decode_service_data(service_bytes) or _decode_manufacturer_data(company_data)
+    decoded = _decode_contact_service_data(service_bytes) or _decode_service_data(service_bytes) or _decode_manufacturer_data(company_data)
     model, sensor_type, values = decoded or ("unknown_switchbot", "unknown", {})
 
     # BlueZ's address and the observed SwitchBot manufacturer physical ID agree.

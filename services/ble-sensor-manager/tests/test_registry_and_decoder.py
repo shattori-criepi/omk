@@ -340,3 +340,61 @@ def test_motion_sensor_id_change_uses_new_topic_and_setup_suggestion(tmp_path: P
     manager.scanning = True
     manager.record_advertisement(DecodedAdvertisement("switchbot:new-motion", "switchbot", "motion_sensor", "motion", -50, "now", {"motion_state": 0}, {}))
     assert manager.suggested_sensor_id("switchbot:new-motion") == "motion-001"
+
+
+def test_contact_sensor_decodes_official_service_data_and_manufacturer_layouts() -> None:
+    closed = decode("D3:B2:04:E2:31:25", -31, {}, {METER_SERVICE_UUID: bytes.fromhex("64006401068f053d81")}, "now")
+    opened = decode("D3:B2:04:E2:31:25", -31, {}, {METER_SERVICE_UUID: bytes([0x64, 0, 0x64, 0x02])}, "now")
+    timeout = decode("D3:B2:04:E2:31:25", -31, {}, {METER_SERVICE_UUID: bytes([0x64, 0, 0x64, 0x04])}, "now")
+    manufacturer_open = decode("D3:B2:04:E2:31:25", -31, {SWITCHBOT_COMPANY_ID: bytes.fromhex("d3b204e23125704c00530051c1")}, {}, "now")
+    manufacturer_closed = decode("D3:B2:04:E2:31:25", -31, {SWITCHBOT_COMPANY_ID: bytes.fromhex("d3b204e23125715c0059000041")}, {}, "now")
+    assert closed is not None and closed.model == "contact_sensor" and closed.sensor_type == "contact" and closed.values == {"contact_state": 0}
+    assert opened is not None and opened.values == {"contact_state": 1}
+    assert timeout is not None and timeout.values == {"contact_state": 1}
+    assert manufacturer_open is not None and manufacturer_open.values == {"contact_state": 1}
+    assert manufacturer_closed is not None and manufacturer_closed.values == {"contact_state": 0}
+
+
+def test_contact_decoder_does_not_misclassify_existing_sensor_layouts() -> None:
+    meter = decode("CF:39:41:C7:ED:79", -40, {SWITCHBOT_COMPANY_ID: bytes.fromhex("cf3941c7ed79f40304992c")}, {}, "now")
+    co2 = decode("B0:E9:FE:58:15:CC", -40, {SWITCHBOT_COMPANY_ID: bytes.fromhex("b0e9fe5815ccf6e405982e0024020e00")}, {}, "now")
+    motion = decode("CF:FC:6A:48:DB:15", -40, {SWITCHBOT_COMPANY_ID: bytes.fromhex("cffc6a48db150c6c0000")}, {}, "now")
+    malformed = decode("D3:B2:04:E2:31:25", -40, {}, {METER_SERVICE_UUID: bytes.fromhex("64")}, "now")
+    unrelated = decode("D3:B2:04:E2:31:25", -40, {SWITCHBOT_COMPANY_ID: bytes.fromhex("d3b204e23125704c01530051c1")}, {}, "now")
+    assert meter is not None and meter.model == "meter"
+    assert co2 is not None and co2.model == "meter_pro_co2"
+    assert motion is not None and motion.model == "motion_sensor"
+    assert malformed is not None and malformed.model == "unknown_switchbot"
+    assert unrelated is not None and unrelated.model == "unknown_switchbot"
+
+
+def _contact_advertisement(state: int, received_at: str = "2026-08-12T14:47:12+09:00") -> DecodedAdvertisement:
+    return DecodedAdvertisement("switchbot:contact", "switchbot", "contact_sensor", "contact", -31, received_at, {"contact_state": state}, {"manufacturer_data": {"0969": "raw"}})
+
+
+def test_contact_publishes_only_open_closed_transitions_after_initial_state(tmp_path: Path) -> None:
+    registry = SensorRegistry(tmp_path / "sensors.json")
+    registry.register(RegisteredSensor("switchbot:contact", "contact-001", "contact", "switchbot", "contact_sensor", "door", "ドア"))
+    publisher = _MqttPublisher()
+    manager = BleManager(registry, publisher)
+    for state in (0, 0, 1, 1, 0, 0, 1):
+        manager.record_advertisement(_contact_advertisement(state))
+    assert [topic for topic, _payload in publisher.messages] == ["omk/contact-001/contact"] * 3
+    assert [json.loads(payload)["contact_state"] for _topic, payload in publisher.messages] == [1, 0, 1]
+
+
+def test_contact_disabled_new_sensor_id_latest_and_setup_suggestion(tmp_path: Path) -> None:
+    registry = SensorRegistry(tmp_path / "sensors.json")
+    registry.register(RegisteredSensor("switchbot:contact", "contact-001", "contact", "switchbot", "contact_sensor", "", "ドア", enabled=False))
+    publisher = _MqttPublisher()
+    manager = BleManager(registry, publisher)
+    manager.record_advertisement(_contact_advertisement(1))
+    manager.record_advertisement(_contact_advertisement(0))
+    assert publisher.messages == []
+    assert manager.registered_list()[0]["latest"]["values"] == {"contact_state": 0}
+    manager.update_registered_sensor("switchbot:contact", {"sensor_id": "contact-002", "display_name": "ドア", "location": "", "enabled": True})
+    manager.record_advertisement(_contact_advertisement(1))
+    assert publisher.messages[0][0] == "omk/contact-002/contact"
+    manager.scanning = True
+    manager.record_advertisement(DecodedAdvertisement("switchbot:new-contact", "switchbot", "contact_sensor", "contact", -50, "now", {"contact_state": 0}, {}))
+    assert manager.suggested_sensor_id("switchbot:new-contact") == "contact-001"
