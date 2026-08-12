@@ -87,21 +87,28 @@ class BleManager:
         self._publish_if_registered(decoded)
 
     def registered_list(self) -> list[dict[str, Any]]:
-        """Return registration records without ever deleting an offline sensor."""
+        """Join immutable registry settings with in-memory latest observations."""
         now = datetime.now(timezone.utc)
         result = []
         for sensor in self.registry.list():
             item = sensor.as_dict()
             seen = self.observations.get(sensor.device_key)
-            item["last_received_at"] = seen.received_at if seen else None
             if not seen:
-                item["status"] = "offline"
+                item["latest"] = None
+                item["online"] = False
+                item["status"] = "unreceived"
             else:
+                item["latest"] = {
+                    "received_at": seen.received_at,
+                    "rssi": seen.rssi,
+                    "values": seen.values,
+                }
                 try:
                     age = (now - datetime.fromisoformat(seen.received_at).astimezone(timezone.utc)).total_seconds()
-                    item["status"] = "normal" if age <= self.offline_seconds else "offline"
+                    item["online"] = age <= self.offline_seconds
                 except ValueError:
-                    item["status"] = "offline"
+                    item["online"] = False
+                item["status"] = "normal" if item["online"] else "offline"
             result.append(item)
         return result
 
