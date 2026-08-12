@@ -107,6 +107,21 @@ class MinuteAggregator:
                     self._latest[state_field] = state
                     self._latest_times[state_field] = received_at
             return completed
+        if kind == "power" and SENSOR_ID_RE.fullmatch(sensor_id) is not None and (
+            "power_w" in payload or "switch_state" in payload
+        ):
+            power = _number(payload.get("power_w"))
+            if power is not None:
+                field = f"{sensor_id}_power_w"
+                self._sums[field] = self._sums.get(field, 0.0) + power
+                self._counts[field] = self._counts.get(field, 0) + 1
+            state = _binary_state(payload.get("switch_state"))
+            if state is not None:
+                field = f"{sensor_id}_switch_state"
+                if received_at >= self._latest_times.get(field, self._start):
+                    self._latest[field] = state
+                    self._latest_times[field] = received_at
+            return completed
         averages = self._environment_averages(parts[1], payload) if kind == "environment" else AVERAGES.get(kind, {})
         for source, target in averages.items():
             value = _number(payload.get(source))

@@ -122,6 +122,28 @@ def test_contact_tracks_state_changes_across_minute_boundaries_and_ignores_inval
     }
 
 
+def test_plug_power_averages_and_keeps_last_switch_state_without_affecting_broute():
+    aggregator = MinuteAggregator()
+    aggregator.ingest("omk/plug-001/power", {"power_w": 5.0, "switch_state": 0}, at(5))
+    aggregator.ingest("omk/plug-001/power", {"power_w": 5.2, "switch_state": 1}, at(15))
+    aggregator.ingest("omk/plug-001/power", {"power_w": 5.4, "switch_state": 1}, at(25))
+    aggregator.ingest("omk/plug-002/power", {"power_w": 173.2, "switch_state": 1}, at(35))
+    aggregator.ingest("omk/plug-001/power", {"power_w": None, "switch_state": 2}, at(40))
+    aggregator.ingest("omk/plug-001/power", {"power_w": float("nan"), "switch_state": True}, at(45))
+    aggregator.ingest("omk/broute-001/power", {"net_power_w": -100}, at(50))
+    aggregator.ingest("omk/bad.id/power", {"power_w": 999, "switch_state": 1}, at(55))
+    assert aggregator.flush_due(at(0, 35)) == {
+        "time": "2026-08-05T10:34:00+09:00",
+        "plug-001_power_w": 5.2,
+        "plug-001_switch_state": 1,
+        "plug-002_power_w": 173.2,
+        "plug-002_switch_state": 1,
+        "broute_grid_power_w": -100,
+        "broute_grid_import_power_w": 0,
+        "broute_grid_export_power_w": 100,
+    }
+
+
 class Sender:
     def __init__(self, fail=False): self.fail, self.calls = fail, []
     def send(self, payload):

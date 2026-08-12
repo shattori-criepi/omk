@@ -43,6 +43,7 @@ names on the next registry update.
 | `motion_sensor` | SwitchBot 人感センサー | `motion` | `motion_state` (0=不在, 1=検知) |
 | `contact_sensor` | SwitchBot 開閉センサー | `contact` | `contact_state` (0=閉, 1=開) |
 | `waterproof_sensor` | SwitchBot 防水温湿度計 | `environment` | `temperature_c`, `relative_humidity_percent` |
+| `plug_sensor` | SwitchBot プラグミニ | `power` | `power_w`, `switch_state` (0=OFF, 1=ON) |
 
 The waterproof model is not limited to outdoors; deployment use belongs in
 `location` (for example, 屋外 or 浴室). `humidity_percent`, `outdoor_meter`, and
@@ -53,8 +54,10 @@ environment data is published immediately on first valid reception and then no
 more often than every 10 seconds per `device_key`; runtime state still updates
 on every advertisement. Motion and contact publish state changes immediately
 and also publish their current state no more often than every 10 seconds. These
-limits use a monotonic clock. Disabled sensors still update runtime state but do
-not publish MQTT.
+limits use a monotonic clock. Plug Mini power follows the same 10-second limit,
+but a `switch_state` transition publishes immediately. Disabled sensors still
+update runtime state but do not publish MQTT. Plug Mini proposes `plug-xxx` IDs
+and publishes `omk/<sensor_id>/power` with `power_w` and `switch_state`.
 
 The current Pi-captured manufacturer layouts decode SwitchBot Meter temperature
 and humidity, and Meter Pro CO2 temperature, humidity, and CO2. The CO2 layout
@@ -89,6 +92,10 @@ Verified on a Raspberry Pi:
   MQTT publish.
 - SwitchBot 防水温湿度計: advertisement reception and dedicated
   temperature/humidity manufacturer-layout decode.
+- SwitchBot プラグミニ: advertisement-only power and switch-state decode.
+  Its manufacturer layout is the primary identifier; the public `0x67` and
+  observed domestic `0x6a` service-data values are supplementary only. Power
+  masks the overload flag from the MSB before applying the 0.1 W scale.
 
 For a line-oriented raw capture on a Pi, use
 `PYTHONPATH=src .venv/bin/python -m omk_ble.raw_scan --seconds 30`.
