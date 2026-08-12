@@ -56,6 +56,14 @@ async def stop_scan() -> dict[str, str]:
 def candidates() -> dict[str, Any]:
     return {"scanning": manager.scanning, "candidates": manager.candidate_list()}
 
+
+@app.get("/api/setup/suggested-sensor-id")
+def suggested_sensor_id(device_key: str) -> dict[str, str]:
+    try:
+        return {"sensor_id": manager.suggested_sensor_id(device_key)}
+    except ValueError as error:
+        raise HTTPException(400, str(error)) from error
+
 @app.get("/api/sensors")
 def sensors() -> dict[str, Any]:
     try:
