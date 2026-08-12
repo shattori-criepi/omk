@@ -43,9 +43,9 @@ MOTION_STATUS_LOW_BITS = 0x2C
 
 CONTACT_SERVICE_DEVICE_TYPE = 0x64
 CONTACT_MANUFACTURER_LENGTH = 13
-CONTACT_SENSOR_DATA_INDEX = 9
 CONTACT_RESERVED_INDEX = 8
 CONTACT_TRAILER_LOW_BITS = 0x01
+CONTACT_MANUFACTURER_STATUS_INDEX = 7
 
 
 def _hex_map(values: dict[str, bytes]) -> dict[str, str]:
@@ -159,9 +159,14 @@ def _decode_contact_manufacturer_data(data: bytes) -> tuple[str, str, dict[str, 
         return None
     if (data[-1] & 0x3F) != CONTACT_TRAILER_LOW_BITS:
         return None
-    state = _contact_state_from_sensor_data(data[CONTACT_SENSOR_DATA_INDEX])
-    if state is None:
+    # The manufacturer packet's status byte is the current contact state in
+    # the Pi captures. Its lower nibble remains 0xc while its upper nibble
+    # changes with the contact state/counters: 0x4c is open; 0x5c, 0xcc, and
+    # 0xdc are closed. Do not use the following counter/time bytes as state.
+    status = data[CONTACT_MANUFACTURER_STATUS_INDEX]
+    if (status & 0x0F) != 0x0C:
         return None
+    state = 1 if (status & 0xF0) == 0x40 else 0
     return "contact_sensor", "contact", {"contact_state": state}
 
 
@@ -188,7 +193,17 @@ def decode(address: str, rssi: int, manufacturer_data: dict[int, bytes], service
         "manufacturer_data": _hex_map({f"{key:04x}": value for key, value in manufacturer_data.items()}),
         "service_data": _hex_map(service_data),
     }
-    decoded = _decode_contact_service_data(service_bytes) or _decode_service_data(service_bytes) or _decode_manufacturer_data(company_data)
+    # Contact service data reliably identifies the device, but the current Pi
+    # captures show its state can be stale. When a complete Contact
+    # manufacturer layout is available, prefer its state snapshot.
+    contact_from_service = _decode_contact_service_data(service_bytes)
+    contact_from_manufacturer = _decode_contact_manufacturer_data(company_data) if company_data else None
+    decoded = (
+        contact_from_manufacturer
+        or contact_from_service
+        or _decode_service_data(service_bytes)
+        or _decode_manufacturer_data(company_data)
+    )
     model, sensor_type, values = decoded or ("unknown_switchbot", "unknown", {})
 
     # BlueZ's address and the observed SwitchBot manufacturer physical ID agree.
