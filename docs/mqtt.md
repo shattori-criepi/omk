@@ -11,6 +11,7 @@ MQTTは、各データ取得処理をRaspberry Piへ集約するLAN内の内部�
 | SEN66測定値 | `omk/<device_id>/sen66` | 0 | false |
 | 接続状態 | `omk/<device_id>/status` | 0 | true |
 | BLE環境センサ | `omk/<sensor_id>/environment` | 0 | false |
+| BLE人感状態変化 | `omk/<sensor_id>/motion` | 0 | false |
 
 初期ノードの例は`omk/sen66-001/sen66`と`omk/sen66-001/status`である。
 
@@ -58,6 +59,11 @@ SwitchBot等のBLE受信は Dashboard ではなく Raspberry Pi ホスト上の
 `sensor_id`、`measured_at`、`quality`、利用可能な `temperature_c`、
 `relative_humidity_percent`、`co2_ppm`、`battery_percent` を含む。collector
 は従来通り型を解釈せず JSONL に保存する。
+
+Motion Sensor は advertisement ごとの測定値を publish せず、状態が変化した
+ときだけ `{"device_id":"motion-001","measured_at":"...","motion_state":1}`
+の形で publish する。サービス起動後の初回 advertisement は状態初期化のみで、
+publish しない。
 
 ## Bルート接続
 

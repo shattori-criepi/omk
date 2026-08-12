@@ -31,6 +31,16 @@ CO2_TEMPERATURE_HUMIDITY_OFFSET = 8
 CO2_MIN_PPM = 400
 CO2_MAX_PPM = 10_000
 
+# Pi captures of the Motion Sensor manufacturer advertisement:
+# <physical id 6> <variable> <PIR status> 00 <counter>. The official Motion
+# Sensor specification defines PIR state at status bit 6. The known status
+# structure has lower six bits 0x2c; paired with the length and reserved byte
+# this avoids treating existing Meter/CO2 layouts as Motion Sensor packets.
+MOTION_MANUFACTURER_LENGTH = 10
+MOTION_STATUS_INDEX = 7
+MOTION_RESERVED_INDEX = 8
+MOTION_STATUS_LOW_BITS = 0x2C
+
 
 def _hex_map(values: dict[str, bytes]) -> dict[str, str]:
     return {key: value.hex() for key, value in values.items()}
@@ -103,10 +113,24 @@ def _decode_co2_manufacturer_data(data: bytes) -> tuple[str, str, dict[str, Any]
     }
 
 
+def _decode_motion_manufacturer_data(data: bytes) -> tuple[str, str, dict[str, Any]] | None:
+    """Decode the verified Motion Sensor manufacturer advertisement layout."""
+    if len(data) != MOTION_MANUFACTURER_LENGTH or data[MOTION_RESERVED_INDEX] != 0:
+        return None
+    status = data[MOTION_STATUS_INDEX]
+    if (status & 0x3F) != MOTION_STATUS_LOW_BITS:
+        return None
+    return "motion_sensor", "motion", {"motion_state": 1 if status & 0x40 else 0}
+
+
 def _decode_manufacturer_data(data: bytes | None) -> tuple[str, str, dict[str, Any]] | None:
     if not data:
         return None
-    return _decode_meter_manufacturer_data(data) or _decode_co2_manufacturer_data(data)
+    return (
+        _decode_meter_manufacturer_data(data)
+        or _decode_co2_manufacturer_data(data)
+        or _decode_motion_manufacturer_data(data)
+    )
 
 
 def decode(address: str, rssi: int, manufacturer_data: dict[int, bytes], service_data: dict[str, bytes], received_at: str) -> DecodedAdvertisement | None:
