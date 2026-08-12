@@ -13,6 +13,7 @@ MQTTは、各データ取得処理をRaspberry Piへ集約するLAN内の内部�
 | BLE環境センサ | `omk/<sensor_id>/environment` | 0 | false |
 | BLE人感状態変化 | `omk/<sensor_id>/motion` | 0 | false |
 | BLE開閉状態変化 | `omk/<sensor_id>/contact` | 0 | false |
+| BLEプラグ電力 | `omk/<sensor_id>/power` | 0 | false |
 
 初期ノードの例は`omk/sen66-001/sen66`と`omk/sen66-001/status`である。
 
@@ -73,6 +74,10 @@ publishする。`contact_state`は0=閉、1=開で、公式のtimeout-not-close�
 正規化する。各rate limitはmonotonic clockを使い、`enabled=false`ではBLE observationと
 runtime更新を継続する一方、MQTT publishは停止する。したがってJSONLへのSwitchBot
 一次保存は厳密な固定周期ではなく、通常は最短約10秒間隔となる。
+
+Plug Miniは`{"device_id":"plug-001","measured_at":"...","power_w":173.2,
+"switch_state":1}`を`omk/<sensor_id>/power`へpublishする。`switch_state`は
+0=OFF、1=ONで、初回は即時、同一状態は最短10秒間隔、状態変化は即時publishする。
 
 ## Bルート接続
 

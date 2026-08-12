@@ -13,6 +13,7 @@
 | `omk/<sensor_id>/environment` | `temperature_c`、`relative_humidity_percent`、`co2_ppm`（存在する項目のみ） |
 | `omk/<sensor_id>/motion` | `motion_state` |
 | `omk/<sensor_id>/contact` | `contact_state` |
+| `omk/<sensor_id>/power` | `power_w`、`switch_state`（Plug Mini等の電力センサ） |
 
 `power`の正値は買電、負値は売電です。電圧・電流・力率、蓄電池の運転状態はHarvestへ送信しません。不正JSON、JSON objectではないpayload、非有限数は安全に無視します。
 
@@ -25,6 +26,11 @@ SEN66は`sen66_temperature_c`、`sen66_relative_humidity_percent`、`sen66_co2_p
 `environment` は汎用のセンサ入力です。許可された `sensor_id`（英数字、`-`、`_`）ごとに、`<sensor_id>_temperature_c`、`<sensor_id>_relative_humidity_percent`、`<sensor_id>_co2_ppm` を生成し、存在する各項目を1分平均で送信します。これらはSEN66の固定fieldとは独立して共存します。
 
 `motion` は `<sensor_id>_motion_state` をその1分の最大値として送信します（0=その分に検知なし、1=一度以上検知）。`contact` は開閉回数を保存せず、状態変化が一度でもあれば `<sensor_id>_contact_changed` を1、最後に観測した状態を `<sensor_id>_contact_state` として送信します（0=閉、1=開）。分境界をまたぐ状態変化は次の分の変化として扱い、再起動後の最初の観測は変化に数えません。
+
+電力センサの`power` payloadに`power_w`または`switch_state`がある場合は、許可された
+`sensor_id`ごとに`<sensor_id>_power_w`（1分平均）と`<sensor_id>_switch_state`
+（分内の最後の正常値、0=OFF、1=ON）を送信する。Bルートの既存`power` fieldとは独立して
+共存する。
 
 ## 再送と設定
 

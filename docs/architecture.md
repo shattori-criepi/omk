@@ -359,11 +359,16 @@ SwitchBotのペアリング不要BLE advertisementは、Raspberry Piホスト上
 登録する。温湿度系は`th-xxx`、CO2は`co2-xxx`、状態系は`motion-xxx`、
 `contact-xxx`を用いる。
 
+`plug_sensor`は`power` typeであり、`plug-xxx`を用いる。広告から`power_w`と
+`switch_state`（0=OFF、1=ON）を得て、同一状態は最短10秒間隔、状態変化は即時に
+`omk/<sensor_id>/power`へpublishする。
+
 MQTT publishはenvironmentが初回即時・以後最短10秒間隔、motion/contactが状態変化時
 即時・同一状態も最短10秒間隔である。BLE受信とruntime state更新は広告ごとに行い、
 `enabled=false`ではpublishだけを止める。`harvest-uploader`はJSONL/Parquetを介さず
 `omk/#`から直接1分集約する。environmentはsensor_id付きfieldの平均、motionは最大値、
 contactは変化有無と最後の状態として、SEN66等と同じHarvest recordに併存する。
+Plug Miniはpowerを平均、switch stateを分内の最後の状態として併存する。
 
 ## 9. データフロー
 

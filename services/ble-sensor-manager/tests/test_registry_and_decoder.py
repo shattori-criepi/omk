@@ -91,6 +91,22 @@ def test_waterproof_sensor_decodes_its_dedicated_service_and_manufacturer_layout
     assert unrelated is not None and unrelated.model == "unknown_switchbot"
 
 
+def test_plug_sensor_decodes_service_and_manufacturer_power_layouts() -> None:
+    service_only = decode("60:55:F9:2E:77:82", -50, {}, {METER_SERVICE_UUID: bytes.fromhex("6a0064")}, "now")
+    on_low = decode("60:55:F9:2E:77:82", -50, {SWITCHBOT_COMPANY_ID: bytes.fromhex("6055f92e7782378016360035")}, {}, "now")
+    off_low = decode("60:55:F9:2E:77:82", -50, {SWITCHBOT_COMPANY_ID: bytes.fromhex("6055f92e7782380016360035")}, {}, "now")
+    on_high = decode("60:55:F9:2E:77:82", -50, {SWITCHBOT_COMPANY_ID: bytes.fromhex("6055f92e77827080163806c4")}, {}, "now")
+    overload_high = decode("60:55:F9:2E:77:82", -50, {SWITCHBOT_COMPANY_ID: bytes.fromhex("6055f92e77827080163886c4")}, {}, "now")
+    unrelated = decode("x", -1, {SWITCHBOT_COMPANY_ID: bytes.fromhex("6055f92e7782378015360035")}, {}, "now")
+    assert service_only is not None and service_only.model == "plug_sensor" and service_only.sensor_type == "power" and service_only.values == {}
+    assert on_low is not None and on_low.device_key == "switchbot:6055f92e7782"
+    assert on_low.values == {"power_w": 5.3, "switch_state": 1}
+    assert off_low is not None and off_low.values == {"power_w": 5.3, "switch_state": 0}
+    assert on_high is not None and on_high.values == {"power_w": 173.2, "switch_state": 1}
+    assert overload_high is not None and overload_high.values == {"power_w": 173.2, "switch_state": 1}
+    assert unrelated is not None and unrelated.model == "unknown_switchbot"
+
+
 def test_short_and_unknown_manufacturer_packets_remain_raw_unknown_candidates() -> None:
     for packet in (b"", bytes.fromhex("cf3941c7ed79f40304"), bytes.fromhex("cf3941c7ed79000004992c")):
         decoded = decode("CF:39:41:C7:ED:79", -50, {SWITCHBOT_COMPANY_ID: packet}, {}, "now")
@@ -355,6 +371,43 @@ def test_environment_publish_is_rate_limited_per_device_with_latest_values(tmp_p
     manager.record_advertisement(advertisement("switchbot:co2", "co2_sensor", "disabled", 601))
     assert len(publisher.messages) == 5
     assert manager.registered_list()[1]["latest"]["values"] == {"co2_ppm": 601}
+
+
+def test_plug_power_publishes_periodically_and_switch_changes_immediately(tmp_path: Path) -> None:
+    registry = SensorRegistry(tmp_path / "sensors.json")
+    registry.register(RegisteredSensor("switchbot:plug", "plug-001", "power", "switchbot", "plug_sensor", "", "プラグ"))
+    registry.register(RegisteredSensor("switchbot:disabled-plug", "plug-002", "power", "switchbot", "plug_sensor", "", "無効", enabled=False))
+    clock = [0.0]
+    publisher = _MqttPublisher()
+    manager = BleManager(registry, publisher, monotonic_provider=lambda: clock[0])
+
+    def advertisement(device_key: str, state: int, watts: float, received_at: str) -> DecodedAdvertisement:
+        return DecodedAdvertisement(device_key, "switchbot", "plug_sensor", "power", -45, received_at, {"power_w": watts, "switch_state": state}, {})
+
+    manager.record_advertisement(advertisement("switchbot:plug", 1, 5.3, "first"))
+    clock[0] = 2.0
+    manager.record_advertisement(advertisement("switchbot:plug", 1, 5.4, "two"))
+    assert len(publisher.messages) == 1
+    assert manager.registered_list()[0]["latest"]["values"] == {"power_w": 5.4, "switch_state": 1}
+    manager.record_advertisement(advertisement("switchbot:disabled-plug", 0, 0.0, "disabled"))
+    assert len(publisher.messages) == 1 and manager.registered_list()[1]["latest"] is not None
+    clock[0] = 3.0
+    manager.record_advertisement(advertisement("switchbot:plug", 0, 0.0, "changed"))
+    assert json.loads(publisher.messages[-1][1])["switch_state"] == 0
+    clock[0] = 12.0
+    manager.record_advertisement(advertisement("switchbot:plug", 0, 0.1, "nine"))
+    assert len(publisher.messages) == 2
+    clock[0] = 13.0
+    manager.record_advertisement(advertisement("switchbot:plug", 0, 0.2, "periodic"))
+    assert len(publisher.messages) == 3
+    manager.update_registered_sensor("switchbot:plug", {"sensor_id": "plug-003", "display_name": "プラグ", "location": "", "enabled": True})
+    clock[0] = 23.0
+    manager.record_advertisement(advertisement("switchbot:plug", 0, 0.3, "renamed"))
+    assert publisher.messages[-1][0] == "omk/plug-003/power"
+    manager.scanning = True
+    manager.record_advertisement(advertisement("switchbot:new-plug", 1, 1.0, "candidate"))
+    assert manager.candidate_list()[0]["model"] == "plug_sensor"
+    assert manager.suggested_sensor_id("switchbot:new-plug") == "plug-001"
 
 
 def test_waterproof_sensor_setup_uses_th_ids_and_runtime_uses_environment_topic(tmp_path: Path) -> None:
