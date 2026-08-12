@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import re
 from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -39,6 +40,12 @@ LATEST = {
     },
     "power-flow": {"battery_soc_percent": "power_system_battery_soc_percent"},
 }
+ENVIRONMENT_FIELDS = (
+    "temperature_c",
+    "relative_humidity_percent",
+    "co2_ppm",
+)
+SENSOR_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
 def _minute(value: datetime) -> datetime:
@@ -70,8 +77,10 @@ class MinuteAggregator:
             self._start = start
         if start != self._start or not self._is_measurement_topic(topic):
             return completed
-        kind = topic.rsplit("/", 1)[1]
-        for source, target in AVERAGES.get(kind, {}).items():
+        parts = topic.split("/")
+        kind = parts[2]
+        averages = self._environment_averages(parts[1], payload) if kind == "environment" else AVERAGES.get(kind, {})
+        for source, target in averages.items():
             value = _number(payload.get(source))
             if value is not None:
                 self._sums[target] = self._sums.get(target, 0.0) + value
@@ -107,4 +116,17 @@ class MinuteAggregator:
     @staticmethod
     def _is_measurement_topic(topic: str) -> bool:
         parts = topic.split("/")
-        return len(parts) == 3 and parts[0] == "omk" and bool(parts[1]) and parts[2] in (set(AVERAGES) | set(LATEST))
+        if len(parts) != 3 or parts[0] != "omk" or not parts[1]:
+            return False
+        if parts[2] == "environment":
+            return SENSOR_ID_RE.fullmatch(parts[1]) is not None
+        return parts[2] in (set(AVERAGES) | set(LATEST))
+
+    @staticmethod
+    def _environment_averages(sensor_id: str, payload: dict[str, Any]) -> dict[str, str]:
+        """Map validated dynamic environment fields without altering fixed schemas."""
+        return {
+            field: f"{sensor_id}_{field}"
+            for field in ENVIRONMENT_FIELDS
+            if field in payload
+        }
