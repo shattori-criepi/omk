@@ -18,7 +18,7 @@ def test_meter_advertisement_decodes_documented_environment_fields() -> None:
         "2026-08-12T10:00:00+09:00",
     )
     assert decoded is not None
-    assert decoded.model == "meter"
+    assert decoded.model == "temperature_humidity_sensor"
     assert decoded.values == {"temperature_c": 25.3, "relative_humidity_percent": 52, "battery_percent": 87}
 
 
@@ -46,7 +46,7 @@ def test_pi_captured_meter_manufacturer_packets_decode_temperature_and_humidity(
         )
         assert decoded is not None
         assert decoded.device_key == "switchbot:cf3941c7ed79"
-        assert decoded.model == "meter"
+        assert decoded.model == "temperature_humidity_sensor"
         assert decoded.sensor_type == "environment"
         assert decoded.values == {"temperature_c": temperature_c, "relative_humidity_percent": 44}
 
@@ -61,7 +61,7 @@ def test_pi_captured_co2_manufacturer_packets_decode_environment_measurements() 
     for address, packet, expected in fixtures:
         decoded = decode(address, -31, {SWITCHBOT_COMPANY_ID: bytes.fromhex(packet)}, {}, "now")
         assert decoded is not None
-        assert decoded.model == "meter_pro_co2"
+        assert decoded.model == "co2_sensor"
         assert decoded.sensor_type == "environment"
         for key, value in expected.items():
             assert decoded.values[key] == value
@@ -101,25 +101,38 @@ def test_short_and_unknown_manufacturer_packets_remain_raw_unknown_candidates() 
 
 def test_registry_validates_ids_and_prevents_duplicate_device_or_id(tmp_path: Path) -> None:
     registry = SensorRegistry(tmp_path / "sensors.json")
-    one = RegisteredSensor("switchbot:abc", "living-env-01", "environment", "switchbot", "meter", "living", "リビング")
+    one = RegisteredSensor("switchbot:abc", "living-env-01", "environment", "switchbot", "temperature_humidity_sensor", "living", "リビング")
     registry.register(one)
     assert registry.list() == [one]
     with pytest.raises(RegistryError, match="already"):
         registry.register(one)
     with pytest.raises(RegistryError, match="lowercase"):
-        registry.register(RegisteredSensor("switchbot:def", "Bad_ID", "environment", "switchbot", "meter", "", "x"))
+        registry.register(RegisteredSensor("switchbot:def", "Bad_ID", "environment", "switchbot", "temperature_humidity_sensor", "", "x"))
+
+
+def test_registry_normalizes_legacy_switchbot_models_when_read_and_written(tmp_path: Path) -> None:
+    path = tmp_path / "sensors.json"
+    path.write_text(json.dumps({"sensors": [
+        {"device_key": "switchbot:meter", "sensor_id": "th-001", "sensor_type": "environment", "vendor": "switchbot", "model": "meter", "location": "", "display_name": "温湿度計", "enabled": True},
+        {"device_key": "switchbot:co2", "sensor_id": "co2-001", "sensor_type": "environment", "vendor": "switchbot", "model": "meter_pro_co2", "location": "", "display_name": "CO2", "enabled": True},
+    ]}), encoding="utf-8")
+    registry = SensorRegistry(path)
+    assert [sensor.model for sensor in registry.list()] == ["temperature_humidity_sensor", "co2_sensor"]
+    registry.update("switchbot:meter", sensor_id="th-001", display_name="温湿度計", location="室内", enabled=True)
+    saved = json.loads(path.read_text(encoding="utf-8"))
+    assert [sensor["model"] for sensor in saved["sensors"]] == ["temperature_humidity_sensor", "co2_sensor"]
 
 
 def test_offline_registration_is_kept_when_no_advertisement_is_seen(tmp_path: Path) -> None:
     registry = SensorRegistry(tmp_path / "sensors.json")
-    registry.register(RegisteredSensor("switchbot:abc", "living-env-01", "environment", "switchbot", "meter", "", "リビング"))
+    registry.register(RegisteredSensor("switchbot:abc", "living-env-01", "environment", "switchbot", "temperature_humidity_sensor", "", "リビング"))
     item = BleManager(registry).registered_list()[0]
     assert item["status"] == "unreceived"
     assert item["latest"] is None
     assert item["online"] is False
 
 
-def _candidate(device_key: str, *, rssi: int = -50, values: dict | None = None, model: str = "meter") -> DecodedAdvertisement:
+def _candidate(device_key: str, *, rssi: int = -50, values: dict | None = None, model: str = "temperature_humidity_sensor") -> DecodedAdvertisement:
     return DecodedAdvertisement(
         device_key=device_key, vendor="switchbot", model=model, sensor_type="environment",
         rssi=rssi, received_at="2026-08-12T10:00:00+09:00", values=values or {},
@@ -142,8 +155,8 @@ def test_setup_candidate_order_is_discovery_order_and_updates_in_place(tmp_path:
 def test_latest_advertisement_replaces_all_candidate_data_without_reordering(tmp_path: Path) -> None:
     manager = BleManager(SensorRegistry(tmp_path / "sensors.json"))
     manager.scanning = True
-    first = DecodedAdvertisement("switchbot:a", "switchbot", "meter_pro_co2", "environment", -79, "first", {"co2_ppm": 577}, {"manufacturer_data": {"0969": "first"}})
-    second = DecodedAdvertisement("switchbot:a", "switchbot", "meter_pro_co2", "environment", -31, "second", {"co2_ppm": 566}, {"manufacturer_data": {"0969": "second"}})
+    first = DecodedAdvertisement("switchbot:a", "switchbot", "co2_sensor", "environment", -79, "first", {"co2_ppm": 577}, {"manufacturer_data": {"0969": "first"}})
+    second = DecodedAdvertisement("switchbot:a", "switchbot", "co2_sensor", "environment", -31, "second", {"co2_ppm": 566}, {"manufacturer_data": {"0969": "second"}})
     manager.record_advertisement(first)
     manager.record_advertisement(second)
     candidates = manager.candidate_list()
@@ -184,7 +197,7 @@ def test_callback_updates_candidate_after_stop_and_new_scan_session(tmp_path: Pa
 
 def test_registered_device_is_excluded_then_moves_from_candidate_list(tmp_path: Path) -> None:
     registry = SensorRegistry(tmp_path / "sensors.json")
-    registry.register(RegisteredSensor("switchbot:registered", "th-001", "environment", "switchbot", "meter", "", "登録済み"))
+    registry.register(RegisteredSensor("switchbot:registered", "th-001", "environment", "switchbot", "temperature_humidity_sensor", "", "登録済み"))
     manager = BleManager(registry)
     manager.scanning = True
     manager.record_advertisement(_candidate("switchbot:registered"))
@@ -197,31 +210,31 @@ def test_registered_device_is_excluded_then_moves_from_candidate_list(tmp_path: 
 
 def test_new_setup_session_resets_candidate_order_and_suggests_type_sequence(tmp_path: Path) -> None:
     registry = SensorRegistry(tmp_path / "sensors.json")
-    registry.register(RegisteredSensor("switchbot:old", "co2-001", "environment", "switchbot", "meter_pro_co2", "", "既存"))
+    registry.register(RegisteredSensor("switchbot:old", "co2-001", "environment", "switchbot", "co2_sensor", "", "既存"))
     manager = BleManager(registry)
     manager.scanning = True
     manager.record_advertisement(_candidate("switchbot:first"))
     manager.begin_setup_session()
-    manager.record_advertisement(_candidate("switchbot:co2", model="meter_pro_co2"))
+    manager.record_advertisement(_candidate("switchbot:co2", model="co2_sensor"))
     assert [item["device_key"] for item in manager.candidate_list()] == ["switchbot:co2"]
     assert manager.suggested_sensor_id("switchbot:co2") == "co2-002"
 
 
 def test_registered_list_joins_latest_runtime_state_without_modifying_registry(tmp_path: Path) -> None:
     registry = SensorRegistry(tmp_path / "sensors.json")
-    online_sensor = RegisteredSensor("switchbot:co2", "co2-001", "environment", "switchbot", "meter_pro_co2", "bedroom", "寝室")
-    offline_sensor = RegisteredSensor("switchbot:old", "co2-002", "environment", "switchbot", "meter_pro_co2", "hall", "廊下")
+    online_sensor = RegisteredSensor("switchbot:co2", "co2-001", "environment", "switchbot", "co2_sensor", "bedroom", "寝室")
+    offline_sensor = RegisteredSensor("switchbot:old", "co2-002", "environment", "switchbot", "co2_sensor", "hall", "廊下")
     registry.register(online_sensor)
     registry.register(offline_sensor)
     # 13:55:01 is 899 seconds old (online); 13:54:59 is 901 seconds old
     # (offline). The fixed clock avoids dependence on test execution time.
     manager = BleManager(registry, now_provider=lambda: datetime(2026, 8, 12, 14, 10, tzinfo=timezone.utc))
     manager.record_advertisement(DecodedAdvertisement(
-        "switchbot:co2", "switchbot", "meter_pro_co2", "environment", -42,
+        "switchbot:co2", "switchbot", "co2_sensor", "environment", -42,
         "2026-08-12T22:55:01+09:00", {"temperature_c": 26.4, "relative_humidity_percent": 44, "co2_ppm": 588}, {"manufacturer_data": {"0969": "raw"}},
     ))
     manager.record_advertisement(DecodedAdvertisement(
-        "switchbot:old", "switchbot", "meter_pro_co2", "environment", -80,
+        "switchbot:old", "switchbot", "co2_sensor", "environment", -80,
         "2026-08-12T22:54:59+09:00", {"co2_ppm": 500}, {},
     ))
     online, offline = manager.registered_list()
@@ -235,12 +248,12 @@ def test_registered_list_joins_latest_runtime_state_without_modifying_registry(t
 
 def test_registered_latest_updates_when_setup_mode_is_stopped(tmp_path: Path) -> None:
     registry = SensorRegistry(tmp_path / "sensors.json")
-    registry.register(RegisteredSensor("switchbot:meter", "th-001", "environment", "switchbot", "meter", "", "リビング"))
+    registry.register(RegisteredSensor("switchbot:meter", "th-001", "environment", "switchbot", "temperature_humidity_sensor", "", "リビング"))
     manager = BleManager(registry)
     assert manager.scanning is False
     manager.record_advertisement(_candidate("switchbot:meter", rssi=-50, values={"temperature_c": 25.6, "relative_humidity_percent": 46}))
     first = manager.registered_list()[0]["latest"]
-    manager.record_advertisement(DecodedAdvertisement("switchbot:meter", "switchbot", "meter", "environment", -30, "updated", {"temperature_c": 25.7, "relative_humidity_percent": 46}, {}))
+    manager.record_advertisement(DecodedAdvertisement("switchbot:meter", "switchbot", "temperature_humidity_sensor", "environment", -30, "updated", {"temperature_c": 25.7, "relative_humidity_percent": 46}, {}))
     latest = manager.registered_list()[0]["latest"]
     assert first is not None and first["rssi"] == -50
     assert latest == {"received_at": "updated", "rssi": -30, "values": {"temperature_c": 25.7, "relative_humidity_percent": 46}}
@@ -264,10 +277,10 @@ class _MqttPublisher:
 
 def test_update_registered_sensor_changes_only_logical_settings_and_keeps_runtime_state(tmp_path: Path) -> None:
     registry = SensorRegistry(tmp_path / "sensors.json")
-    original = RegisteredSensor("switchbot:co2", "co2-002", "environment", "switchbot", "meter_pro_co2", "bedroom", "寝室")
+    original = RegisteredSensor("switchbot:co2", "co2-002", "environment", "switchbot", "co2_sensor", "bedroom", "寝室")
     registry.register(original)
     manager = BleManager(registry)
-    manager.record_advertisement(_candidate("switchbot:co2", values={"co2_ppm": 588}, model="meter_pro_co2"))
+    manager.record_advertisement(_candidate("switchbot:co2", values={"co2_ppm": 588}, model="co2_sensor"))
     updated = manager.update_registered_sensor("switchbot:co2", {"sensor_id": "co2-001", "display_name": "主寝室", "location": "main-bedroom", "enabled": False})
     assert updated.device_key == original.device_key
     assert (updated.vendor, updated.model, updated.sensor_type) == (original.vendor, original.model, original.sensor_type)
@@ -279,8 +292,8 @@ def test_update_registered_sensor_changes_only_logical_settings_and_keeps_runtim
 
 def test_update_rejects_duplicate_or_invalid_sensor_id_and_unknown_device(tmp_path: Path) -> None:
     registry = SensorRegistry(tmp_path / "sensors.json")
-    registry.register(RegisteredSensor("switchbot:a", "co2-001", "environment", "switchbot", "meter_pro_co2", "", "A"))
-    registry.register(RegisteredSensor("switchbot:b", "co2-002", "environment", "switchbot", "meter_pro_co2", "", "B"))
+    registry.register(RegisteredSensor("switchbot:a", "co2-001", "environment", "switchbot", "co2_sensor", "", "A"))
+    registry.register(RegisteredSensor("switchbot:b", "co2-002", "environment", "switchbot", "co2_sensor", "", "B"))
     manager = BleManager(registry)
     with pytest.raises(RegistryError, match="already"):
         manager.update_registered_sensor("switchbot:b", {"sensor_id": "co2-001", "display_name": "B", "location": "", "enabled": True})
@@ -292,21 +305,21 @@ def test_update_rejects_duplicate_or_invalid_sensor_id_and_unknown_device(tmp_pa
 
 def test_updated_sensor_id_is_used_for_next_mqtt_publish_and_disabled_sensor_is_not_published(tmp_path: Path) -> None:
     registry = SensorRegistry(tmp_path / "sensors.json")
-    registry.register(RegisteredSensor("switchbot:co2", "co2-002", "environment", "switchbot", "meter_pro_co2", "", "CO2"))
+    registry.register(RegisteredSensor("switchbot:co2", "co2-002", "environment", "switchbot", "co2_sensor", "", "CO2"))
     publisher = _MqttPublisher()
     manager = BleManager(registry, publisher)
     manager.update_registered_sensor("switchbot:co2", {"sensor_id": "co2-001", "display_name": "CO2", "location": "", "enabled": True})
-    manager.record_advertisement(_candidate("switchbot:co2", values={"co2_ppm": 600}, model="meter_pro_co2"))
+    manager.record_advertisement(_candidate("switchbot:co2", values={"co2_ppm": 600}, model="co2_sensor"))
     assert publisher.messages[0][0] == "omk/co2-001/environment"
     assert json.loads(publisher.messages[0][1])["co2_ppm"] == 600
     manager.update_registered_sensor("switchbot:co2", {"sensor_id": "co2-001", "display_name": "CO2", "location": "", "enabled": False})
-    manager.record_advertisement(_candidate("switchbot:co2", values={"co2_ppm": 601}, model="meter_pro_co2"))
+    manager.record_advertisement(_candidate("switchbot:co2", values={"co2_ppm": 601}, model="co2_sensor"))
     assert len(publisher.messages) == 1
 
 
 def test_waterproof_sensor_setup_uses_th_ids_and_runtime_uses_environment_topic(tmp_path: Path) -> None:
     registry = SensorRegistry(tmp_path / "sensors.json")
-    registry.register(RegisteredSensor("switchbot:meter", "th-001", "environment", "switchbot", "meter", "", "室内"))
+    registry.register(RegisteredSensor("switchbot:meter", "th-001", "environment", "switchbot", "temperature_humidity_sensor", "", "室内"))
     publisher = _MqttPublisher()
     manager = BleManager(registry, publisher)
     outdoor = DecodedAdvertisement(
@@ -356,8 +369,8 @@ def test_motion_decoder_does_not_classify_existing_or_unrelated_switchbot_layout
     co2 = decode("B0:E9:FE:58:15:CC", -40, {SWITCHBOT_COMPANY_ID: bytes.fromhex("b0e9fe5815ccf6e405982e0024020e00")}, {}, "now")
     malformed = decode("CF:FC:6A:48:DB:15", -40, {SWITCHBOT_COMPANY_ID: bytes.fromhex("cffc6a48db150c")}, {}, "now")
     unrelated = decode("CF:FC:6A:48:DB:15", -40, {SWITCHBOT_COMPANY_ID: bytes.fromhex("cffc6a48db150b2d0087")}, {}, "now")
-    assert meter is not None and meter.model == "meter"
-    assert co2 is not None and co2.model == "meter_pro_co2"
+    assert meter is not None and meter.model == "temperature_humidity_sensor"
+    assert co2 is not None and co2.model == "co2_sensor"
     assert malformed is not None and malformed.model == "unknown_switchbot"
     assert unrelated is not None and unrelated.model == "unknown_switchbot"
 
@@ -446,8 +459,8 @@ def test_contact_decoder_does_not_misclassify_existing_sensor_layouts() -> None:
     motion = decode("CF:FC:6A:48:DB:15", -40, {SWITCHBOT_COMPANY_ID: bytes.fromhex("cffc6a48db150c6c0000")}, {}, "now")
     malformed = decode("D3:B2:04:E2:31:25", -40, {}, {METER_SERVICE_UUID: bytes.fromhex("64")}, "now")
     unrelated = decode("D3:B2:04:E2:31:25", -40, {SWITCHBOT_COMPANY_ID: bytes.fromhex("d3b204e23125704c01530051c1")}, {}, "now")
-    assert meter is not None and meter.model == "meter"
-    assert co2 is not None and co2.model == "meter_pro_co2"
+    assert meter is not None and meter.model == "temperature_humidity_sensor"
+    assert co2 is not None and co2.model == "co2_sensor"
     assert motion is not None and motion.model == "motion_sensor"
     assert malformed is not None and malformed.model == "unknown_switchbot"
     assert unrelated is not None and unrelated.model == "unknown_switchbot"

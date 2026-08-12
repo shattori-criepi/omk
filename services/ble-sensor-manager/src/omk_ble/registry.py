@@ -10,6 +10,11 @@ from pathlib import Path
 from .models import RegisteredSensor
 
 SENSOR_ID_RE = re.compile(r"^[a-z][a-z0-9-]{0,63}$")
+LEGACY_MODEL_NAMES = {
+    "meter": "temperature_humidity_sensor",
+    "meter_plus": "temperature_humidity_sensor",
+    "meter_pro_co2": "co2_sensor",
+}
 
 
 class RegistryError(ValueError):
@@ -28,11 +33,12 @@ class SensorRegistry:
             sensors = data.get("sensors", [])
             if not isinstance(sensors, list):
                 raise RegistryError("sensors must be an array")
-            return [RegisteredSensor.from_dict(item) for item in sensors]
+            return [self._normalise_sensor(RegisteredSensor.from_dict(item)) for item in sensors]
         except (OSError, json.JSONDecodeError, TypeError) as error:
             raise RegistryError(f"cannot read sensor registry: {error}") from error
 
     def register(self, sensor: RegisteredSensor) -> RegisteredSensor:
+        sensor = self._normalise_sensor(sensor)
         if not SENSOR_ID_RE.fullmatch(sensor.sensor_id):
             raise RegistryError("sensor_id must use lowercase letters, digits, and hyphens")
         sensors = self.list()
@@ -42,6 +48,18 @@ class SensorRegistry:
             raise RegistryError("sensor_id is already in use")
         self._write(sensors + [sensor])
         return sensor
+
+    @staticmethod
+    def _normalise_sensor(sensor: RegisteredSensor) -> RegisteredSensor:
+        """Read legacy SwitchBot model names without retaining them on writes."""
+        model = LEGACY_MODEL_NAMES.get(sensor.model, sensor.model)
+        if model == sensor.model:
+            return sensor
+        return RegisteredSensor(
+            device_key=sensor.device_key, sensor_id=sensor.sensor_id,
+            sensor_type=sensor.sensor_type, vendor=sensor.vendor, model=model,
+            location=sensor.location, display_name=sensor.display_name, enabled=sensor.enabled,
+        )
 
     def update(self, device_key: str, *, sensor_id: str, display_name: str, location: str, enabled: bool) -> RegisteredSensor:
         """Update editable logical settings while preserving physical identity."""
