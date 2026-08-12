@@ -291,7 +291,7 @@ def test_motion_manufacturer_packets_decode_only_motion_state() -> None:
 def test_motion_decoder_does_not_classify_existing_or_unrelated_switchbot_layouts() -> None:
     meter = decode("CF:39:41:C7:ED:79", -40, {SWITCHBOT_COMPANY_ID: bytes.fromhex("cf3941c7ed79f40304992c")}, {}, "now")
     co2 = decode("B0:E9:FE:58:15:CC", -40, {SWITCHBOT_COMPANY_ID: bytes.fromhex("b0e9fe5815ccf6e405982e0024020e00")}, {}, "now")
-    malformed = decode("CF:FC:6A:48:DB:15", -40, {SWITCHBOT_COMPANY_ID: bytes.fromhex("cffc6a48db150c6")}, {}, "now")
+    malformed = decode("CF:FC:6A:48:DB:15", -40, {SWITCHBOT_COMPANY_ID: bytes.fromhex("cffc6a48db150c")}, {}, "now")
     unrelated = decode("CF:FC:6A:48:DB:15", -40, {SWITCHBOT_COMPANY_ID: bytes.fromhex("cffc6a48db150b2d0087")}, {}, "now")
     assert meter is not None and meter.model == "meter"
     assert co2 is not None and co2.model == "meter_pro_co2"
