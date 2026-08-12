@@ -1,4 +1,5 @@
 import asyncio
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -227,3 +228,53 @@ def test_unknown_registered_model_with_latest_does_not_raise(tmp_path: Path) -> 
     manager = BleManager(registry)
     manager.record_advertisement(_candidate("switchbot:unknown", model="unknown_switchbot"))
     assert manager.registered_list()[0]["latest"] is not None
+
+
+class _MqttPublisher:
+    def __init__(self) -> None:
+        self.messages: list[tuple[str, str]] = []
+
+    def publish(self, topic: str, payload: str, **_kwargs: object) -> None:
+        self.messages.append((topic, payload))
+
+
+def test_update_registered_sensor_changes_only_logical_settings_and_keeps_runtime_state(tmp_path: Path) -> None:
+    registry = SensorRegistry(tmp_path / "sensors.json")
+    original = RegisteredSensor("switchbot:co2", "co2-002", "environment", "switchbot", "meter_pro_co2", "bedroom", "寝室")
+    registry.register(original)
+    manager = BleManager(registry)
+    manager.record_advertisement(_candidate("switchbot:co2", values={"co2_ppm": 588}, model="meter_pro_co2"))
+    updated = manager.update_registered_sensor("switchbot:co2", {"sensor_id": "co2-001", "display_name": "主寝室", "location": "main-bedroom", "enabled": False})
+    assert updated.device_key == original.device_key
+    assert (updated.vendor, updated.model, updated.sensor_type) == (original.vendor, original.model, original.sensor_type)
+    assert (updated.sensor_id, updated.display_name, updated.location, updated.enabled) == ("co2-001", "主寝室", "main-bedroom", False)
+    assert manager.registered_list()[0]["latest"]["values"] == {"co2_ppm": 588}
+    saved = json.loads((tmp_path / "sensors.json").read_text(encoding="utf-8"))
+    assert set(saved["sensors"][0]) == {"device_key", "sensor_id", "sensor_type", "vendor", "model", "location", "display_name", "enabled"}
+
+
+def test_update_rejects_duplicate_or_invalid_sensor_id_and_unknown_device(tmp_path: Path) -> None:
+    registry = SensorRegistry(tmp_path / "sensors.json")
+    registry.register(RegisteredSensor("switchbot:a", "co2-001", "environment", "switchbot", "meter_pro_co2", "", "A"))
+    registry.register(RegisteredSensor("switchbot:b", "co2-002", "environment", "switchbot", "meter_pro_co2", "", "B"))
+    manager = BleManager(registry)
+    with pytest.raises(RegistryError, match="already"):
+        manager.update_registered_sensor("switchbot:b", {"sensor_id": "co2-001", "display_name": "B", "location": "", "enabled": True})
+    with pytest.raises(RegistryError, match="lowercase"):
+        manager.update_registered_sensor("switchbot:b", {"sensor_id": "Bad_ID", "display_name": "B", "location": "", "enabled": True})
+    with pytest.raises(KeyError):
+        manager.update_registered_sensor("switchbot:missing", {"sensor_id": "co2-003", "display_name": "X", "location": "", "enabled": True})
+
+
+def test_updated_sensor_id_is_used_for_next_mqtt_publish_and_disabled_sensor_is_not_published(tmp_path: Path) -> None:
+    registry = SensorRegistry(tmp_path / "sensors.json")
+    registry.register(RegisteredSensor("switchbot:co2", "co2-002", "environment", "switchbot", "meter_pro_co2", "", "CO2"))
+    publisher = _MqttPublisher()
+    manager = BleManager(registry, publisher)
+    manager.update_registered_sensor("switchbot:co2", {"sensor_id": "co2-001", "display_name": "CO2", "location": "", "enabled": True})
+    manager.record_advertisement(_candidate("switchbot:co2", values={"co2_ppm": 600}, model="meter_pro_co2"))
+    assert publisher.messages[0][0] == "omk/co2-001/environment"
+    assert json.loads(publisher.messages[0][1])["co2_ppm"] == 600
+    manager.update_registered_sensor("switchbot:co2", {"sensor_id": "co2-001", "display_name": "CO2", "location": "", "enabled": False})
+    manager.record_advertisement(_candidate("switchbot:co2", values={"co2_ppm": 601}, model="meter_pro_co2"))
+    assert len(publisher.messages) == 1

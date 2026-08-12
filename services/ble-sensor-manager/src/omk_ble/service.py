@@ -164,6 +164,14 @@ class BleManager:
             index += 1
         return f"{prefix}-{index:03d}"
 
+    def update_registered_sensor(self, device_key: str, request: dict[str, Any]) -> RegisteredSensor:
+        """Update logical registry fields; observations remain keyed by device_key."""
+        return self.registry.update(
+            device_key,
+            sensor_id=request["sensor_id"], display_name=request["display_name"],
+            location=request.get("location", ""), enabled=bool(request["enabled"]),
+        )
+
     def _publish_if_registered(self, advertisement: DecodedAdvertisement) -> None:
         if not self._mqtt:
             return
