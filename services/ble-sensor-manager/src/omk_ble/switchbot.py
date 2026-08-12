@@ -161,12 +161,13 @@ def _decode_contact_manufacturer_data(data: bytes) -> tuple[str, str, dict[str, 
         return None
     # The manufacturer packet's status byte is the current contact state in
     # the Pi captures. Its lower nibble remains 0xc while its upper nibble
-    # changes with the contact state/counters: 0x4c is open; 0x5c, 0xcc, and
-    # 0xdc are closed. Do not use the following counter/time bytes as state.
+    # changes with the contact state/counters. Pi door-operation verification
+    # established that 0x4c means closed, while 0x5c, 0xcc, and 0xdc mean
+    # open. Do not use the following counter/time bytes as state.
     status = data[CONTACT_MANUFACTURER_STATUS_INDEX]
     if (status & 0x0F) != 0x0C:
         return None
-    state = 1 if (status & 0xF0) == 0x40 else 0
+    state = 0 if (status & 0xF0) == 0x40 else 1
     return "contact_sensor", "contact", {"contact_state": state}
 
 
