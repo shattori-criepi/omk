@@ -17,6 +17,7 @@ from .switchbot import decode
 LOGGER = logging.getLogger(__name__)
 ENVIRONMENT_PUBLISH_INTERVAL_SECONDS = 10.0
 STATE_PUBLISH_INTERVAL_SECONDS = 10.0
+POWER_PUBLISH_INTERVAL_SECONDS = 10.0
 
 
 class BleManager:
@@ -36,6 +37,8 @@ class BleManager:
         self._previous_contact_state: dict[str, int] = {}
         self._last_environment_publish_at: dict[str, float] = {}
         self._last_state_publish_at: dict[str, float] = {}
+        self._previous_switch_state: dict[str, int] = {}
+        self._last_power_publish_at: dict[str, float] = {}
         self.setup_candidates: dict[str, DecodedAdvertisement] = {}
         self._setup_candidate_order: list[str] = []
         self.scanning = False
@@ -165,7 +168,7 @@ class BleManager:
             raise ValueError("device was not found in the current setup scan")
         prefix = {
             "temperature_humidity_sensor": "th", "waterproof_sensor": "th", "co2_sensor": "co2",
-            "motion_sensor": "motion", "contact_sensor": "contact",
+            "motion_sensor": "motion", "contact_sensor": "contact", "plug_sensor": "plug",
         }.get(candidate.model, "sensor")
         used_ids = {sensor.sensor_id for sensor in self.registry.list()}
         index = 1
@@ -195,6 +198,9 @@ class BleManager:
         if sensor.sensor_type == "contact":
             self._publish_contact_change(sensor, advertisement)
             return
+        if sensor.sensor_type == "power":
+            self._publish_power(sensor, advertisement)
+            return
         if not sensor.enabled or not self._mqtt:
             return
         if sensor.sensor_type == "environment":
@@ -206,6 +212,23 @@ class BleManager:
         self._mqtt.publish(f"omk/{sensor.sensor_id}/{sensor.sensor_type}", json.dumps(payload), qos=0, retain=False)
         if sensor.sensor_type == "environment":
             self._last_environment_publish_at[sensor.device_key] = now
+
+    def _publish_power(self, sensor: RegisteredSensor, advertisement: DecodedAdvertisement) -> None:
+        """Publish Plug power periodically, but switch transitions immediately."""
+        switch_state = advertisement.values.get("switch_state")
+        if switch_state not in (0, 1):
+            return
+        previous = self._previous_switch_state.get(sensor.device_key)
+        self._previous_switch_state[sensor.device_key] = switch_state
+        if not sensor.enabled or not self._mqtt:
+            return
+        now = self._monotonic_provider()
+        last = self._last_power_publish_at.get(sensor.device_key)
+        if previous == switch_state and last is not None and now - last < POWER_PUBLISH_INTERVAL_SECONDS:
+            return
+        payload = {"device_id": sensor.sensor_id, "measured_at": advertisement.received_at, "quality": "normal", **advertisement.values}
+        self._mqtt.publish(f"omk/{sensor.sensor_id}/power", json.dumps(payload), qos=0, retain=False)
+        self._last_power_publish_at[sensor.device_key] = now
 
     def _publish_motion_change(self, sensor: RegisteredSensor, advertisement: DecodedAdvertisement) -> None:
         """Publish transitions immediately and the current state every 10 seconds."""
