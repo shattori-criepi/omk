@@ -44,7 +44,6 @@ MOTION_STATUS_LOW_BITS = 0x2C
 CONTACT_SERVICE_DEVICE_TYPE = 0x64
 CONTACT_MANUFACTURER_LENGTH = 13
 CONTACT_RESERVED_INDEX = 8
-CONTACT_TRAILER_LOW_BITS = 0x01
 CONTACT_MANUFACTURER_STATUS_INDEX = 7
 
 
@@ -153,21 +152,19 @@ def _decode_contact_manufacturer_data(data: bytes) -> tuple[str, str, dict[str, 
     """Decode the observed manufacturer-only Contact Sensor layout safely."""
     if len(data) != CONTACT_MANUFACTURER_LENGTH:
         return None
-    # Captures show bytes 8 and 10 are reserved zeroes. The final byte changed
-    # from 0x41 to 0xc1, so only its stable lower-six-bit structure is used.
+    # Captures show bytes 8 and 10 are reserved zeroes. The trailer varies
+    # (for example 0x40, 0x80, 0xc0, 0x41, and 0xc1), so it is not a
+    # classifier condition.
     if data[CONTACT_RESERVED_INDEX] != 0 or data[10] != 0:
         return None
-    if (data[-1] & 0x3F) != CONTACT_TRAILER_LOW_BITS:
-        return None
     # The manufacturer packet's status byte is the current contact state in
-    # the Pi captures. Its lower nibble remains 0xc while its upper nibble
-    # changes with the contact state/counters. Pi door-operation verification
-    # established that 0x4c means closed, while 0x5c, 0xcc, and 0xdc mean
-    # open. Do not use the following counter/time bytes as state.
+    # the Pi captures. Its lower nibble remains 0xc. The state itself is bit
+    # 4: 0x4c/0xcc are closed and 0x5c/0xdc are open. The other status bits,
+    # and the following counter/time bytes, are not state classifiers.
     status = data[CONTACT_MANUFACTURER_STATUS_INDEX]
     if (status & 0x0F) != 0x0C:
         return None
-    state = 0 if (status & 0xF0) == 0x40 else 1
+    state = 1 if status & 0x10 else 0
     return "contact_sensor", "contact", {"contact_state": state}
 
 

@@ -354,6 +354,18 @@ def test_contact_sensor_decodes_official_service_data_and_manufacturer_layouts()
     assert manufacturer_closed is not None and manufacturer_closed.values == {"contact_state": 0}
     assert manufacturer_open is not None and manufacturer_open.values == {"contact_state": 1}
 
+    for packet, expected_state in (
+        ("d3b204e231251d4c003a002d80", 0),
+        ("d3b204e231251e5c003e0000c0", 1),
+        ("d3b204e231251fdc00010003c0", 1),
+        ("d3b204e2312520cc00040000c0", 0),
+        ("d3b204e2312521dc0007000040", 1),
+        ("d3b204e2312522cc000e000140", 0),
+    ):
+        decoded = decode("D3:B2:04:E2:31:25", -31, {SWITCHBOT_COMPANY_ID: bytes.fromhex(packet)}, {}, "now")
+        assert decoded is not None and decoded.model == "contact_sensor"
+        assert decoded.values == {"contact_state": expected_state}
+
 
 def test_contact_prefers_current_manufacturer_state_over_stale_service_data() -> None:
     stale_open_service_data = {METER_SERVICE_UUID: bytes.fromhex("64006405011300d981")}
