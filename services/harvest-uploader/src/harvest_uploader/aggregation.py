@@ -60,6 +60,12 @@ def _number(value: Any) -> float | int | None:
     return value
 
 
+def _binary_state(value: Any) -> int | None:
+    if isinstance(value, bool) or value not in (0, 1):
+        return None
+    return int(value) if isinstance(value, (int, float)) else None
+
+
 class MinuteAggregator:
     """Keeps only the current open minute; callers discard it on restart."""
 
@@ -69,6 +75,9 @@ class MinuteAggregator:
         self._counts: dict[str, int] = {}
         self._latest: dict[str, float | int] = {}
         self._latest_times: dict[str, datetime] = {}
+        self._maximums: dict[str, int] = {}
+        self._contact_changed: dict[str, int] = {}
+        self._contact_previous_state: dict[str, int] = {}
 
     def ingest(self, topic: str, payload: dict[str, Any], received_at: datetime) -> dict[str, Any] | None:
         start = _minute(received_at)
@@ -79,6 +88,25 @@ class MinuteAggregator:
             return completed
         parts = topic.split("/")
         kind = parts[2]
+        sensor_id = parts[1]
+        if kind == "motion":
+            state = _binary_state(payload.get("motion_state"))
+            if state is not None:
+                field = f"{sensor_id}_motion_state"
+                self._maximums[field] = max(self._maximums.get(field, 0), state)
+            return completed
+        if kind == "contact":
+            state = _binary_state(payload.get("contact_state"))
+            if state is not None:
+                state_field = f"{sensor_id}_contact_state"
+                changed_field = f"{sensor_id}_contact_changed"
+                previous = self._contact_previous_state.get(sensor_id)
+                self._contact_changed[changed_field] = max(self._contact_changed.get(changed_field, 0), int(previous is not None and previous != state))
+                self._contact_previous_state[sensor_id] = state
+                if received_at >= self._latest_times.get(state_field, self._start):
+                    self._latest[state_field] = state
+                    self._latest_times[state_field] = received_at
+            return completed
         averages = self._environment_averages(parts[1], payload) if kind == "environment" else AVERAGES.get(kind, {})
         for source, target in averages.items():
             value = _number(payload.get(source))
@@ -101,6 +129,8 @@ class MinuteAggregator:
         record: dict[str, Any] = {"time": self._start.isoformat(timespec="seconds")}
         for field, total in self._sums.items():
             record[field] = total / self._counts[field]
+        record.update(self._maximums)
+        record.update(self._contact_changed)
         record.update(self._latest)
         if "broute_grid_power_w" in record:
             power = record["broute_grid_power_w"]
@@ -111,6 +141,8 @@ class MinuteAggregator:
         self._counts.clear()
         self._latest.clear()
         self._latest_times.clear()
+        self._maximums.clear()
+        self._contact_changed.clear()
         return record if len(record) > 1 else None
 
     @staticmethod
@@ -118,7 +150,7 @@ class MinuteAggregator:
         parts = topic.split("/")
         if len(parts) != 3 or parts[0] != "omk" or not parts[1]:
             return False
-        if parts[2] == "environment":
+        if parts[2] in ("environment", "motion", "contact"):
             return SENSOR_ID_RE.fullmatch(parts[1]) is not None
         return parts[2] in (set(AVERAGES) | set(LATEST))
 
