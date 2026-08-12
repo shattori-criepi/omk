@@ -32,13 +32,16 @@ body {
 }
 
 .topbar {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 16px;
   min-width: 0;
 }
 
 .current-datetime {
+  min-width: 0;
+  overflow: hidden;
   margin: 0;
   font-size: clamp(28px, 4.1vw, 46px);
   font-weight: 700;
@@ -54,11 +57,11 @@ body {
 }
 
 .status-area {
-  margin-left: auto;
   display: flex;
   align-items: center;
   gap: clamp(8px, 1vw, 14px);
   min-width: 0;
+  flex-shrink: 0;
 }
 
 .admin-link {
@@ -327,17 +330,14 @@ body {
 
 @media (max-width: 800px) {
   .topbar { gap: 8px; }
-  .status-area { gap: 7px; }
-  .updated { max-width: 13rem; overflow: hidden; text-overflow: ellipsis; }
+  .current-datetime { font-size: clamp(26px, 4.1vw, 38px); }
+  .status-area { gap: 7px; flex-shrink: 0; }
+  .updated { max-width: min(13rem, 22vw); overflow: hidden; text-overflow: ellipsis; }
   .sensor-toolbar { grid-template-columns: 1fr; }
   .admin-actions { width: 100%; }.admin-actions button { flex: 1; }
 
   .dashboard {
     grid-template-rows: auto minmax(0, 1fr) minmax(0, 1.2fr);
-  }
-
-  .current-datetime {
-    font-size: clamp(26px, 4.1vw, 38px);
   }
 
   .cards-layout {
@@ -355,11 +355,15 @@ body {
 
 @media (max-width: 600px) {
   .topbar {
-    align-items: flex-start;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    align-items: center;
+    gap: 6px;
   }
 
   .current-datetime {
-    white-space: normal;
+    font-size: clamp(20px, 6vw, 30px);
+    white-space: nowrap;
+    text-overflow: ellipsis;
   }
 
   .status-area {
@@ -369,8 +373,14 @@ body {
   }
 
   .updated {
+    max-width: 8rem;
     font-size: 10px;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
+
+  .freshness { font-size: 10px; padding: 0.3em 0.55em; }
+  .admin-link { width: 48px; height: 48px; border-radius: 12px; }
 
   .power-hero {
     grid-template-columns: minmax(0, 1fr) minmax(140px, 34%);
