@@ -22,6 +22,12 @@ Unknown SwitchBot advertisements intentionally appear with raw manufacturer and
 service data hex during setup. This permits real-device validation for Meter Pro
 CO2, motion, and contact sensors without publishing guessed values.
 
+OMK keeps product names separate from internal models: SwitchBot Meter and
+Meter Plus use `temperature_humidity_sensor`, and SwitchBot Meter Pro CO2 uses
+`co2_sensor`. Existing registry entries with the former `meter`, `meter_plus`,
+or `meter_pro_co2` values are read compatibly and rewritten with the current
+names on the next registry update.
+
 The current Pi-captured manufacturer layouts decode SwitchBot Meter temperature
 and humidity, and Meter Pro CO2 temperature, humidity, and CO2. The CO2 layout
 is based on matching measurements from two physical devices; it does not use a

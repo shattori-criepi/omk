@@ -157,7 +157,7 @@ class BleManager:
         if not candidate:
             raise ValueError("device was not found in the current setup scan")
         prefix = {
-            "meter": "th", "meter_plus": "th", "waterproof_sensor": "th", "meter_pro_co2": "co2",
+            "temperature_humidity_sensor": "th", "waterproof_sensor": "th", "co2_sensor": "co2",
             "motion_sensor": "motion", "contact_sensor": "contact",
         }.get(candidate.model, "sensor")
         used_ids = {sensor.sensor_id for sensor in self.registry.list()}
