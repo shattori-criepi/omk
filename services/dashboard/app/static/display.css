@@ -61,6 +61,11 @@ body {
   min-width: 0;
 }
 
+.admin-link, .back-link { color: #f8fafc; text-decoration: none; font-size: clamp(24px, 3vw, 34px); background: transparent; border: 0; padding: .25em; }
+.admin { max-width: 900px; min-height: 100dvh; margin: auto; padding: clamp(18px, 4vw, 36px); }
+.admin-header { display: flex; align-items: center; gap: 18px; margin-bottom: 24px; }.admin-header h1 { margin: 0; font-size: clamp(28px, 6vw, 48px); }
+.admin-menu, .sensor-list { display: grid; gap: 14px; }.admin-menu button, .admin-actions button, .sensor-card button { min-height: 64px; padding: 14px 18px; border: 0; border-radius: 14px; color: inherit; background: #1e293b; font: inherit; text-align: left; font-size: clamp(18px, 3.5vw, 26px); }.admin-menu button { display: flex; justify-content: space-between; }.admin-menu button:disabled { opacity: .5; }.admin-menu small { font-size: .55em; }.admin-actions { display: flex; gap: 12px; margin: 18px 0; }.admin-actions .primary, .sensor-card .register { background: #2563eb; font-weight: 700; }.setup-status { color: #cbd5e1; line-height: 1.5; }.sensor-card { padding: 18px; border-radius: 16px; background: #172554; }.sensor-card h2 { margin: 0 0 8px; font-size: 22px; }.sensor-card p { color: #bfdbfe; margin: 8px 0; }.sensor-card ul { padding-left: 1.2em; line-height: 1.55; }.error { color: #fca5a5; }
+
 .updated {
   margin: 0;
   color: #94a3b8;

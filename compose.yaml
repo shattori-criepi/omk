@@ -20,6 +20,9 @@ services:
       TZ: Asia/Tokyo
       OMK_PROCESSED_DATA_ROOT: /app/data/processed
       OMK_LATEST_DATA_ROOT: /app/data/latest
+      OMK_BLE_MANAGER_URL: http://host.docker.internal:8787
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./data/processed:/app/data/processed:ro
       - ./data/latest:/app/data/latest:ro
