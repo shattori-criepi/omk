@@ -82,7 +82,7 @@ docker compose logs --tail=100 sensor-collector
 
 各JSONL行は独立したJSONです。一次保存は汎用JSONLとし、CSVなどの用途別形式は後段の処理で生成します。
 
-遠隔可視化用には、独立した`services/harvest-uploader`が同じMQTTを専用client IDで購読し、SEN66、Bルート、一条電力フローを1分単位で集約してSORACOM Harvest Dataへ送信します。JSONLは10秒生データの一次保存、Parquetは将来の分析・CSV抽出用派生データ、Harvest Data／Lagoonは遠隔可視化という役割分担です。詳細は[harvest-uploader README](services/harvest-uploader/README.md)を参照してください。
+遠隔可視化用には、独立した`services/harvest-uploader`が同じMQTTを専用client IDで購読し、SEN66、Bルート、一条電力フロー、およびBLE environment / motion / contactセンサを1分単位で集約してSORACOM Harvest Dataへ送信します。JSONLはMQTTの一次保存、Parquetは将来の分析・CSV抽出用派生データ、Harvest Data／Lagoonは遠隔可視化という役割分担です。Harvest uploaderはJSONLやParquetを読まずMQTTから直接集約します。詳細は[harvest-uploader README](services/harvest-uploader/README.md)を参照してください。
 
 分析用には、独立した`services/data-transformer`でJSONLを`data/processed/`配下の日時・データセット別Parquetへ変換できます。Bルートの瞬時電力・積算電力量・30分値とSEN66を正規化します。`status`は管理情報として意図的に除外し、未知のトピックや不正レコードだけを`data/errors/transform/`へ追跡情報付きで記録します。実行方法とスキーマは[サービスREADME](services/data-transformer/README.md)を参照してください。
 

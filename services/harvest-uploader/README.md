@@ -24,7 +24,7 @@ SEN66は`sen66_temperature_c`、`sen66_relative_humidity_percent`、`sen66_co2_p
 
 `environment` は汎用のセンサ入力です。許可された `sensor_id`（英数字、`-`、`_`）ごとに、`<sensor_id>_temperature_c`、`<sensor_id>_relative_humidity_percent`、`<sensor_id>_co2_ppm` を生成し、存在する各項目を1分平均で送信します。これらはSEN66の固定fieldとは独立して共存します。
 
-`motion` は `<sensor_id>_motion_state` をその1分の最大値として送信します。`contact` は開閉回数を保存せず、状態変化が一度でもあれば `<sensor_id>_contact_changed` を1、最後に観測した状態を `<sensor_id>_contact_state` として送信します。分境界をまたぐ状態変化は次の分の変化として扱い、再起動後の最初の観測は変化に数えません。
+`motion` は `<sensor_id>_motion_state` をその1分の最大値として送信します（0=その分に検知なし、1=一度以上検知）。`contact` は開閉回数を保存せず、状態変化が一度でもあれば `<sensor_id>_contact_changed` を1、最後に観測した状態を `<sensor_id>_contact_state` として送信します（0=閉、1=開）。分境界をまたぐ状態変化は次の分の変化として扱い、再起動後の最初の観測は変化に数えません。
 
 ## 再送と設定
 
