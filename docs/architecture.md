@@ -344,6 +344,27 @@ omk/<device_id>/<data_type>
 
 QoS、retain、再送上限は実機試験で確定します。
 
+### 8.3 BLEセンサ管理とHarvest経路
+
+SwitchBotのペアリング不要BLE advertisementは、Raspberry Piホスト上の
+`omk-ble-sensor-manager`が常時受動受信する。物理個体は
+`switchbot:<小文字MAC・コロンなし>`形式の`device_key`、OMK上の論理センサは
+`sensor_id`で識別する。registryは識別・表示・設置の設定だけを保持し、計測値、RSSI、
+受信時刻、raw advertisementはruntime stateとする。
+
+対応modelは`temperature_humidity_sensor`、`co2_sensor`、`motion_sensor`、
+`contact_sensor`、`waterproof_sensor`である。environmentは`temperature_c`と
+`relative_humidity_percent`、必要に応じて`co2_ppm`へ正規化する。setupはDashboard
+管理画面から開始し、未登録候補の判定、`sensor_id`自動提案、表示名・location設定を経て
+登録する。温湿度系は`th-xxx`、CO2は`co2-xxx`、状態系は`motion-xxx`、
+`contact-xxx`を用いる。
+
+MQTT publishはenvironmentが初回即時・以後最短10秒間隔、motion/contactが状態変化時
+即時・同一状態も最短10秒間隔である。BLE受信とruntime state更新は広告ごとに行い、
+`enabled=false`ではpublishだけを止める。`harvest-uploader`はJSONL/Parquetを介さず
+`omk/#`から直接1分集約する。environmentはsensor_id付きfieldの平均、motionは最大値、
+contactは変化有無と最後の状態として、SEN66等と同じHarvest recordに併存する。
+
 ## 9. データフロー
 
 ### 9.1 通常計測

@@ -61,15 +61,18 @@ environment payload は `device_id`、`measured_at`、`quality`、利用可能�
 `relative_humidity_percent`、`co2_ppm`、`battery_percent` を含む。collector
 は従来通り型を解釈せず JSONL に保存する。
 
-Motion Sensor は advertisement ごとの測定値を publish せず、状態が変化した
-ときだけ `{"device_id":"motion-001","measured_at":"...","motion_state":1}`
-の形で publish する。サービス起動後の初回 advertisement は状態初期化のみで、
-publish しない。
+BLE advertisement は常時受信し、runtimeのlatest値、RSSI、受信時刻は広告ごとに
+更新する。environmentは初回の正常値を即時publishし、以後は`device_key`ごとに
+最短10秒間隔でpublishする。Motion Sensorは状態変化時に即時publishし、同一状態も
+最短10秒間隔で `{"device_id":"motion-001","measured_at":"...","motion_state":1}`
+の形でpublishする。`motion_state`は0=不在、1=検知である。
 
-Contact Sensor も状態変化時だけ
+Contact Sensorも状態変化時に即時publishし、同一状態も最短10秒間隔で
 `{"device_id":"contact-001","measured_at":"...","contact_state":1}` を
-publish する。`contact_state` は 0=閉、1=開で、公式の timeout-not-close も
-開（1）として正規化する。
+publishする。`contact_state`は0=閉、1=開で、公式のtimeout-not-closeも開（1）として
+正規化する。各rate limitはmonotonic clockを使い、`enabled=false`ではBLE observationと
+runtime更新を継続する一方、MQTT publishは停止する。したがってJSONLへのSwitchBot
+一次保存は厳密な固定周期ではなく、通常は最短約10秒間隔となる。
 
 ## Bルート接続
 
