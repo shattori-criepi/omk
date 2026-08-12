@@ -1,3 +1,4 @@
+import asyncio
 from pathlib import Path
 
 import pytest
@@ -107,6 +108,49 @@ def test_setup_candidate_order_is_discovery_order_and_updates_in_place(tmp_path:
     assert [item["device_key"] for item in candidates] == ["switchbot:a", "switchbot:b", "switchbot:c"]
     assert candidates[0]["rssi"] == -10
     assert candidates[0]["values"] == {"temperature_c": 22.0}
+
+
+def test_latest_advertisement_replaces_all_candidate_data_without_reordering(tmp_path: Path) -> None:
+    manager = BleManager(SensorRegistry(tmp_path / "sensors.json"))
+    manager.scanning = True
+    first = DecodedAdvertisement("switchbot:a", "switchbot", "meter_pro_co2", "environment", -79, "first", {"co2_ppm": 577}, {"manufacturer_data": {"0969": "first"}})
+    second = DecodedAdvertisement("switchbot:a", "switchbot", "meter_pro_co2", "environment", -31, "second", {"co2_ppm": 566}, {"manufacturer_data": {"0969": "second"}})
+    manager.record_advertisement(first)
+    manager.record_advertisement(second)
+    candidates = manager.candidate_list()
+    assert len(candidates) == 1
+    assert candidates[0]["device_key"] == "switchbot:a"
+    assert candidates[0]["rssi"] == -31
+    assert candidates[0]["received_at"] == "second"
+    assert candidates[0]["values"] == {"co2_ppm": 566}
+    assert candidates[0]["raw"] == {"manufacturer_data": {"0969": "second"}}
+
+
+def test_callback_updates_candidate_after_stop_and_new_scan_session(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    manager = BleManager(SensorRegistry(tmp_path / "sensors.json"))
+    decoded = iter((_candidate("switchbot:a", rssi=-70, values={"temperature_c": 20.0}), _candidate("switchbot:a", rssi=-20, values={"temperature_c": 21.0})))
+    monkeypatch.setattr("omk_ble.service.decode", lambda *_args: next(decoded))
+    device = type("Device", (), {"address": "AA:BB:CC:DD:EE:FF"})()
+    advertisement = type("Advertisement", (), {"rssi": -1, "manufacturer_data": {}, "service_data": {}})()
+
+    async def start_collection() -> None:
+        return None
+
+    manager.start_collection = start_collection  # type: ignore[method-assign]
+
+    async def exercise() -> None:
+        await manager.start_scan(60)
+        manager._on_detection(device, advertisement)
+        await manager.stop_scan()
+        await manager.start_scan(60)
+        manager._on_detection(device, advertisement)
+        await manager.stop_scan()
+
+    asyncio.run(exercise())
+    candidates = manager.candidate_list()
+    assert [item["device_key"] for item in candidates] == ["switchbot:a"]
+    assert candidates[0]["rssi"] == -20
+    assert candidates[0]["values"] == {"temperature_c": 21.0}
 
 
 def test_registered_device_is_excluded_then_moves_from_candidate_list(tmp_path: Path) -> None:
