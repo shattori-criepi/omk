@@ -1,6 +1,23 @@
 <!doctype html>
-<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><title>OMK 管理</title><link rel="stylesheet" href="{{ url_for('static', path='/display.css') }}?v=20260812-ble"><script src="{{ url_for('static', path='/admin.js') }}?v=20260812-ble" defer></script></head>
-<body><main class="admin" aria-label="OMK 管理画面"><header class="admin-header"><a href="/display" class="back-link">← ダッシュボード</a><h1>管理</h1></header>
-<section class="admin-menu" id="admin-menu"><button id="open-sensors">センサ管理 <span>›</span></button><button disabled>システム管理 <small>準備中</small></button><button disabled>ネットワーク <small>準備中</small></button><button disabled>システム情報 <small>準備中</small></button></section>
-<section id="sensor-management" hidden><div class="admin-header"><button id="back-menu" class="back-link">← 管理</button><h1>センサ管理</h1></div><p id="setup-status" class="setup-status">登録済みセンサを表示しています。</p><div class="admin-actions"><button id="start-scan" class="primary">センサを追加</button><button id="stop-scan" hidden>探索を中止</button></div><div id="registered-sensors" class="sensor-list"></div><div id="candidates" class="sensor-list" hidden></div></section>
-</main></body></html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title>OMK 管理</title>
+    <link rel="stylesheet" href="{{ url_for('static', path='/display.css') }}?v=20260812-admin2">
+  </head>
+  <body>
+    <main class="admin-page" aria-label="OMK 管理画面">
+      <header class="admin-page-header">
+        <a href="/display" class="back-link">← ダッシュボード</a>
+        <h1>管理</h1>
+      </header>
+      <nav class="admin-menu" aria-label="管理メニュー">
+        <a href="/admin/sensors" class="admin-menu-item">センサ管理 <span aria-hidden="true">›</span></a>
+        <span class="admin-menu-item is-disabled">システム管理 <small>準備中</small></span>
+        <span class="admin-menu-item is-disabled">ネットワーク <small>準備中</small></span>
+        <span class="admin-menu-item is-disabled">システム情報 <small>準備中</small></span>
+      </nav>
+    </main>
+  </body>
+</html>
