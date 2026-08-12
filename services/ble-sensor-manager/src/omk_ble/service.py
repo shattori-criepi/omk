@@ -19,7 +19,10 @@ LOGGER = logging.getLogger(__name__)
 class BleManager:
     def __init__(self, registry: SensorRegistry, mqtt_client: mqtt.Client | None = None) -> None:
         self.registry = registry
-        self.candidates: dict[str, DecodedAdvertisement] = {}
+        # Observations run continuously for registered-sensor health. Setup
+        # candidates are a separate, per-session insertion-ordered mapping.
+        self.observations: dict[str, DecodedAdvertisement] = {}
+        self.setup_candidates: dict[str, DecodedAdvertisement] = {}
         self.scanning = False
         self._scanner: Any = None
         self._timeout_task: asyncio.Task[None] | None = None
@@ -28,6 +31,7 @@ class BleManager:
 
     async def start_scan(self, timeout_seconds: int = 60) -> None:
         await self.start_collection()
+        self.begin_setup_session()
         self.scanning = True
         if self._timeout_task:
             self._timeout_task.cancel()
@@ -54,11 +58,24 @@ class BleManager:
             self._timeout_task.cancel()
         self.scanning = False
 
+    def begin_setup_session(self) -> None:
+        """Reset only setup candidates; passive observations remain intact."""
+        self.setup_candidates.clear()
+
     def _on_detection(self, device: Any, advertisement: Any) -> None:
         decoded = decode(device.address, advertisement.rssi, advertisement.manufacturer_data, advertisement.service_data, now_iso())
         if decoded:
-            self.candidates[decoded.device_key] = decoded
-            self._publish_if_registered(decoded)
+            self.record_advertisement(decoded)
+
+    def record_advertisement(self, decoded: DecodedAdvertisement) -> None:
+        """Record an advertisement without ever reordering setup candidates."""
+        self.observations[decoded.device_key] = decoded
+        registered_keys = {sensor.device_key for sensor in self.registry.list()}
+        if self.scanning and decoded.device_key not in registered_keys:
+            # Assigning an existing key updates values in place; Python dict
+            # insertion order stays unchanged throughout this setup session.
+            self.setup_candidates[decoded.device_key] = decoded
+        self._publish_if_registered(decoded)
 
     def registered_list(self) -> list[dict[str, Any]]:
         """Return registration records without ever deleting an offline sensor."""
@@ -66,7 +83,7 @@ class BleManager:
         result = []
         for sensor in self.registry.list():
             item = sensor.as_dict()
-            seen = self.candidates.get(sensor.device_key)
+            seen = self.observations.get(sensor.device_key)
             item["last_received_at"] = seen.received_at if seen else None
             if not seen:
                 item["status"] = "offline"
@@ -80,18 +97,20 @@ class BleManager:
         return result
 
     def candidate_list(self) -> list[dict[str, Any]]:
-        registered = {item.device_key: item for item in self.registry.list()}
+        registered_keys = {item.device_key for item in self.registry.list()}
         items = []
-        for candidate in self.candidates.values():
+        for candidate in self.setup_candidates.values():
+            # Registration can occur while an API response is in flight.
+            if candidate.device_key in registered_keys:
+                continue
             item = candidate.as_dict()
-            item["registered"] = candidate.device_key in registered
             item["identifier_suffix"] = candidate.device_key[-4:].upper()
             item["highlight"] = "value_changed" if candidate.values else None
             items.append(item)
-        return sorted(items, key=lambda value: value["rssi"], reverse=True)
+        return items
 
     def register(self, request: dict[str, Any]) -> RegisteredSensor:
-        candidate = self.candidates.get(request["device_key"])
+        candidate = self.setup_candidates.get(request["device_key"])
         if not candidate:
             raise ValueError("device was not found in the current setup scan")
         sensor = RegisteredSensor(
@@ -99,7 +118,25 @@ class BleManager:
             vendor=candidate.vendor, model=candidate.model, location=request.get("location", ""),
             display_name=request["display_name"], enabled=bool(request.get("enabled", True)),
         )
-        return self.registry.register(sensor)
+        registered = self.registry.register(sensor)
+        # Remove it immediately; remaining candidates retain their order.
+        self.setup_candidates.pop(candidate.device_key, None)
+        return registered
+
+    def suggested_sensor_id(self, device_key: str) -> str:
+        """Suggest a type-plus-sequence OMK ID without changing registration."""
+        candidate = self.setup_candidates.get(device_key)
+        if not candidate:
+            raise ValueError("device was not found in the current setup scan")
+        prefix = {
+            "meter": "th", "meter_plus": "th", "meter_pro_co2": "co2",
+            "motion_sensor": "motion", "contact_sensor": "contact",
+        }.get(candidate.model, "sensor")
+        used_ids = {sensor.sensor_id for sensor in self.registry.list()}
+        index = 1
+        while f"{prefix}-{index:03d}" in used_ids:
+            index += 1
+        return f"{prefix}-{index:03d}"
 
     def _publish_if_registered(self, advertisement: DecodedAdvertisement) -> None:
         if not self._mqtt:

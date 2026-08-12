@@ -29,7 +29,8 @@
       <form id="register-form" method="dialog">
         <h2 id="register-title">センサを登録</h2>
         <p id="register-device" class="dialog-device"></p>
-        <label>OMK センサID<input id="sensor-id" name="sensor_id" required pattern="[a-z][a-z0-9-]{0,63}" placeholder="living-env-01" autocomplete="off"></label>
+        <label>OMK センサID<input id="sensor-id" name="sensor_id" required pattern="[a-z][a-z0-9-]{0,63}" placeholder="co2-001" autocomplete="off"></label>
+        <p class="field-hint">種別＋連番を自動提案します（例: <code>co2-001</code>、<code>th-001</code>）。</p>
         <label>表示名<input id="display-name" name="display_name" required maxlength="64" placeholder="リビング" autocomplete="off"></label>
         <label>設置場所（任意）<input id="location" name="location" maxlength="64" placeholder="living-room" autocomplete="off"></label>
         <p id="register-error" class="error" hidden></p>
