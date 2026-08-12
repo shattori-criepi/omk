@@ -1,8 +1,8 @@
-# L1 Coilcraft XGL4020-472MEC footprint audit — 2026-08-03 JST
+# L1 Coilcraft XGL4020-472MEC footprint監査 — 2026-08-03 JST
 
-Initial scope was documentation and audit only. **Integration update, 2026-08-03 JST:** the generator and formal schematic now use the accepted `Inductor_SMD:L_Coilcraft_XxL4020`, MPN `XGL4020-472MEC` and LCSC `C6012418`; the generator was rerun deterministically, ERC/PDF/SVG passed, and the L1 netlist was unchanged. No PCB, footprint-library file, BOM/CPL, commit or push was changed. The earlier `Inductor_SMD:L_Vishay_IHLP-2020` assignment is retained below solely as rejected-history evidence.
+当初の対象範囲は文書化と監査のみであった。**統合更新、2026-08-03 JST:** generatorと正式回路図は承認済みの`Inductor_SMD:L_Coilcraft_XxL4020`、MPN `XGL4020-472MEC`、LCSC `C6012418`を使用する。generatorを決定論的に再実行し、ERC/PDF/SVGはpass、L1 netlistは不変だった。PCB、footprint-library file、BOM/CPL、commit、pushは変更していない。以前の`Inductor_SMD:L_Vishay_IHLP-2020`割り当ては、REJECTED履歴の根拠としてのみ以下に残す。
 
-## Controlled sources
+## 管理された出典
 
 All package and land-pattern dimensions below come from Coilcraft primary sources, retrieved 2026-08-03 JST.
 
@@ -14,7 +14,7 @@ All package and land-pattern dimensions below come from Coilcraft primary source
 
 The accessible XGL data sheet gives no separate coplanarity limit, solder-mask expansion, paste-aperture rule, or part-specific reflow profile. Therefore those values are not invented here: use the board assembler's process rules and Coilcraft Document 362, then validate the paste/mask result in the next footprint-integration task. MSL is 1 (unlimited floor life below 30 °C/85% RH), RoHS and halogen-free are stated by Coilcraft. `M` denotes ±20% tolerance, `E` tin-silver (96.5/3.5) over copper, and `C` a 7-inch machine-ready reel. The reel page establishes tape orientation, but this environment cannot make a controlled visual comparison between that drawing and an installed 3D model.
 
-## Official XGL4020-472MEC package and land data
+## 公式XGL4020-472MEC packageとland data
 
 | Item | Coilcraft controlled value | Basis / note |
 | --- | --- | --- |
@@ -30,7 +30,7 @@ The accessible XGL data sheet gives no separate coplanarity limit, solder-mask e
 | Pin numbers | No package pin numbers specified | KiCad pads 1/2 are schematic identities; map SW/output consistently and preserve the physical start-lead orientation during placement. |
 | Magnetic construction | Magnetically shielded composite | Series/product pages |
 
-## Current footprint: direct KiCad extraction
+## 現行footprint: KiCadから直接抽出した値
 
 Inspected installed file: `/usr/share/kicad/footprints/Inductor_SMD.pretty/L_Vishay_IHLP-2020.kicad_mod`.
 
@@ -46,7 +46,7 @@ Inspected installed file: `/usr/share/kicad/footprints/Inductor_SMD.pretty/L_Vis
 | 3D reference | `${KICAD9_3DMODEL_DIR}/Inductor_SMD.3dshapes/L_Vishay_IHLP-2020.step`, zero offset/rotation |
 | Installed 3D asset | Not present below `/usr/share/kicad`; `KICAD9_3DMODEL_DIR` is unset in this environment. |
 
-## Numerical comparison and standard-library search
+## 数値比較と標準libraryの検索
 
 The installed `Inductor_SMD.pretty` tree contains no `XGL4020` footprint. The two applicable existing Coilcraft candidates below were read directly; no generic or unverified 4 mm footprint is being assumed.
 
@@ -67,7 +67,7 @@ The installed `Inductor_SMD.pretty` tree contains no `XGL4020` footprint. The tw
 
 `L_Coilcraft_XxL4020` is a common XFL/XEL/XGL-family 4.0 mm footprint rather than an MPN-named XGL file. Its Fab body and all three controlling land values exactly match Document 1529-1. Coilcraft's stated XGL/XFL drop-in relationship provides additional controlled support. `L_Coilcraft_XAL4020-XXX` has matching pads but a 4.30 mm Fab body and an XAL-specific 3D reference; do **not** use it for XGL4020-472MEC.
 
-## Verdict and implementation gate
+## 判定と実装gate
 
 | Status | Decision |
 | --- | --- |
@@ -81,7 +81,7 @@ The installed `Inductor_SMD.pretty` tree contains no `XGL4020` footprint. The tw
 | Phase 3B placement planning | **GO** using the integrated 2D footprint; do not issue fabrication/manufacturing release until MLCC DC-bias evidence and procurement checks are complete. |
 | Manufacturing release | BLOCKED — 3D/mechanical, procurement and MLCC release gates remain. |
 
-## Phase 3B placement rules
+## Phase 3B配置規則
 
 The first four rules are direct consequences of the AP63203 layout guidance already recorded in `power-review.md`; the remaining rows are OMK placement rules for the stated ESP32/SEN66 design.
 
@@ -98,7 +98,7 @@ The first four rules are direct consequences of the AP63203 layout guidance alre
 | Keep the buck/L1 magnetic and switching region away from the SEN66 airflow/temperature-sensitive zone, ESP32 antenna keepout, USB D+/D− pair and sensitive I2C routes. | OMK system rule; ESP32/SEN66 design constraints |
 | Apply fabricator-standard solder-mask expansion and paste aperture first; no Coilcraft-specific paste reduction is specified. Review stencil result and thermal balance with the selected assembler. | Controlled-source limitation + manufacturing rule |
 
-## Integration result and remaining task
+## 統合結果と残作業
 
 Standard-footprint integration is complete: the generator now holds the selected MPN/LCSC/status and `Inductor_SMD:L_Coilcraft_XxL4020`; L1 pad 1 remains `SW`, pad 2 remains `+3V3`, the complete netlist is unchanged, and the formal schematic was regenerated with 0 errors / the two existing U1 library warnings. PDF and SVG were re-exported. GUI operation is unavailable in this environment, so GUI visual review remains a Phase 3B pre-layout check.
 

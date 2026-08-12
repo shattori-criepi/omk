@@ -1,8 +1,8 @@
-# Murata MLCC DC-bias audit — C1, C4, C5
+# Murata MLCC DC-bias監査 — C1、C4、C5
 
 Audit date: 2026-08-03 JST. Scope is the effective capacitance of C1, C4 and C5 in the AP63203 supply only. This document is an audit record; it does **not** change the generator, formal schematic, PCB, footprint, BOM/CPL or Gerber.
 
-## Official sources and measurement conditions
+## 公式出典と測定条件
 
 | Source | Retrieval / status | Use |
 | --- | --- | --- |
@@ -13,7 +13,7 @@ Audit date: 2026-08-03 JST. Scope is the effective capacitance of C1, C4 and C5 
 
 SimSurfing data used here are **representative characteristic data**, not a production guaranteed minimum: 25°C, AC 0.5 Vrms, the stated DC bias, and the listed part-number family without the tape suffix. The official API reports available temperature points −55°C, 25°C and +85°C. Values below are rounded to two or three meaningful figures; no measured production worst case is inferred.
 
-## Current-design extraction
+## 現行設計の抽出
 
 | Ref. | Formal design / use | MPN and nominal specification | Applied DC voltage |
 | --- | --- | --- | --- |
@@ -23,7 +23,7 @@ SimSurfing data used here are **representative characteristic data**, not a prod
 
 The generator and formal schematic agree on these MPNs, values and nets. C1/C4/C5 have standard `Capacitor_SMD:C_0805_2012Metric` footprints. No formal circuit file was edited for this audit.
 
-## Official DC-bias results
+## 公式DC-bias結果
 
 | Ref. / MPN | Nominal capacitance | SimSurfing DC-bias condition | Representative effective capacitance | Nominal-retention view | Temperature points at applied DC bias |
 | --- | ---: | --- | ---: | ---: | --- |
@@ -33,19 +33,19 @@ The generator and formal schematic agree on these MPNs, values and nets. C1/C4/C
 
 The C4/C5 total is the sum of two equal representative curves. It is not a separately guaranteed two-part minimum. Temperature curves describe the individual selected characteristic at the stated DC/AC condition. Tolerance, DC bias and temperature must not be multiplied into a claimed “official worst case” because Murata has not supplied a combined guaranteed lower-bound data set in the retrieved material.
 
-### C1 input assessment
+### C1入力の評価
 
 AP63203 Table 2 specifies **10 uF nominal** input capacitance. The input-capacitor text separately states that a ceramic capacitor **greater than 10 uF** is sufficient for most applications; these are not the same claim. The 5 V representative value of about 5.28 uF is below the Table-2 nominal value. C2's 100 nF is an EVM-style high-frequency bypass and does not establish 10 uF of bulk effective capacitance.
 
 The datasheet does not publish an AP63203 minimum effective-CIN stability threshold for this exact USB/PTC source impedance and load transient. Therefore the data do not prove the current C1 is sufficient, but also do not prove it must be replaced. C1 is **VERIFY**, not ACCEPT or CHANGE. Before manufacturing release, select/verify the input source impedance and startup transient, and either establish adequate margin by test/calculation or revise the capacitor selection in a separate authorized implementation task.
 
-### C4/C5 output assessment
+### C4/C5出力の評価
 
 AP63203 Table 2 and the WU-EVM use two 22 uF ceramic capacitors. Datasheet output guidance says 22–68 uF ceramic is sufficient for most applications and calls for large capacitance/low ESR for load transient response. At 25°C and 3.3 V, the current pair's representative total is about 23.5 uF, inside that 22–68 uF guidance. The SimSurfing temperature curve yields about 22.1 uF at −55°C and about 21.6 uF at +85°C before any separate tolerance treatment.
 
 Thus the topology is nominally aligned but has little representative margin against the 22 uF lower guidance at high temperature. Because the retrieved official data do not provide a combined DC-bias/tolerance/temperature guaranteed minimum or an AP63203 output-capacitance stability floor, C4/C5 are **VERIFY**, not ACCEPT. This is not evidence of a required schematic change yet.
 
-## AP63203 comparison and disposition
+## AP63203との比較と判定
 
 | Item | Official comparison | Decision | Rationale |
 | --- | --- | --- | --- |
@@ -56,7 +56,7 @@ Thus the topology is nominally aligned but has little representative margin agai
 | Circuit values / parts | No official data establishes a mandatory alternative value/rating for this 5 V USB source | No CHANGE | Any capacitance/voltage-rating change must be a separate approved implementation change after required margin is defined. |
 | Manufacturing release | MLCC effective-capacitance margin and Phase 3B layout/transient verification open | BLOCKED | The representative data remove the prior data-access blocker, but do not prove worst-case AP63203 input/output margin. |
 
-## Status lists
+## 状態一覧
 
 ### ACCEPT
 
@@ -84,7 +84,7 @@ None. The audit does not authorize or require a circuit change from representati
 
 Phase 3B may proceed with the current electrical topology for preliminary placement/routing. Keep C1/C2 at U2 VIN/GND and C4/C5 at the post-L1 output/FB return as required by the AP63203 layout guidance. Do not freeze the manufacturing BOM or release fabrication/assembly data until C1/C4/C5 effective-capacitance margins, thermal/transient behavior and procurement status are closed.
 
-## Repository checks
+## リポジトリ確認
 
 - `git diff --check`: passed for tracked files.
 - `git diff --no-index --check /dev/null hardware/pcb/esp32-c3-main/murata-mlcc-dc-bias-audit.md`: passed (the expected no-index difference exit status was handled; no whitespace diagnostics).

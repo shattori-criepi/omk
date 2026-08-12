@@ -1,15 +1,15 @@
-# Phase 3A power review — 2026-08-03 JST
+# Phase 3A 電源レビュー — 2026-08-03 JST
 
 Scope: AP63203WU-7, L1, C1–C5 only. No schematic change is authorized by this review.
 
-## Primary sources
+## 一次出典
 
 - Diodes Incorporated, *AP63200/AP63201/AP63203/AP63205: 2 A synchronous buck*, retrieved 2026-08-03: https://www.diodes.com/part/view/AP63203
 - Diodes Incorporated, *AP63203WU-EVM User Guide*, retrieved 2026-08-03: https://www.diodes.com/assets/Evaluation-Boards/AP63203WU-EVM-User-Guide.pdf
 - LCSC AP63203WU-7, C780769, retrieved 2026-08-03: https://fat.lcsc.com/product-detail/C780769.html
 - Murata GRM21BR60J226ME39 reference sheet, 2025-01-09: https://search.murata.co.jp/Ceramy/image/img/A01X/G101/ENG/GRM21BR60J226ME39-01A.pdf
 
-## U2 conclusion
+## U2の結論
 
 AP63203WU-7 is the fixed 3.3 V member of the 2 A synchronous-buck family, with 3.8–32 V input, 1.1 MHz nominal switching, and TSOT-23-6 package. Pins are FB=1, EN=2, IN=3, GND=4, SW=5, BST=6. FB is connected directly at the regulated output for this fixed-output version; no external divider is used. EN must not float: tie to IN for always-on operation. The EVM/datasheet reference circuit uses a ceramic input capacitor at IN/GND, 100 nF BST-to-SW capacitor, 4.7 µH-class inductor and ceramic output capacitance.
 
@@ -23,7 +23,7 @@ AP63203WU-7 is the fixed 3.3 V member of the 2 A synchronous-buck family, with 3
 
 Murata GRM21BR60J226ME39L is 0805, 22 µF ±20%, X5R, 6.3 V. Its reference sheet does not state an application-specific 3.3 V effective capacitance in the static document; obtain SimSurfing curve/approval data before release. Treat C1’s 10 µF X5R effective value likewise as VERIFY. Do not infer an effective value from nominal capacitance.
 
-## Initial candidate comparison (superseded by final status below)
+## 初期候補の比較（以下の最終状態により置換済み）
 
 | Rank | Manufacturer / MPN | LCSC | L / tol. | Isat / Irms / DCR | Size | Status |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -45,7 +45,7 @@ Output power = 2.805 W. Assuming 88–93% efficiency: input current = 0.60–0.6
 - Use a continuous GND plane and several short thermal/return vias at U2 GND/capacitor grounds.
 - Keep the buck/SW region away from USB D+/D− and the ESP32 antenna keepout; the Espressif guideline requires a clean antenna area (minimum 15 mm around antenna if it cannot overhang the board).
 
-## Remaining blockers
+## 残るblocker
 
 1. L1 procurement: JLCPCB SMT eligibility, LCSC/JLC part number, live stock and Basic/Extended class.
 2. L1 3D/mechanical: the audited `Inductor_SMD:L_Coilcraft_XxL4020` and XGL4020-472MEC / C6012418 are integrated through the generator and formal schematic; ERC/PDF/SVG passed. Confirm 3D model, short/start-lead orientation and Phase 3B placement. The historical `Inductor_SMD:L_Vishay_IHLP-2020` is incompatible. See [xgl4020-footprint-audit.md](xgl4020-footprint-audit.md).

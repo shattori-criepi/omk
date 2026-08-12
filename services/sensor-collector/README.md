@@ -18,7 +18,7 @@ Mosquittoの`omk/#`を購読し、payloadの機種別仕様を解釈せず日次
 
 各行には、Raspberry Pi側で付与した`received_at`、`topic`、`qos`、`retain`、および受信payloadを入れます。通常のJSON payloadは`payload`にそのままネストします。不正JSONは`payload_raw`と解析エラーを、UTF-8でないデータはBase64を保存します。
 
-JSONLへの保存成功後、正常なJSON payloadの`omk/<device_id>/power`、`sen66`、`power-flow`は、それぞれ`broute_power.json`、`sen66.json`、`ichijo_power_flow.json`として`LATEST_DATA_ROOT`へ保存します。値はJSONLと同じレコード全体で、同一ディレクトリ内の一時ファイルからatomic置換します。不正JSON、Base64 payload、`status`および対象外トピックは最新状態を更新しません。最新状態の保存に失敗しても、JSONL収集は継続します。
+JSONLへの保存成功後、正常なJSON payloadの`omk/<device_id>/power`、`sen66`、`power-flow`は、それぞれ`broute_power.json`、`sen66.json`、`ichijo_power_flow.json`として`LATEST_DATA_ROOT`へ保存します。値はJSONLと同じレコード全体で、同一ディレクトリ内の一時ファイルから原子的に置換します。不正JSON、Base64 payload、`status`および対象外トピックは最新状態を更新しません。最新状態の保存に失敗しても、JSONL収集は継続します。
 
 latest JSONは置換後に`0644`へ設定するため、ホストユーザーおよび読み取り専用でマウントしたdashboardから読み取れます。
 

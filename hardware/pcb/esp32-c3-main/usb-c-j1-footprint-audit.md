@@ -1,8 +1,8 @@
-# J1 USB-C footprint audit — DX07S016JA1R1500
+# J1 USB-C footprint監査 — DX07S016JA1R1500
 
 Audit date: 2026-08-03 15:32 JST.  This is a document-only Phase 3A/3B gate review.  It does **not** alter the schematic, generator, footprint file, 3D model, PCB, PDF/SVG, BOM/CPL, or manufacturing data.
 
-## Scope and controlled sources
+## 対象範囲と管理された出典
 
 | Source | Controlled use | Revision / availability at audit |
 | --- | --- | --- |
@@ -14,7 +14,7 @@ Audit date: 2026-08-03 15:32 JST.  This is a document-only Phase 3A/3B gate revi
 
 No third-party drawing or image was used to fill missing dimensions.  The official drawing must be acquired from JAE before manufacturing release.
 
-## Direct KiCad footprint extraction
+## KiCad footprintの直接抽出
 
 The exact installed file is:
 
@@ -36,7 +36,7 @@ The exact installed file is:
 
 All signal lands are F.Cu/F.Mask/F.Paste.  Thus the footprint requests normal copper, solder-mask opening and stencil paste for the signal lands.  The four shell pads are `thru_hole`, on `*.Cu`/`*.Mask`, with `pad_prop_heatsink`; they carry no paste layer.  The two unnumbered rectangular SMD mechanical pads use F.Cu/F.Mask/F.Paste.  The two unnumbered locating holes are NPTH and have no copper/paste connection.
 
-### Pad inventory (KiCad coordinate system, mm)
+### pad一覧（KiCad座標系、mm）
 
 | Classification | Pads / coordinates and size |
 | --- | --- |
@@ -48,7 +48,7 @@ All signal lands are F.Cu/F.Mask/F.Paste.  Thus the footprint requests normal co
 
 For completeness, A2/A3/A10/A11 and B2/B3/B10/B11 are absent: they are the SuperSpeed contacts omitted by this 16-position USB2-only part.  The 16-pad hardware therefore has only the USB 2.0/power/control contact set; these are not missing KiCad pads.  The footprint has no individually numbered VBUS, GND or shell pad because the USB-C contact designators themselves are the pad numbers.
 
-## Schematic / pad mapping audit
+## 回路図 / pad mapping監査
 
 The formal symbol is `Connector:USB_C_Receptacle_USB2.0_16P`; the generator and formal schematic assign the matching KiCad footprint.  Its electrical mapping is unchanged and every electrical symbol pin named below exists in the footprint.
 
@@ -64,7 +64,7 @@ The formal symbol is `Connector:USB_C_Receptacle_USB2.0_16P`; the generator and 
 
 No SuperSpeed symbol pins are required by this USB2.0_16P symbol or this 16-position part.  The same-number S1 pads are intentionally one shield net, not accidental signal-GND shorts.  R3 remains DNP and no chassis ground exists in Rev.A; this audit does not change that circuit decision.
 
-## Official-versus-KiCad comparison
+## 公式値とKiCadの比較
 
 | Item | JAE official value | KiCad value | Difference | Finding / note |
 | --- | --- | --- | --- | --- |
@@ -81,7 +81,7 @@ No SuperSpeed symbol pins are required by this USB2.0_16P symbol or this 16-posi
 | 3D origin, rotation, height | Requires JAE 3D/model drawing | Reference is zero offset/rotation; file unavailable locally | — | VERIFY. |
 | Board thickness, coplanarity, insertion depth, reflow, tape, MSL, RoHS | Requires `JACS-30413` / `JAHL-30353-1` / certificates | Not encoded in footprint | — | VERIFY. RoHS certificate route exists on product page but was not retrievable anonymously. |
 
-## Board-edge, shell and Phase 3B placement rules
+## 基板端、shell、Phase 3B配置規則
 
 The KiCad origin is **not** declared by the footprint as a PCB-edge datum.  Phase 3B shall obtain `SJ121837`, identify its mounting-side board-edge datum and align that datum (not an arbitrary Fab or courtyard line) to the board `Edge.Cuts`.  Do not infer an overhang, cutout or notch requirement from the current coordinates.
 
@@ -92,7 +92,7 @@ Until that drawing is available, these constraints apply:
 - Make the shell return short and low inductance to the selected shield strategy; do not thermal-relief or split it by accident.  Keep the four common S1 pads on `USB_SHIELD`, not electrical `GND`, unless R3 is deliberately populated after evaluation.
 - Confirm plated-hole manufacturing capability, annular-ring rules, paste/mask expansion, reflow profile and connector retention with the selected assembler.  The present shell pads are PTH, so ordinary top-side reflow eligibility is not assumed.
 
-### USB 2.0 routing rules for Phase 3B
+### Phase 3BのUSB 2.0 routing規則
 
 | Basis | Rule |
 | --- | --- |
@@ -101,13 +101,13 @@ Until that drawing is available, these constraints apply:
 | JAE-controlled, pending drawing | Contact-side copper restrictions, exact edge alignment, plug insertion/cable envelope, body height, assembly/rework access and shell-stake land geometry. |
 | Espressif-controlled | Preserve the ESP32-C3-MINI antenna keepout and do not route USB/buck return currents through it. |
 
-## Procurement and alternatives
+## 調達と代替候補
 
 LCSC identity `C3197885` was matched to the MPN.  JLCPCB's public C3197885 page classifies it as **Extended**, SMD / SMT Assembly, Economic and Standard PCBA, Assembly Difficulty High and MSL 1.  Its displayed stock/price is cache-visible rather than an order-time commitment.  Live price/MOQ, consignment/pre-order requirement, fixture requirement, PnP/CPL rotation, selective-solder/wave/reflow method and final PCBA eligibility were not established in a logged-in JLC order flow, therefore remain **VERIFY**.
 
 No alternative was selected.  An alternative comparison is deliberately deferred unless this JAE part fails its official drawing or order-time procurement gate: a USB2-only 16-contact receptacle is not a drop-in replacement unless its contact lands, shell stakes, locating holes, mounting style (top/mid mount), board-edge datum and enclosure clearance all match.  Reusing this footprint for another MPN is prohibited without a separate audit.
 
-## Final decision and next task
+## 最終決定と次作業
 
 | Responsibility | Status | Reason |
 | --- | --- | --- |
