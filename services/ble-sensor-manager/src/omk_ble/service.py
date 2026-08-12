@@ -29,6 +29,7 @@ class BleManager:
         # updates never affect position during a session.
         self.observations: dict[str, DecodedAdvertisement] = {}
         self._previous_motion_state: dict[str, int] = {}
+        self._previous_contact_state: dict[str, int] = {}
         self.setup_candidates: dict[str, DecodedAdvertisement] = {}
         self._setup_candidate_order: list[str] = []
         self.scanning = False
@@ -184,6 +185,9 @@ class BleManager:
         if sensor.sensor_type == "motion":
             self._publish_motion_change(sensor, advertisement)
             return
+        if sensor.sensor_type == "contact":
+            self._publish_contact_change(sensor, advertisement)
+            return
         if not sensor.enabled or not self._mqtt:
             return
         payload = {"sensor_id": sensor.sensor_id, "measured_at": advertisement.received_at, "quality": "normal", **advertisement.values}
@@ -200,3 +204,15 @@ class BleManager:
             return
         payload = {"device_id": sensor.sensor_id, "measured_at": advertisement.received_at, "motion_state": state}
         self._mqtt.publish(f"omk/{sensor.sensor_id}/motion", json.dumps(payload), qos=0, retain=False)
+
+    def _publish_contact_change(self, sensor: RegisteredSensor, advertisement: DecodedAdvertisement) -> None:
+        """Publish Contact Sensor open/closed transitions after initial state."""
+        state = advertisement.values.get("contact_state")
+        if state not in (0, 1):
+            return
+        previous = self._previous_contact_state.get(sensor.device_key)
+        self._previous_contact_state[sensor.device_key] = state
+        if previous is None or previous == state or not sensor.enabled or not self._mqtt:
+            return
+        payload = {"device_id": sensor.sensor_id, "measured_at": advertisement.received_at, "contact_state": state}
+        self._mqtt.publish(f"omk/{sensor.sensor_id}/contact", json.dumps(payload), qos=0, retain=False)
