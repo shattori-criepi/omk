@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from omk_ble.registry import RegistryError, SensorRegistry
-from omk_ble.models import RegisteredSensor
+from omk_ble.models import DecodedAdvertisement, RegisteredSensor
 from omk_ble.switchbot import METER_SERVICE_UUID, SWITCHBOT_COMPANY_ID, decode
 from omk_ble.service import BleManager
 
@@ -87,3 +87,48 @@ def test_offline_registration_is_kept_when_no_advertisement_is_seen(tmp_path: Pa
     registry = SensorRegistry(tmp_path / "sensors.json")
     registry.register(RegisteredSensor("switchbot:abc", "living-env-01", "environment", "switchbot", "meter", "", "リビング"))
     assert BleManager(registry).registered_list()[0]["status"] == "offline"
+
+
+def _candidate(device_key: str, *, rssi: int = -50, values: dict | None = None, model: str = "meter") -> DecodedAdvertisement:
+    return DecodedAdvertisement(
+        device_key=device_key, vendor="switchbot", model=model, sensor_type="environment",
+        rssi=rssi, received_at="2026-08-12T10:00:00+09:00", values=values or {},
+    )
+
+
+def test_setup_candidate_order_is_discovery_order_and_updates_in_place(tmp_path: Path) -> None:
+    manager = BleManager(SensorRegistry(tmp_path / "sensors.json"))
+    manager.scanning = True
+    manager.record_advertisement(_candidate("switchbot:a", rssi=-80, values={"temperature_c": 20.0}))
+    manager.record_advertisement(_candidate("switchbot:b", rssi=-30, values={"temperature_c": 21.0}))
+    manager.record_advertisement(_candidate("switchbot:a", rssi=-10, values={"temperature_c": 22.0}))
+    manager.record_advertisement(_candidate("switchbot:c", rssi=-60, model="unknown_switchbot"))
+    candidates = manager.candidate_list()
+    assert [item["device_key"] for item in candidates] == ["switchbot:a", "switchbot:b", "switchbot:c"]
+    assert candidates[0]["rssi"] == -10
+    assert candidates[0]["values"] == {"temperature_c": 22.0}
+
+
+def test_registered_device_is_excluded_then_moves_from_candidate_list(tmp_path: Path) -> None:
+    registry = SensorRegistry(tmp_path / "sensors.json")
+    registry.register(RegisteredSensor("switchbot:registered", "th-001", "environment", "switchbot", "meter", "", "登録済み"))
+    manager = BleManager(registry)
+    manager.scanning = True
+    manager.record_advertisement(_candidate("switchbot:registered"))
+    manager.record_advertisement(_candidate("switchbot:new"))
+    assert [item["device_key"] for item in manager.candidate_list()] == ["switchbot:new"]
+    manager.register({"device_key": "switchbot:new", "sensor_id": "th-002", "display_name": "新規"})
+    assert manager.candidate_list() == []
+    assert [item["sensor_id"] for item in manager.registered_list()] == ["th-001", "th-002"]
+
+
+def test_new_setup_session_resets_candidate_order_and_suggests_type_sequence(tmp_path: Path) -> None:
+    registry = SensorRegistry(tmp_path / "sensors.json")
+    registry.register(RegisteredSensor("switchbot:old", "co2-001", "environment", "switchbot", "meter_pro_co2", "", "既存"))
+    manager = BleManager(registry)
+    manager.scanning = True
+    manager.record_advertisement(_candidate("switchbot:first"))
+    manager.begin_setup_session()
+    manager.record_advertisement(_candidate("switchbot:co2", model="meter_pro_co2"))
+    assert [item["device_key"] for item in manager.candidate_list()] == ["switchbot:co2"]
+    assert manager.suggested_sensor_id("switchbot:co2") == "co2-002"

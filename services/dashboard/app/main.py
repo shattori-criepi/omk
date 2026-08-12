@@ -88,6 +88,11 @@ async def ble_candidates() -> dict:
     return await _ble_request("GET", "/api/setup/candidates")
 
 
+@app.get("/api/admin/setup/suggested-sensor-id")
+async def suggested_sensor_id(device_key: str) -> dict:
+    return await _ble_request("GET", f"/api/setup/suggested-sensor-id?device_key={device_key}")
+
+
 @app.post("/api/admin/sensors", status_code=201)
 async def register_sensor(request: Request) -> dict:
     return await _ble_request("POST", "/api/sensors", await request.json())

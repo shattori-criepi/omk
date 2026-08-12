@@ -13,6 +13,11 @@ Run `scripts/setup-ble-sensor-manager.sh` on the Pi to create its virtualenv and
 install the systemd unit. Registration is readable JSON at
 `data/ble/sensors.json`.
 
+`sensor_id` is an OMK logical identifier, separate from `device_key`, vendor,
+model, and location. New registrations receive a type-plus-sequence suggestion
+such as `th-001`, `co2-001`, `motion-001`, or `contact-001`; replacement
+hardware normally receives a new logical ID.
+
 Unknown SwitchBot advertisements intentionally appear with raw manufacturer and
 service data hex during setup. This permits real-device validation for Meter Pro
 CO2, motion, and contact sensors without publishing guessed values.
