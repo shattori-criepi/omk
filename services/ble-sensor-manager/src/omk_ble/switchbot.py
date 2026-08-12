@@ -13,6 +13,7 @@ from .models import DecodedAdvertisement
 SWITCHBOT_COMPANY_ID = 0x0969
 METER_SERVICE_UUID = "0000fd3d-0000-1000-8000-00805f9b34fb"
 MODEL_BY_TYPE = {0x54: ("meter", "environment"), 0x69: ("meter_plus", "environment")}
+WATERPROOF_SERVICE_DEVICE_TYPE = 0x77
 
 # Captured on the Pi: <6-byte physical id> <variable> 03
 # <tenths, signed integer, RH>. The first header byte changed from f4 to f8
@@ -30,6 +31,15 @@ CO2_LAYOUT_MARKER = 0xE4
 CO2_TEMPERATURE_HUMIDITY_OFFSET = 8
 CO2_MIN_PPM = 400
 CO2_MAX_PPM = 10_000
+
+# Waterproof Sensor layout: <physical id 6> <variable 2> <fraction/significant
+# temperature digits 2> <humidity> <reserved 00>. It is deliberately distinct
+# from the Meter layout despite using the same vendor ID.
+WATERPROOF_MANUFACTURER_LENGTH = 12
+WATERPROOF_TEMPERATURE_FRACTION_INDEX = 8
+WATERPROOF_TEMPERATURE_INTEGER_INDEX = 9
+WATERPROOF_HUMIDITY_INDEX = 10
+WATERPROOF_RESERVED_INDEX = 11
 
 # Pi captures of the Motion Sensor manufacturer advertisement:
 # <physical id 6> <variable> <PIR status> 00 <counter>. The official Motion
@@ -89,6 +99,13 @@ def _decode_contact_service_data(data: bytes | None) -> tuple[str, str, dict[str
     return "contact_sensor", "contact", {"contact_state": state}
 
 
+def _decode_waterproof_service_data(data: bytes | None) -> tuple[str, str, dict[str, Any]] | None:
+    """Identify the waterproof temperature/humidity sensor's service data."""
+    if not data or len(data) != 3 or data[0] != WATERPROOF_SERVICE_DEVICE_TYPE:
+        return None
+    return "waterproof_sensor", "environment", {}
+
+
 def _decode_meter_expression(fraction: int, signed_integer: int, humidity: int) -> tuple[float, int] | None:
     """Decode the observed Meter-compatible temperature/humidity triplet."""
     integer = signed_integer & 0x7F
@@ -138,6 +155,26 @@ def _decode_co2_manufacturer_data(data: bytes) -> tuple[str, str, dict[str, Any]
     }
 
 
+def _decode_waterproof_manufacturer_data(data: bytes) -> tuple[str, str, dict[str, Any]] | None:
+    """Decode the verified waterproof temperature/humidity sensor layout."""
+    if len(data) != WATERPROOF_MANUFACTURER_LENGTH or data[WATERPROOF_RESERVED_INDEX] != 0:
+        return None
+    fraction = data[WATERPROOF_TEMPERATURE_FRACTION_INDEX] & 0x0F
+    integer_byte = data[WATERPROOF_TEMPERATURE_INTEGER_INDEX]
+    humidity = data[WATERPROOF_HUMIDITY_INDEX] & 0x7F
+    if fraction > 9 or humidity > 100:
+        return None
+    temperature = (integer_byte & 0x7F) + fraction / 10
+    if not integer_byte & 0x80:
+        temperature *= -1
+    if not -20 <= temperature <= 60:
+        return None
+    return "waterproof_sensor", "environment", {
+        "temperature_c": temperature,
+        "relative_humidity_percent": humidity,
+    }
+
+
 def _decode_motion_manufacturer_data(data: bytes) -> tuple[str, str, dict[str, Any]] | None:
     """Decode the verified Motion Sensor manufacturer advertisement layout."""
     if len(data) != MOTION_MANUFACTURER_LENGTH or data[MOTION_RESERVED_INDEX] != 0:
@@ -174,6 +211,7 @@ def _decode_manufacturer_data(data: bytes | None) -> tuple[str, str, dict[str, A
     return (
         _decode_meter_manufacturer_data(data)
         or _decode_co2_manufacturer_data(data)
+        or _decode_waterproof_manufacturer_data(data)
         or _decode_motion_manufacturer_data(data)
         or _decode_contact_manufacturer_data(data)
     )
@@ -196,9 +234,13 @@ def decode(address: str, rssi: int, manufacturer_data: dict[int, bytes], service
     # manufacturer layout is available, prefer its state snapshot.
     contact_from_service = _decode_contact_service_data(service_bytes)
     contact_from_manufacturer = _decode_contact_manufacturer_data(company_data) if company_data else None
+    waterproof_from_service = _decode_waterproof_service_data(service_bytes)
+    waterproof_from_manufacturer = _decode_waterproof_manufacturer_data(company_data) if company_data else None
     decoded = (
         contact_from_manufacturer
         or contact_from_service
+        or waterproof_from_manufacturer
+        or waterproof_from_service
         or _decode_service_data(service_bytes)
         or _decode_manufacturer_data(company_data)
     )

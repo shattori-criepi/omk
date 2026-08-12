@@ -56,8 +56,8 @@ JSONL保存に成功した正常JSON payloadのうち、`omk/<device_id>/power`�
 
 SwitchBot等のBLE受信は Dashboard ではなく Raspberry Pi ホスト上の
 `omk-ble-sensor-manager` が行う。登録の物理 `device_key` と論理
-`sensor_id` を分離し、MQTTには後者だけを使用する。environment payload は
-`sensor_id`、`measured_at`、`quality`、利用可能な `temperature_c`、
+`sensor_id` を分離し、MQTT payload の `device_id` には後者だけを使用する。
+environment payload は `device_id`、`measured_at`、`quality`、利用可能な `temperature_c`、
 `relative_humidity_percent`、`co2_ppm`、`battery_percent` を含む。collector
 は従来通り型を解釈せず JSONL に保存する。
 

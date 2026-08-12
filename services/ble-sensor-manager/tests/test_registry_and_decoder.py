@@ -67,6 +67,30 @@ def test_pi_captured_co2_manufacturer_packets_decode_environment_measurements() 
             assert decoded.values[key] == value
 
 
+def test_waterproof_sensor_decodes_its_dedicated_service_and_manufacturer_layouts() -> None:
+    service_only = decode(
+        "D6:69:17:D3:10:38", -53, {}, {METER_SERVICE_UUID: bytes.fromhex("770047")}, "now",
+    )
+    captured = decode(
+        "D6:69:17:D3:10:38", -53,
+        {SWITCHBOT_COMPANY_ID: bytes.fromhex("d66917d31038550b069bd200")},
+        {METER_SERVICE_UUID: bytes.fromhex("770047")}, "now",
+    )
+    below_freezing = decode(
+        "11:22:33:44:55:66", -60,
+        {SWITCHBOT_COMPANY_ID: bytes.fromhex("112233445566550b06055200")}, {}, "now",
+    )
+    malformed = decode("x", -1, {SWITCHBOT_COMPANY_ID: bytes.fromhex("d66917d31038550b069bd2")}, {}, "now")
+    unrelated = decode("x", -1, {SWITCHBOT_COMPANY_ID: bytes.fromhex("d66917d31038550b069bd201")}, {}, "now")
+    assert service_only is not None and service_only.model == "waterproof_sensor" and service_only.values == {}
+    assert captured is not None and captured.sensor_type == "environment"
+    assert captured.values == {"temperature_c": 27.6, "relative_humidity_percent": 82}
+    assert "humidity_percent" not in captured.values
+    assert below_freezing is not None and below_freezing.values == {"temperature_c": -5.6, "relative_humidity_percent": 82}
+    assert malformed is not None and malformed.model == "unknown_switchbot"
+    assert unrelated is not None and unrelated.model == "unknown_switchbot"
+
+
 def test_short_and_unknown_manufacturer_packets_remain_raw_unknown_candidates() -> None:
     for packet in (b"", bytes.fromhex("cf3941c7ed79f40304"), bytes.fromhex("cf3941c7ed79000004992c")):
         decoded = decode("CF:39:41:C7:ED:79", -50, {SWITCHBOT_COMPANY_ID: packet}, {}, "now")
@@ -278,6 +302,45 @@ def test_updated_sensor_id_is_used_for_next_mqtt_publish_and_disabled_sensor_is_
     manager.update_registered_sensor("switchbot:co2", {"sensor_id": "co2-001", "display_name": "CO2", "location": "", "enabled": False})
     manager.record_advertisement(_candidate("switchbot:co2", values={"co2_ppm": 601}, model="meter_pro_co2"))
     assert len(publisher.messages) == 1
+
+
+def test_waterproof_sensor_setup_uses_th_ids_and_runtime_uses_environment_topic(tmp_path: Path) -> None:
+    registry = SensorRegistry(tmp_path / "sensors.json")
+    registry.register(RegisteredSensor("switchbot:meter", "th-001", "environment", "switchbot", "meter", "", "室内"))
+    publisher = _MqttPublisher()
+    manager = BleManager(registry, publisher)
+    outdoor = DecodedAdvertisement(
+        "switchbot:waterproof", "switchbot", "waterproof_sensor", "environment", -53, "now",
+        {"temperature_c": 27.6, "relative_humidity_percent": 82}, {"manufacturer_data": {"0969": "raw"}},
+    )
+    manager.scanning = True
+    manager.record_advertisement(outdoor)
+    assert manager.candidate_list()[0]["model"] == "waterproof_sensor"
+    assert manager.suggested_sensor_id("switchbot:waterproof") == "th-002"
+    manager.register({"device_key": "switchbot:waterproof", "sensor_id": "th-002", "display_name": "屋外温湿度", "location": "屋外"})
+    manager.record_advertisement(outdoor)
+    assert manager.registered_list()[1]["latest"]["values"] == {"temperature_c": 27.6, "relative_humidity_percent": 82}
+    assert publisher.messages[-1][0] == "omk/th-002/environment"
+    assert json.loads(publisher.messages[-1][1]) == {
+        "device_id": "th-002", "measured_at": "now", "quality": "normal",
+        "temperature_c": 27.6, "relative_humidity_percent": 82,
+    }
+    manager.update_registered_sensor("switchbot:waterproof", {"sensor_id": "th-003", "display_name": "浴室温湿度", "location": "浴室", "enabled": True})
+    manager.record_advertisement(outdoor)
+    assert publisher.messages[-1][0] == "omk/th-003/environment"
+
+
+def test_disabled_waterproof_sensor_updates_latest_without_publishing(tmp_path: Path) -> None:
+    registry = SensorRegistry(tmp_path / "sensors.json")
+    registry.register(RegisteredSensor("switchbot:waterproof", "th-002", "environment", "switchbot", "waterproof_sensor", "屋外", "屋外温湿度", enabled=False))
+    publisher = _MqttPublisher()
+    manager = BleManager(registry, publisher)
+    manager.record_advertisement(DecodedAdvertisement(
+        "switchbot:waterproof", "switchbot", "waterproof_sensor", "environment", -53, "now",
+        {"temperature_c": 27.6, "relative_humidity_percent": 82}, {},
+    ))
+    assert publisher.messages == []
+    assert manager.registered_list()[0]["latest"]["values"] == {"temperature_c": 27.6, "relative_humidity_percent": 82}
 
 
 def test_motion_manufacturer_packets_decode_only_motion_state() -> None:
