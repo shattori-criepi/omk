@@ -43,6 +43,24 @@ class SensorRegistry:
         self._write(sensors + [sensor])
         return sensor
 
+    def update(self, device_key: str, *, sensor_id: str, display_name: str, location: str, enabled: bool) -> RegisteredSensor:
+        """Update editable logical settings while preserving physical identity."""
+        if not SENSOR_ID_RE.fullmatch(sensor_id):
+            raise RegistryError("sensor_id must use lowercase letters, digits, and hyphens")
+        sensors = self.list()
+        existing = next((sensor for sensor in sensors if sensor.device_key == device_key), None)
+        if existing is None:
+            raise KeyError(device_key)
+        if any(sensor.sensor_id == sensor_id and sensor.device_key != device_key for sensor in sensors):
+            raise RegistryError("sensor_id is already in use")
+        updated = RegisteredSensor(
+            device_key=existing.device_key, sensor_id=sensor_id,
+            sensor_type=existing.sensor_type, vendor=existing.vendor, model=existing.model,
+            location=location, display_name=display_name, enabled=enabled,
+        )
+        self._write([updated if sensor.device_key == device_key else sensor for sensor in sensors])
+        return updated
+
     def _write(self, sensors: list[RegisteredSensor]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         payload = json.dumps({"sensors": [sensor.as_dict() for sensor in sensors]}, ensure_ascii=False, indent=2) + "\n"

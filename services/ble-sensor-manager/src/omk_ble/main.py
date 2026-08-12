@@ -6,7 +6,7 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException
 import paho.mqtt.client as mqtt
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from .registry import RegistryError, SensorRegistry
 from .service import BleManager
@@ -21,6 +21,15 @@ class RegisterRequest(BaseModel):
     display_name: str = Field(min_length=1, max_length=64)
     location: str = Field(default="", max_length=64)
     enabled: bool = True
+
+
+class UpdateSensorRequest(BaseModel):
+    """Only logical registry settings are mutable from the management API."""
+    model_config = ConfigDict(extra="forbid")
+    sensor_id: str
+    display_name: str = Field(min_length=1, max_length=64)
+    location: str = Field(default="", max_length=64)
+    enabled: bool
 
 @app.on_event("startup")
 async def startup() -> None:
@@ -76,6 +85,16 @@ def register(request: RegisterRequest) -> dict[str, Any]:
     try:
         return manager.register(request.model_dump()).as_dict()
     except (RegistryError, ValueError) as error:
+        raise HTTPException(400, str(error)) from error
+
+
+@app.patch("/api/sensors/{device_key}")
+def update_sensor(device_key: str, request: UpdateSensorRequest) -> dict[str, Any]:
+    try:
+        return manager.update_registered_sensor(device_key, request.model_dump()).as_dict()
+    except KeyError as error:
+        raise HTTPException(404, "sensor was not found") from error
+    except RegistryError as error:
         raise HTTPException(400, str(error)) from error
 
 @app.get("/health")

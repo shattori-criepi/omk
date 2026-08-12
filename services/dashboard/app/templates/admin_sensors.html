@@ -37,5 +37,17 @@
         <div class="dialog-actions"><button type="button" id="cancel-register">キャンセル</button><button type="submit" class="primary">登録する</button></div>
       </form>
     </dialog>
+    <dialog id="edit-dialog" class="register-dialog" aria-labelledby="edit-title">
+      <form id="edit-form" method="dialog">
+        <h2 id="edit-title">センサを編集</h2>
+        <p id="edit-physical-info" class="dialog-device"></p>
+        <label>OMK センサID<input id="edit-sensor-id" name="sensor_id" required pattern="[a-z][a-z0-9-]{0,63}" autocomplete="off"></label>
+        <label>表示名<input id="edit-display-name" name="display_name" required maxlength="64" autocomplete="off"></label>
+        <label>設置場所（任意）<input id="edit-location" name="location" maxlength="64" autocomplete="off"></label>
+        <label class="enabled-control"><input id="edit-enabled" name="enabled" type="checkbox"> このセンサを有効にする</label>
+        <p id="edit-error" class="error" hidden></p>
+        <div class="dialog-actions"><button type="button" id="cancel-edit">キャンセル</button><button type="submit" class="primary">保存する</button></div>
+      </form>
+    </dialog>
   </body>
 </html>
