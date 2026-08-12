@@ -14,7 +14,6 @@
         </time>
 
         <div class="status-area">
-          <a class="admin-link" href="/admin" aria-label="管理画面">⚙</a>
           <p class="updated">
             最終更新
             <time id="updated-at" datetime="{{ dashboard.updated_at_iso }}">{{ dashboard.updated_at }}</time>
@@ -27,6 +26,7 @@
             {{ dashboard.freshness }}
           </p>
         </div>
+        <a class="admin-link" href="/admin" aria-label="管理画面" title="管理画面">⚙<span class="sr-only">管理画面</span></a>
       </header>
 
       <section id="power-section" class="power-hero source--{{ dashboard.power_freshness }}" aria-labelledby="current-power-label">
