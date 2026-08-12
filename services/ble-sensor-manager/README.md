@@ -49,6 +49,8 @@ Verified on a Raspberry Pi:
 - SwitchBot 温湿度計: advertisement reception, temperature, and humidity decode.
 - SwitchBot CO2センサー: advertisement reception, temperature, humidity, and CO2
   ppm decode (verified against two physical devices).
+- SwitchBot 防水温湿度計: advertisement reception and dedicated
+  temperature/humidity manufacturer-layout decode.
 
 For a line-oriented raw capture on a Pi, use
 `PYTHONPATH=src .venv/bin/python -m omk_ble.raw_scan --seconds 30`.
