@@ -18,8 +18,9 @@ service data hex during setup. This permits real-device validation for Meter Pro
 CO2, motion, and contact sensors without publishing guessed values.
 
 The current Pi-captured manufacturer layouts decode SwitchBot Meter temperature
-and humidity, and Meter Pro CO2's CO2 value only. Meter Pro CO2 temperature and
-humidity deliberately remain raw until their positions are confirmed.
+and humidity, and Meter Pro CO2 temperature, humidity, and CO2. The CO2 layout
+is based on matching measurements from two physical devices; it does not use a
+per-device MAC address or assume that its variable bytes are constants.
 
 ## Raspberry Pi validation notes
 
@@ -41,8 +42,8 @@ the adapter is missing or cannot be powered on.
 Verified on a Raspberry Pi:
 
 - SwitchBot 温湿度計: advertisement reception, temperature, and humidity decode.
-- SwitchBot CO2センサー: advertisement reception and CO2 ppm decode. Temperature
-  and humidity decode are **not yet verified**.
+- SwitchBot CO2センサー: advertisement reception, temperature, humidity, and CO2
+  ppm decode (verified against two physical devices).
 
 For a line-oriented raw capture on a Pi, use
 `PYTHONPATH=src .venv/bin/python -m omk_ble.raw_scan --seconds 30`.
