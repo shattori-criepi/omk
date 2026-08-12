@@ -12,7 +12,10 @@ from .models import DecodedAdvertisement
 
 SWITCHBOT_COMPANY_ID = 0x0969
 METER_SERVICE_UUID = "0000fd3d-0000-1000-8000-00805f9b34fb"
-MODEL_BY_TYPE = {0x54: ("meter", "environment"), 0x69: ("meter_plus", "environment")}
+MODEL_BY_TYPE = {
+    0x54: ("temperature_humidity_sensor", "environment"),
+    0x69: ("temperature_humidity_sensor", "environment"),
+}
 WATERPROOF_SERVICE_DEVICE_TYPE = 0x77
 
 # Captured on the Pi: <6-byte physical id> <variable> 03
@@ -129,7 +132,7 @@ def _decode_meter_manufacturer_data(data: bytes) -> tuple[str, str, dict[str, An
     if measurement is None:
         return None
     temperature, humidity = measurement
-    return "meter", "environment", {
+    return "temperature_humidity_sensor", "environment", {
         "temperature_c": temperature,
         "relative_humidity_percent": humidity,
     }
@@ -148,7 +151,7 @@ def _decode_co2_manufacturer_data(data: bytes) -> tuple[str, str, dict[str, Any]
     co2_ppm = int.from_bytes(data[13:15], byteorder="big")
     if not CO2_MIN_PPM <= co2_ppm <= CO2_MAX_PPM:
         return None
-    return "meter_pro_co2", "environment", {
+    return "co2_sensor", "environment", {
         "temperature_c": temperature,
         "relative_humidity_percent": humidity,
         "co2_ppm": co2_ppm,
