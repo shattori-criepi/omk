@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -183,18 +184,28 @@ def test_new_setup_session_resets_candidate_order_and_suggests_type_sequence(tmp
 
 def test_registered_list_joins_latest_runtime_state_without_modifying_registry(tmp_path: Path) -> None:
     registry = SensorRegistry(tmp_path / "sensors.json")
-    sensor = RegisteredSensor("switchbot:co2", "co2-001", "environment", "switchbot", "meter_pro_co2", "bedroom", "寝室")
-    registry.register(sensor)
-    manager = BleManager(registry)
+    online_sensor = RegisteredSensor("switchbot:co2", "co2-001", "environment", "switchbot", "meter_pro_co2", "bedroom", "寝室")
+    offline_sensor = RegisteredSensor("switchbot:old", "co2-002", "environment", "switchbot", "meter_pro_co2", "hall", "廊下")
+    registry.register(online_sensor)
+    registry.register(offline_sensor)
+    # 13:55:01 is 899 seconds old (online); 13:54:59 is 901 seconds old
+    # (offline). The fixed clock avoids dependence on test execution time.
+    manager = BleManager(registry, now_provider=lambda: datetime(2026, 8, 12, 14, 10, tzinfo=timezone.utc))
     manager.record_advertisement(DecodedAdvertisement(
         "switchbot:co2", "switchbot", "meter_pro_co2", "environment", -42,
-        "2026-08-12T13:55:00+09:00", {"temperature_c": 26.4, "relative_humidity_percent": 44, "co2_ppm": 588}, {"manufacturer_data": {"0969": "raw"}},
+        "2026-08-12T22:55:01+09:00", {"temperature_c": 26.4, "relative_humidity_percent": 44, "co2_ppm": 588}, {"manufacturer_data": {"0969": "raw"}},
     ))
-    item = manager.registered_list()[0]
-    assert item["latest"] == {"received_at": "2026-08-12T13:55:00+09:00", "rssi": -42, "values": {"temperature_c": 26.4, "relative_humidity_percent": 44, "co2_ppm": 588}}
-    assert item["online"] is False  # Fixture timestamp is intentionally stale.
-    assert item["status"] == "offline"
-    assert registry.list() == [sensor]
+    manager.record_advertisement(DecodedAdvertisement(
+        "switchbot:old", "switchbot", "meter_pro_co2", "environment", -80,
+        "2026-08-12T22:54:59+09:00", {"co2_ppm": 500}, {},
+    ))
+    online, offline = manager.registered_list()
+    assert online["latest"] == {"received_at": "2026-08-12T22:55:01+09:00", "rssi": -42, "values": {"temperature_c": 26.4, "relative_humidity_percent": 44, "co2_ppm": 588}}
+    assert online["online"] is True
+    assert online["status"] == "normal"
+    assert offline["online"] is False
+    assert offline["status"] == "offline"
+    assert registry.list() == [online_sensor, offline_sensor]
 
 
 def test_registered_latest_updates_when_setup_mode_is_stopped(tmp_path: Path) -> None:

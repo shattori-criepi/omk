@@ -5,7 +5,7 @@ import json
 import logging
 import os
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Callable
 
 import paho.mqtt.client as mqtt
 
@@ -17,7 +17,12 @@ LOGGER = logging.getLogger(__name__)
 
 
 class BleManager:
-    def __init__(self, registry: SensorRegistry, mqtt_client: mqtt.Client | None = None) -> None:
+    def __init__(
+        self,
+        registry: SensorRegistry,
+        mqtt_client: mqtt.Client | None = None,
+        now_provider: Callable[[], datetime] | None = None,
+    ) -> None:
         self.registry = registry
         # Observations run continuously for registered-sensor health. Setup
         # candidate order and candidate payloads are deliberately separate:
@@ -30,6 +35,7 @@ class BleManager:
         self._timeout_task: asyncio.Task[None] | None = None
         self._mqtt = mqtt_client
         self.offline_seconds = int(os.getenv("OMK_BLE_OFFLINE_SECONDS", "900"))
+        self._now_provider = now_provider or (lambda: datetime.now(timezone.utc))
 
     async def start_scan(self, timeout_seconds: int = 60) -> None:
         await self.start_collection()
@@ -88,7 +94,7 @@ class BleManager:
 
     def registered_list(self) -> list[dict[str, Any]]:
         """Join immutable registry settings with in-memory latest observations."""
-        now = datetime.now(timezone.utc)
+        now = self._now_provider()
         result = []
         for sensor in self.registry.list():
             item = sensor.as_dict()
