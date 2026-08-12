@@ -278,3 +278,65 @@ def test_updated_sensor_id_is_used_for_next_mqtt_publish_and_disabled_sensor_is_
     manager.update_registered_sensor("switchbot:co2", {"sensor_id": "co2-001", "display_name": "CO2", "location": "", "enabled": False})
     manager.record_advertisement(_candidate("switchbot:co2", values={"co2_ppm": 601}, model="meter_pro_co2"))
     assert len(publisher.messages) == 1
+
+
+def test_motion_manufacturer_packets_decode_only_motion_state() -> None:
+    false = decode("CF:FC:6A:48:DB:15", -40, {SWITCHBOT_COMPANY_ID: bytes.fromhex("cffc6a48db150b2c0087")}, {}, "now")
+    true = decode("CF:FC:6A:48:DB:15", -40, {SWITCHBOT_COMPANY_ID: bytes.fromhex("cffc6a48db150c6c0000")}, {}, "now")
+    assert false is not None and false.model == "motion_sensor" and false.sensor_type == "motion"
+    assert false.values == {"motion_state": 0}
+    assert true is not None and true.values == {"motion_state": 1}
+
+
+def test_motion_decoder_does_not_classify_existing_or_unrelated_switchbot_layouts() -> None:
+    meter = decode("CF:39:41:C7:ED:79", -40, {SWITCHBOT_COMPANY_ID: bytes.fromhex("cf3941c7ed79f40304992c")}, {}, "now")
+    co2 = decode("B0:E9:FE:58:15:CC", -40, {SWITCHBOT_COMPANY_ID: bytes.fromhex("b0e9fe5815ccf6e405982e0024020e00")}, {}, "now")
+    malformed = decode("CF:FC:6A:48:DB:15", -40, {SWITCHBOT_COMPANY_ID: bytes.fromhex("cffc6a48db150c6")}, {}, "now")
+    unrelated = decode("CF:FC:6A:48:DB:15", -40, {SWITCHBOT_COMPANY_ID: bytes.fromhex("cffc6a48db150b2d0087")}, {}, "now")
+    assert meter is not None and meter.model == "meter"
+    assert co2 is not None and co2.model == "meter_pro_co2"
+    assert malformed is not None and malformed.model == "unknown_switchbot"
+    assert unrelated is not None and unrelated.model == "unknown_switchbot"
+
+
+def _motion_advertisement(state: int, received_at: str = "2026-08-12T14:47:12+09:00") -> DecodedAdvertisement:
+    return DecodedAdvertisement("switchbot:motion", "switchbot", "motion_sensor", "motion", -31, received_at, {"motion_state": state}, {"manufacturer_data": {"0969": "raw"}})
+
+
+def test_motion_publishes_only_state_transitions_after_first_observation(tmp_path: Path) -> None:
+    registry = SensorRegistry(tmp_path / "sensors.json")
+    registry.register(RegisteredSensor("switchbot:motion", "motion-001", "motion", "switchbot", "motion_sensor", "hall", "廊下"))
+    publisher = _MqttPublisher()
+    manager = BleManager(registry, publisher)
+    for state in (0, 0, 0, 1, 1, 1, 0, 0, 1):
+        manager.record_advertisement(_motion_advertisement(state))
+    assert [topic for topic, _payload in publisher.messages] == ["omk/motion-001/motion", "omk/motion-001/motion", "omk/motion-001/motion"]
+    assert [json.loads(payload)["motion_state"] for _topic, payload in publisher.messages] == [1, 0, 1]
+    assert all(set(json.loads(payload)) == {"device_id", "measured_at", "motion_state"} for _topic, payload in publisher.messages)
+
+
+def test_motion_first_true_and_disabled_state_changes_do_not_publish(tmp_path: Path) -> None:
+    registry = SensorRegistry(tmp_path / "sensors.json")
+    registry.register(RegisteredSensor("switchbot:motion", "motion-001", "motion", "switchbot", "motion_sensor", "", "人感", enabled=False))
+    publisher = _MqttPublisher()
+    manager = BleManager(registry, publisher)
+    manager.record_advertisement(_motion_advertisement(1))
+    manager.record_advertisement(_motion_advertisement(0))
+    manager.record_advertisement(_motion_advertisement(1))
+    assert publisher.messages == []
+    assert manager.registered_list()[0]["latest"]["values"] == {"motion_state": 1}
+    assert registry.list()[0].enabled is False
+
+
+def test_motion_sensor_id_change_uses_new_topic_and_setup_suggestion(tmp_path: Path) -> None:
+    registry = SensorRegistry(tmp_path / "sensors.json")
+    registry.register(RegisteredSensor("switchbot:motion", "motion-001", "motion", "switchbot", "motion_sensor", "", "人感"))
+    publisher = _MqttPublisher()
+    manager = BleManager(registry, publisher)
+    manager.record_advertisement(_motion_advertisement(0))
+    manager.update_registered_sensor("switchbot:motion", {"sensor_id": "motion-002", "display_name": "人感", "location": "", "enabled": True})
+    manager.record_advertisement(_motion_advertisement(1))
+    assert publisher.messages[0][0] == "omk/motion-002/motion"
+    manager.scanning = True
+    manager.record_advertisement(DecodedAdvertisement("switchbot:new-motion", "switchbot", "motion_sensor", "motion", -50, "now", {"motion_state": 0}, {}))
+    assert manager.suggested_sensor_id("switchbot:new-motion") == "motion-001"
