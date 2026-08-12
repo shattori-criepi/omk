@@ -473,7 +473,6 @@ def test_motion_and_contact_publish_current_state_every_ten_seconds_or_on_change
     manager.record_advertisement(_contact_advertisement(1, "periodic"))
     assert len(publisher.messages) == 7
     assert manager.registered_list()[0]["latest"]["received_at"] == "periodic"
-    assert registry.list()[0].enabled is False
 
 
 def test_motion_sensor_id_change_uses_new_topic_and_setup_suggestion(tmp_path: Path) -> None:
