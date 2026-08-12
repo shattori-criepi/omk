@@ -14,16 +14,22 @@ SWITCHBOT_COMPANY_ID = 0x0969
 METER_SERVICE_UUID = "0000fd3d-0000-1000-8000-00805f9b34fb"
 MODEL_BY_TYPE = {0x54: ("meter", "environment"), 0x69: ("meter_plus", "environment")}
 
-# Captured on the Pi: <6-byte physical id> f4 03 <tenths, signed integer, RH>.
-# f4 03 alone is *not* considered a device type; length and the complete,
-# plausible measurement layout are required before classifying it as a Meter.
+# Captured on the Pi: <6-byte physical id> <variable> 03
+# <tenths, signed integer, RH>. The first header byte changed from f4 to f8
+# for the same physical Meter, so it is deliberately not a fixed discriminator.
 METER_MANUFACTURER_LENGTH = 11
-METER_MANUFACTURER_HEADER = bytes.fromhex("f403")
+METER_MANUFACTURER_LAYOUT_MARKER_INDEX = 7
+METER_MANUFACTURER_LAYOUT_MARKER = 0x03
 
-# Captured Meter Pro CO2 layout.  The trailing zero and fixed separator make
-# this intentionally narrower than a general "16 byte is CO2" assumption.
+# Captured Meter Pro CO2 layout: <MAC 6> <variable> e4 <Meter-compatible
+# temperature/humidity 3> 00 <variable> <CO2 big-endian 2> 00. The variable
+# byte before CO2 was 3f on one device and 24 on another, so it is not used.
 CO2_MANUFACTURER_LENGTH = 16
-CO2_MANUFACTURER_SEPARATOR = 0x3F
+CO2_LAYOUT_MARKER_INDEX = 7
+CO2_LAYOUT_MARKER = 0xE4
+CO2_TEMPERATURE_HUMIDITY_OFFSET = 8
+CO2_MIN_PPM = 400
+CO2_MAX_PPM = 10_000
 
 
 def _hex_map(values: dict[str, bytes]) -> dict[str, str]:
@@ -48,19 +54,29 @@ def _decode_service_data(data: bytes | None) -> tuple[str, str, dict[str, Any]] 
     }
 
 
-def _decode_meter_manufacturer_data(data: bytes) -> tuple[str, str, dict[str, Any]] | None:
-    """Decode only the real Meter-compatible manufacturer packet layout."""
-    if len(data) != METER_MANUFACTURER_LENGTH or data[6:8] != METER_MANUFACTURER_HEADER:
-        return None
-    tenths, signed_integer, humidity = data[8:11]
+def _decode_meter_expression(fraction: int, signed_integer: int, humidity: int) -> tuple[float, int] | None:
+    """Decode the observed Meter-compatible temperature/humidity triplet."""
     integer = signed_integer & 0x7F
-    # Reject a packet that only happens to have the header; the actual complete
-    # layout is required. The sign bit is observed as positive in the fixture.
-    if tenths > 9 or integer > 99 or humidity > 100:
+    if fraction > 9 or humidity > 100:
         return None
-    temperature = integer + tenths / 10
-    if not signed_integer & 0x80:
+    temperature = integer + fraction / 10
+    if (signed_integer & 0x80) == 0:
         temperature *= -1
+    # The documented Meter measurement range is -20.0 to 60.0 C. It makes the
+    # manufacturer-layout identification stricter without assuming a MAC.
+    if not -20 <= temperature <= 60:
+        return None
+    return temperature, humidity
+
+
+def _decode_meter_manufacturer_data(data: bytes) -> tuple[str, str, dict[str, Any]] | None:
+    """Decode Meter only when the complete observed manufacturer layout fits."""
+    if len(data) != METER_MANUFACTURER_LENGTH or data[METER_MANUFACTURER_LAYOUT_MARKER_INDEX] != METER_MANUFACTURER_LAYOUT_MARKER:
+        return None
+    measurement = _decode_meter_expression(*data[8:11])
+    if measurement is None:
+        return None
+    temperature, humidity = measurement
     return "meter", "environment", {
         "temperature_c": temperature,
         "relative_humidity_percent": humidity,
@@ -68,13 +84,23 @@ def _decode_meter_manufacturer_data(data: bytes) -> tuple[str, str, dict[str, An
 
 
 def _decode_co2_manufacturer_data(data: bytes) -> tuple[str, str, dict[str, Any]] | None:
-    """Decode only CO2 verified from two Pi captures; do not infer temp/RH."""
+    """Decode the observed two-device CO2 layout without a MAC-specific rule."""
     if len(data) != CO2_MANUFACTURER_LENGTH:
         return None
-    if data[12] != CO2_MANUFACTURER_SEPARATOR or data[15] != 0:
+    if data[CO2_LAYOUT_MARKER_INDEX] != CO2_LAYOUT_MARKER or data[11] != 0 or data[15] != 0:
         return None
+    measurement = _decode_meter_expression(*data[CO2_TEMPERATURE_HUMIDITY_OFFSET:11])
+    if measurement is None:
+        return None
+    temperature, humidity = measurement
     co2_ppm = int.from_bytes(data[13:15], byteorder="big")
-    return "meter_pro_co2", "environment", {"co2_ppm": co2_ppm}
+    if not CO2_MIN_PPM <= co2_ppm <= CO2_MAX_PPM:
+        return None
+    return "meter_pro_co2", "environment", {
+        "temperature_c": temperature,
+        "relative_humidity_percent": humidity,
+        "co2_ppm": co2_ppm,
+    }
 
 
 def _decode_manufacturer_data(data: bytes | None) -> tuple[str, str, dict[str, Any]] | None:
