@@ -346,19 +346,19 @@ def test_contact_sensor_decodes_official_service_data_and_manufacturer_layouts()
     closed = decode("D3:B2:04:E2:31:25", -31, {}, {METER_SERVICE_UUID: bytes.fromhex("64006401068f053d81")}, "now")
     opened = decode("D3:B2:04:E2:31:25", -31, {}, {METER_SERVICE_UUID: bytes([0x64, 0, 0x64, 0x02])}, "now")
     timeout = decode("D3:B2:04:E2:31:25", -31, {}, {METER_SERVICE_UUID: bytes([0x64, 0, 0x64, 0x04])}, "now")
-    manufacturer_open = decode("D3:B2:04:E2:31:25", -31, {SWITCHBOT_COMPANY_ID: bytes.fromhex("d3b204e23125704c00530051c1")}, {}, "now")
-    manufacturer_closed = decode("D3:B2:04:E2:31:25", -31, {SWITCHBOT_COMPANY_ID: bytes.fromhex("d3b204e23125715c0059000041")}, {}, "now")
+    manufacturer_closed = decode("D3:B2:04:E2:31:25", -31, {SWITCHBOT_COMPANY_ID: bytes.fromhex("d3b204e23125704c00530051c1")}, {}, "now")
+    manufacturer_open = decode("D3:B2:04:E2:31:25", -31, {SWITCHBOT_COMPANY_ID: bytes.fromhex("d3b204e23125715c0059000041")}, {}, "now")
     assert closed is not None and closed.model == "contact_sensor" and closed.sensor_type == "contact" and closed.values == {"contact_state": 0}
     assert opened is not None and opened.values == {"contact_state": 1}
     assert timeout is not None and timeout.values == {"contact_state": 1}
-    assert manufacturer_open is not None and manufacturer_open.values == {"contact_state": 1}
     assert manufacturer_closed is not None and manufacturer_closed.values == {"contact_state": 0}
+    assert manufacturer_open is not None and manufacturer_open.values == {"contact_state": 1}
 
 
 def test_contact_prefers_current_manufacturer_state_over_stale_service_data() -> None:
     stale_open_service_data = {METER_SERVICE_UUID: bytes.fromhex("64006405011300d981")}
-    manufacturer_closed = {SWITCHBOT_COMPANY_ID: bytes.fromhex("d3b204e23125865c004a000041")}
-    manufacturer_open = {SWITCHBOT_COMPANY_ID: bytes.fromhex("d3b204e23125854c00450035c1")}
+    manufacturer_closed = {SWITCHBOT_COMPANY_ID: bytes.fromhex("d3b204e23125854c00450035c1")}
+    manufacturer_open = {SWITCHBOT_COMPANY_ID: bytes.fromhex("d3b204e23125865c004a000041")}
     closed = decode("D3:B2:04:E2:31:25", -31, manufacturer_closed, stale_open_service_data, "now")
     opened = decode("D3:B2:04:E2:31:25", -31, manufacturer_open, {METER_SERVICE_UUID: bytes([0x64, 0, 0x64, 0x01])}, "now")
     assert closed is not None and closed.model == "contact_sensor" and closed.values == {"contact_state": 0}
