@@ -48,6 +48,40 @@ def test_unrelated_and_excluded_fields_never_enter_harvest_payload():
     assert aggregator.flush_due(at(0, 35)) is None
 
 
+def test_environment_sensors_average_independently_and_coexist_with_sen66():
+    aggregator = MinuteAggregator()
+    aggregator.ingest("omk/sen66-001/sen66", {"temperature_celsius": 27}, at(5))
+    aggregator.ingest("omk/th-001/environment", {"temperature_c": 28, "relative_humidity_percent": 40}, at(10))
+    aggregator.ingest("omk/th-001/environment", {"temperature_c": 30, "relative_humidity_percent": 44}, at(20))
+    aggregator.ingest("omk/th-002/environment", {"temperature_c": 26, "relative_humidity_percent": 89}, at(30))
+    aggregator.ingest("omk/co2-001/environment", {"temperature_c": 27, "relative_humidity_percent": 39, "co2_ppm": 580}, at(40))
+    aggregator.ingest("omk/co2-001/environment", {"temperature_c": 29, "relative_humidity_percent": 41, "co2_ppm": 592}, at(50))
+    assert aggregator.flush_due(at(0, 35)) == {
+        "time": "2026-08-05T10:34:00+09:00",
+        "sen66_temperature_c": 27,
+        "th-001_temperature_c": 29,
+        "th-001_relative_humidity_percent": 42,
+        "th-002_temperature_c": 26,
+        "th-002_relative_humidity_percent": 89,
+        "co2-001_temperature_c": 28,
+        "co2-001_relative_humidity_percent": 40,
+        "co2-001_co2_ppm": 586,
+    }
+
+
+def test_environment_ignores_missing_none_nonfinite_invalid_and_state_topics():
+    aggregator = MinuteAggregator()
+    aggregator.ingest("omk/th-001/environment", {"temperature_c": None, "relative_humidity_percent": float("nan")}, at(5))
+    aggregator.ingest("omk/th-001/environment", {"temperature_c": 25}, at(10))
+    aggregator.ingest("omk/bad.id/environment", {"temperature_c": 99}, at(15))
+    aggregator.ingest("omk/motion-001/motion", {"motion_state": 1}, at(20))
+    aggregator.ingest("omk/contact-001/contact", {"contact_state": 0}, at(25))
+    aggregator.ingest("omk/th-001/status", {"temperature_c": 99}, at(30))
+    assert aggregator.flush_due(at(0, 35)) == {
+        "time": "2026-08-05T10:34:00+09:00", "th-001_temperature_c": 25,
+    }
+
+
 class Sender:
     def __init__(self, fail=False): self.fail, self.calls = fail, []
     def send(self, payload):
