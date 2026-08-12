@@ -1,0 +1,75 @@
+from __future__ import annotations
+
+import os
+from pathlib import Path
+from typing import Any
+
+from fastapi import FastAPI, HTTPException
+import paho.mqtt.client as mqtt
+from pydantic import BaseModel, Field
+
+from .registry import RegistryError, SensorRegistry
+from .service import BleManager
+
+app = FastAPI(title="OMK BLE sensor manager")
+client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="omk-ble-sensor-manager")
+manager = BleManager(SensorRegistry(Path(os.getenv("OMK_BLE_REGISTRY", "/var/lib/omk/ble/sensors.json"))), client)
+
+class RegisterRequest(BaseModel):
+    device_key: str
+    sensor_id: str
+    display_name: str = Field(min_length=1, max_length=64)
+    location: str = Field(default="", max_length=64)
+    enabled: bool = True
+
+@app.on_event("startup")
+async def startup() -> None:
+    client.connect_async(os.getenv("MQTT_HOST", "127.0.0.1"), int(os.getenv("MQTT_PORT", "1883")))
+    client.loop_start()
+    try:
+        await manager.start_collection()
+    except RuntimeError as error:
+        # Absence of Bluetooth must not make the gateway service unhealthy.
+        import logging
+        logging.getLogger(__name__).warning("BLE passive collection unavailable: %s", error)
+
+@app.on_event("shutdown")
+async def shutdown() -> None:
+    if manager._scanner:
+        await manager._scanner.stop()
+    client.loop_stop()
+
+@app.post("/api/setup/scan")
+async def start_scan() -> dict[str, Any]:
+    try:
+        await manager.start_scan(int(os.getenv("OMK_BLE_SCAN_SECONDS", "60")))
+    except RuntimeError as error:
+        raise HTTPException(503, str(error)) from error
+    return {"status": "scanning", "timeout_seconds": int(os.getenv("OMK_BLE_SCAN_SECONDS", "60"))}
+
+@app.delete("/api/setup/scan")
+async def stop_scan() -> dict[str, str]:
+    await manager.stop_scan()
+    return {"status": "stopped"}
+
+@app.get("/api/setup/candidates")
+def candidates() -> dict[str, Any]:
+    return {"scanning": manager.scanning, "candidates": manager.candidate_list()}
+
+@app.get("/api/sensors")
+def sensors() -> dict[str, Any]:
+    try:
+        return {"sensors": manager.registered_list()}
+    except RegistryError as error:
+        raise HTTPException(500, str(error)) from error
+
+@app.post("/api/sensors", status_code=201)
+def register(request: RegisterRequest) -> dict[str, Any]:
+    try:
+        return manager.register(request.model_dump()).as_dict()
+    except (RegistryError, ValueError) as error:
+        raise HTTPException(400, str(error)) from error
+
+@app.get("/health")
+def health() -> dict[str, str]:
+    return {"status": "ok"}
