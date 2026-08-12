@@ -10,6 +10,7 @@
 | `omk/<device_id>/power` | `net_power_w` |
 | `omk/<device_id>/cumulative-energy` | `cumulative_energy_import_kwh`、`cumulative_energy_export_kwh` |
 | `omk/<device_id>/power-flow` | `pv_power_w`、`load_power_w`、`grid_import_power_w`、`grid_export_power_w`、`pcs_ac_output_power_w`、`battery_soc_percent`、`battery_charge_power_w`、`battery_discharge_power_w` |
+| `omk/<sensor_id>/environment` | `temperature_c`、`relative_humidity_percent`、`co2_ppm`（存在する項目のみ） |
 
 `power`の正値は買電、負値は売電です。電圧・電流・力率、蓄電池の運転状態はHarvestへ送信しません。不正JSON、JSON objectではないpayload、非有限数は安全に無視します。
 
@@ -18,6 +19,8 @@
 SEN66は`sen66_temperature_c`、`sen66_relative_humidity_percent`、`sen66_co2_ppm`、`sen66_pm1_0_ug_m3`、`sen66_pm2_5_ug_m3`、`sen66_pm4_0_ug_m3`、`sen66_pm10_0_ug_m3`、`sen66_voc_index`、`sen66_nox_index`です。Bルートは`broute_grid_power_w`、`broute_grid_import_power_w`、`broute_grid_export_power_w`、`broute_grid_import_energy_kwh`、`broute_grid_export_energy_kwh`です。電力系は`power_system_pv_power_w`、`power_system_load_power_w`、`power_system_grid_import_power_w`、`power_system_grid_export_power_w`、`power_system_pcs_ac_output_power_w`、`power_system_battery_soc_percent`、`power_system_battery_charge_power_w`、`power_system_battery_discharge_power_w`です。
 
 `time`は区間開始時刻（例: `2026-08-05T10:34:00+09:00`）です。温湿度・空気質・各瞬時電力は有効サンプルの平均、積算買売電量とSOCは区間末の最新値です。欠測フィールドはJSONから省略し、全項目欠測の区間は送信しません。開いた1分区間はメモリだけに保持するため、再起動時には意図的に破棄されます。
+
+`environment` は汎用のセンサ入力です。許可された `sensor_id`（英数字、`-`、`_`）ごとに、`<sensor_id>_temperature_c`、`<sensor_id>_relative_humidity_percent`、`<sensor_id>_co2_ppm` を生成し、存在する各項目を1分平均で送信します。これらはSEN66の固定fieldとは独立して共存します。
 
 ## 再送と設定
 
