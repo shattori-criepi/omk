@@ -12,7 +12,7 @@ PYTHONPATH=src .venv/bin/pytest -v
 
 Raspberry Pi 4（Python 3.13.5、aarch64）では`pyarrow==20.0.0`、`duckdb==1.3.2`、`pytest==9.1.1`で検証しています。
 
-## Parquet verification
+## Parquet検証
 
 DuckDB CLIは不要です。リポジトリ直下から、この仮想環境のPython版DuckDBで読み取り専用の検証を実行できます。
 

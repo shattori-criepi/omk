@@ -1,10 +1,10 @@
-# USBLC6-2SC6 placement and return-path audit
+# USBLC6-2SC6 配置とreturn path監査
 
 **Audit date:** 2026-08-03 JST
 
 **Scope:** USB-C J1 to ESP32-C3-MINI-1 U1 USB D+/D− protection only. The actual formal reference is **D1** (not U3): `USBLC6-2SC6`. This audit records circuit/topology and Phase 3B placement requirements only; it does not modify the generator, formal schematic, PCB, footprint, BOM/CPL, or Gerber files.
 
-## Sources
+## 出典
 
 | Source | Revision / date | Used for |
 | --- | --- | --- |
@@ -14,7 +14,7 @@
 | [ESP32-C3 Hardware Design Guidelines — Schematic Checklist](https://docs.espressif.com/projects/esp-hardware-design-guidelines/en/latest/esp32c3/schematic-checklist.html) | latest, retrieved 2026-08-03 JST | GPIO18 = D− / GPIO19 = D+, and chip-side optional 22/33 Ω series and D+/D− capacitor footprints. |
 | Project formal sources | `scripts/generate_schematic.py`, `esp32-c3-main.kicad_sch`, KiCad 9 standard symbol/footprint files; read 2026-08-03 JST | Current D1/J1/U1 values, nets, pin numbers and assigned land pattern. |
 
-## Current design extraction
+## 現行設計の抽出
 
 | Item | Current value | Assessment |
 | --- | --- | --- |
@@ -27,7 +27,7 @@
 
 DS4260 lists 3.5 pF maximum I/O-to-GND capacitance and explicitly supports USB 2.0 up to 480 Mb/s, so it is electrically suitable for ESP32-C3 USB Full-Speed. This audit does not make a new device-selection decision.
 
-## Pin mapping audit
+## pin mapping監査
 
 ST’s functional diagram (top view) defines 1/6 as I/O1, 3/4 as I/O2, 2 as GND and 5 as VBUS. The KiCad SOT-23-6 footprint likewise uses pads 1–3 on one package side and 4–6 on the other; pad 1 is identified by the F.SilkS triangle.
 
@@ -42,9 +42,9 @@ ST’s functional diagram (top view) defines 1/6 as I/O1, 3/4 as I/O2, 2 as GND 
 
 I/O1 and I/O2 are electrically symmetric inside each pair. Nevertheless, the PCB must orient D1 deliberately: route J1 into pads 1/3 (connector side) and out of pads 6/4 (chip side), or the 180° equivalent that preserves this through-path. This avoids using a T branch as an ESD stub. The current net labels intentionally make each pair one net; they do not authorize a forked layout.
 
-## USB D+/D− signal and ESD return paths
+## USB D+/D− signalとESD return path
 
-### Intended signal path
+### 意図したsignal path
 
 ```text
 J1 A6/B6 (D+) → D1 I/O1 connector-side pad → D1 I/O1 chip-side pad → U1.27 GPIO19 (USB_D+)
@@ -53,7 +53,7 @@ J1 A7/B7 (D−) → D1 I/O2 connector-side pad → D1 I/O2 chip-side pad → U1.
 
 The connector has duplicated USB2 pins as expected for Type-C. The D+ and D− net identities are preserved end-to-end, and Espressif specifies GPIO19 as D+ and GPIO18 as D−. **No schematic CHANGE is indicated.**
 
-### ESD discharge return path
+### ESD放電return path
 
 USBLC6-2 uses rail-to-rail protection. Its effectiveness depends on low inductance in all three branches, not just the signal trace:
 
@@ -66,7 +66,7 @@ DS4260 warns that the data-I/O, VBUS and GND paths must all be as short as possi
 
 The USB shell is intentionally a separate `USB_SHIELD` net. It reaches system GND only through R3, a 0 Ω DNP option. D1.2 must connect directly to the continuous system GND reference plane; it is not a substitute for, nor required to be routed through, the optional shell bond. The shell stakes and the selected shield-bond strategy belong at the connector entry and must not lengthen the D1 GND discharge path.
 
-## Phase 3B placement and routing requirements
+## Phase 3B配置とrouting要件
 
 | Requirement | Source / rationale | Phase 3B evidence required |
 | --- | --- | --- |
@@ -85,7 +85,7 @@ The USB shell is intentionally a separate `USB_SHIELD` net. It reaches system GN
 | Keep the shield termination at the connector entry; maintain `USB_SHIELD` as a separately reviewed net. | Present R3 DNP shield option; prevents accidental use of shell path as D1 return. | Shell stakes, R3 option and chassis/system-GND policy reviewed. |
 | Reserve optional chip-side USB tuning positions. | Espressif recommends 22/33 Ω series and D+/D− shunt-cap footprints close to the chip. Current topology has neither. | **VERIFY / design decision:** document why no tuning footprints are present, or create a separate approved schematic-change task. This audit does not change it. |
 
-## Footprint, 3D, assembly and procurement
+## footprint、3D、assembly、調達
 
 | Topic | Finding | Status |
 | --- | --- | --- |
@@ -95,7 +95,7 @@ The USB shell is intentionally a separate `USB_SHIELD` net. It reaches system GN
 | Assembly | SOT23-6L is an ordinary SMT package, but reflow profile, polarity recognition, paste/mask and CPL rotation must be verified with the chosen assembler. | VERIFY |
 | Procurement / PCBA | LCSC property is `C7519`; live LCSC/JLC stock, Basic/Extended class and PCBA eligibility were not captured in this audit. | VERIFY; manufacturing release BLOCKED |
 
-## Disposition
+## 判定
 
 | Item | Classification | Reason |
 | --- | --- | --- |
@@ -109,7 +109,7 @@ The USB shell is intentionally a separate `USB_SHIELD` net. It reaches system GN
 | Footprint 3D/stencil/assembly and JLCPCBA procurement | VERIFY | Not confirmed here. |
 | Manufacturing release | BLOCKED | PCB layout/DRC, return-path review, assembly/procurement checks and prototype USB/ESD validation remain. |
 
-### Change decision and Phase 3B gate
+### 変更の決定とPhase 3B gate
 
 There is **no CHANGE** to the schematic, generator, footprint or BOM from this audit. The electrical protection topology is correct. Phase 3B may place and route the USB path only after reserving D1 directly at J1, C2 directly at D1.5/GND, a continuous GND return, and the antenna/buck exclusions above. Manufacturing release remains **BLOCKED** until those rules are implemented and reviewed.
 

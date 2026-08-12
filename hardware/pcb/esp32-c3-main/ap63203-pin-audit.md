@@ -1,17 +1,17 @@
-# AP63203WU-7 pin-by-pin audit
+# AP63203WU-7 pinごとの監査
 
-Audit date: 2026-08-03 JST. Scope is only the U2 buck-converter circuit review. This document does **not** change the generator, formal schematic, PCB, footprint files, BOM/CPL, or manufacturing data.
+監査日: 2026-08-03 JST。対象はU2 buck-converter回路のレビューだけである。本書はgenerator、正式回路図、PCB、footprint file、BOM/CPL、製造データを**変更しない**。
 
-## Evidence and controlled sources
+## 根拠と管理された出典
 
 | Source | Revision / date | Used pages |
 | --- | --- | --- |
 | [Diodes Incorporated, *AP63200/AP63201/AP63203/AP63205* datasheet](https://www.diodes.com/datasheet/download/AP63200-AP63201-AP63203-AP63205.pdf) | DS41326 Rev. 3-2, November 2024; retrieved 2026-08-03 JST | pp. 2–5: pins, limits and electrical characteristics; p. 9: fixed-output circuit; pp. 10–14: EN, protection, component selection and layout; pp. 16–17: ordering/package. |
 | [Diodes Incorporated, *AP63203WU-EVM User Guide*](https://www.diodes.com/assets/Evaluation-Boards/AP63203WU-EVM-User-Guide.pdf) | Rev. 2, July 2023; retrieved 2026-08-03 JST | pp. 4–6: 3.3 V configuration, schematic and BOM. |
 
-## Current-design extraction
+## 現行設計の抽出
 
-The generator and generated formal schematic agree on the following U2 circuit.  This audit read them but did not modify either file.
+generatorと生成済み正式回路図は、以下のU2回路について一致している。本監査ではこれらを参照しただけで、いずれのファイルも変更していない。
 
 | Item | Current formal design |
 | --- | --- |
@@ -22,7 +22,7 @@ The generator and generated formal schematic agree on the following U2 circuit. 
 | Output / feedback | U2 pin 1 `FB` = `+3V3`; C4/C5 are 22 uF each (`GRM21BR60J226ME39L`) from `+3V3` to GND. No external feedback divider is fitted. |
 | Ground | U2 pin 4 = GND. TSOT26 is a six-lead package; the datasheet package drawing and assigned six-pad footprint have no exposed pad. |
 
-## Part and pin audit
+## 部品とpinの監査
 
 The exact orderable part is `AP63203WU-7`: AP63203 fixed 3.3 V, 1.1 MHz PWM/PFM, TSOT26, 3,000-piece 7-inch tape-and-reel. It is not the adjustable AP63200/AP63201 and does not use their external divider. Datasheet electrical limits specify AP63203 VFB/output regulation at 3.27–3.33 V in CCM.
 
@@ -36,7 +36,7 @@ The exact orderable part is `AP63203WU-7`: AP63203 fixed 3.3 V, 1.1 MHz PWM/PFM,
 | 6 BST | High-side gate-drive bootstrap input; ceramic 100 nF from BST to SW is recommended. VBST limit is VSW−0.3 V to VSW+6.0 V. | C3 pin 1 `BST`; C3 pin 2 `SW`. | ACCEPT | Value and endpoints match datasheet. C3 voltage rating must remain adequate for the bootstrap differential voltage; the specified 16 V X7R part has nominal voltage margin. Physical placement remains Phase 3B VERIFY. |
 | Exposed pad | None shown for TSOT26 package. | None in symbol/footprint. | ACCEPT | No missing exposed-pad connection exists. Footprint pad-land dimensional audit is outside this circuit-only audit. |
 
-## External-component audit
+## 外付け部品の監査
 
 | Item | Official recommendation / EVM | Current design | Status | Finding |
 | --- | --- | --- | --- | --- |
@@ -47,7 +47,7 @@ The exact orderable part is `AP63203WU-7`: AP63203 fixed 3.3 V, 1.1 MHz PWM/PFM,
 | C4/C5 output | Datasheet Table 2 and WU-EVM use 2 × 22 uF ceramics (44 uF nominal); general text calls 22–68 uF ceramic sufficient for most applications. | 2 × 22 uF, 6.3 V X5R, 0805. | VERIFY | Nominal 44 uF exactly matches Table 2/EVM topology. The Murata audit records about 11.7 uF each / 23.5 uF total representative effective capacitance at 3.3 V; worst-condition tolerance/temperature margin and stability/transient compliance cannot be released. |
 | Feedback divider / Cff | Not used for fixed-output AP63203. EVM includes a 100 pF item in its BOM, but its fixed-output instruction is direct FB-to-output and the current datasheet Figure 21 has no divider/Cff. | None. | ACCEPT | No divider is missing. The EVM C4 is not a basis to add a component without an official schematic/net confirmation. |
 
-## Operating limits and protection relevance
+## 動作上限と保護機能の関連性
 
 | Parameter | Official value | Design relevance / status |
 | --- | --- | --- |
@@ -58,7 +58,7 @@ The exact orderable part is `AP63203WU-7`: AP63203 fixed 3.3 V, 1.1 MHz PWM/PFM,
 | Soft start / UVLO | 4 ms typ soft start; VIN UVLO rising 3.30–3.70 V, 440 mV typ hysteresis | Adequate for a 5 V source in principle; USB/PTC startup behavior: VERIFY. |
 | Thermal reference | TSOT26 theta-JA 89 °C/W under specified single-layer 2 oz/minimum-layout test condition | Do not apply this number directly to final board. Datasheet asks for heat-spreading GND / vias: Phase 3B VERIFY. |
 
-## Datasheet / EVM comparison
+## datasheet / EVMの比較
 
 | Topic | Current OMK design | Datasheet / WU-EVM | Assessment |
 | --- | --- | --- | --- |
@@ -71,7 +71,7 @@ The exact orderable part is `AP63203WU-7`: AP63203 fixed 3.3 V, 1.1 MHz PWM/PFM,
 | EVM extras | No input/output connectors, EN jumper/divider, optional/uncertain 100 pF EVM item, or EVM test points | Evaluation convenience / 12 V test fixture | No circuit CHANGE implied. |
 | Layout | Not yet PCB-laid out | Close VIN caps, compact SW/BST loop, GND vias/plane, FB away from SW | BLOCKED for manufacturing release until Phase 3B implementation/review. |
 
-## Disposition and next gate
+## 判定と次のgate
 
 ### ACCEPT
 
@@ -90,7 +90,7 @@ The exact orderable part is `AP63203WU-7`: AP63203 fixed 3.3 V, 1.1 MHz PWM/PFM,
 
 ### CHANGE
 
-None identified by this pin-by-pin circuit audit.
+このpinごとの回路監査では該当なし。
 
 ### BLOCKED
 
@@ -98,4 +98,4 @@ None identified by this pin-by-pin circuit audit.
 
 ## Phase gate
 
-No schematic change is required by this audit. Phase 3B may proceed with PCB placement/routing of the approved electrical topology, subject to the layout rules in datasheet p. 15: VIN capacitors closest to U2; compact BST–SW loop; L1 then output capacitors; FB at the regulated output and away from SW; sufficient capacitor-ground vias and a large GND heat-spreading layer beneath U2. Manufacturing release remains **BLOCKED**.
+この監査で回路図変更は不要である。Phase 3Bでは、datasheet p. 15のlayout規則、すなわちU2に最も近いVIN capacitor、コンパクトなBST–SW loop、L1の後にoutput capacitor、安定化出力上かつSWから離したFB、十分なcapacitor-ground via、U2下の大きなGND放熱layerに従い、承認済みの電気的topologyをPCB配置／配線してよい。製造リリースは引き続き**BLOCKED**とする。

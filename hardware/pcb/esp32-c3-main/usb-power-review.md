@@ -1,8 +1,8 @@
-# Phase 3A USB-C input/protection review — 2026-08-03 JST
+# Phase 3A USB-C入力／保護レビュー — 2026-08-03 JST
 
 Scope is J1, F1, D1, R1/R2, R3 and USB routing only; no schematic change.
 
-## Connection audit
+## 接続監査
 
 The formal schematic labels all J1 VBUS pins `+5V_USB`, all A1/A12/B1/B12 GND, A6/B6 `USB_D+`, A7/B7 `USB_D-`; A5 and B5 are independent CC nets through separate R1/R2 to GND. A8/B8 are NC. F1 separates VBUS to `+5V`; D1 is on the data nets before GPIO19 D+ / GPIO18 D−. D1 pin 1/6 is I/O1, 3/4 I/O2, pin 2 GND, pin 5 VBUS. R3 provides shield-to-GND 0 Ω DNP. TP10/TP11 are labelled USB_D+/USB_D− and must be implemented as inline pads or very short stubs in Phase 3B.
 
@@ -22,13 +22,13 @@ Bourns MF-MSMF110-2 is Electrical: ACCEPT, Thermal/high-temperature: VERIFY, Sta
 
 **Maintain ST USBLC6-2SC6 / LCSC C7519.** It is an active USB 2.0 ESD part with two data channels plus VBUS protection, 3.5 pF max line capacitance, IEC 61000-4-2 level 4 (8 kV contact / 15 kV air), SOT23-6L package. It is suitable for Full Speed and has no D+/D− polarity when each paired I/O pin is connected as specified. Its GND return must be short and via-rich. Official: https://www.st.com/resource/en/datasheet/usblc6-2.pdf ; current ST product page: https://www.st.com/en/protections-and-emi-filters/usblc6-2.html . JLC class/live stock VERIFY. USBLC6-2P6 is package alternative only; no alternate is selected without an official LCSC/JLC listing review.
 
-## Shield, VBUS and Phase 3B layout
+## shield、VBUS、Phase 3B layout
 
 For this plastic, unearthed enclosure, retain **R3 0 Ω DNP** as the Rev.A recommended tuning option; populate 0 Ω only after EMI/ESD evaluation. Do not hard-short shield before the chassis/ESD return strategy is measured. A 1–4.7 nF capacitor/RC option may be proposed after testing but needs a deliberate schematic change.
 
 C1 10 µF + C2 100 nF are after F1 and are appropriate local buck input decoupling; USB inrush compliance still requires measurement with the final PTC, cable and host. Route D+/D− as ~90 Ω differential according to stackup, length-match, avoid vias/stubs/90° corners, place ESD at J1, keep continuous GND reference, and separate from SW/L1/antenna. Place shell stakes near GND vias; keep CC separate from the differential pair.
 
-## Status
+## 状態
 
 | Item | Electrical | Procurement | Footprint | PCB layout | Manufacturing release |
 | --- | --- | --- | --- | --- | --- |

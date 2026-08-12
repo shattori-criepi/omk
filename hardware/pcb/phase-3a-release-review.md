@@ -1,14 +1,14 @@
-# Phase 3A release review and schematic-change plan — historical record
+# Phase 3A リリースレビューと回路図変更計画 — 履歴記録
 
-> **Project status: CANCELLED (2026-08-04). Manufacturing release: CANCELLED. Fabrication permitted: NO.**
+> **プロジェクト状態: CANCELLED (2026-08-04)。製造リリース: CANCELLED。製造許可: NO。**
 >
 > 本文は中止前の部品・回路図統合レビューの履歴である。本文中の`BLOCKED`、Phase 3B、発注前またはprototype gateは当時の未完了事項を示すだけで、現在の製造承認や次作業を意味しない。後継構成へ自動適用してはならない。詳細は[中止決定記録](../../docs/decisions/esp32-c3-integrated-pcb-cancellation.md)を参照。
 
-Scope at the time: final inventory before Phase 3B PCB layout. This is a historical review and change plan only.
+当時の対象範囲: Phase 3B PCB layout前の最終棚卸し。本書は履歴としてのレビューおよび変更計画のみを記録する。
 
-## Decisions fixed by Phase 3A
+## Phase 3Aで確定した決定
 
-| Area | Fixed decision |
+| 領域 | 確定した決定 |
 | --- | --- |
 | MCU | ESP32-C3-MINI-1-H4X; USB D−/D+=GPIO18/GPIO19; SDA/SCL=GPIO6/GPIO7; BOOT=GPIO9; UART RX/TX=GPIO20/GPIO21; GPIO3 status LED remains DNP. |
 | Buck | U2 AP63203WU-7, fixed 5 V to 3.3 V / 2 A. C2/C3=100 nF ACCEPT; C1=10 uF and C4/C5=22 uF×2 nominally ACCEPT, DC-bias VERIFY. |
@@ -16,13 +16,13 @@ Scope at the time: final inventory before Phase 3B PCB layout. This is a histori
 | USB | J1 JAE DX07S016JA1R1500; D1 ST USBLC6-2SC6; F1 Bourns MF-MSMF110-2; independent 5.1 kOhm Rd; R3 0 Ohm DNP. USB 2.0 Full Speed sink only; no PD. |
 | Interconnect | Bare 2.54 mm 1×4 rejected. Selected header: JST S4B-PH-K-S(LF)(SN) / C157926, side-entry TH, for both main J3 and carrier J2. Retain 1=3V3, 2=GND, 3=SDA, 4=SCL. Harness: PHR-4×2, SPH-002T-P0.5S×8, AWG26–28 stranded wire×4, 40 mm nominal, female housings at both ends. |
 
-The MPN/form factor and electrical mapping are fixed. PCB coordinates and rotations are Phase 3B responsibilities; rotating a footprint does not change pad numbering or the schematic net mapping. See `jst-ph-header-selection.md`.
+MPN/form factorおよび電気的mappingは確定している。PCB座標と回転はPhase 3Bの責務であり、footprintを回転してもpad番号や回路図のnet mappingは変わらない。`jst-ph-header-selection.md`を参照。
 
-## Formal-schematic delta audit
+## 正式回路図の差分監査
 
-### Main board
+### main board
 
-| Item | Formal schematic / generator now | Required schematic-change set | Classification |
+| 項目 | 現在の正式回路図 / generator | 必要な回路図変更一式 | 分類 |
 | --- | --- | --- | --- |
 | J3 | Generic `Conn_01x04` symbol retained; Value `JST PH 4P`; MPN `S4B-PH-K-S(LF)(SN)`; LCSC `C157926`; `Connector_JST:JST_PH_S4B-PH-K_1x04_P2.00mm_Horizontal`; mapping 1=3V3, 2=GND, 3=SDA, 4=SCL. | Integrated in generator and formal schematic; ERC/PDF/SVG checked. Only PCB placement, 3D and mechanical review remain in Phase 3B. | Integrated / no schematic change remaining |
 | L1 | 4.7 uH; MPN `XGL4020-472MEC`; LCSC `C6012418`; `Inductor_SMD:L_Coilcraft_XxL4020`; pad 1=`SW`, pad 2=`+3V3`. | Integrated through generator and formal schematic; ERC/PDF/SVG and unchanged-netlist audit passed. 3D/mechanical and procurement remain Phase 3B/purchase gates. | Integrated / no schematic change remaining |
@@ -36,7 +36,7 @@ The MPN/form factor and electrical mapping are fixed. PCB coordinates and rotati
 
 ### SEN66 carrier
 
-| Item | Formal schematic / generator now | Required schematic-change set | Classification |
+| 項目 | 現在の正式回路図 / generator | 必要な回路図変更一式 | 分類 |
 | --- | --- | --- | --- |
 | J2 | Generic `Conn_01x04` symbol retained; Value `JST PH 4P`; MPN `S4B-PH-K-S(LF)(SN)`; LCSC `C157926`; `Connector_JST:JST_PH_S4B-PH-K_1x04_P2.00mm_Horizontal`; mapping 1=3V3, 2=GND, 3=SDA, 4=SCL. | Integrated with main J3 in generator and formal schematic; ERC/PDF/SVG checked. Only PCB placement, 3D and mechanical review remain in Phase 3B. | Integrated / no schematic change remaining |
 | J1 | Six independent TH pads: 1/6=3V3, 2/5=GND, 3=SDA, 4=SCL. | No change; this is the direct-solder SEN66 cable input, not board link. | No change |
@@ -44,21 +44,21 @@ The MPN/form factor and electrical mapping are fixed. PCB coordinates and rotati
 | R1/R2 | 4.7 kOhm DNP, LCSC C25900. | No circuit change. | No change |
 | TP1–TP4 | 3V3, GND, SDA, SCL respectively. | No change. | No change |
 
-## Approved schematic-change set and order
+## 承認済み回路図変更一式と順序
 
-1. Task A audit is recorded in `jst-ph-footprint-audit.md`: pads 1–4, pitch, 0.75 mm drill geometry, Pad-1 identification and 2D body mapping pass. The standard KiCad footprint is ACCEPT; missing STEP/drawing-view and finished-hole evidence are later gates.
-2. **Task B complete:** both generators and formal schematics were updated together with S4B-PH-K-S(LF)(SN), C157926 and the accepted KiCad footprint. The pin mapping was preserved; main ERC is 0 errors / 2 existing U1-library warnings and carrier ERC is 0 errors / 0 warnings. PCB coordinates/rotations remain Phase 3B work.
-3. **L1 integration complete:** the generator and formal schematic now use XGL4020-472MEC / C6012418 / `Inductor_SMD:L_Coilcraft_XxL4020`; pad mapping and complete netlist were preserved, then ERC/PDF/SVG passed. The historical IHLP-2020 footprint must not be reused. 3D/start-lead orientation and procurement remain later gates; see `esp32-c3-main/xgl4020-footprint-audit.md`.
-4. J1 audit is recorded in `esp32-c3-main/usb-c-j1-footprint-audit.md`: symbol/pad mapping is accepted, but the publicly inaccessible JAE `SJ121837` / `JACS-30413` / `JAHL-30353-1` leave official land/edge/assembly geometry VERIFY. Obtain these records and complete the comparison before setting its LCSC property to C3197885.
-5. Normalize manufacturer, MPN, LCSC, DNP, assembly, status and release-note properties for F1, D1, R1/R2, R3 and C1/C4/C5 without changing nets.
-6. Archive AP63203 EVM pin-for-pin evidence and Murata DC-bias data. Change values only if that evidence disproves the present circuit.
-7. Regenerate, compare generated/formal results, run ERC, export PDF and perform GUI review before PCB placement.
+1. Task Aの監査は`jst-ph-footprint-audit.md`に記録している。pads 1〜4、pitch、0.75 mm drill geometry、Pad-1識別、2D body mappingはpassした。標準KiCad footprintはACCEPTであり、欠けているSTEP/drawing-viewとfinished-holeの根拠は後続gateとする。
+2. **Task B complete:** 両generatorと正式回路図を、S4B-PH-K-S(LF)(SN)、C157926、承認済みKiCad footprintで同時更新した。pin mappingは維持し、mainのERCは0 errors / 既存U1-library warnings 2件、carrierのERCは0 errors / 0 warnings。PCB座標／回転はPhase 3Bの作業として残る。
+3. **L1 integration complete:** generatorと正式回路図はXGL4020-472MEC / C6012418 / `Inductor_SMD:L_Coilcraft_XxL4020`を使用する。pad mappingと完全なnetlistを維持し、ERC/PDF/SVGをpassした。履歴上のIHLP-2020 footprintを再利用してはならない。3D/start-leadの向きと調達は後続gateとする。`esp32-c3-main/xgl4020-footprint-audit.md`を参照。
+4. J1の監査は`esp32-c3-main/usb-c-j1-footprint-audit.md`に記録している。symbol/pad mappingは受理したが、公開取得できないJAE `SJ121837` / `JACS-30413` / `JAHL-30353-1`により、公式land/edge/assembly geometryはVERIFYのままである。これらを取得して比較を完了してから、LCSC propertyをC3197885へ設定する。
+5. netを変更せず、F1、D1、R1/R2、R3、C1/C4/C5のmanufacturer、MPN、LCSC、DNP、assembly、status、release-note propertyを正規化する。
+6. AP63203 EVMのpin-for-pin根拠とMurataのDC-biasデータを記録する。これらが現行回路を否定する場合に限り値を変更する。
+7. PCB配置前に、再生成、generated/formal結果の比較、ERC、PDF出力、GUI reviewを実行する。
 
-This plan selects side-entry TH S4B-PH-K-S(LF)(SN). Its schematic update is independent of later PCB rotation; Phase 3B determines the rotations and mechanical arrangement.
+本計画では側面挿入THのS4B-PH-K-S(LF)(SN)を選定する。回路図更新は後続PCB回転と独立しており、回転と機械的配置はPhase 3Bで決定する。
 
-## Remaining release blockers
+## 残るリリースblocker
 
-| Item | Current decision | Unresolved evidence/action | Phase | Release blocker | Owner/action |
+| 項目 | 現在の決定 | 未解決の根拠／対応 | Phase | リリースblocker | 担当／対応 |
 | --- | --- | --- | --- | --- | --- |
 | L1 procurement | XGL4020-472MEC Electrical ACCEPT; LCSC/JLC `C6012418`, Extended listing found | Live stock, price, MOQ and PCBA eligibility in the order flow. | Purchase | Yes | Procurement check. |
 | L1 footprint | XGL4020-472MEC / `Inductor_SMD:L_Coilcraft_XxL4020` integrated | 3D/start-lead orientation, assembler paste/mask and placement remain. | Phase 3B / before release | Yes | Hardware design. |
@@ -72,9 +72,9 @@ This plan selects side-entry TH S4B-PH-K-S(LF)(SN). Its schematic update is inde
 | J3/J2 | S4B-PH-K-S(LF)(SN) integrated in both schematics, side-entry TH | 2D footprint accepted; 3D/drawing-view, finished-hole/annular-ring, JLC order-time evidence, CPL rotation and cable exit/strain relief are later gates. | Phase 3B / purchase | Yes | Hardware/mechanical. |
 | Mechanics | Coplanar boards, 40 mm harness | Board outlines, M3, SEN66 retainer/airflow, thermal separation and STEP interference. | Phase 3B | Yes | Mechanical/layout. |
 
-## Phase gates
+## Phase gate
 
-| Gate | Must be complete |
+| Gate | 完了必須事項 |
 | --- | --- |
 | Phase 3A complete | **Complete:** component selection and change plan are complete; manufacturing blockers are explicit. |
 | Schematic consolidation | **Complete:** both boards use the accepted standard footprint; mapping was preserved and both schematics regenerated/ERC checked. |
@@ -82,7 +82,7 @@ This plan selects side-entry TH S4B-PH-K-S(LF)(SN). Its schematic update is inde
 | Immediately before order | JLC stock, Basic/Extended, price, PCBA eligibility, MOQ/alternates, approved footprint audits and DC-bias evidence. |
 | Prototype evaluation | PTC startup, shield population, ripple, SEN66 voltage drop/temperature offset, EMI/ESD, USB CDC/upload, Wi-Fi/MQTT and 24-hour run. |
 
-## References
+## 参照資料
 
 - `hardware/pcb/esp32-c3-main/power-review.md`
 - `hardware/pcb/esp32-c3-main/usb-power-review.md`

@@ -1,101 +1,87 @@
-# OMK BLE sensor manager
+# OMK BLEセンサマネージャー
 
-This Raspberry Pi host service passively receives BlueZ advertisements, maps a
-physical `device_key` to an OMK logical `sensor_id`, and publishes vendor-neutral
-MQTT topics such as `omk/living-env-01/environment`.
+このRaspberry Piホストサービスは、BlueZのBLE広告を受動的に受信し、物理的な
+`device_key`をOMKの論理的な`sensor_id`へ対応付け、
+`omk/living-env-01/environment`のようなベンダー非依存のMQTT topicをpublishします。
 
-It deliberately runs outside the Dashboard container; Docker reaches port 8787
-through its host gateway. It needs no BlueZ DBus socket or privileged container,
-so Bluetooth access remains isolated to the host service. Limit port 8787 to the
-Docker bridge in the Pi firewall if the Dashboard is exposed beyond the local UI.
+このサービスはDashboardコンテナの外で動作し、Dockerはホストゲートウェイ経由で
+ポート8787へ接続します。BlueZのDBusソケットや特権コンテナは不要なため、Bluetoothへの
+アクセスはホストサービスに分離されたままです。DashboardをローカルUI以外へ公開する場合は、
+Piのファイアウォールでポート8787をDockerブリッジに限定してください。
 
-Run `scripts/setup-ble-sensor-manager.sh` on the Pi to create its virtualenv and
-install the systemd unit. Registration is readable JSON at
-`data/ble/sensors.json`.
+Pi上で`scripts/setup-ble-sensor-manager.sh`を実行すると、virtualenvの作成とsystemd unitの
+導入を行えます。登録情報は`data/ble/sensors.json`に可読なJSONとして保存します。
 
-`device_key` is the physical identity (`switchbot:<lowercase MAC without
-colons>`); `sensor_id` is the OMK logical identity. The registry stores only
-`device_key`, `sensor_id`, `sensor_type`, vendor, model, location,
-`display_name`, and `enabled`. Latest measurements, RSSI, receive time, and raw
-advertisements remain runtime state and are never written into the registry.
+`device_key`は物理的な識別子（`switchbot:<コロンを除いた小文字MAC>`）、`sensor_id`は
+OMKの論理的な識別子です。registryには`device_key`、`sensor_id`、`sensor_type`、vendor、
+model、location、`display_name`、`enabled`だけを保存します。最新の測定値、RSSI、受信時刻、
+生のBLE広告はruntime stateとして保持し、registryへは書き込みません。
 
-Dashboard's sensor-management setup flow discovers unregistered advertisements,
-classifies them, proposes an ID, then registers a chosen display name and
-location. It proposes the first unused `th-xxx` for
-`temperature_humidity_sensor` and `waterproof_sensor`, `co2-xxx` for
-`co2_sensor`, and corresponding `motion-xxx` / `contact-xxx` IDs for state
-sensors. Replacement hardware normally receives a new logical ID.
+Dashboardのセンサ管理セットアップフローでは、未登録のBLE広告を発見・分類し、IDを提案した後、
+選択した表示名とlocationで登録します。`temperature_humidity_sensor`と`waterproof_sensor`には
+未使用で最小の`th-xxx`、`co2_sensor`には`co2-xxx`、状態センサには対応する
+`motion-xxx` / `contact-xxx`を提案します。センサを交換した場合は、原則として新しい論理IDを
+発行します。
 
-Unknown SwitchBot advertisements intentionally appear with raw manufacturer and
-service data hex during setup. This permits real-device validation for Meter Pro
-CO2, motion, and contact sensors without publishing guessed values.
+未知のSwitchBot BLE広告は、セットアップ中にmanufacturer dataとservice dataの生hexを付けて
+意図的に表示します。推測した値をpublishせずに、Meter Pro CO2、人感センサ、開閉センサを
+実機で検証できるようにするためです。
 
-OMK keeps product names separate from internal models: SwitchBot Meter and
-Meter Plus use `temperature_humidity_sensor`, and SwitchBot Meter Pro CO2 uses
-`co2_sensor`. Existing registry entries with the former `meter`, `meter_plus`,
-or `meter_pro_co2` values are read compatibly and rewritten with the current
-names on the next registry update.
+OMKでは製品名と内部modelを分離しています。SwitchBot MeterおよびMeter Plusは
+`temperature_humidity_sensor`、SwitchBot Meter Pro CO2は`co2_sensor`を使用します。旧来の
+`meter`、`meter_plus`、`meter_pro_co2`を持つ既存registryは互換的に読み込み、次回のregistry更新時に
+現行名へ書き換えます。
 
-| OMK model | Dashboard name | sensor type | Normalized values |
+| OMK model | Dashboard表示名 | sensor type | 正規化後の値 |
 | --- | --- | --- | --- |
 | `temperature_humidity_sensor` | SwitchBot 温湿度計 | `environment` | `temperature_c`, `relative_humidity_percent` |
-| `co2_sensor` | SwitchBot CO2センサー | `environment` | temperature, humidity, `co2_ppm` |
+| `co2_sensor` | SwitchBot CO2センサー | `environment` | 温度、湿度、`co2_ppm` |
 | `motion_sensor` | SwitchBot 人感センサー | `motion` | `motion_state` (0=不在, 1=検知) |
 | `contact_sensor` | SwitchBot 開閉センサー | `contact` | `contact_state` (0=閉, 1=開) |
 | `waterproof_sensor` | SwitchBot 防水温湿度計 | `environment` | `temperature_c`, `relative_humidity_percent` |
 | `plug_sensor` | SwitchBot プラグミニ | `power` | `power_w`, `switch_state` (0=OFF, 1=ON) |
 
-The waterproof model is not limited to outdoors; deployment use belongs in
-`location` (for example, 屋外 or 浴室). `humidity_percent`, `outdoor_meter`, and
-`waterproof_meter` are not OMK schema/model names.
+`waterproof_sensor`は屋外専用ではありません。設置用途は`location`（例: 屋外、浴室）で
+表します。`humidity_percent`、`outdoor_meter`、`waterproof_meter`はOMKのschema/model名では
+ありません。
 
-Advertisements are received continuously without pairing. For enabled sensors,
-environment data is published immediately on first valid reception and then no
-more often than every 10 seconds per `device_key`; runtime state still updates
-on every advertisement. Motion and contact publish state changes immediately
-and also publish their current state no more often than every 10 seconds. These
-limits use a monotonic clock. Plug Mini power follows the same 10-second limit,
-but a `switch_state` transition publishes immediately. Disabled sensors still
-update runtime state but do not publish MQTT. Plug Mini proposes `plug-xxx` IDs
-and publishes `omk/<sensor_id>/power` with `power_w` and `switch_state`.
+BLE広告はペアリングなしで継続受信します。`enabled=true`のenvironmentセンサは、最初に有効な
+値を受信した時点で即時publishし、その後は`device_key`ごとに最短10秒間隔でpublishします。
+runtime stateは広告を受信するたびに更新します。motionとcontactは状態変化時に即時publishし、
+加えて現在状態を最短10秒間隔でpublishします。これらの制限にはmonotonic clockを使用します。
+Plug Miniの電力も同じ10秒制限に従いますが、`switch_state`の変化時は即時publishします。
+`enabled=false`のセンサもruntime stateは更新しますが、MQTTはpublishしません。Plug Miniには
+`plug-xxx`を提案し、`power_w`と`switch_state`を含む`omk/<sensor_id>/power`をpublishします。
 
-The current Pi-captured manufacturer layouts decode SwitchBot Meter temperature
-and humidity, and Meter Pro CO2 temperature, humidity, and CO2. The CO2 layout
-is based on matching measurements from two physical devices; it does not use a
-per-device MAC address or assume that its variable bytes are constants.
+現在Piで取得したmanufacturer layoutでは、SwitchBot Meterの温度・湿度と、Meter Pro CO2の温度・
+湿度・CO2をdecodeできます。CO2 layoutは2台の実機で測定値が一致したことに基づき、個体ごとの
+MACアドレスを使用せず、可変byteを定数とはみなしません。
 
-## Raspberry Pi validation notes
+## Raspberry Piでの確認事項
 
-With the Pi's current BlueZ/bleak combination, SwitchBot advertisements can be
-reported exclusively as `manufacturer_data[0x0969]`; an empty `service_data`
-field is therefore not an error. `raw_scan` prints both structures for a new
-fixture:
+Piの現在のBlueZ/bleakの組み合わせでは、SwitchBot BLE広告が`manufacturer_data[0x0969]`だけで
+報告されることがあります。そのため、`service_data`が空であってもエラーではありません。
+新しいfixtureを取得する際、`raw_scan`は両方の構造を出力します。
 
 ```sh
 PYTHONPATH=src .venv/bin/python -m omk_ble.raw_scan --seconds 30
 ```
 
-Before starting the service, inspect the adapter with `rfkill list bluetooth`
-and `bluetoothctl show`. If it is soft blocked, run `sudo rfkill unblock
-bluetooth`, then `sudo bluetoothctl power on`. The setup script performs these
-steps opportunistically and logs a warning rather than failing installation if
-the adapter is missing or cannot be powered on.
+サービスを起動する前に、`rfkill list bluetooth`と`bluetoothctl show`でアダプタを確認します。
+soft blockされている場合は、`sudo rfkill unblock bluetooth`、続いて
+`sudo bluetoothctl power on`を実行してください。セットアップスクリプトも可能な範囲でこれらを
+実行します。アダプタがない、または電源を投入できない場合は、導入を失敗させず警告を記録します。
 
-Verified on a Raspberry Pi:
+Raspberry Piで実機確認済み:
 
-- SwitchBot 温湿度計: advertisement reception, temperature, and humidity decode.
-- SwitchBot CO2センサー: advertisement reception, temperature, humidity, and CO2
-  ppm decode (verified against two physical devices).
-- SwitchBot 人感センサー: advertisement reception, state transition, and periodic
-  MQTT publish.
-- SwitchBot 開閉センサー: advertisement reception, state transition, and periodic
-  MQTT publish.
-- SwitchBot 防水温湿度計: advertisement reception and dedicated
-  temperature/humidity manufacturer-layout decode.
-- SwitchBot プラグミニ: advertisement-only power and switch-state decode.
-  Its manufacturer layout is the primary identifier; the public `0x67` and
-  observed domestic `0x6a` service-data values are supplementary only. Power
-  masks the overload flag from the MSB before applying the 0.1 W scale.
+- SwitchBot 温湿度計: BLE広告の受信、温度・湿度のdecode。
+- SwitchBot CO2センサー: BLE広告の受信、温度・湿度・CO2 ppmのdecode（2台の実機で確認）。
+- SwitchBot 人感センサー: BLE広告の受信、状態遷移、定期MQTT publish。
+- SwitchBot 開閉センサー: BLE広告の受信、状態遷移、定期MQTT publish。
+- SwitchBot 防水温湿度計: BLE広告の受信、専用temperature/humidity manufacturer layoutのdecode。
+- SwitchBot プラグミニ: BLE広告のみからの電力・switch stateのdecode。manufacturer layoutを主な
+  識別根拠とし、公開されている`0x67`および国内実機で観測した`0x6a`のservice data値は補助的にのみ
+  用います。電力値はMSBのoverload flagをmaskしてから、0.1 W scaleを適用します。
 
 ### SwitchBot プラグミニ実機確認
 
@@ -116,5 +102,5 @@ manufacturer dataではstate byteのbit 7を`switch_state`として用い、0=OF
 は記載しない。Service Dataは補助識別に留め、Plug Mini判定とmeasurement decodeは
 manufacturer dataの12-byte layoutを主根拠にする。
 
-For a line-oriented raw capture on a Pi, use
-`PYTHONPATH=src .venv/bin/python -m omk_ble.raw_scan --seconds 30`.
+Piで行指向のraw captureを取得するには、
+`PYTHONPATH=src .venv/bin/python -m omk_ble.raw_scan --seconds 30`を使用します。

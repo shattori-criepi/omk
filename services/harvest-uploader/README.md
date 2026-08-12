@@ -35,7 +35,7 @@ SEN66は`sen66_temperature_c`、`sen66_relative_humidity_percent`、`sen66_co2_p
 SwitchBot Plug MiniのPi実機では、`plug-001_power_w`と`plug-001_switch_state`が
 SORACOM Harvest Dataへ送信されることを確認した。分内で負荷を変えた例では瞬時値が
 約170 Wに達する一方、1分平均の`plug-001_power_w`は137.3 W、最後の状態
-`plug-001_switch_state`は1となった。これは電力を平均、switch stateをlast valid state
+`plug-001_switch_state`は1となった。これは電力を平均、switch stateを最後の正常値
 として扱う仕様どおりである。
 
 ## 再送と設定

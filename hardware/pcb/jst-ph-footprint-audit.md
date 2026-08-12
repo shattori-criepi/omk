@@ -1,19 +1,19 @@
-# JST PH Task A footprint audit — 2026-08-03 JST
+# JST PH Task A footprint監査 — 2026-08-03 JST
 
-Scope: JST `S4B-PH-K-S(LF)(SN)` / C157926 and the installed KiCad 9 footprint. This is an audit only; no footprint or design file was changed.
+対象: JST `S4B-PH-K-S(LF)(SN)` / C157926および導入済みKiCad 9 footprint。本書は監査のみであり、footprintまたは設計ファイルは変更していない。
 
-## Sources and inspected files
+## 出典と確認ファイル
 
 - JST, [PH CONNECTOR catalogue ePH.pdf](https://www.jst-mfg.com/product/pdf/eng/ePH.pdf), retrieved 2026-08-03 JST. The PCB-layout drawing is explicitly viewed from the connector mounting surface. It specifies 2.00 mm pitch with ±0.05 mm hole-pitch tolerance and a `φ0.7 +0.1/0` hole; it identifies the No. 1 circuit and cautions that hole dimensions vary with PCB material/drilling process.
 - `/usr/share/kicad/footprints/Connector_JST.pretty/JST_PH_S4B-PH-K_1x04_P2.00mm_Horizontal.kicad_mod`
   - footprint name: `JST_PH_S4B-PH-K_1x04_P2.00mm_Horizontal`
   - version: `20241229`; generator: `kicad-footprint-generator`
 - Footprint 3D reference: `${KICAD9_3DMODEL_DIR}/Connector_JST.3dshapes/JST_PH_S4B-PH-K_1x04_P2.00mm_Horizontal.step`, offset `(0,0,0)`, scale `(1,1,1)`, rotation `(0,0,0)`.
-  The referenced STEP/WRL file is **not installed** below `/usr/share/kicad` (and `KICAD9_3DMODEL_DIR` is unset), so its geometry/orientation could not be inspected.
+  参照しているSTEP/WRLファイルは`/usr/share/kicad`配下に**導入されておらず**（`KICAD9_3DMODEL_DIR`も未設定）、geometry/orientationを確認できなかった。
 
-## Direct KiCad extraction
+## KiCadから直接抽出した値
 
-| Item | Extracted KiCad value |
+| 項目 | KiCadから抽出した値 |
 | --- | --- |
 | Pads | 1: `(0,0)`, 2: `(2,0)`, 3: `(4,0)`, 4: `(6,0)` mm |
 | Pad 1 | through-hole `roundrect`, 1.20 × 1.75 mm, drill 0.75 mm |
@@ -24,11 +24,11 @@ Scope: JST `S4B-PH-K-S(LF)(SN)` / C157926 and the installed KiCad 9 footprint. T
 | 2D height / mating opening | Not encoded as a reliable physical height/orientation in the `.kicad_mod`; requires drawing/3D review. |
 | Retention | No extra retention holes/pads; the footprint uses four through-hole contacts only. |
 
-The courtyard is 0.50 mm outside the Fab extents on all four sides. The local Fab drawing includes a triangular No. 1 cue at the pad-1 end; Silk also provides a pad-1-side cue. The footprint's `Horizontal` designation is consistent with the selected side-entry form, but the local coordinate sign of the mating opening is not accepted without the unavailable 3D model or a controlled drawing-view check.
+courtyardは全4辺でFab範囲の外側0.50 mmにある。ローカルFab図にはpad-1端に三角形のNo. 1目印があり、Silkにもpad-1側の目印がある。footprintの`Horizontal`指定は選定した側面挿入形状と整合するが、利用できない3D modelまたは管理されたdrawing-viewで確認しない限り、嵌合開口のローカル座標符号は受け入れない。
 
-## Official-to-KiCad comparison
+## 公式値とKiCadの比較
 
-| Item | JST official value | KiCad value | Difference | Decision | Note |
+| 項目 | JST公式値 | KiCad値 | 差分 | 決定 | 注記 |
 | --- | --- | --- | --- | --- | --- |
 | Circuits | S4B = 4 circuits | 4 pads | none | PASS | Correct family/count. |
 | Pad numbers | Official drawing identifies No. 1 circuit | pads numbered 1–4 | none | PASS | Pad 1 is uniquely roundrect and on the Fab/Silk No. 1 end. |
@@ -44,19 +44,19 @@ The courtyard is 0.50 mm outside the Fab extents on all four sides. The local Fa
 | Fab/Silk/Courtyard | No KiCad-layer geometry in official document | Fab/Silk/Courtyard extents listed above | N/A | ACCEPTABLE | Geometry is internally consistent; verify body/mating keepout in Phase 3B. |
 | 3D model availability | N/A | Referenced STEP missing locally; zero transform specified | unavailable | VERIFY | This is an environment/package gap, not evidence of a footprint or part failure. Verify origin, height, Pin-1 end and opening direction in Phase 3B. |
 
-## Pad-number and electrical audit
+## pad番号と電気的監査
 
-The current main and carrier symbols use generic 1–4 connector pins, with the fixed mapping `1=3V3`, `2=GND`, `3=SDA`, `4=SCL`. The audited footprint has the same ordered pad set. A footprint rotated by 0°, 90°, 180° or 270° retains pad numbers; only physical location changes. Therefore both J3 and J2 can use this exact footprint while retaining a 1:1 harness: 1→1, 2→2, 3→3, 4→4. A 1↔4 reversed harness remains prohibited.
+現行のmainおよびcarrier symbolは汎用の1〜4 connector pinを使い、mappingは`1=3V3`、`2=GND`、`3=SDA`、`4=SCL`で固定している。監査対象footprintも同じ順序のpad集合を持つ。footprintは0°、90°、180°、270°へ回転してもpad番号を保持し、物理位置だけが変わる。よってJ3/J2はいずれもこの正確なfootprintを使用しつつ、1→1、2→2、3→3、4→4の1:1ハーネスを維持できる。1↔4の逆配線ハーネスは禁止のままとする。
 
-## Drill, soldering and board-edge rules
+## drill、はんだ付け、基板端の規則
 
 The 0.75 mm KiCad drill is compatible with the JST `φ0.7 +0.1/0` layout guidance as a nominal-layout comparison, but the official source does not define the PCB fabricator's pre-plating drill. Confirm the selected fabricator's finished-hole convention before release. The standard footprint's 1.20 × 1.75 mm pads provide a calculated minimum 0.225 mm copper annular ring; this is suitable for review but not a substitute for the fabricator rule check.
 
 For Phase 3B, place the **Fab body**, not the courtyard, within the board outline. The 0.50 mm courtyard does not reserve mating-housing insertion or cable-bend space; add a separate mechanical keepout from the mating face based on the housing and harness bend radius. Keep that corridor clear of the ESP32 antenna at J3 and of SEN66 airflow/strain relief at J2. This is a placement rule only; no coordinates or rotations are decided here.
 
-## Responsibility-separated verdict
+## 責務を分離した判定
 
-| Status | Decision |
+| 状態 | 決定 |
 | --- | --- |
 | Pad numbering, pitch and drill geometry | ACCEPT for schematic/footprint assignment |
 | 2D pad/body mapping | ACCEPT — No local-footprint discrepancy was found. |
@@ -66,4 +66,4 @@ For Phase 3B, place the **Fab body**, not the courtyard, within the board outlin
 | Schematic consolidation | **COMPLETE:** main J3 and carrier J2 were updated together, mapping preserved, then both schematics regenerated/ERC checked. |
 | Manufacturing release | **BLOCKED:** procurement, fabrication, PCBA and layout gates remain. |
 
-No local footprint creation is authorized or justified by this audit. The missing 3D asset is an environment/package gap, not proof that the 2D footprint is wrong. STEP/WRL installation, model origin/height/opening direction, mating insertion space, cable bend clearance, board-edge placement, airflow, antenna clearance and strain relief are Phase 3B mechanical checks. JLC drill/finished-hole treatment, annular-ring rule, wave-solder fixture, order-time PCBA eligibility, stock/price and CPL rotation are manufacturing checks.
+この監査によりローカルfootprintの作成を承認または正当化するものではない。3D assetの欠落は環境／packageの不足であり、2D footprintが誤っている根拠ではない。STEP/WRLの導入、modelのorigin／高さ／開口方向、嵌合挿入空間、cable bend clearance、基板端配置、気流、antenna clearance、strain reliefはPhase 3Bの機械的確認とする。JLCのdrill／finished-hole処理、annular-ring rule、wave-solder fixture、発注時のPCBA適格性、在庫／価格、CPL rotationは製造上の確認事項である。

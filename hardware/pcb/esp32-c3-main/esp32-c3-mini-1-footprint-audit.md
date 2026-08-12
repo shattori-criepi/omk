@@ -1,9 +1,9 @@
-# ESP32-C3-MINI-1-H4X footprint / EPAD / antenna audit
+# ESP32-C3-MINI-1-H4X footprint / EPAD / antenna監査
 
-**Audit date:** 2026-08-03 JST
-**Scope:** U1 `ESP32-C3-MINI-1-H4X` only: part identity, symbol-to-footprint numbering, 2D land pattern, EPAD, antenna keepout, and the remaining PCB/assembly gates. This is an audit-only record. It does **not** modify the generator, schematic, footprint, PCB, BOM/CPL, or Gerber files.
+**監査日:** 2026-08-03 JST
+**対象:** U1 `ESP32-C3-MINI-1-H4X`のみ。部品識別、symbol-to-footprint番号、2D land pattern、EPAD、antenna keepout、残るPCB／assembly gateを扱う。これは監査のみの記録であり、generator、回路図、footprint、PCB、BOM/CPL、Gerber fileを**変更しない**。
 
-## Sources
+## 出典
 
 | Source | Revision / date | Used for |
 | --- | --- | --- |
@@ -14,7 +14,7 @@
 
 The official datasheet makes its Figure 11-1 land-pattern drawing and source/STEP data the controlling reference. Dimensions not made unambiguous by the accessible drawing or text are not inferred below.
 
-## Current design extraction
+## 現行設計の抽出
 
 | Field | Current formal schematic / generator value | Assessment |
 | --- | --- | --- |
@@ -27,7 +27,7 @@ The official datasheet makes its Figure 11-1 land-pattern drawing and source/STE
 
 `H4X` is not a vague suffix: Table 1-1 lists it as a **Recommended** PCB-antenna module with 4 MB Quad-SPI flash, chip revision v1.1, ambient range –40 to 105 °C, and 13.2 × 16.6 × 2.4 mm body size. The datasheet identifies the embedded chip as ESP32-C3FH4X (v1.1, 4 MB). The older `-H4` is NRND; no substitution is authorized by this audit.
 
-## Symbol / pad-number mapping audit
+## symbol / pad番号mapping監査
 
 The datasheet states that the module has 53 pins. Direct parsing of the current symbol gives exactly one pin each for 1 through 53. Direct parsing of the footprint gives pads 1–48 and 50–53 once each, plus nine copper/paste segments all numbered 49. KiCad therefore treats the nine segments as one logical EPAD, not as nine different electrical pins.
 
@@ -58,7 +58,7 @@ This table verifies pad-number correspondence only; it does not approve final tr
 
 The hardware guideline’s “at least nine GND vias” statement applies to the bare ESP32-C3 chip ground pad. It is not used here as an invented numeric requirement for the module EPAD. For a module EPAD, the same guideline instead specifies a paste-covered grid with GND vias in the gaps.
 
-## Antenna and base-board keepout audit
+## antennaとbase-board keepoutの監査
 
 | Item | Official requirement | Current footprint | Status |
 | --- | --- | --- | --- |
@@ -78,7 +78,7 @@ The hardware guideline’s “at least nine GND vias” statement applies to the
 | Assembly handling | Datasheet specifies MSL 3 and a 168-hour floor-life limit after opening at 25 ±5 °C / 60%RH before bake is required. | VERIFY — carry this into assembler instructions and final PCBA process review. |
 | Procurement / JLCPCBA | Current formal property is LCSC `C41349510`; no live LCSC/JLC part page, stock, feeder, placement, or PCBA eligibility was verified in this audit. | VERIFY; manufacturing release BLOCKED. |
 
-## Disposition and Phase 3B gate
+## 判定とPhase 3B gate
 
 | Item | Classification | Reason |
 | --- | --- | --- |
@@ -91,11 +91,11 @@ The hardware guideline’s “at least nine GND vias” statement applies to the
 | JLCPCB procurement and placement eligibility | VERIFY | No live official procurement/PCBA evidence captured. |
 | Manufacturing release | BLOCKED | Requires completed PCB implementation/DRC, antenna/mechanical/RF review, 3D confirmation, and JLC/assembler/procurement validation. |
 
-### Footprint change decision
+### footprint変更の決定
 
 **No footprint-file change is justified by this audit.** The local 2D footprint and its symbol mapping are accepted. The required next changes are PCB-only: apply the external antenna/board-edge keepout, decide EPAD paste/via strategy, perform DRC and 3D/mechanical review, and then validate the actual assembled RF performance. This audit does not authorize a change to the generator, formal schematic or footprint library.
 
-### Phase 3B may proceed for
+### Phase 3Bで進めてよい事項
 
 - placing U1 with the antenna end at the selected board edge/outside the board;
 - creating the external antenna clearance and mechanical/enclosure keepout before other placement;

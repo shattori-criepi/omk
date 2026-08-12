@@ -1,4 +1,4 @@
-# Phase 3B PCB layout requirements — historical record
+# Phase 3B PCB layout要件 — 履歴記録
 
 > **Project status: CANCELLED (2026-08-04). Manufacturing release: CANCELLED. Fabrication permitted: NO.**
 >
@@ -8,24 +8,24 @@
 
 This document consolidates the completed Phase 3A audit records into implementation requirements for the **main board** PCB. It does not create or modify a PCB, schematic, generator, footprint, BOM/CPL, or Gerber file. Requirements are classified as **MUST**, **SHOULD**, **VERIFY**, or **BLOCKED**; a numeric geometry is deliberately not fixed where the stack-up, controlled drawing, assembler rule, or official source is still missing.
 
-## 1. Scope and phase gate
+## 1. 対象範囲とphase gate
 
-### Phase 3B purpose
+### Phase 3Bの目的
 
 Implement and review the main-board placement, routing, copper/keepout rules and mechanical interfaces while preserving the formal-schematic netlist. Carrier-board placement is a separate PCB task; its J2 connector must remain electrically and mechanically compatible with main-board J3.
 
-### Accepted electrical topology
+### 承認済みの電気的topology
 
 - U1: `ESP32-C3-MINI-1-H4X`; antenna-module 2D footprint, pin mapping and EPAD 49 mapping are accepted.
 - USB: J1 → D1 `USBLC6-2SC6` → U1.27 D+ / U1.26 D−. D1 mapping and rail-to-rail topology are accepted.
 - Buck: U2 `AP63203WU-7`, C1 10 uF, C2/C3 100 nF, L1 `XGL4020-472MEC` 4.7 uH, C4/C5 22 uF ×2. U2 pin/net topology and L1 2D footprint are accepted.
 - Board link: main J3 and carrier J2 are both JST `S4B-PH-K-S(LF)(SN)` / C157926, side-entry TH; mapping is fixed as 1=3V3, 2=GND, 3=I2C_SDA, 4=I2C_SCL.
 
-### Gate status
+### gateの状態
 
 **Historical Phase 3B gate (superseded):** PCB implementation had been planned conditionally. The integrated-PCB plan is now **CANCELLED**; do not start or resume implementation from this document. The then-open items in Sections 12 and 14 remain incomplete and do not constitute a manufacturing-release gate for any successor design.
 
-## 2. Board-level constraints
+## 2. 基板全体の制約
 
 | Area | Requirement / current status | Classification | Evidence / source |
 | --- | --- | --- | --- |
@@ -36,7 +36,7 @@ Implement and review the main-board placement, routing, copper/keepout rules and
 | Enclosure | Respect the ESP32 antenna clearance inside the enclosure; do not use the component courtyard as an enclosure keepout. | MUST | ESP32-C3 module audit. |
 | Assembly / service | Reserve hand-solder/rework access for TH J3, USB shell stakes, and test points; verify wave fixture and connector insertion access with the assembler. | VERIFY | J1/J3 audits. |
 
-## 3. Placement priority
+## 3. 配置の優先順位
 
 Placement proceeds in this order. Each priority is a gate for the next one rather than a final coordinate decision.
 
@@ -49,7 +49,7 @@ Placement proceeds in this order. Each priority is a gate for the next one rathe
 7. **J3 JST PH:** place edge-facing toward the carrier/inter-board gap after confirming cable bend, U1 antenna and enclosure clearance.
 8. **Remaining passives, switches, headers and test points:** place only after the critical RF/USB/power/mechanical corridors are protected.
 
-## 4. ESP32-C3 module requirements
+## 4. ESP32-C3 module要件
 
 | Requirement | Classification | Phase 3B implementation evidence |
 | --- | --- | --- |
@@ -61,9 +61,9 @@ Placement proceeds in this order. Each priority is a gate for the next one rathe
 | Choose EPAD stencil aperture and GND-via grid only after fabricator/assembler rules are available. Vias belong in grid gaps; do not invent count or drill. | VERIFY | Stencil/via policy and DRC/manufacturing review. |
 | Confirm U1 pin-1, antenna-end and STEP orientation in KiCad GUI/3D viewer. | VERIFY | GUI 3D evidence; unavailable in the isolated environment. |
 
-## 5. USB-C and USB data path
+## 5. USB-CとUSB data path
 
-### Fixed net mapping and routing order
+### 固定net mappingとrouting順序
 
 ```text
 J1 A6/B6 D+ → D1.1/6 I/O1 → U1.27 GPIO19 USB_D+
@@ -105,7 +105,7 @@ Espressif also recommends reserving 22/33 Ω series and D+/D− shunt-capacitor 
 | C1/C4/C5 nominal values are retained. Murata official DC-bias representative data is recorded (C1 about 5.28 uF at 5.0 V; C4/C5 about 11.7 uF each / 23.5 uF total at 3.3 V), but worst-condition margin and sufficiency across tolerance, temperature, transient response and stability remain unproven. | VERIFY / release blocker | `murata-mlcc-dc-bias-audit.md`. |
 | Test startup, load transient, short-circuit protection and thermal behavior on hardware. | VERIFY / prototype gate | AP63203 audit. |
 
-## 7. JST PH board link
+## 7. JST PH基板間接続
 
 | Requirement | Classification | Evidence |
 | --- | --- | --- |
@@ -116,7 +116,7 @@ Espressif also recommends reserving 22/33 Ω series and D+/D− shunt-capacitor 
 | Confirm 3D geometry, connector opening direction, CPL rotation, wave fixture, plated-hole/annular-ring convention and order-time eligibility. | VERIFY | `jst-ph-footprint-audit.md`, procurement/assembly review. |
 | Confirm carrier J2 uses the same selected part/orientation policy and remains clear of SEN66 airflow/assembly path. | VERIFY | Carrier PCB review. |
 
-## 8. Grounding and return paths
+## 8. groundingとreturn path
 
 - **MUST:** use a continuous system GND reference plane for U1, USB and power returns; do not introduce a plane split below the USB pair or its ESD return.
 - **MUST:** D1.2 must have a short, low-inductance path to the same system GND plane. D1 shell/shield connection is a separate `USB_SHIELD` policy through R3 DNP.
@@ -125,7 +125,7 @@ Espressif also recommends reserving 22/33 Ω series and D+/D− shunt-capacitor 
 - **MUST:** antenna keepout forbids GND copper, vias and all other copper objects within its 13.2 × 5.4 mm under-module zone. This does not conflict with the requirement for dense GND stitching **near**, but not within, the permitted area around the antenna.
 - **VERIFY:** define GND stitching-via pattern, zone priorities and thermal-relief policy after stack-up/fabricator rules are known.
 
-## 9. Routing classes and unresolved stack-up data
+## 9. routing classと未確定のstack-up data
 
 Do not freeze these values in KiCad before the selected PCB fabricator provides the actual stack-up and manufacturing rules:
 
@@ -140,7 +140,7 @@ Do not freeze these values in KiCad before the selected PCB fabricator provides 
 
 Once supplied, reflect the approved values in KiCad board setup/net classes and re-run DRC; do not infer them from this requirements document.
 
-## 10. Keepouts and separation matrix
+## 10. keepoutと分離matrix
 
 | Pair / boundary | Requirement | Status / owner |
 | --- | --- | --- |
@@ -153,7 +153,7 @@ Once supplied, reflect the approved values in KiCad board setup/net classes and 
 | U1 EPAD ↔ antenna zone | EPAD GND/vias remain outside the 13.2 × 5.4 mm antenna zone. | MUST / DRC review |
 | USB shell ↔ system GND | Maintain separate `USB_SHIELD`; R3 DNP is the deliberate optional bond. | MUST / layout + prototype decision |
 
-## 11. DRC and review checklist
+## 11. DRCとレビューchecklist
 
 Before declaring a PCB layout review complete, record each item below.
 
@@ -170,7 +170,7 @@ Before declaring a PCB layout review complete, record each item below.
 - [ ] 3D review has checked U1 antenna end, J1/J3 mating, enclosure/mounting/cable collisions and component heights.
 - [ ] Silkscreen is readable, does not cover pads, and identifies connector pin 1 / function.
 
-## 12. Manufacturing and assembly VERIFY
+## 12. 製造とassemblyのVERIFY
 
 | Open evidence | Why release remains blocked |
 | --- | --- |
@@ -184,7 +184,7 @@ Before declaring a PCB layout review complete, record each item below.
 
 **BOM freeze, PCBA order and manufacturing release are prohibited until these items are closed.**
 
-## 13. Prototype verification
+## 13. prototype検証
 
 After DRC/3D/mechanical review and assembly, verify:
 
@@ -210,7 +210,7 @@ After DRC/3D/mechanical review and assembly, verify:
 | MLCC effective capacitance | VERIFY | Official Murata representative DC-bias data is obtained; approve worst-condition margin or complete prototype transient/stability evaluation before BOM freeze. No circuit change is currently required. |
 | Manufacturing release | CANCELLED | Fabrication is not permitted. The then-open manufacturing, assembly, procurement and prototype checks remain historical, incomplete records. |
 
-## 15. Recommended Phase 3B implementation sequence
+## 15. 推奨するPhase 3B実装順序
 
 1. Create the PCB and enter only preliminary board outline/mechanical constraints; do not freeze dimensions.
 2. Place U1 at the selected antenna edge and create its under-module plus external antenna keepouts.
@@ -224,7 +224,7 @@ After DRC/3D/mechanical review and assembly, verify:
 10. Run DRC, inspect silkscreen/courtyard/Edge.Cuts, then carry out GUI 3D/mechanical review.
 11. Resolve the open J1, C2, MLCC, procurement and assembly gates before manufacturing data is generated.
 
-## Integrated audit records
+## 統合済み監査記録
 
 - `hardware/pcb/phase-3a-release-review.md`
 - `hardware/pcb/jst-ph-header-selection.md`
