@@ -93,6 +93,7 @@ flowchart LR
     subgraph Acquisition[データ取得層]
         ESP[ESP32・将来のセンサノード]
         BR[Bルート通信<br/>host systemd]
+        BLE[BLE sensor manager<br/>host systemd / BlueZ]
     end
     subgraph Messaging[MQTTメッセージング層]
         MQ[Mosquitto]
@@ -109,6 +110,7 @@ flowchart LR
     end
     ESP -->|publish| MQ
     BR -->|publish| MQ
+    BLE -->|vendor-neutral publish| MQ
     MQ --> COL --> JSONL
     COL --> LATEST
     JSONL --> TRANSFORM[data-transformer]

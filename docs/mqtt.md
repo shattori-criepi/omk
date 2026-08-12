@@ -10,6 +10,7 @@ MQTTは、各データ取得処理をRaspberry Piへ集約するLAN内の内部�
 | --- | --- | --- | --- |
 | SEN66測定値 | `omk/<device_id>/sen66` | 0 | false |
 | 接続状態 | `omk/<device_id>/status` | 0 | true |
+| BLE環境センサ | `omk/<sensor_id>/environment` | 0 | false |
 
 初期ノードの例は`omk/sen66-001/sen66`と`omk/sen66-001/status`である。
 
@@ -48,6 +49,15 @@ JSONとして解析できないUTF-8 payloadは`payload_raw`と`payload_parse_er
 ## latest状態キャッシュ
 
 JSONL保存に成功した正常JSON payloadのうち、`omk/<device_id>/power`、`sen66`、`power-flow`は、それぞれ`data/latest/broute_power.json`、`sen66.json`、`ichijo_power_flow.json`へ更新される。collectorは同一ディレクトリの一時ファイルをatomic置換するため、dashboardは読取り途中のJSONを参照しない。latest更新が失敗してもJSONL収集は継続する。詳細な保存条件と権限は[sensor-collector README](../services/sensor-collector/README.md)を参照する。
+
+## BLEセンサ
+
+SwitchBot等のBLE受信は Dashboard ではなく Raspberry Pi ホスト上の
+`omk-ble-sensor-manager` が行う。登録の物理 `device_key` と論理
+`sensor_id` を分離し、MQTTには後者だけを使用する。environment payload は
+`sensor_id`、`measured_at`、`quality`、利用可能な `temperature_c`、
+`relative_humidity_percent`、`co2_ppm`、`battery_percent` を含む。collector
+は従来通り型を解釈せず JSONL に保存する。
 
 ## Bルート接続
 
