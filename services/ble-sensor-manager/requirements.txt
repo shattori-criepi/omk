@@ -1,0 +1,5 @@
+bleak==0.22.3
+fastapi==0.115.12
+paho-mqtt==2.1.0
+uvicorn[standard]==0.34.2
+pytest==8.3.5
