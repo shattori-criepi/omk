@@ -17,6 +17,10 @@ MODEL_BY_TYPE = {
     0x69: ("temperature_humidity_sensor", "environment"),
 }
 WATERPROOF_SERVICE_DEVICE_TYPE = 0x77
+# The public specification identifies Plug Mini as 0x67, while the verified
+# domestic advertisement is 0x6a. Service data is only supplementary: the
+# manufacturer layout is required to decode measurements.
+PLUG_SERVICE_DEVICE_TYPES = {0x67, 0x6A}
 
 # Captured on the Pi: <6-byte physical id> <variable> 03
 # <tenths, signed integer, RH>. The first header byte changed from f4 to f8
@@ -58,6 +62,14 @@ CONTACT_SERVICE_DEVICE_TYPE = 0x64
 CONTACT_MANUFACTURER_LENGTH = 13
 CONTACT_RESERVED_INDEX = 8
 CONTACT_MANUFACTURER_STATUS_INDEX = 7
+
+# Plug Mini layout: <physical id 6> <sequence> <switch state> <marker 16>
+# <variable> <power big-endian 2>. The variable byte is observed as 0x36/0x38
+# and is intentionally not a classifier condition.
+PLUG_MANUFACTURER_LENGTH = 12
+PLUG_STATE_INDEX = 7
+PLUG_LAYOUT_MARKER_INDEX = 8
+PLUG_LAYOUT_MARKER = 0x16
 
 
 def _hex_map(values: dict[str, bytes]) -> dict[str, str]:
@@ -107,6 +119,13 @@ def _decode_waterproof_service_data(data: bytes | None) -> tuple[str, str, dict[
     if not data or len(data) != 3 or data[0] != WATERPROOF_SERVICE_DEVICE_TYPE:
         return None
     return "waterproof_sensor", "environment", {}
+
+
+def _decode_plug_service_data(data: bytes | None) -> tuple[str, str, dict[str, Any]] | None:
+    """Identify the Plug Mini's short service-data advertisement."""
+    if not data or len(data) != 3 or data[0] not in PLUG_SERVICE_DEVICE_TYPES:
+        return None
+    return "plug_sensor", "power", {}
 
 
 def _decode_meter_expression(fraction: int, signed_integer: int, humidity: int) -> tuple[float, int] | None:
@@ -178,6 +197,21 @@ def _decode_waterproof_manufacturer_data(data: bytes) -> tuple[str, str, dict[st
     }
 
 
+def _decode_plug_manufacturer_data(data: bytes) -> tuple[str, str, dict[str, Any]] | None:
+    """Decode the verified Plug Mini manufacturer advertisement layout."""
+    if len(data) != PLUG_MANUFACTURER_LENGTH or data[PLUG_LAYOUT_MARKER_INDEX] != PLUG_LAYOUT_MARKER:
+        return None
+    state_byte = data[PLUG_STATE_INDEX]
+    if state_byte & 0x7F:
+        return None
+    # Bit 7 of the power MSB is the official overload flag, not power data.
+    raw_power = ((data[10] & 0x7F) << 8) | data[11]
+    return "plug_sensor", "power", {
+        "power_w": raw_power / 10.0,
+        "switch_state": 1 if state_byte & 0x80 else 0,
+    }
+
+
 def _decode_motion_manufacturer_data(data: bytes) -> tuple[str, str, dict[str, Any]] | None:
     """Decode the verified Motion Sensor manufacturer advertisement layout."""
     if len(data) != MOTION_MANUFACTURER_LENGTH or data[MOTION_RESERVED_INDEX] != 0:
@@ -215,6 +249,7 @@ def _decode_manufacturer_data(data: bytes | None) -> tuple[str, str, dict[str, A
         _decode_meter_manufacturer_data(data)
         or _decode_co2_manufacturer_data(data)
         or _decode_waterproof_manufacturer_data(data)
+        or _decode_plug_manufacturer_data(data)
         or _decode_motion_manufacturer_data(data)
         or _decode_contact_manufacturer_data(data)
     )
@@ -239,11 +274,15 @@ def decode(address: str, rssi: int, manufacturer_data: dict[int, bytes], service
     contact_from_manufacturer = _decode_contact_manufacturer_data(company_data) if company_data else None
     waterproof_from_service = _decode_waterproof_service_data(service_bytes)
     waterproof_from_manufacturer = _decode_waterproof_manufacturer_data(company_data) if company_data else None
+    plug_from_service = _decode_plug_service_data(service_bytes)
+    plug_from_manufacturer = _decode_plug_manufacturer_data(company_data) if company_data else None
     decoded = (
         contact_from_manufacturer
         or contact_from_service
         or waterproof_from_manufacturer
         or waterproof_from_service
+        or plug_from_manufacturer
+        or plug_from_service
         or _decode_service_data(service_bytes)
         or _decode_manufacturer_data(company_data)
     )
