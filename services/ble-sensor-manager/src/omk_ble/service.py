@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import os
+from time import monotonic
 from datetime import datetime, timezone
 from typing import Any, Callable
 
@@ -14,6 +15,7 @@ from .registry import SensorRegistry
 from .switchbot import decode
 
 LOGGER = logging.getLogger(__name__)
+ENVIRONMENT_PUBLISH_INTERVAL_SECONDS = 10.0
 
 
 class BleManager:
@@ -22,6 +24,7 @@ class BleManager:
         registry: SensorRegistry,
         mqtt_client: mqtt.Client | None = None,
         now_provider: Callable[[], datetime] | None = None,
+        monotonic_provider: Callable[[], float] | None = None,
     ) -> None:
         self.registry = registry
         # Observations run continuously for registered-sensor health. Setup
@@ -30,6 +33,7 @@ class BleManager:
         self.observations: dict[str, DecodedAdvertisement] = {}
         self._previous_motion_state: dict[str, int] = {}
         self._previous_contact_state: dict[str, int] = {}
+        self._last_environment_publish_at: dict[str, float] = {}
         self.setup_candidates: dict[str, DecodedAdvertisement] = {}
         self._setup_candidate_order: list[str] = []
         self.scanning = False
@@ -38,6 +42,7 @@ class BleManager:
         self._mqtt = mqtt_client
         self.offline_seconds = int(os.getenv("OMK_BLE_OFFLINE_SECONDS", "900"))
         self._now_provider = now_provider or (lambda: datetime.now(timezone.utc))
+        self._monotonic_provider = monotonic_provider or monotonic
 
     async def start_scan(self, timeout_seconds: int = 60) -> None:
         await self.start_collection()
@@ -190,8 +195,15 @@ class BleManager:
             return
         if not sensor.enabled or not self._mqtt:
             return
+        if sensor.sensor_type == "environment":
+            published_at = self._last_environment_publish_at.get(sensor.device_key)
+            now = self._monotonic_provider()
+            if published_at is not None and now - published_at < ENVIRONMENT_PUBLISH_INTERVAL_SECONDS:
+                return
         payload = {"device_id": sensor.sensor_id, "measured_at": advertisement.received_at, "quality": "normal", **advertisement.values}
         self._mqtt.publish(f"omk/{sensor.sensor_id}/{sensor.sensor_type}", json.dumps(payload), qos=0, retain=False)
+        if sensor.sensor_type == "environment":
+            self._last_environment_publish_at[sensor.device_key] = now
 
     def _publish_motion_change(self, sensor: RegisteredSensor, advertisement: DecodedAdvertisement) -> None:
         """Publish only transitions; first observed state initializes runtime state."""
