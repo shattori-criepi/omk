@@ -421,15 +421,15 @@ def _motion_advertisement(state: int, received_at: str = "2026-08-12T14:47:12+09
     return DecodedAdvertisement("switchbot:motion", "switchbot", "motion_sensor", "motion", -31, received_at, {"motion_state": state}, {"manufacturer_data": {"0969": "raw"}})
 
 
-def test_motion_publishes_only_state_transitions_after_first_observation(tmp_path: Path) -> None:
+def test_motion_publishes_initial_and_state_transitions(tmp_path: Path) -> None:
     registry = SensorRegistry(tmp_path / "sensors.json")
     registry.register(RegisteredSensor("switchbot:motion", "motion-001", "motion", "switchbot", "motion_sensor", "hall", "廊下"))
     publisher = _MqttPublisher()
     manager = BleManager(registry, publisher)
     for state in (0, 0, 0, 1, 1, 1, 0, 0, 1):
         manager.record_advertisement(_motion_advertisement(state))
-    assert [topic for topic, _payload in publisher.messages] == ["omk/motion-001/motion", "omk/motion-001/motion", "omk/motion-001/motion"]
-    assert [json.loads(payload)["motion_state"] for _topic, payload in publisher.messages] == [1, 0, 1]
+    assert [topic for topic, _payload in publisher.messages] == ["omk/motion-001/motion"] * 4
+    assert [json.loads(payload)["motion_state"] for _topic, payload in publisher.messages] == [0, 1, 0, 1]
     assert all(set(json.loads(payload)) == {"device_id", "measured_at", "motion_state"} for _topic, payload in publisher.messages)
 
 
@@ -443,6 +443,36 @@ def test_motion_first_true_and_disabled_state_changes_do_not_publish(tmp_path: P
     manager.record_advertisement(_motion_advertisement(1))
     assert publisher.messages == []
     assert manager.registered_list()[0]["latest"]["values"] == {"motion_state": 1}
+
+
+def test_motion_and_contact_publish_current_state_every_ten_seconds_or_on_change(tmp_path: Path) -> None:
+    registry = SensorRegistry(tmp_path / "sensors.json")
+    registry.register(RegisteredSensor("switchbot:motion", "motion-001", "motion", "switchbot", "motion_sensor", "", "人感"))
+    registry.register(RegisteredSensor("switchbot:motion-2", "motion-002", "motion", "switchbot", "motion_sensor", "", "人感2"))
+    registry.register(RegisteredSensor("switchbot:contact", "contact-001", "contact", "switchbot", "contact_sensor", "", "ドア"))
+    clock = [0.0]
+    publisher = _MqttPublisher()
+    manager = BleManager(registry, publisher, monotonic_provider=lambda: clock[0])
+    manager.record_advertisement(_motion_advertisement(0, "first"))
+    manager.record_advertisement(_contact_advertisement(0, "first"))
+    clock[0] = 2.0
+    manager.record_advertisement(_motion_advertisement(0, "two"))
+    manager.record_advertisement(_contact_advertisement(0, "two"))
+    assert len(publisher.messages) == 2
+    manager.record_advertisement(DecodedAdvertisement("switchbot:motion-2", "switchbot", "motion_sensor", "motion", -40, "independent", {"motion_state": 0}, {}))
+    assert len(publisher.messages) == 3
+    clock[0] = 3.0
+    manager.record_advertisement(_motion_advertisement(1, "changed"))
+    manager.record_advertisement(_contact_advertisement(1, "changed"))
+    assert [json.loads(payload) for _topic, payload in publisher.messages[-2:]] == [
+        {"device_id": "motion-001", "measured_at": "changed", "motion_state": 1},
+        {"device_id": "contact-001", "measured_at": "changed", "contact_state": 1},
+    ]
+    clock[0] = 13.0
+    manager.record_advertisement(_motion_advertisement(1, "periodic"))
+    manager.record_advertisement(_contact_advertisement(1, "periodic"))
+    assert len(publisher.messages) == 7
+    assert manager.registered_list()[0]["latest"]["received_at"] == "periodic"
     assert registry.list()[0].enabled is False
 
 
@@ -454,7 +484,7 @@ def test_motion_sensor_id_change_uses_new_topic_and_setup_suggestion(tmp_path: P
     manager.record_advertisement(_motion_advertisement(0))
     manager.update_registered_sensor("switchbot:motion", {"sensor_id": "motion-002", "display_name": "人感", "location": "", "enabled": True})
     manager.record_advertisement(_motion_advertisement(1))
-    assert publisher.messages[0][0] == "omk/motion-002/motion"
+    assert publisher.messages[-1][0] == "omk/motion-002/motion"
     manager.scanning = True
     manager.record_advertisement(DecodedAdvertisement("switchbot:new-motion", "switchbot", "motion_sensor", "motion", -50, "now", {"motion_state": 0}, {}))
     assert manager.suggested_sensor_id("switchbot:new-motion") == "motion-001"
@@ -512,15 +542,15 @@ def _contact_advertisement(state: int, received_at: str = "2026-08-12T14:47:12+0
     return DecodedAdvertisement("switchbot:contact", "switchbot", "contact_sensor", "contact", -31, received_at, {"contact_state": state}, {"manufacturer_data": {"0969": "raw"}})
 
 
-def test_contact_publishes_only_open_closed_transitions_after_initial_state(tmp_path: Path) -> None:
+def test_contact_publishes_initial_and_open_closed_transitions(tmp_path: Path) -> None:
     registry = SensorRegistry(tmp_path / "sensors.json")
     registry.register(RegisteredSensor("switchbot:contact", "contact-001", "contact", "switchbot", "contact_sensor", "door", "ドア"))
     publisher = _MqttPublisher()
     manager = BleManager(registry, publisher)
     for state in (0, 0, 1, 1, 0, 0, 1):
         manager.record_advertisement(_contact_advertisement(state))
-    assert [topic for topic, _payload in publisher.messages] == ["omk/contact-001/contact"] * 3
-    assert [json.loads(payload)["contact_state"] for _topic, payload in publisher.messages] == [1, 0, 1]
+    assert [topic for topic, _payload in publisher.messages] == ["omk/contact-001/contact"] * 4
+    assert [json.loads(payload)["contact_state"] for _topic, payload in publisher.messages] == [0, 1, 0, 1]
 
 
 def test_contact_disabled_new_sensor_id_latest_and_setup_suggestion(tmp_path: Path) -> None:

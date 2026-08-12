@@ -11,6 +11,8 @@
 | `omk/<device_id>/cumulative-energy` | `cumulative_energy_import_kwh`、`cumulative_energy_export_kwh` |
 | `omk/<device_id>/power-flow` | `pv_power_w`、`load_power_w`、`grid_import_power_w`、`grid_export_power_w`、`pcs_ac_output_power_w`、`battery_soc_percent`、`battery_charge_power_w`、`battery_discharge_power_w` |
 | `omk/<sensor_id>/environment` | `temperature_c`、`relative_humidity_percent`、`co2_ppm`（存在する項目のみ） |
+| `omk/<sensor_id>/motion` | `motion_state` |
+| `omk/<sensor_id>/contact` | `contact_state` |
 
 `power`の正値は買電、負値は売電です。電圧・電流・力率、蓄電池の運転状態はHarvestへ送信しません。不正JSON、JSON objectではないpayload、非有限数は安全に無視します。
 
@@ -21,6 +23,8 @@ SEN66は`sen66_temperature_c`、`sen66_relative_humidity_percent`、`sen66_co2_p
 `time`は区間開始時刻（例: `2026-08-05T10:34:00+09:00`）です。温湿度・空気質・各瞬時電力は有効サンプルの平均、積算買売電量とSOCは区間末の最新値です。欠測フィールドはJSONから省略し、全項目欠測の区間は送信しません。開いた1分区間はメモリだけに保持するため、再起動時には意図的に破棄されます。
 
 `environment` は汎用のセンサ入力です。許可された `sensor_id`（英数字、`-`、`_`）ごとに、`<sensor_id>_temperature_c`、`<sensor_id>_relative_humidity_percent`、`<sensor_id>_co2_ppm` を生成し、存在する各項目を1分平均で送信します。これらはSEN66の固定fieldとは独立して共存します。
+
+`motion` は `<sensor_id>_motion_state` をその1分の最大値として送信します。`contact` は開閉回数を保存せず、状態変化が一度でもあれば `<sensor_id>_contact_changed` を1、最後に観測した状態を `<sensor_id>_contact_state` として送信します。分境界をまたぐ状態変化は次の分の変化として扱い、再起動後の最初の観測は変化に数えません。
 
 ## 再送と設定
 
