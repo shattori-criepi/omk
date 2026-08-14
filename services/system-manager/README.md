@@ -16,6 +16,9 @@ Dashboardは`host.docker.internal:8788`へHTTPで接続し、Bearer tokenはDash
 インストーラーは、`/etc/omk/system-manager.env`を所有者`root:root`、mode `0600`で作成します。
 このファイルには`OMK_SYSTEM_MANAGER_TOKEN`が含まれます。既存tokenは再実行時にも維持します。
 tokenを表示・commitしたり、ブラウザクライアントへコピーしたりしてはいけません。
+起動時には、`data/site/site_uuid` とSORACOM Metadata ServiceのSIM Tag `site_uuid` を照合します。
+片方だけにあるUUID v4はもう片方へ復元・保存し、両者が異なる、または形式が不正な場合は安全のため
+サービスを起動しません。Metadata Serviceへ接続できない場合は、検証済みのローカル値があれば警告して継続します。
 `/etc/omk/dashboard-system-manager.env`はDashboardコンテナへの環境変数注入だけに用いるファイルで、
 `credentials.yaml`をコンテナへmountしません。
 
