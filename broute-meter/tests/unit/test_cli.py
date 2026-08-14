@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import Mapping
 from datetime import UTC, datetime
@@ -600,6 +601,7 @@ def test_run_connection_retries_broute_session_after_scan_failure(
 
 def test_run_connection_retry_wait_stops_on_shutdown(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     """終了要求があれば初期接続の再試行待機を中断する。"""
 
@@ -634,9 +636,13 @@ def test_run_connection_retry_wait_stops_on_shutdown(
             config,  # type: ignore[arg-type]
             stop_event,  # type: ignore[arg-type]
             logging.getLogger("broute_meter.test"),
+            runtime_status=RuntimeStatusStore(tmp_path / "status.json"),
         )
         is None
     )
+    assert json.loads((tmp_path / "status.json").read_text(encoding="utf-8"))[
+        "retry_after_seconds"
+    ] == 30
 
 
 def test_pana_authentication_rejection_is_not_overwritten_by_retry_timeout(
@@ -696,7 +702,7 @@ def test_pana_authentication_rejection_is_not_overwritten_by_retry_timeout(
         (NoSmartMeterFoundError("no scan candidates"), "scan_error"),
     ],
 )
-def test_pana_transport_failures_remain_connection_errors(
+def test_connection_failures_are_classified_before_retry_wait(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     failure: Exception,
@@ -728,7 +734,10 @@ def test_pana_transport_failures_remain_connection_errors(
         object(), config, StopImmediately(), logging.getLogger("broute_meter.test"), runtime_status=RuntimeStatusStore(status_path)
     )
 
-    assert expected_state in status_path.read_text(encoding="utf-8")
+    assert cli._error_connection_state(failure) == expected_state
+    status = json.loads(status_path.read_text(encoding="utf-8"))
+    assert status["state"] == "retry_wait"
+    assert status["retry_after_seconds"] == 30
 
 def test_run_treats_inflight_failure_after_stop_signal_as_graceful(
     tmp_path: Path,

@@ -15,6 +15,7 @@ CONNECTION_STATES: Final = frozenset(
         "scanning",
         "authenticating",
         "connected",
+        "retry_wait",
         "scan_error",
         "authentication_error",
         "connection_error",
@@ -29,17 +30,30 @@ class RuntimeStatusStore:
     def __init__(self, path: Path) -> None:
         self.path = path
 
-    def write(self, state: str, *, now: datetime) -> None:
+    def write(
+        self,
+        state: str,
+        *,
+        now: datetime,
+        retry_after_seconds: float | None = None,
+    ) -> None:
         if state not in CONNECTION_STATES:
             raise ValueError("Unsupported B-route connection state")
+        if retry_after_seconds is not None and (
+            state != "retry_wait" or retry_after_seconds <= 0
+        ):
+            raise ValueError("retry_after_seconds is only valid for retry_wait")
         self.path.parent.mkdir(parents=True, exist_ok=True)
         descriptor, temporary_name = tempfile.mkstemp(prefix=".status.", dir=self.path.parent)
         try:
             os.fchmod(descriptor, 0o644)
             with os.fdopen(descriptor, "w", encoding="utf-8") as output:
                 descriptor = -1
+                payload = {"state": state, "updated_at": now.astimezone(UTC).isoformat()}
+                if retry_after_seconds is not None:
+                    payload["retry_after_seconds"] = retry_after_seconds
                 json.dump(
-                    {"state": state, "updated_at": now.astimezone(UTC).isoformat()},
+                    payload,
                     output,
                     ensure_ascii=False,
                     sort_keys=True,

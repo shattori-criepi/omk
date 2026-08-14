@@ -96,6 +96,10 @@ class _ResponseDiagnostics:
 
         self.unexpected_response_count += 1
 
+    def record_event_type(self, event_type: str) -> None:
+        assert self.event_types is not None
+        self.event_types.add(event_type)
+
 
 # RS-WSUHA-P設定コマンドはここだけに集約する。初期版では、公式資料で
 # 動作を確認できたUARTモードのRUART/WUART以外を推測して追加しない。
@@ -562,9 +566,21 @@ class RsWsuhaPAdapter(BaseAdapter):
             line = self._read_response_line(response_deadline).strip(b" \t")
             if line.startswith(b"EVENT 22"):
                 diagnostics.record_expected()
+                diagnostics.record_event_type("22")
                 if current_fields is not None:
                     results.append(self._parse_scan_result(current_fields))
-                return tuple(results)
+                completed_results = tuple(results)
+                assert diagnostics.event_types is not None
+                logger.info(
+                    "アクティブスキャン完了 candidates=%d received_line_count=%d "
+                    "unexpected_response_count=%d malformed_response_count=%d event_types=%s",
+                    len(completed_results),
+                    diagnostics.received_line_count,
+                    diagnostics.unexpected_response_count,
+                    diagnostics.malformed_response_count,
+                    ",".join(sorted(diagnostics.event_types)) or "none",
+                )
+                return completed_results
 
             if line == b"EPANDESC":
                 diagnostics.record_expected()

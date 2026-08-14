@@ -21,3 +21,18 @@ def test_runtime_status_is_atomic_non_sensitive_json(tmp_path) -> None:
 def test_runtime_status_rejects_unknown_states(tmp_path) -> None:
     with pytest.raises(ValueError):
         RuntimeStatusStore(tmp_path / "status.json").write("unsafe", now=datetime.now(UTC))
+
+
+def test_runtime_status_records_non_sensitive_retry_wait(tmp_path) -> None:
+    path = tmp_path / "status.json"
+    RuntimeStatusStore(path).write(
+        "retry_wait",
+        now=datetime(2026, 8, 14, tzinfo=UTC),
+        retry_after_seconds=30,
+    )
+
+    assert json.loads(path.read_text(encoding="utf-8")) == {
+        "retry_after_seconds": 30,
+        "state": "retry_wait",
+        "updated_at": "2026-08-14T00:00:00+00:00",
+    }
