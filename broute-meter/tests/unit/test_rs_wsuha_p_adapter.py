@@ -541,6 +541,30 @@ def test_active_scan_returns_all_candidates_for_session_to_disambiguate() -> Non
     ]
 
 
+def test_active_scan_logs_safe_completion_diagnostics(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    adapter, _, _ = _adapter(
+        [
+            b"OK\r\nEVENT 20 0011223344556677 0\r\n"
+            b"EPANDESC\r\nChannel:39\r\nPan ID:1111\r\n"
+            b"Addr:0011223344556677\r\nEVENT 22\r\n"
+        ]
+    )
+
+    with caplog.at_level(logging.INFO):
+        assert len(adapter.active_scan()) == 1
+
+    diagnostic = next(
+        record.getMessage()
+        for record in caplog.records
+        if "アクティブスキャン完了" in record.getMessage()
+    )
+    assert "candidates=1" in diagnostic
+    assert "event_types=20,22" in diagnostic
+    assert "0011223344556677" not in diagnostic
+
+
 def test_active_scan_rejects_descriptor_missing_required_field() -> None:
     adapter, _, _ = _adapter(
         [b"OK\r\nEPANDESC\r\nChannel:39\r\nPan ID:1111\r\nEVENT 22\r\n"]

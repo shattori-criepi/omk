@@ -471,7 +471,13 @@ def _connect_broute_until_ready(
         # scan/time-out failures caused by the rejected PANA session.
         if runtime_status is not None and not (
             authentication_rejected
-            and state in {"scanning", "authenticating", "scan_error", "connection_error"}
+            and state in {
+                "scanning",
+                "authenticating",
+                "retry_wait",
+                "scan_error",
+                "connection_error",
+            }
         ):
             _write_runtime_status(runtime_status, state, logger)
 
@@ -518,6 +524,13 @@ def _connect_broute_until_ready(
                 config.retry.reconnect_wait_seconds,
                 exc,
             )
+            if runtime_status is not None and not authentication_rejected:
+                _write_runtime_status(
+                    runtime_status,
+                    "retry_wait",
+                    logger,
+                    retry_after_seconds=config.retry.reconnect_wait_seconds,
+                )
             if stop_event.wait(config.retry.reconnect_wait_seconds):
                 break
 
@@ -528,11 +541,17 @@ def _write_runtime_status(
     store: RuntimeStatusStore,
     state: str,
     logger: logging.Logger,
+    *,
+    retry_after_seconds: float | None = None,
 ) -> None:
     """Status persistence must never stop metering or disclose credentials."""
 
     try:
-        store.write(state, now=datetime.now().astimezone())
+        store.write(
+            state,
+            now=datetime.now().astimezone(),
+            retry_after_seconds=retry_after_seconds,
+        )
     except OSError:
         logger.warning("Bルート接続状態を保存できませんでした", exc_info=True)
 

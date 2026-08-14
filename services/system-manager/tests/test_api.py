@@ -70,6 +70,7 @@ def test_update_returns_no_password_or_raw_id_and_logs_no_secret(tmp_path: Path,
         "service_active": True,
         "connection_state": "starting",
         "status_updated_at": None,
+        "retry_after_seconds": None,
     }
     combined = response.text + caplog.text
     assert VALID_ID not in combined
@@ -162,6 +163,7 @@ def test_status_never_returns_password_or_raw_id(tmp_path: Path) -> None:
         ("scanning", "scanning"),
         ("authenticating", "authenticating"),
         ("connected", "connected"),
+        ("retry_wait", "retry_wait"),
         ("authentication_error", "authentication_error"),
         ("connection_error", "connection_error"),
     ],
@@ -182,6 +184,7 @@ def test_status_returns_broute_runtime_state_without_secrets(
     assert response.status_code == 200
     assert response.json()["connection_state"] == expected
     assert response.json()["status_updated_at"] == "2026-08-14T00:00:00+00:00"
+    assert response.json()["retry_after_seconds"] is None
     assert VALID_ID not in response.text
     assert VALID_PASSWORD not in response.text
 
@@ -197,3 +200,18 @@ def test_inactive_service_is_stopped_even_with_a_stale_connected_status(tmp_path
 
     assert response.json()["service_active"] is False
     assert response.json()["connection_state"] == "stopped"
+
+
+def test_status_returns_retry_wait_delay_without_credentials(tmp_path: Path) -> None:
+    (tmp_path / "status.json").write_text(
+        '{"state":"retry_wait","updated_at":"2026-08-14T00:00:00+00:00","retry_after_seconds":30}',
+        encoding="utf-8",
+    )
+    with client_for(tmp_path) as client:
+        client.app.state.controller = ActiveController()
+        response = client.get("/api/broute/credentials/status", headers=headers())
+
+    assert response.json()["connection_state"] == "retry_wait"
+    assert response.json()["retry_after_seconds"] == 30
+    assert VALID_ID not in response.text
+    assert VALID_PASSWORD not in response.text

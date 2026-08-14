@@ -96,12 +96,12 @@ def create_app(configured_settings: Settings | None = None) -> FastAPI:
             )
 
     @app.get("/api/broute/credentials/status", dependencies=[Depends(authenticated)])
-    def broute_credentials_status(request: Request) -> dict[str, bool | str | None]:
+    def broute_credentials_status(request: Request) -> dict[str, bool | str | float | None]:
         settings: Settings = request.app.state.settings
         configured, identifier_masked, password_configured = credential_status(settings.credentials_path)
         controller: BRouteServiceController = request.app.state.controller
         service_active = controller.is_active()
-        connection_state, status_updated_at = connection_status(
+        connection_state, status_updated_at, retry_after_seconds = connection_status(
             settings.status_path,
             service_active=service_active,
         )
@@ -112,10 +112,11 @@ def create_app(configured_settings: Settings | None = None) -> FastAPI:
             "service_active": service_active,
             "connection_state": connection_state,
             "status_updated_at": status_updated_at,
+            "retry_after_seconds": retry_after_seconds,
         }
 
     @app.put("/api/broute/credentials", dependencies=[Depends(authenticated)])
-    def update_broute_credentials(request: Request, body: UpdateCredentialsRequest) -> dict[str, bool | str | None]:
+    def update_broute_credentials(request: Request, body: UpdateCredentialsRequest) -> dict[str, bool | str | float | None]:
         try:
             identifier, password = validate_broute_credentials(body.id, body.password)
         except CredentialValidationError as error:
@@ -153,6 +154,7 @@ def create_app(configured_settings: Settings | None = None) -> FastAPI:
             # process writes its authoritative state before attempting PANA.
             "connection_state": "starting",
             "status_updated_at": None,
+            "retry_after_seconds": None,
         }
 
     @app.get("/health")
