@@ -4,8 +4,8 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <title>OMK Bルート設定</title>
-    <link rel="stylesheet" href="{{ url_for('static', path='/display.css') }}?v=20260814-broute">
-    <script src="{{ url_for('static', path='/broute.js') }}?v=20260814-broute" defer></script>
+    <link rel="stylesheet" href="{{ url_for('static', path='/display.css') }}?v=20260814-broute-keyboard">
+    <script src="{{ url_for('static', path='/broute.js') }}?v=20260814-broute-keyboard" defer></script>
   </head>
   <body>
     <main class="admin-page broute-management-page" aria-label="OMK Bルート設定">
@@ -39,5 +39,17 @@
         <button id="broute-save" class="primary" type="submit">保存して接続</button>
       </form>
     </main>
+    <section id="broute-keyboard-overlay" class="broute-keyboard-overlay" role="dialog" aria-modal="true" aria-labelledby="broute-keyboard-title" hidden>
+      <header class="broute-keyboard-header">
+        <h2 id="broute-keyboard-title">BルートID</h2>
+        <p id="broute-keyboard-count" class="broute-keyboard-count">0 / 32文字</p>
+        <output id="broute-keyboard-value" class="broute-keyboard-value" aria-live="polite"></output>
+      </header>
+      <div id="broute-keyboard-keys" class="broute-keyboard-keys" aria-label="英数字キーボード"></div>
+      <footer class="broute-keyboard-actions">
+        <button id="broute-keyboard-cancel" type="button">キャンセル</button>
+        <button id="broute-keyboard-confirm" class="primary" type="button">決定</button>
+      </footer>
+    </section>
   </body>
 </html>
