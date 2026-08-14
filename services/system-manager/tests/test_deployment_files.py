@@ -30,3 +30,18 @@ def test_setup_reloads_and_restarts_active_system_manager() -> None:
     assert 'systemctl is-active --quiet "${SERVICE_NAME}"' in setup
     assert 'systemctl restart "${SERVICE_NAME}"' in setup
     assert 'systemctl start "${SERVICE_NAME}"' in setup
+
+
+def test_setup_preserves_and_validates_a_root_only_existing_token() -> None:
+    setup = (REPOSITORY_ROOT / "scripts/setup-system-manager.sh").read_text(
+        encoding="utf-8"
+    )
+
+    # The token's existence check must be privileged because the installed
+    # environment file is root:root 0600. The generation branch follows the
+    # existing-file branch, so rerunning setup does not rotate a valid token.
+    existing_branch = setup.index('if [[ -e "${ENV_FILE}" ]]; then')
+    generation = setup.index('token="$(openssl rand -hex 32)"')
+    assert existing_branch < generation
+    assert '"${SUDO[@]}" grep -q \'^OMK_SYSTEM_MANAGER_TOKEN=.\' "${ENV_FILE}"' in setup
+    assert 'log "Preserving existing root-only token file."' in setup
