@@ -81,7 +81,10 @@ async def _system_manager_request(method: str, path: str, body: dict | None = No
     if not SYSTEM_MANAGER_TOKEN:
         raise HTTPException(503, "システム管理サービスの認証設定がありません")
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
+        # system-manager can legitimately wait for its bounded 45-second
+        # systemctl operation. Keep this longer than that bound so a working
+        # host service is not mislabeled as unreachable by the proxy.
+        async with httpx.AsyncClient(timeout=60) as client:
             response = await client.request(
                 method,
                 f"{SYSTEM_MANAGER_URL}{path}",

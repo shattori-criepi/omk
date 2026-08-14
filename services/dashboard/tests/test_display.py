@@ -564,12 +564,17 @@ def test_broute_proxy_adds_bearer_token_only_to_host_request(monkeypatch: pytest
             return type("Response", (), {"status_code": 200, "json": lambda self: {"configured": False}})()
 
     monkeypatch.setattr(dashboard_main, "SYSTEM_MANAGER_TOKEN", "token-canary")
-    monkeypatch.setattr(dashboard_main.httpx, "AsyncClient", lambda **_: SuccessfulClient())
+    monkeypatch.setattr(
+        dashboard_main.httpx,
+        "AsyncClient",
+        lambda **kwargs: captured.update({"client": kwargs}) or SuccessfulClient(),
+    )
     response = asyncio.run(dashboard_main._system_manager_request("GET", "/api/broute/credentials/status"))
 
     assert response == {"configured": False}
     assert captured["url"] == "http://host.docker.internal:8788/api/broute/credentials/status"
     assert captured["headers"] == {"Authorization": "Bearer token-canary"}
+    assert captured["client"] == {"timeout": 60}
 
 
 def test_broute_admin_page_keeps_credentials_and_token_out_of_html() -> None:
@@ -595,7 +600,7 @@ def test_broute_admin_page_keeps_credentials_and_token_out_of_html() -> None:
     assert raw_identifier not in response.text + javascript
     assert "validToken(id, 32)" in javascript
     assert "validToken(pass, 12)" in javascript
-    assert "保存しました。Bルートへ再接続しました。" in javascript
+    assert "設定を保存しました。Bルートへ再接続しています。" in javascript
     assert "設定は保存されましたが、Bルートサービスの再起動に失敗しました。" in javascript
 
 
@@ -621,8 +626,11 @@ for (const selector of ["#broute-form", "#broute-id", "#broute-password", "#brou
 elements["#broute-keyboard-overlay"].hidden = true;
 global.document = { querySelector: (selector) => elements[selector], createElement: () => element() };
 const requests = [];
-global.fetch = async (url, options = {}) => { requests.push({url, options}); return { status: 200, json: async () => ({ configured: true, id_masked: "0000************************4CEF", password_configured: true, service_active: true }) }; };
-vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8") + "\nglobalThis.__brouteTest = {formatToken, unformatToken, validToken, appendKeyboardKey, backspaceKeyboardKey};");
+let response = { status: 200, detail: { configured: true, id_masked: "0000************************4CEF", password_configured: true, service_active: true, connection_state: "starting" } }, scheduledDelay = null;
+global.setTimeout = (_callback, delay) => { scheduledDelay = delay; return 1; };
+global.clearTimeout = () => {};
+global.fetch = async (url, options = {}) => { requests.push({url, options}); return { status: response.status, ok: response.status < 400, json: async () => response.detail }; };
+vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8") + "\nglobalThis.__brouteTest = {formatToken, unformatToken, validToken, appendKeyboardKey, backspaceKeyboardKey, showStatus, pollStatus, loadStatus};");
 (async () => {
   const id = "123456789ABCDEF0123456789ABCDEF0", password = "123456789ABC";
   const identifier = elements["#broute-id"], passInput = elements["#broute-password"], overlay = elements["#broute-keyboard-overlay"];
@@ -649,11 +657,23 @@ vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8") + "\nglobalThis.__b
   elements["#broute-keyboard-confirm"].listeners.click();
   const confirmed = overlay.hidden && passInput.value === "1234 BBBB BBBB";
   const noPutBeforeSave = !requests.some((request) => request.options.method === "PUT");
+  const stateLabels = {};
+  for (const state of ["scanning", "authenticating", "connected", "authentication_error", "connection_error"]) { __brouteTest.showStatus({service_active: true, connection_state: state}); stateLabels[state] = elements["#broute-connection"].textContent; }
+  response = { status: 200, detail: { configured: true, service_active: true, connection_state: "scanning" } };
+  await __brouteTest.pollStatus();
+  const polling = elements["#broute-connection"].textContent === "スマートメータを探索中" && scheduledDelay === 1500;
+  response = { status: 400, detail: {detail: "入力値が不正です"} };
+  await __brouteTest.loadStatus();
+  const upstreamErrorIsNotTransport = elements["#broute-connection"].textContent === "状態を取得できません";
+  response = { status: 503, detail: {detail: "システム管理サービスに接続できません"} };
+  await __brouteTest.loadStatus();
+  const transportError = elements["#broute-connection"].textContent === "system-manager接続エラー";
+  response = { status: 200, detail: { configured: true, id_masked: "0000************************4CEF", password_configured: true, service_active: true, connection_state: "starting" } };
   elements["#broute-id"].value = "1234 5678 9ABC DEF0 1234 5678 9ABC DEF0";
   elements["#broute-password"].value = "1234 5678 9ABC";
   await elements["#broute-form"].onsubmit({preventDefault() {}});
   const put = requests.find((request) => request.options.method === "PUT");
-  console.log(JSON.stringify({ formattedId: __brouteTest.formatToken(id, 32), formattedPassword: __brouteTest.formatToken(password, 12), normalizedPaste: __brouteTest.unformatToken("1234 5678 9ABC DEF0 1234 5678 9ABC DEF0", 32), validId: __brouteTest.validToken("1234 5678 9ABC DEF0 1234 5678 9ABC DEF0", 32), validPassword: __brouteTest.validToken("1234 5678 9ABC", 12), invalidShortId: __brouteTest.validToken("1234 5678 9ABC DEF0 1234 5678 9ABC DEF", 32), masked: __brouteTest.formatToken("0000************************4CEF", 32), idOpened, passwordOpened, idMaximum, passwordMaximum, idBackspace, cancellationRestored, confirmed, noPutBeforeSave, passwordBlankOnLoad, request: JSON.parse(put.options.body) }));
+  console.log(JSON.stringify({ formattedId: __brouteTest.formatToken(id, 32), formattedPassword: __brouteTest.formatToken(password, 12), normalizedPaste: __brouteTest.unformatToken("1234 5678 9ABC DEF0 1234 5678 9ABC DEF0", 32), validId: __brouteTest.validToken("1234 5678 9ABC DEF0 1234 5678 9ABC DEF0", 32), validPassword: __brouteTest.validToken("1234 5678 9ABC", 12), invalidShortId: __brouteTest.validToken("1234 5678 9ABC DEF0 1234 5678 9ABC DEF", 32), masked: __brouteTest.formatToken("0000************************4CEF", 32), idOpened, passwordOpened, idMaximum, passwordMaximum, idBackspace, cancellationRestored, confirmed, noPutBeforeSave, passwordBlankOnLoad, stateLabels, polling, upstreamErrorIsNotTransport, transportError, reconnectingMessage: elements["#broute-message"].textContent === "設定を保存しました。Bルートへ再接続しています。", request: JSON.parse(put.options.body) }));
 })();
 '''
     completed = subprocess.run(
@@ -680,6 +700,17 @@ vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8") + "\nglobalThis.__b
     assert result["confirmed"] is True
     assert result["noPutBeforeSave"] is True
     assert result["passwordBlankOnLoad"] is True
+    assert result["stateLabels"] == {
+        "scanning": "スマートメータを探索中",
+        "authenticating": "認証中",
+        "connected": "接続済み",
+        "authentication_error": "認証エラー",
+        "connection_error": "接続エラー",
+    }
+    assert result["polling"] is True
+    assert result["upstreamErrorIsNotTransport"] is True
+    assert result["transportError"] is True
+    assert result["reconnectingMessage"] is True
     assert result["request"] == {"id": "123456789ABCDEF0123456789ABCDEF0", "password": "123456789ABC"}
 
 

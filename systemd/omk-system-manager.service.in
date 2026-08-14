@@ -10,6 +10,7 @@ Group=@OMK_GROUP@
 WorkingDirectory=@OMK_ROOT@/services/system-manager
 EnvironmentFile=@ENV_FILE@
 Environment=OMK_BROUTE_CREDENTIALS_PATH=@OMK_ROOT@/broute-meter/config/credentials.yaml
+Environment=OMK_BROUTE_STATUS_PATH=@OMK_ROOT@/data/broute-meter/status.json
 Environment=OMK_SYSTEMCTL_PATH=@SYSTEMCTL_PATH@
 Environment=PYTHONPATH=@OMK_ROOT@/services/system-manager/src
 Environment=TZ=Asia/Tokyo

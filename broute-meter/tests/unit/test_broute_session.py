@@ -91,6 +91,17 @@ def test_connect_runs_confirmed_sequence_and_returns_connection() -> None:
     ]
 
 
+def test_connect_reports_scan_and_pana_authentication_states() -> None:
+    states: list[str] = []
+
+    BRouteSession(
+        FakeConnectionAdapter((_candidate(),)),
+        on_state_change=states.append,
+    ).connect(VALID_B_ROUTE_ID, VALID_B_ROUTE_PASSWORD)
+
+    assert states == ["scanning", "authenticating"]
+
+
 def test_no_scan_candidate_stops_before_radio_settings() -> None:
     adapter = FakeConnectionAdapter(())
     session = BRouteSession(adapter)

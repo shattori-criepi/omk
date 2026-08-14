@@ -553,7 +553,7 @@ def test_run_connection_retries_broute_session_after_scan_failure(
     attempts: list[tuple[str, str]] = []
 
     class FakeSession:
-        def __init__(self, _adapter: object, *, scan_max_attempts: int) -> None:
+        def __init__(self, _adapter: object, *, scan_max_attempts: int, on_state_change=None) -> None:
             assert scan_max_attempts == 3
 
         def connect(self, identifier: str, password: str) -> SimpleNamespace:
@@ -600,7 +600,7 @@ def test_run_connection_retry_wait_stops_on_shutdown(
     """終了要求があれば初期接続の再試行待機を中断する。"""
 
     class FakeSession:
-        def __init__(self, _adapter: object, *, scan_max_attempts: int) -> None:
+        def __init__(self, _adapter: object, *, scan_max_attempts: int, on_state_change=None) -> None:
             pass
 
         def connect(self, _identifier: str, _password: str) -> SimpleNamespace:
@@ -675,7 +675,7 @@ def test_run_treats_inflight_failure_after_stop_signal_as_graceful(
     )
 
     class FakeSession:
-        def __init__(self, _adapter: object, *, scan_max_attempts: int) -> None:
+        def __init__(self, _adapter: object, *, scan_max_attempts: int, on_state_change=None) -> None:
             assert scan_max_attempts == 3
 
         def connect(self, _identifier: str, _password: str) -> SimpleNamespace:
@@ -784,7 +784,7 @@ def test_run_continues_when_mqtt_publisher_start_fails(
             raise RuntimeError("test MQTT startup failure")
 
     class FakeSession:
-        def __init__(self, _adapter: object, *, scan_max_attempts: int) -> None:
+        def __init__(self, _adapter: object, *, scan_max_attempts: int, on_state_change=None) -> None:
             assert scan_max_attempts == 3
 
         def connect(self, _identifier: str, _password: str) -> SimpleNamespace:

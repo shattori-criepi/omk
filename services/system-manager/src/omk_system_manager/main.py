@@ -23,6 +23,7 @@ from .credentials import (
     write_credentials_atomically,
 )
 from .service_control import BRouteServiceController, ServiceControlError
+from .runtime_status import connection_status
 
 
 @dataclass(frozen=True)
@@ -30,6 +31,7 @@ class Settings:
     token: str = field(repr=False)
     credentials_path: Path
     systemctl_path: str
+    status_path: Path = Path("/home/omkdev/projects/omk/data/broute-meter/status.json")
 
     @classmethod
     def from_environment(cls) -> "Settings":
@@ -45,6 +47,12 @@ class Settings:
                 )
             ),
             systemctl_path=os.environ.get("OMK_SYSTEMCTL_PATH", "/usr/bin/systemctl"),
+            status_path=Path(
+                os.environ.get(
+                    "OMK_BROUTE_STATUS_PATH",
+                    "/home/omkdev/projects/omk/data/broute-meter/status.json",
+                )
+            ),
         )
 
 
@@ -92,11 +100,18 @@ def create_app(configured_settings: Settings | None = None) -> FastAPI:
         settings: Settings = request.app.state.settings
         configured, identifier_masked, password_configured = credential_status(settings.credentials_path)
         controller: BRouteServiceController = request.app.state.controller
+        service_active = controller.is_active()
+        connection_state, status_updated_at = connection_status(
+            settings.status_path,
+            service_active=service_active,
+        )
         return {
             "configured": configured,
             "id_masked": identifier_masked,
             "password_configured": password_configured,
-            "service_active": controller.is_active(),
+            "service_active": service_active,
+            "connection_state": connection_state,
+            "status_updated_at": status_updated_at,
         }
 
     @app.put("/api/broute/credentials", dependencies=[Depends(authenticated)])
@@ -134,6 +149,10 @@ def create_app(configured_settings: Settings | None = None) -> FastAPI:
             "id_masked": identifier_masked,
             "password_configured": password_configured,
             "service_active": True,
+            # A restart makes any earlier connected record stale. The new
+            # process writes its authoritative state before attempting PANA.
+            "connection_state": "starting",
+            "status_updated_at": None,
         }
 
     @app.get("/health")
