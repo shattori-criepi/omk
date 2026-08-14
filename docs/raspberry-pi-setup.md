@@ -6,15 +6,20 @@
 ためのDockerホストを準備するまでの手順です。初めて作業する人は、上から順に進めて
 ください。
 
-この時点ではOMKの計測サービスは起動しません。Bルート資格情報、センサ設定、実機用
-Compose構成、表示、アクセスポイント、LTEなどは後続作業です。これらが未整備の状態で
-この文書だけを実行しても、計測開始や外部送信は行われません。
+この文書の初期セットアップ部分だけではOMKの計測サービスは起動しません。Bルート資格情報、
+センサ設定、実機用Compose構成、表示、アクセスポイント、LTEは個別の後続手順です。これらが
+未整備の状態で初期セットアップだけを実行しても、計測開始や外部送信は行われません。
 
 | 段階 | この文書で行うこと | 後続で行うこと |
 |---|---|---|
 | Raspberry Pi Imager | OS、ユーザー、SSH、ネットワーク、地域設定 | — |
 | 初期セットアップ | OS更新、Docker、基本ツール、`data/`作成 | — |
 | OMK運用開始 | — | 周辺機器、秘密情報、Composeサービス、表示、ネットワーク |
+
+初期セットアップ後の実装済みサービスは、`setup-data-collection.sh`、
+`setup-broute-meter.sh`、`setup-system-manager.sh`、`setup-ble-sensor-manager.sh`、
+`setup-dashboard-kiosk.sh`で個別に設定します。各手順は対象サービスのREADMEを確認してから
+実行してください。
 
 ## 1. 目的と前提条件
 
@@ -188,6 +193,9 @@ mountと`data/sensors`、`data/latest`、`data/processed`、`data/harvest-upload
 `services/mosquitto/data`を確認します。`setup-data-transformer.sh`は`data/processed`と
 `data/errors/transform`、venv、systemd timerを、`setup-broute-meter.sh`は
 `data/broute-meter`と`logs/broute-meter`、Bルートsystemd設定を確認します。
+`setup-system-manager.sh`はBルート認証情報および固定ホスト操作用のhost API、token、
+sudoersを設定し、`setup-ble-sensor-manager.sh`はBlueZを使うBLE探索・登録用host APIを設定します。
+Dashboardコンテナからこれらのhost APIへは`host.docker.internal`経由で接続します。
 
 実測データ、Parquet、SQLite、CSV、ログはGit管理対象外です。BルートID・パスワード、
 Wi-Fiパスワード、SSH秘密鍵、APIキーなどの秘密情報を、リポジトリやセットアップ

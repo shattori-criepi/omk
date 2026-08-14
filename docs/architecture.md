@@ -11,7 +11,7 @@ OMKは周辺機器の種類が多く、Raspberry Pi OS、USB、Bluetooth、Wi-SU
 | 項目 | 状態 | 方針 |
 |---|---|---|
 | コード構造 | 採用 | TypeScriptを中心としたモジュラーモノリス |
-| 配備単位 | 採用 | Docker Composeで管理する少数の責務別コンテナ |
+| 配備単位 | 採用 | Docker Composeのアプリケーションサービスと、ハードウェア・systemd依存処理を分けて管理 |
 | 既存Python処理 | 移行対象 | 当面は独立コンテナ／アダプタとして維持し、必要性を見て統合 |
 | ハードウェア連携 | 採用 | Ports and Adapters方式でドライバを交換可能にする |
 | データ集約 | 採用 | 各取得処理はMQTTでRaspberry Piへ集約し、`sensor-collector`が`omk/#`を収集 |
@@ -22,7 +22,7 @@ OMKは周辺機器の種類が多く、Raspberry Pi OS、USB、Bluetooth、Wi-SU
 | Raspberry Pi OS | 採用 | 64-bit Raspberry Pi OSのみを正式対象とし、32-bit版は対象外 |
 | 本番ネットワーク | 採用 | 住宅Wi-Fiを動作要件とせず、OMK用APと独立した外部回線を基本とする |
 | ローカル保存方式 | 未決定 | ポートを先に定義し、SQLite等の実装は別途決定 |
-| UI技術 | 未決定 | ローカルWeb UIを前提とするが、フレームワークは未決定 |
+| UI技術 | 採用 | FastAPIベースのDashboardをDockerで実行し、ChromiumキオスクとローカルWeb UIへ提供 |
 | クラウド送信仕様 | 未決定 | 既存SORACOM送信処理を棚卸し後に契約を確定 |
 
 ## 3. システムコンテキスト
@@ -408,7 +408,7 @@ JSONL保存、Harvest 1分集約、SORACOM Harvest Data送信までの経路を�
 
 ## 10. コンテナ構成
 
-### 10.1 候補構成
+### 10.1 現在の構成
 
 | サービス | 主な責務 | 言語／実装 |
 |---|---|---|
@@ -417,7 +417,9 @@ JSONL保存、Harvest 1分集約、SORACOM Harvest Data送信までの経路を�
 | `data-transformer` | JSONLの検証・トピック別正規化・Parquet出力。`status`は管理情報として除外 | Python / PyArrow |
 | `dashboard` | latest JSONによる瞬時値、Parquetによる日計・履歴の表示 | Python / Docker Compose |
 | `omk-dashboard-kiosk.service` | Wayland GUIセッション内でChromiumキオスクを起動・監視し、labwcのカーソル非表示操作を実行 | user systemd / wtype |
-| Bルートsystemdサービス | USBシリアル・PANAによるBルート通信 | ホストOS |
+| `omk-ble-sensor-manager.service` | BlueZを使うBLE探索・登録のホストAPI | Python / host systemd |
+| `omk-system-manager.service` | Bルート認証情報と固定ホスト操作をDashboardへ安全に中継 | Python / host systemd |
+| `omk-broute-meter.service` | USBシリアル・PANAによるBルート通信、接続状態の出力と復旧 | Python / host systemd |
 | CSV・分析・可視化・外部送信 | JSONLを使う後段処理 | 今後決定 |
 
 `core`を細かく多数のサービスへ分割しません。別コンテナ化は、次のいずれかを満たす場合だけ検討します。
@@ -427,29 +429,35 @@ JSONL保存、Harvest 1分集約、SORACOM Harvest Data送信までの経路を�
 - 独立して再起動・更新する運用上の価値がある
 - 障害分離が明確に必要である
 
-### 10.2 Composeファイル
+### 10.2 Composeとホストサービス
 
-- `compose.yaml`: 共通サービスとネットワーク
-- `compose.mock.yaml`: シミュレータ、実機ドライバ無効化
-- `compose.windows-hardware.yaml`: Windows／WSL2上の任意Bルート実機検証用アダプタとデバイス設定
-- `compose.pi.yaml`: Raspberry Pi 4／5向けの`/dev`、D-Bus、実機設定の追加
+`compose.yaml`は、`mosquitto`、`dashboard`、`sensor-collector`、`harvest-uploader`と、
+開発・試験用のBルートmock/testサービスを定義します。Dashboardはlatest JSONとParquetを
+読み取り専用でmountし、host APIへは`host.docker.internal`経由で接続します。
 
-環境ごとにDockerfileやコードを分岐させず、設定とアダプタ選択で切り替えます。
+USBシリアル、BlueZ、Bルート認証情報、systemd操作が必要な`omk-broute-meter.service`、
+`omk-ble-sensor-manager.service`、`omk-system-manager.service`はComposeへ含めません。
+ホスト側の個別setup scriptが、必要最小限の権限とともにこれらを設定します。
 
 ## 11. APIとUI
 
 UIはローカルネットワークまたは本体ディスプレイから利用するWeb UIを基本とします。
+DashboardはDockerコンテナで動作し、7インチSmartiPi Touch Pro 3のChromiumキオスク表示を
+主な利用形態とします。
 
-最低限必要なAPI:
+表示画面はlatest JSONとParquetを読み、`/api/display`を10秒間隔で更新します。歯車アイコンから
+開く「管理メニュー」には、センサ管理、Bルート設定、システム操作があります。
 
-- 現在値
-- 期間指定の履歴
-- デバイス一覧と状態
-- 送信キューの状態
-- システムヘルス
-- バージョン情報
+- センサ管理はDashboardバックエンドから`host.docker.internal:8787`のBLE Sensor Managerを呼び、
+  ペアリング不要BLEセンサの探索・登録を行います。
+- Bルート設定とシステム操作はDashboardバックエンドから
+  `host.docker.internal:8788`のsystem-managerを呼びます。BルートID/PASS、接続状態、再試行、
+  Raspberry Piの再起動・シャットダウンを扱います。
+- DashboardコンテナはBlueZ、USBシリアル、`credentials.yaml`、systemd操作権限を持ちません。
+  Bearer tokenの付与とhost APIの呼び出しはバックエンドだけが担い、ブラウザへtokenを返しません。
 
-UIはドライバ固有APIへ直接アクセスしません。`core`が公開する安定したAPIだけを利用します。
+この分離により、ハードウェア・OS権限が必要な処理をコンテナへ持ち込まず、Dashboardは表示と
+利用者操作に限定します。
 
 ## 12. 設定
 

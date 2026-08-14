@@ -1,6 +1,11 @@
 # OMK Dashboard
 
-Raspberry Pi Touch Display 2（横向き）のChromiumキオスクで表示する、利用者向けの最小ダッシュボードです。瞬時値は最新状態JSON、日計電力量はDuckDBによるParquetから取得します。
+Raspberry Pi上でDockerコンテナとして動作する、利用者向けのDashboardです。7インチの
+SmartiPi Touch Pro 3を横向きで使用するChromiumキオスク表示を主な利用形態とします。
+瞬時値は最新状態JSON、日計電力量はDuckDBで読むParquetから取得します。
+
+歯車アイコンから開く「管理メニュー」には、センサ管理、Bルート設定、システム操作が
+あります。「ネットワーク」と「システム情報」の管理画面は現在提供していません。
 
 ## ローカル起動
 
@@ -22,53 +27,97 @@ OMK_PROCESSED_DATA_ROOT=../../data/processed OMK_LATEST_DATA_ROOT=../../data/lat
 docker compose up --build dashboard
 ```
 
+Composeでは、`data/latest`と`data/processed`だけを読み取り専用でmountします。
+認証情報ファイルやホストのsystemdソケットをDashboardコンテナへ渡しません。
+
+## 管理メニュー
+
+### センサ管理
+
+`/admin/sensors`では、ホスト上の`omk-ble-sensor-manager.service`をDashboardバックエンド
+経由で利用します。Dockerコンテナは`host.docker.internal:8787`へ接続し、BlueZのD-Bus
+ソケットやBluetooth権限を持ちません。
+
+周辺のペアリング不要BLE advertisementを探索し、SwitchBot等の対応センサを候補として
+表示します。選択した候補に論理`device_id`、表示名、設置場所を設定して登録できます。
+対応するセンサ種別や登録後の扱いは[BLE Sensor Manager README](../ble-sensor-manager/README.md)
+を参照してください。
+
+### Bルート設定
+
+`/admin/broute`では、BルートIDとパスワードを設定し、接続状態を確認できます。保存済みの
+パスワードおよび生のBルートIDは、画面やDashboard APIへ返しません。
+
+- IDは32文字、パスワードは12文字のASCII値を扱い、入力時は4文字ごとに区切って表示します。
+- 7インチ画面向けの専用ソフトウェアキーボードと、接続済み物理キーボードの両方を使用できます。
+- 通常画面のパスワード入力欄はマスクし、キーボードオーバーレイではその場で入力した値だけを
+  確認用に表示します。
+- `starting`、`adapter_missing`、`adapter_initializing`、`scanning`、`authenticating`、
+  `connected`、`scan_error`、`authentication_error`、`connection_error`、`retry_wait`、
+  `status_unavailable`、`stopped`を画面上の状態として扱います。
+- 未検出時は自動再試行し、長時間未検出で待機中の場合だけ「今すぐ再試行」を表示します。
+
+RS-WSUHA-PのUSB抜去は`adapter_missing`として表示します。再挿入後はready状態を待ってから
+初期化、scan、PANA接続へ自動復帰します。必要時のUSB resetはBルートサービス側に限定され、
+DashboardからUSBやsystemdを直接操作しません。
+
+Dashboardバックエンドは、`host.docker.internal:8788`のsystem-managerへBearer token付きで
+要求を中継します。`scripts/setup-system-manager.sh`はroot-onlyのsystem-manager tokenから
+`/etc/omk/dashboard-system-manager.env`を作成し、Composeの`env_file`でDashboardプロセスに
+だけ環境変数として渡します。tokenはHTML、JavaScript、ブラウザAPIへ渡されません。このファイルは
+`root:<OMKユーザーの主グループ>`、mode `0640`です。詳細は
+[System Manager README](../system-manager/README.md)を参照してください。
+
+### システム操作
+
+`/admin/system`では、再起動とシャットダウンを実行できます。どちらも確認ダイアログを経由し、
+シャットダウンは危険操作として視覚的に区別します。Dashboardは操作要求をsystem-managerへ
+中継するだけで、直接`sudo`や`systemctl`を実行しません。
+
+再起動後はDashboardが復帰をpollし、復帰したら`/display`へ戻ります。シャットダウン後は
+電源を再投入するまで自動復帰しません。
+
 ## Raspberry Pi Chromiumキオスク
 
-dashboardサーバーはDocker Compose、表示用Chromiumは別のuser systemdサービスです。GUI自動ログイン済みのWaylandセッションで、リポジトリルートから次を実行します。
+DashboardサーバーはDocker Compose、表示用Chromiumは別のuser systemdサービスです。GUI自動
+ログイン済みのWaylandセッションで、リポジトリルートから次を実行します。
 
 ```bash
 ./scripts/setup-dashboard-kiosk.sh
 ```
 
-このサービスはdashboardのhealth応答を待ってからChromiumを起動し、Chromium終了時は5秒後に自動再起動します。セットアップは`wtype`を確認・導入し、labwcの`HideCursor`/`WarpCursor`キーバインドを既存のタッチ設定を残して`~/.config/labwc/rc.xml`へ追加します。Chromiumの起動後に`wtype`でこのキーバインドを実行するため、カーソルは自動的に非表示になります。SSHやNapterの接続には依存しません。状態確認、再起動、ログ確認、停止は次のとおりです。
-
-```bash
-systemctl --user status omk-dashboard-kiosk.service --no-pager
-systemctl --user restart omk-dashboard-kiosk.service
-journalctl --user -u omk-dashboard-kiosk.service --no-pager
-systemctl --user disable --now omk-dashboard-kiosk.service
-```
-
-Waylandセッションが起動していない場合はセットアップを実行せず、GUIへログインしてから実行してください。セットアップ時にソケットがなければ安全に停止し、GUIログイン後の再実行を求めます。GUI自動ログイン時にuser managerの`default.target`から起動し、unit内ではWaylandソケットを待ちます。lingerは不要です。SSHやNapterの切断には依存しません。
-
-カーソルが残る場合は、`command -v wtype`、`~/.config/labwc/rc.xml`の`labwc_config`ルートと`HideCursor`・`WarpCursor`アクション、ならびに`systemctl --user cat omk-dashboard-kiosk.service`の`ExecStartPost`を確認してください。SSHからlabwcを即時再読込する場合は、GUIセッションのPIDを`LABWC_PID=<pid>`としてセットアップを再実行します。再読込に失敗した場合も、次回GUIログインまたは再起動で反映されます。
+このサービスはDashboardのhealth応答を待ってからChromiumを起動し、Chromium終了時は5秒後に
+自動再起動します。セットアップは`wtype`を確認・導入し、labwcの`HideCursor`/`WarpCursor`
+キーバインドを既存のタッチ設定を残して`~/.config/labwc/rc.xml`へ追加します。詳細は
+[Raspberry Pi初期セットアップ](../../docs/raspberry-pi-setup.md#dashboard-chromiumキオスク)
+を参照してください。
 
 ## URL
 
 - 表示画面: http://localhost:8000/display
 - 表示更新API: http://localhost:8000/api/display
 - ヘルスチェック: http://localhost:8000/health
+- 管理メニュー: http://localhost:8000/admin
 - Bルート設定: http://localhost:8000/admin/broute
+- システム操作: http://localhost:8000/admin/system
 
-## Bルート設定
-
-`/admin/broute`はDashboardバックエンドを経由して、ホスト上の
-system-manager（`host.docker.internal:8788`）へ認証情報の状態確認・更新を依頼します。
-保存済みのパスワードや生のBルートIDは画面・Dashboard APIへ返しません。
-
-Dashboardコンテナは認証情報YAMLをmountしません。`scripts/setup-system-manager.sh`が
-root-onlyのsystem-manager tokenから`/etc/omk/dashboard-system-manager.env`を作成し、
-Composeの`env_file`でDashboardプロセスにだけ環境変数として渡します。tokenはHTML、
-JavaScript、ブラウザAPIへ渡されません。このファイルは`root:<OMKユーザーの主グループ>`、
-mode `0640`で、Docker Composeを起動するOMKユーザーだけが読めます。
-
-Raspberry Pi自身またはLAN内からは、`localhost` をPiのIPアドレスに置き換えてください。
+Raspberry Pi自身またはLAN内から利用する場合は、`localhost`をPiのIPアドレスに置き換えます。
 
 ## データ
 
-`OMK_LATEST_DATA_ROOT`（既定: `data/latest`）はcollectorが原子的に置換する瞬時値JSONのルートです。対象は`broute_power.json`、`sen66.json`、`ichijo_power_flow.json`です。`OMK_PROCESSED_DATA_ROOT` は日計電力量用の処理済みParquetのルートです。Composeでは両方をdashboardへ読み取り専用でマウントします。一条`power-flow`が10分を超えて古い場合、画面はBルート電力へフォールバックします。
+`OMK_LATEST_DATA_ROOT`（既定: `data/latest`）はcollectorが原子的に置換する瞬時値JSONの
+ルートです。対象は`broute_power.json`、`sen66.json`、`ichijo_power_flow.json`です。
+`OMK_PROCESSED_DATA_ROOT`は日計電力量用の処理済みParquetのルートです。一条`power-flow`が
+10分を超えて古い場合、画面はBルート電力へフォールバックします。
 
-データセットまたは値がない場合も画面は表示され、数値は `--`、電力状態は「データなし」、鮮度は `unavailable` になります。日計電力量は該当データがない場合 `0.0 kWh` です。
+データセットまたは値がない場合も画面は表示され、数値は`--`、電力状態は「データなし」、
+鮮度は`unavailable`になります。日計電力量は該当データがない場合`0.0 kWh`です。
+
+## 実機確認済みの管理機能
+
+Raspberry Pi実機で、BルートID/PASS設定、正常接続、未検出時のretry表示と手動retry、
+RS-WSUHA-P抜去・再挿入後の自動復旧、Dashboardの状態更新、ソフトウェアキーボード、
+物理キーボード入力、Raspberry Pi再起動後のDashboard自動復帰、およびシャットダウンを確認済みです。
 
 ## テスト
 
@@ -82,7 +131,3 @@ Docker Composeを使う場合:
 ```bash
 docker compose run --rm dashboard pytest -q
 ```
-
-## 現状と未実装事項
-
-latest JSONとDuckDB／Parquet実データ接続済みです。画面は10秒ごとに`/api/display`から値を更新します。MQTT購読、WebSocket、管理者画面、認証、グラフは未実装です。

@@ -32,12 +32,14 @@ Windows PCです。初期設定はSSHで行えるため、キーボードとデ�
 3. `/home/omkdev/projects/omk`へこのリポジトリをcloneする
 4. `./scripts/setup-raspberry-pi.sh`を実行し、再ログイン後にDockerを確認する
 5. Onyx を使う場合は [SORACOM Onyx セットアップ](docs/soracom-onyx-setup.md)を実行する
-6. OMKのデータ収集サービスを起動後、GUI自動ログイン中に`./scripts/setup-dashboard-kiosk.sh`を実行して、表示用Chromiumとlabwcのカーソル非表示設定をuser systemdへ登録する
-7. 後続タスクとして、周辺機器、秘密情報、ネットワーク機能を個別に設定する
+6. `./scripts/setup-data-collection.sh`でDockerのデータ収集・Dashboardサービスを起動する
+7. Bルートを使用する場合は`./scripts/setup-broute-meter.sh`と`./scripts/setup-system-manager.sh`を実行し、管理メニューから認証情報を設定する
+8. BLEセンサを使用する場合は`./scripts/setup-ble-sensor-manager.sh`を実行し、管理メニューから探索・登録する
+9. GUI自動ログイン中に`./scripts/setup-dashboard-kiosk.sh`を実行して、表示用Chromiumとlabwcのカーソル非表示設定をuser systemdへ登録する
 
-現時点のセットアップスクリプトは、OS更新、Docker、データ保存領域までを準備します。
-OMKアプリケーションやDocker Composeサービスは起動しません。実機用Compose構成、秘密情報、
-周辺機器設定が整備されるまでは、本番計測の開始手順として扱わないでください。
+`setup-raspberry-pi.sh`はOS更新、Docker、データ保存領域までを準備します。計測・表示・
+周辺機器の各サービスは、その後に上記の個別setup scriptで有効化します。BルートID/PASSなどの
+秘密情報はGitやセットアップログへ書かず、Bルート設定画面から設定します。
 
 ## 1. OMKが扱う範囲
 
