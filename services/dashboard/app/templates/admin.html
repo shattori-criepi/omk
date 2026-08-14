@@ -3,21 +3,19 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-    <title>OMK 管理</title>
-    <link rel="stylesheet" href="{{ url_for('static', path='/display.css') }}?v=20260812-admin2">
+    <title>OMK 管理メニュー</title>
+    <link rel="stylesheet" href="{{ url_for('static', path='/display.css') }}?v=20260814-admin-menu">
   </head>
   <body>
-    <main class="admin-page" aria-label="OMK 管理画面">
+    <main class="admin-page" aria-label="OMK 管理メニュー">
       <header class="admin-page-header">
         <a href="/display" class="back-link">← ダッシュボード</a>
-        <h1>管理</h1>
+        <h1>管理メニュー</h1>
       </header>
       <nav class="admin-menu" aria-label="管理メニュー">
         <a href="/admin/sensors" class="admin-menu-item">センサ管理 <span aria-hidden="true">›</span></a>
         <a href="/admin/broute" class="admin-menu-item">Bルート設定 <span aria-hidden="true">›</span></a>
         <a href="/admin/system" class="admin-menu-item">システム操作 <span aria-hidden="true">›</span></a>
-        <span class="admin-menu-item is-disabled">ネットワーク <small>準備中</small></span>
-        <span class="admin-menu-item is-disabled">システム情報 <small>準備中</small></span>
       </nav>
     </main>
   </body>

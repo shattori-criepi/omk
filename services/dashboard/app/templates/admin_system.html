@@ -4,12 +4,12 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <title>OMK システム操作</title>
-    <link rel="stylesheet" href="{{ url_for('static', path='/display.css') }}?v=20260814-system-controls">
+    <link rel="stylesheet" href="{{ url_for('static', path='/display.css') }}?v=20260814-system-controls-ui">
   </head>
   <body>
     <main class="system-management-page" aria-label="システム操作">
       <header class="admin-page-header">
-        <a href="/admin" class="back-link">← 管理</a>
+        <a href="/admin" class="back-link">← 管理メニュー</a>
         <h1>システム操作</h1>
       </header>
       <section class="system-controls" aria-label="電源操作">
@@ -19,9 +19,9 @@
       </section>
       <dialog id="system-confirm" class="register-dialog system-confirm-dialog" aria-labelledby="system-confirm-title">
         <form method="dialog">
-          <h2 id="system-confirm-title">確認</h2>
-          <p id="system-confirm-message" class="dialog-device"></p>
-          <div class="dialog-actions">
+          <h2 id="system-confirm-title" class="system-confirm-title">確認</h2>
+          <p id="system-confirm-message" class="dialog-device system-confirm-message"></p>
+          <div class="dialog-actions system-confirm-actions">
             <button id="system-confirm-cancel" type="button">キャンセル</button>
             <button id="system-confirm-execute" type="button" class="danger">実行</button>
           </div>
