@@ -184,6 +184,10 @@ class BleManager:
             location=request.get("location", ""), enabled=bool(request["enabled"]),
         )
 
+    def delete_registered_sensor(self, device_key: str) -> RegisteredSensor:
+        """Unregister a physical device without deleting observations or history."""
+        return self.registry.delete(device_key)
+
     def _publish_if_registered(self, advertisement: DecodedAdvertisement) -> None:
         try:
             sensor = next((item for item in self.registry.list() if item.device_key == advertisement.device_key), None)

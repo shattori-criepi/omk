@@ -4,7 +4,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
+from fastapi import HTTPException
 
+from omk_ble import main as ble_main
 from omk_ble.registry import RegistryError, SensorRegistry
 from omk_ble.models import DecodedAdvertisement, RegisteredSensor
 from omk_ble.switchbot import METER_SERVICE_UUID, SWITCHBOT_COMPANY_ID, decode
@@ -124,6 +126,52 @@ def test_registry_validates_ids_and_prevents_duplicate_device_or_id(tmp_path: Pa
         registry.register(one)
     with pytest.raises(RegistryError, match="lowercase"):
         registry.register(RegisteredSensor("switchbot:def", "Bad_ID", "environment", "switchbot", "temperature_humidity_sensor", "", "x"))
+
+
+def test_registry_delete_releases_sensor_id_and_preserves_other_registrations(tmp_path: Path) -> None:
+    registry = SensorRegistry(tmp_path / "sensors.json")
+    old = RegisteredSensor("switchbot:old", "plug-001", "power", "switchbot", "plug_sensor", "", "旧プラグ")
+    other = RegisteredSensor("switchbot:other", "th-001", "environment", "switchbot", "temperature_humidity_sensor", "", "温湿度計")
+    registry.register(old)
+    registry.register(other)
+
+    assert registry.delete("switchbot:old") == old
+    assert registry.list() == [other]
+    assert [item["sensor_id"] for item in json.loads((tmp_path / "sensors.json").read_text(encoding="utf-8"))["sensors"]] == ["th-001"]
+    replacement = RegisteredSensor("switchbot:new", "plug-001", "power", "switchbot", "plug_sensor", "", "新品プラグ")
+    assert registry.register(replacement) == replacement
+    with pytest.raises(KeyError):
+        registry.delete("switchbot:missing")
+
+
+def test_deleting_registered_sensor_stops_publish_and_allows_setup_candidate(tmp_path: Path) -> None:
+    registry = SensorRegistry(tmp_path / "sensors.json")
+    sensor = RegisteredSensor("switchbot:plug", "plug-001", "power", "switchbot", "plug_sensor", "", "プラグ")
+    registry.register(sensor)
+    publisher = _MqttPublisher()
+    manager = BleManager(registry, publisher)
+    advertisement = DecodedAdvertisement("switchbot:plug", "switchbot", "plug_sensor", "power", -45, "now", {"power_w": 5.2, "switch_state": 1})
+    manager.record_advertisement(advertisement)
+    assert len(publisher.messages) == 1
+
+    assert manager.delete_registered_sensor("switchbot:plug") == sensor
+    assert manager.registered_list() == []
+    manager.scanning = True
+    manager.record_advertisement(advertisement)
+    assert len(publisher.messages) == 1
+    assert [item["device_key"] for item in manager.candidate_list()] == ["switchbot:plug"]
+    assert manager.suggested_sensor_id("switchbot:plug") == "plug-001"
+
+
+def test_delete_sensor_api_returns_deleted_identity_and_not_found(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    registry = SensorRegistry(tmp_path / "sensors.json")
+    registry.register(RegisteredSensor("switchbot:plug", "plug-001", "power", "switchbot", "plug_sensor", "", "プラグ"))
+    monkeypatch.setattr(ble_main, "manager", BleManager(registry))
+
+    assert ble_main.delete_sensor("switchbot:plug") == {"deleted": True, "device_key": "switchbot:plug", "sensor_id": "plug-001"}
+    with pytest.raises(HTTPException) as error:
+        ble_main.delete_sensor("switchbot:missing")
+    assert error.value.status_code == 404
 
 
 def test_registry_normalizes_legacy_switchbot_models_when_read_and_written(tmp_path: Path) -> None:
