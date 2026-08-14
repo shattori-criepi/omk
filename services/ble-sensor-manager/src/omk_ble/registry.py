@@ -79,6 +79,15 @@ class SensorRegistry:
         self._write([updated if sensor.device_key == device_key else sensor for sensor in sensors])
         return updated
 
+    def delete(self, device_key: str) -> RegisteredSensor:
+        """Remove one registration while leaving all measurement history untouched."""
+        sensors = self.list()
+        existing = next((sensor for sensor in sensors if sensor.device_key == device_key), None)
+        if existing is None:
+            raise KeyError(device_key)
+        self._write([sensor for sensor in sensors if sensor.device_key != device_key])
+        return existing
+
     def _write(self, sensors: list[RegisteredSensor]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         payload = json.dumps({"sensors": [sensor.as_dict() for sensor in sensors]}, ensure_ascii=False, indent=2) + "\n"

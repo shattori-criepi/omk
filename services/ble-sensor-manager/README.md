@@ -45,6 +45,17 @@ OMKでは製品名と内部modelを分離しています。SwitchBot Meterおよ
 表します。`humidity_percent`、`outdoor_meter`、`waterproof_meter`はOMKのschema/model名では
 ありません。
 
+## 登録の削除と交換
+
+管理画面の`/admin/sensors`では、編集画面から登録済みBLEセンサを`device_key`単位で
+登録解除できます。この操作はregistryの登録情報だけを削除し、JSONL、Parquet、Harvest retry
+queue、SORACOM Harvest Data、MQTTの過去履歴には一切触れません。削除された`sensor_id`は空くため、
+故障交換時は旧センサを削除し、セットアップモードで発見した新品へ同じ`sensor_id`を再使用できます。
+
+`enabled=false`は一時的な停止であり、registryと`sensor_id`の占有を維持しつつruntime stateの更新だけを
+続け、MQTT publishを止めます。一方、削除後はregistryから完全に外れ、以後MQTT publishしません。周囲で
+同じ物理デバイスのBLE広告が続いていれば、未登録candidateとして再び表示され、セットアップから再登録できます。
+
 BLE広告はペアリングなしで継続受信します。`enabled=true`のenvironmentセンサは、最初に有効な
 値を受信した時点で即時publishし、その後は`device_key`ごとに最短10秒間隔でpublishします。
 runtime stateは広告を受信するたびに更新します。motionとcontactは状態変化時に即時publishし、
