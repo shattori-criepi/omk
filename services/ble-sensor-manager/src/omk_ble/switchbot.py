@@ -63,9 +63,9 @@ CONTACT_MANUFACTURER_LENGTH = 13
 CONTACT_RESERVED_INDEX = 8
 CONTACT_MANUFACTURER_STATUS_INDEX = 7
 
-# Plug Mini layout: <physical id 6> <sequence> <switch state> <marker 16>
-# <variable> <power big-endian 2>. The variable byte is observed as 0x36/0x38
-# and is intentionally not a classifier condition.
+# Plug Mini layout: <physical id 6> <sequence> <switch state> <variable>
+# <variable> <power big-endian 2>. Byte 8 was 0x16 on one device and 0x10 on
+# another, so it is only retained as a strict manufacturer-only fallback marker.
 PLUG_MANUFACTURER_LENGTH = 12
 PLUG_STATE_INDEX = 7
 PLUG_LAYOUT_MARKER_INDEX = 8
@@ -197,9 +197,13 @@ def _decode_waterproof_manufacturer_data(data: bytes) -> tuple[str, str, dict[st
     }
 
 
-def _decode_plug_manufacturer_data(data: bytes) -> tuple[str, str, dict[str, Any]] | None:
-    """Decode the verified Plug Mini manufacturer advertisement layout."""
-    if len(data) != PLUG_MANUFACTURER_LENGTH or data[PLUG_LAYOUT_MARKER_INDEX] != PLUG_LAYOUT_MARKER:
+def _decode_plug_manufacturer_data(
+    data: bytes, *, require_marker: bool = True,
+) -> tuple[str, str, dict[str, Any]] | None:
+    """Decode Plug Mini values, with strict matching for manufacturer-only data."""
+    if len(data) != PLUG_MANUFACTURER_LENGTH:
+        return None
+    if require_marker and data[PLUG_LAYOUT_MARKER_INDEX] != PLUG_LAYOUT_MARKER:
         return None
     state_byte = data[PLUG_STATE_INDEX]
     if state_byte & 0x7F:
@@ -275,7 +279,12 @@ def decode(address: str, rssi: int, manufacturer_data: dict[int, bytes], service
     waterproof_from_service = _decode_waterproof_service_data(service_bytes)
     waterproof_from_manufacturer = _decode_waterproof_manufacturer_data(company_data) if company_data else None
     plug_from_service = _decode_plug_service_data(service_bytes)
-    plug_from_manufacturer = _decode_plug_manufacturer_data(company_data) if company_data else None
+    # Domestic Plug Mini service data is observed as 0x6a (the public type is
+    # 0x67). Once either identifies this device, byte 8 is deliberately not a
+    # classifier: it varies across verified physical devices.
+    plug_from_manufacturer = _decode_plug_manufacturer_data(
+        company_data, require_marker=plug_from_service is None,
+    ) if company_data else None
     decoded = (
         contact_from_manufacturer
         or contact_from_service

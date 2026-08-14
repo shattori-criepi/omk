@@ -113,5 +113,14 @@ manufacturer dataではstate byteのbit 7を`switch_state`として用い、0=OF
 は記載しない。Service Dataは補助識別に留め、Plug Mini判定とmeasurement decodeは
 manufacturer dataの12-byte layoutを主根拠にする。
 
+国内Plug Miniの複数個体で12-byte manufacturer advertisementを確認している。byte 8は旧個体で
+`0x16`、新品個体で`0x10`を観測したため、固定classifierには使用しない。service dataで公開値
+`0x67`または国内実測値`0x6a`を補助識別できる場合、state byte（index 7）と末尾2 byteから値を
+decodeする。state byteのbit 7は`switch_state`、電力は
+`((data[10] & 0x7f) << 8) | data[11]`に0.1 W scaleを適用する。新品実機の
+`...8010370037`はON / 5.5 Wとして確認した。service dataがないmanufacturer-onlyの判定では、
+誤認防止のため従来の`0x16` markerをstrict fallbackとして維持する。`0x10`および`0x16`の意味は
+現時点で断定しない。
+
 Piで行指向のraw captureを取得するには、
 `PYTHONPATH=src .venv/bin/python -m omk_ble.raw_scan --seconds 30`を使用します。
