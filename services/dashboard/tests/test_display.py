@@ -1,6 +1,8 @@
 import asyncio
 import json
 import re
+import shutil
+import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -455,6 +457,372 @@ def test_delete_sensor_proxy_forwards_device_key_and_propagates_not_found(monkey
     with pytest.raises(dashboard_main.HTTPException) as error:
         asyncio.run(dashboard_main.delete_sensor("switchbot:missing"))
     assert error.value.status_code == 404
+
+
+def test_broute_status_proxy_returns_only_safe_status(monkeypatch: pytest.MonkeyPatch) -> None:
+    raw_identifier = "A" * 32
+    raw_password = "B" * 12
+
+    async def successful_request(method: str, path: str, body: dict | None = None) -> dict:
+        assert (method, path, body) == ("GET", "/api/broute/credentials/status", None)
+        return {
+            "configured": True,
+            "id_masked": "AAAA************************AAAA",
+            "password_configured": True,
+            "service_active": True,
+        }
+
+    monkeypatch.setattr(dashboard_main, "_system_manager_request", successful_request)
+    response = client.get("/api/admin/broute-credentials")
+
+    assert response.status_code == 200
+    assert response.json()["id_masked"] == "AAAA************************AAAA"
+    assert raw_identifier not in response.text
+    assert raw_password not in response.text
+
+
+def test_broute_update_proxy_forwards_body_and_preserves_safe_failure_state(monkeypatch: pytest.MonkeyPatch) -> None:
+    identifier = "A" * 32
+    password = "B" * 12
+
+    async def restart_failure(method: str, path: str, body: dict | None = None) -> dict:
+        assert (method, path) == ("PUT", "/api/broute/credentials")
+        assert body == {"id": identifier, "password": password}
+        raise dashboard_main.HTTPException(
+            502,
+            {"code": "credentials_saved_restart_failed", "credentials_saved": True},
+        )
+
+    monkeypatch.setattr(dashboard_main, "_system_manager_request", restart_failure)
+    response = client.put(
+        "/api/admin/broute-credentials",
+        json={"id": identifier, "password": password},
+    )
+
+    assert response.status_code == 502
+    assert response.json()["detail"] == {
+        "code": "credentials_saved_restart_failed",
+        "credentials_saved": True,
+    }
+    assert identifier not in response.text
+    assert password not in response.text
+
+
+def test_broute_retry_proxy_uses_fixed_upstream_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def accepted(method: str, path: str, body: dict | None = None) -> dict:
+        assert (method, path, body) == ("POST", "/api/broute/retry", None)
+        return {"accepted": True}
+
+    monkeypatch.setattr(dashboard_main, "_system_manager_request", accepted)
+    response = client.post("/api/admin/broute-retry")
+
+    assert response.json() == {"accepted": True}
+
+
+@pytest.mark.parametrize("status_code", [401, 403, 400])
+def test_broute_proxy_propagates_system_manager_errors(monkeypatch: pytest.MonkeyPatch, status_code: int) -> None:
+    async def failed_request(*_: object, **__: object) -> dict:
+        raise dashboard_main.HTTPException(status_code, "upstream error")
+
+    monkeypatch.setattr(dashboard_main, "_system_manager_request", failed_request)
+    response = client.get("/api/admin/broute-credentials")
+
+    assert response.status_code == status_code
+    assert response.json() == {"detail": "upstream error"}
+
+
+def test_broute_proxy_reports_missing_system_manager_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(dashboard_main, "SYSTEM_MANAGER_TOKEN", None)
+
+    with pytest.raises(dashboard_main.HTTPException) as error:
+        asyncio.run(dashboard_main._system_manager_request("GET", "/api/broute/credentials/status"))
+
+    assert error.value.status_code == 503
+
+
+def test_broute_proxy_translates_system_manager_connection_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    class UnreachableClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_: object) -> None:
+            return None
+
+        async def request(self, *_: object, **__: object) -> object:
+            raise dashboard_main.httpx.ConnectError("unreachable")
+
+    monkeypatch.setattr(dashboard_main, "SYSTEM_MANAGER_TOKEN", "token-canary")
+    monkeypatch.setattr(dashboard_main.httpx, "AsyncClient", lambda **_: UnreachableClient())
+
+    with pytest.raises(dashboard_main.HTTPException) as error:
+        asyncio.run(dashboard_main._system_manager_request("GET", "/api/broute/credentials/status"))
+
+    assert error.value.status_code == 503
+
+
+def test_broute_proxy_adds_bearer_token_only_to_host_request(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    class SuccessfulClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_: object) -> None:
+            return None
+
+        async def request(self, method: str, url: str, **kwargs: object):
+            captured.update({"method": method, "url": url, **kwargs})
+            return type("Response", (), {"status_code": 200, "json": lambda self: {"configured": False}})()
+
+    monkeypatch.setattr(dashboard_main, "SYSTEM_MANAGER_TOKEN", "token-canary")
+    monkeypatch.setattr(
+        dashboard_main.httpx,
+        "AsyncClient",
+        lambda **kwargs: captured.update({"client": kwargs}) or SuccessfulClient(),
+    )
+    response = asyncio.run(dashboard_main._system_manager_request("GET", "/api/broute/credentials/status"))
+
+    assert response == {"configured": False}
+    assert captured["url"] == "http://host.docker.internal:8788/api/broute/credentials/status"
+    assert captured["headers"] == {"Authorization": "Bearer token-canary"}
+    assert captured["client"] == {"timeout": 60}
+
+
+def test_broute_admin_page_keeps_credentials_and_token_out_of_html() -> None:
+    token = "dashboard-token-canary"
+    raw_identifier = "A" * 32
+    response = client.get("/admin/broute")
+    javascript = (Path(__file__).parents[1] / "app" / "static" / "broute.js").read_text(encoding="utf-8")
+
+    assert response.status_code == 200
+    assert "Bルート設定" in response.text
+    assert 'id="broute-password"' in response.text
+    assert 'autocomplete="new-password"' in response.text
+    assert 'id="broute-id" name="id" required maxlength="39"' in response.text
+    assert 'id="broute-password" name="password" type="password" required maxlength="14"' in response.text
+    assert '<label for="broute-id">BルートID</label>' in response.text
+    assert '<label for="broute-password">パスワード</label>' in response.text
+    assert "接続状態" in response.text
+    assert 'id="broute-keyboard-overlay"' in response.text
+    assert 'id="broute-keyboard-value"' in response.text
+    assert 'id="broute-keyboard-cancel"' in response.text
+    assert 'id="broute-keyboard-confirm"' in response.text
+    assert token not in response.text + javascript
+    assert raw_identifier not in response.text + javascript
+    assert "validToken(id, 32)" in javascript
+    assert "validToken(pass, 12)" in javascript
+    assert "設定を保存しました。Bルートへの接続を開始します。" in javascript
+    assert "設定は保存されましたが、Bルートサービスの再起動に失敗しました。" in javascript
+
+
+def test_broute_layout_uses_wide_grid_rows_with_narrow_screen_fallback() -> None:
+    stylesheet = (Path(__file__).parents[1] / "app" / "static" / "display.css").read_text(encoding="utf-8")
+
+    assert ".broute-field { display: grid; grid-template-columns: 8.5rem minmax(0, 1fr);" in stylesheet
+    assert ".broute-status-list div { display: grid; grid-template-columns: 8.5rem minmax(0, 1fr);" in stylesheet
+    assert "@media (max-width: 700px)" in stylesheet
+    assert ".broute-status-list div, .broute-field { grid-template-columns: 1fr;" in stylesheet
+    assert ".broute-keyboard-overlay { position: fixed;" in stylesheet
+    assert ".broute-keyboard-actions { display: grid; grid-template-columns: 1fr 1fr;" in stylesheet
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is required for browser formatter tests")
+def test_broute_browser_formatter_groups_normalizes_and_submits_unformatted_values() -> None:
+    javascript_path = Path(__file__).parents[1] / "app" / "static" / "broute.js"
+    harness = r'''
+const fs = require("fs"), vm = require("vm");
+const elements = {}, documentListeners = {};
+function element() { return { value: "", selectionStart: 0, disabled: false, className: "", textContent: "", hidden: false, children: [], listeners: {}, addEventListener(type, listener) { this.listeners[type] = listener; }, append(child) { this.children.push(child); }, setAttribute() {}, setSelectionRange(position) { this.selectionStart = position; }, reset() { elements["#broute-id"].value = ""; elements["#broute-password"].value = ""; } }; }
+for (const selector of ["#broute-form", "#broute-id", "#broute-password", "#broute-save", "#broute-retry", "#broute-message", "#broute-connection", "#broute-id-masked", "#broute-password-configured", "#broute-keyboard-overlay", "#broute-keyboard-title", "#broute-keyboard-count", "#broute-keyboard-value", "#broute-keyboard-keys", "#broute-keyboard-cancel", "#broute-keyboard-confirm"]) elements[selector] = element();
+elements["#broute-keyboard-overlay"].hidden = true;
+global.document = { querySelector: (selector) => elements[selector], createElement: () => element(), addEventListener(type, listener) { documentListeners[type] = listener; } };
+const requests = [];
+let response = { status: 200, detail: { configured: true, id_masked: "0000************************4CEF", password_configured: true, service_active: true, connection_state: "starting" } }, scheduledDelay = null;
+let currentNow = 0;
+Date.now = () => currentNow;
+global.setTimeout = (_callback, delay) => { scheduledDelay = delay; return 1; };
+global.clearTimeout = () => {};
+global.fetch = async (url, options = {}) => { requests.push({url, options}); return { status: response.status, ok: response.status < 400, json: async () => response.detail }; };
+vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8") + "\nglobalThis.__brouteTest = {formatToken, unformatToken, validToken, appendKeyboardKey, backspaceKeyboardKey, showStatus, stateMessage, pollStatus, loadStatus};");
+(async () => {
+  const id = "123456789ABCDEF0123456789ABCDEF0", password = "123456789ABC";
+  const identifier = elements["#broute-id"], passInput = elements["#broute-password"], overlay = elements["#broute-keyboard-overlay"];
+  const passwordBlankOnLoad = passInput.value === "";
+  identifier.value = "1234 5678";
+  identifier.listeners.pointerdown({preventDefault() {}});
+  const idOpened = !overlay.hidden && elements["#broute-keyboard-title"].textContent === "BルートID";
+  __brouteTest.appendKeyboardKey("A");
+  __brouteTest.backspaceKeyboardKey();
+  elements["#broute-keyboard-cancel"].listeners.click();
+  const cancellationRestored = overlay.hidden && identifier.value === "1234 5678";
+  function physicalKey(key) { let prevented = false; documentListeners.keydown({key, preventDefault() { prevented = true; }}); return prevented; }
+  identifier.value = "";
+  identifier.listeners.pointerdown({preventDefault() {}});
+  physicalKey("a");
+  __brouteTest.appendKeyboardKey("B");
+  physicalKey("3");
+  const mixedKeyboardInput = identifier.value === "aB3" && elements["#broute-keyboard-value"].textContent === "aB3";
+  for (let index = 0; index < 40; index += 1) physicalKey("z");
+  const physicalIdMaximum = __brouteTest.unformatToken(identifier.value, 32).length === 32;
+  physicalKey("Backspace");
+  const physicalBackspace = __brouteTest.unformatToken(identifier.value, 32).length === 31;
+  physicalKey("Escape");
+  const physicalEscapeRestored = overlay.hidden && identifier.value === "";
+  identifier.value = "";
+  identifier.listeners.pointerdown({preventDefault() {}});
+  for (let index = 0; index < 40; index += 1) __brouteTest.appendKeyboardKey("A");
+  const idMaximum = __brouteTest.unformatToken(identifier.value, 32).length === 32 && identifier.value === "AAAA AAAA AAAA AAAA AAAA AAAA AAAA AAAA";
+  __brouteTest.backspaceKeyboardKey();
+  const idBackspace = __brouteTest.unformatToken(identifier.value, 32).length === 31;
+  elements["#broute-keyboard-cancel"].listeners.click();
+  passInput.value = "1234";
+  passInput.listeners.pointerdown({preventDefault() {}});
+  const passwordOpened = !overlay.hidden && elements["#broute-keyboard-title"].textContent === "パスワード";
+  for (let index = 0; index < 12; index += 1) __brouteTest.appendKeyboardKey("B");
+  const passwordMaximum = __brouteTest.unformatToken(passInput.value, 12).length === 12 && elements["#broute-keyboard-value"].textContent === "1234 BBBB BBBB";
+  elements["#broute-keyboard-confirm"].listeners.click();
+  const confirmed = overlay.hidden && passInput.value === "1234 BBBB BBBB";
+  passInput.value = "ab";
+  passInput.listeners.pointerdown({preventDefault() {}});
+  physicalKey("c");
+  const physicalEnter = physicalKey("Enter") && overlay.hidden && passInput.value === "abc";
+  const noPutBeforeSave = !requests.some((request) => request.options.method === "PUT");
+  const stateLabels = {};
+  for (const state of ["starting", "adapter_missing", "adapter_initializing", "scanning", "authenticating", "connected", "retry_wait", "scan_error", "authentication_error", "connection_error", "status_unavailable"]) { __brouteTest.showStatus({service_active: true, connection_state: state}); stateLabels[state] = elements["#broute-connection"].textContent; }
+  __brouteTest.showStatus({service_active: true, connection_state: "retry_wait", connection_attempt: 3});
+  const retryButtonVisibleAfterRepeatedFailures = !elements["#broute-retry"].hidden;
+  __brouteTest.showStatus({service_active: true, connection_state: "retry_wait", connection_attempt: 2});
+  const retryButtonHiddenBeforeExtendedRetry = elements["#broute-retry"].hidden;
+  __brouteTest.showStatus({service_active: true, connection_state: "adapter_missing", connection_attempt: 3});
+  const retryButtonHiddenWhenAdapterMissing = elements["#broute-retry"].hidden;
+  const missingStateIsNotStarting = __brouteTest.showStatus({service_active: true}) === "status_unavailable" && elements["#broute-connection"].textContent === "状態確認中";
+  response = { status: 200, detail: { configured: true, service_active: true, connection_state: "scanning" } };
+  await __brouteTest.pollStatus();
+  const idlePolling = elements["#broute-connection"].textContent === "スマートメータを探索中" && scheduledDelay === 10000;
+  response = { status: 400, detail: {detail: "入力値が不正です"} };
+  await __brouteTest.loadStatus();
+  const upstreamErrorIsNotTransport = elements["#broute-connection"].textContent === "状態を取得できません";
+  response = { status: 503, detail: {detail: "システム管理サービスに接続できません"} };
+  await __brouteTest.loadStatus();
+  const transportError = elements["#broute-connection"].textContent === "system-manager接続エラー";
+  response = { status: 200, detail: { configured: true, id_masked: "0000************************4CEF", password_configured: true, service_active: true, connection_state: "starting" } };
+  elements["#broute-id"].value = "1234 5678 9ABC DEF0 1234 5678 9ABC DEF0";
+  elements["#broute-password"].value = "1234 5678 9ABC";
+  await elements["#broute-form"].onsubmit({preventDefault() {}});
+  const reconnectStates = [];
+  for (const state of ["stopped", "starting", "scanning", "retry_wait", "authenticating", "connected"]) {
+    response = { status: 200, detail: { configured: true, service_active: state !== "stopped", connection_state: state, retry_after_seconds: state === "retry_wait" ? 30 : null } };
+    await __brouteTest.pollStatus();
+    reconnectStates.push({state, label: elements["#broute-connection"].textContent, delay: scheduledDelay, message: elements["#broute-message"].textContent});
+  }
+  async function submitReconnect() {
+    elements["#broute-id"].value = "1234 5678 9ABC DEF0 1234 5678 9ABC DEF0";
+    elements["#broute-password"].value = "1234 5678 9ABC";
+    response = { status: 200, detail: { configured: true, service_active: false, connection_state: "stopped" } };
+    await elements["#broute-form"].onsubmit({preventDefault() {}});
+  }
+  await submitReconnect();
+  response = { status: 200, detail: { configured: true, service_active: true, connection_state: "scan_error" } };
+  await __brouteTest.pollStatus();
+  const scanErrorTerminal = elements["#broute-message"].textContent === "スマートメータを検出できませんでした。" && scheduledDelay === 10000;
+  await submitReconnect();
+  response = { status: 200, detail: { configured: true, service_active: true, connection_state: "authentication_error" } };
+  await __brouteTest.pollStatus();
+  const authenticationErrorTerminal = elements["#broute-message"].textContent === "認証エラー。BルートIDまたはパスワードを確認してください。" && scheduledDelay === 10000;
+  await submitReconnect();
+  response = { status: 200, detail: { configured: true, service_active: true, connection_state: "connection_error" } };
+  await __brouteTest.pollStatus();
+  const connectionErrorTerminal = elements["#broute-message"].textContent === "スマートメータとの通信に失敗しました。" && scheduledDelay === 10000;
+  await submitReconnect();
+  response = { status: 200, detail: { configured: true, service_active: true, connection_state: "adapter_missing", connection_attempt: 3 } };
+  await __brouteTest.pollStatus();
+  const adapterMissingStatus = elements["#broute-connection"].textContent === "Bルートアダプターが接続されていません。" && elements["#broute-message"].textContent === "Bルートアダプターを接続してください。" && elements["#broute-retry"].hidden && scheduledDelay === 10000;
+  await submitReconnect();
+  currentNow = 180001;
+  response = { status: 200, detail: { configured: true, service_active: true, connection_state: "retry_wait", retry_after_seconds: 300, connection_attempt: 3 } };
+  await __brouteTest.pollStatus();
+  const longRetryWaitDoesNotTimeout = elements["#broute-connection"].textContent === "再試行待ち" && elements["#broute-message"].textContent === "スマートメータを検出できません。BルートID・パスワード、または通信状態を確認してください。" && !elements["#broute-retry"].hidden && scheduledDelay === 10000;
+  const put = requests.find((request) => request.options.method === "PUT");
+  console.log(JSON.stringify({ formattedId: __brouteTest.formatToken(id, 32), formattedPassword: __brouteTest.formatToken(password, 12), normalizedPaste: __brouteTest.unformatToken("1234 5678 9ABC DEF0 1234 5678 9ABC DEF0", 32), validId: __brouteTest.validToken("1234 5678 9ABC DEF0 1234 5678 9ABC DEF0", 32), validPassword: __brouteTest.validToken("1234 5678 9ABC", 12), invalidShortId: __brouteTest.validToken("1234 5678 9ABC DEF0 1234 5678 9ABC DEF", 32), masked: __brouteTest.formatToken("0000************************4CEF", 32), idOpened, passwordOpened, idMaximum, passwordMaximum, idBackspace, cancellationRestored, mixedKeyboardInput, physicalIdMaximum, physicalBackspace, physicalEscapeRestored, physicalEnter, confirmed, noPutBeforeSave, passwordBlankOnLoad, stateLabels, retryButtonVisibleAfterRepeatedFailures, retryButtonHiddenBeforeExtendedRetry, retryButtonHiddenWhenAdapterMissing, missingStateIsNotStarting, adapterMissingMessage: __brouteTest.stateMessage("adapter_missing"), adapterInitializingMessage: __brouteTest.stateMessage("adapter_initializing"), scanErrorMessage: __brouteTest.stateMessage("scan_error"), retryWaitMessage: __brouteTest.stateMessage("retry_wait", 30), idlePolling, upstreamErrorIsNotTransport, transportError, reconnectStates, scanErrorTerminal, authenticationErrorTerminal, connectionErrorTerminal, adapterMissingStatus, longRetryWaitDoesNotTimeout, request: JSON.parse(put.options.body) }));
+})();
+'''
+    completed = subprocess.run(
+        ["node", "-e", harness, str(javascript_path)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    result = json.loads(completed.stdout)
+
+    assert result["formattedId"] == "1234 5678 9ABC DEF0 1234 5678 9ABC DEF0"
+    assert result["formattedPassword"] == "1234 5678 9ABC"
+    assert result["normalizedPaste"] == "123456789ABCDEF0123456789ABCDEF0"
+    assert result["validId"] is True
+    assert result["validPassword"] is True
+    assert result["invalidShortId"] is False
+    assert result["masked"] == "0000 **** **** **** **** **** **** 4CEF"
+    assert result["idOpened"] is True
+    assert result["passwordOpened"] is True
+    assert result["idMaximum"] is True
+    assert result["passwordMaximum"] is True
+    assert result["idBackspace"] is True
+    assert result["cancellationRestored"] is True
+    assert result["mixedKeyboardInput"] is True
+    assert result["physicalIdMaximum"] is True
+    assert result["physicalBackspace"] is True
+    assert result["physicalEscapeRestored"] is True
+    assert result["physicalEnter"] is True
+    assert result["confirmed"] is True
+    assert result["noPutBeforeSave"] is True
+    assert result["passwordBlankOnLoad"] is True
+    assert result["stateLabels"] == {
+        "starting": "起動中",
+        "adapter_missing": "Bルートアダプターが接続されていません。",
+        "adapter_initializing": "Bルートアダプターを初期化しています。",
+        "scanning": "スマートメータを探索中",
+        "authenticating": "認証中",
+        "connected": "接続済み",
+        "retry_wait": "再試行待ち",
+        "scan_error": "スマートメータ未検出",
+        "authentication_error": "認証エラー",
+        "connection_error": "通信エラー",
+        "status_unavailable": "状態確認中",
+    }
+    assert result["missingStateIsNotStarting"] is True
+    assert result["retryButtonVisibleAfterRepeatedFailures"] is True
+    assert result["retryButtonHiddenBeforeExtendedRetry"] is True
+    assert result["retryButtonHiddenWhenAdapterMissing"] is True
+    assert result["adapterMissingMessage"] == "Bルートアダプターを接続してください。"
+    assert result["adapterInitializingMessage"] == "Bルートアダプターを初期化しています。"
+    assert result["scanErrorMessage"] == "スマートメータを検出できませんでした。"
+    assert result["retryWaitMessage"] == "30秒後にスマートメータを再探索します。"
+    assert result["idlePolling"] is True
+    assert result["upstreamErrorIsNotTransport"] is True
+    assert result["transportError"] is True
+    assert result["reconnectStates"] == [
+        {"state": "stopped", "label": "再起動中", "delay": 1500, "message": "Bルートへ接続しています。"},
+        {"state": "starting", "label": "起動中", "delay": 1500, "message": "Bルートへ接続しています。"},
+        {"state": "scanning", "label": "スマートメータを探索中", "delay": 1500, "message": "Bルートへ接続しています。"},
+        {"state": "retry_wait", "label": "再試行待ち", "delay": 10000, "message": "30秒後にスマートメータを再探索します。"},
+        {"state": "authenticating", "label": "認証中", "delay": 1500, "message": "Bルートへ接続しています。"},
+        {"state": "connected", "label": "接続済み", "delay": 10000, "message": "Bルートへ接続しました。"},
+    ]
+    assert result["scanErrorTerminal"] is True
+    assert result["authenticationErrorTerminal"] is True
+    assert result["connectionErrorTerminal"] is True
+    assert result["adapterMissingStatus"] is True
+    assert result["longRetryWaitDoesNotTimeout"] is True
+    assert result["request"] == {"id": "123456789ABCDEF0123456789ABCDEF0", "password": "123456789ABC"}
+
+
+def test_dashboard_compose_uses_env_file_without_credentials_mount() -> None:
+    compose = Path(__file__).parents[3] / "compose.yaml"
+    source = compose.read_text(encoding="utf-8")
+    dashboard_section = source.split("  dashboard:\n", 1)[1].split("\n  sensor-collector:", 1)[0]
+
+    assert "OMK_SYSTEM_MANAGER_URL: http://host.docker.internal:8788" in dashboard_section
+    assert "- /etc/omk/dashboard-system-manager.env" in dashboard_section
+    assert "credentials.yaml" not in dashboard_section
 
 
 def test_static_files_are_available() -> None:

@@ -21,6 +21,9 @@ services:
       OMK_PROCESSED_DATA_ROOT: /app/data/processed
       OMK_LATEST_DATA_ROOT: /app/data/latest
       OMK_BLE_MANAGER_URL: http://host.docker.internal:8787
+      OMK_SYSTEM_MANAGER_URL: http://host.docker.internal:8788
+    env_file:
+      - /etc/omk/dashboard-system-manager.env
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:

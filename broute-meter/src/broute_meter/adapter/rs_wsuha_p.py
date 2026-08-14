@@ -18,6 +18,7 @@ from typing import TypeVar
 from broute_meter.adapter.base import (
     AdapterCommunicationError,
     AdapterCredentialError,
+    AdapterOperationCancelled,
     AdapterPanaJoinError,
     AdapterResponseTimeoutError,
     AdapterScanError,
@@ -44,6 +45,7 @@ DEFAULT_PANA_JOIN_TIMEOUT_SECONDS = 60.0
 COMMAND_TERMINATOR = b"\r\n"
 READ_SIZE_BYTES = 1
 MAX_LINE_BYTES = 8192
+SHUTDOWN_POLL_SECONDS = 1.0
 
 _HEX_BYTE_PATTERN = re.compile(r"[0-9A-Fa-f]{2}\Z")
 _READ_SETTING_RESPONSE_PATTERN = re.compile(rb"OK ([0-9A-Fa-f]{2})\Z")
@@ -57,6 +59,46 @@ class AdapterSettingCommand:
 
     read: str
     write: str
+
+
+@dataclass(slots=True)
+class _ResponseDiagnostics:
+    """応答本文を記録せず、待機失敗を分類するための集計情報。"""
+
+    expected_response_category: str
+    started_at: float
+    received_line_count: int = 0
+    unexpected_response_count: int = 0
+    malformed_response_count: int = 0
+    event_types: set[str] | None = None
+
+    def __post_init__(self) -> None:
+        if self.event_types is None:
+            self.event_types = set()
+
+    def record_expected(self) -> None:
+        self.received_line_count += 1
+
+    def record_unexpected(self, line: bytes) -> None:
+        self.received_line_count += 1
+        if not line or any(byte < 0x20 or byte > 0x7E for byte in line):
+            self.malformed_response_count += 1
+            return
+
+        parts = line.split(maxsplit=2)
+        if parts and parts[0] == b"EVENT":
+            if len(parts) >= 2 and parts[1].isdigit():
+                assert self.event_types is not None
+                self.event_types.add(parts[1].decode("ascii"))
+            else:
+                self.malformed_response_count += 1
+            return
+
+        self.unexpected_response_count += 1
+
+    def record_event_type(self, event_type: str) -> None:
+        assert self.event_types is not None
+        self.event_types.add(event_type)
 
 
 # RS-WSUHA-P設定コマンドはここだけに集約する。初期版では、公式資料で
@@ -173,6 +215,12 @@ class RsWsuhaPAdapter(BaseAdapter):
         self._line_buffer = _ResponseLineBuffer()
         self._received_lines: deque[bytes] = deque()
         self._startup_wait_pending = True
+        self._shutdown_event: threading.Event | None = None
+
+    def set_shutdown_event(self, shutdown_event: threading.Event | None) -> None:
+        """Allow long scan/PANA reads to observe service shutdown promptly."""
+
+        self._shutdown_event = shutdown_event
 
     @property
     def is_open(self) -> bool:
@@ -287,14 +335,23 @@ class RsWsuhaPAdapter(BaseAdapter):
             response_deadline = self._response_deadline(
                 DEFAULT_SCAN_TIMEOUT_SECONDS
             )
-            with self._translate_transport_errors():
+            diagnostics = _ResponseDiagnostics(
+                expected_response_category="scan_command_ack",
+                started_at=self._monotonic(),
+            )
+            with self._translate_transport_errors(
+                operation="active_scan",
+                diagnostics=diagnostics,
+            ):
                 encoded_command = self._send_command(command)
                 self._wait_for_response(
                     encoded_command,
                     self._parse_ok_response,
                     response_deadline,
+                    diagnostics=diagnostics,
                 )
-                return self._collect_scan_results(response_deadline)
+                diagnostics.expected_response_category = "scan_completion_event_22"
+                return self._collect_scan_results(response_deadline, diagnostics)
 
     def set_channel(self, channel: str) -> None:
         """スキャン結果のChannelをS2レジスターへ設定する。"""
@@ -465,17 +522,25 @@ class RsWsuhaPAdapter(BaseAdapter):
         response_deadline: float,
         *,
         sensitive: bool = False,
+        diagnostics: _ResponseDiagnostics | None = None,
     ) -> _ResponseValue:
         while True:
             line = self._read_response_line(response_deadline)
             normalized_line = line.strip(b" \t")
             if normalized_line == encoded_command:
+                if diagnostics is not None:
+                    diagnostics.record_expected()
                 logger.debug("RS-WSUHA-Pのコマンドechoを受信しました。")
                 continue
 
             parsed = response_parser(normalized_line)
             if parsed is not None:
+                if diagnostics is not None:
+                    diagnostics.record_expected()
                 return parsed
+
+            if diagnostics is not None:
+                diagnostics.record_unexpected(normalized_line)
 
             # TODO: 公式資料でエラー応答の形式を確認できた場合に限り、
             # 専用例外への変換を追加する。
@@ -492,6 +557,7 @@ class RsWsuhaPAdapter(BaseAdapter):
     def _collect_scan_results(
         self,
         response_deadline: float,
+        diagnostics: _ResponseDiagnostics,
     ) -> tuple[ActiveScanResult, ...]:
         results: list[ActiveScanResult] = []
         current_fields: dict[str, str] | None = None
@@ -499,17 +565,32 @@ class RsWsuhaPAdapter(BaseAdapter):
         while True:
             line = self._read_response_line(response_deadline).strip(b" \t")
             if line.startswith(b"EVENT 22"):
+                diagnostics.record_expected()
+                diagnostics.record_event_type("22")
                 if current_fields is not None:
                     results.append(self._parse_scan_result(current_fields))
-                return tuple(results)
+                completed_results = tuple(results)
+                assert diagnostics.event_types is not None
+                logger.info(
+                    "アクティブスキャン完了 candidates=%d received_line_count=%d "
+                    "unexpected_response_count=%d malformed_response_count=%d event_types=%s",
+                    len(completed_results),
+                    diagnostics.received_line_count,
+                    diagnostics.unexpected_response_count,
+                    diagnostics.malformed_response_count,
+                    ",".join(sorted(diagnostics.event_types)) or "none",
+                )
+                return completed_results
 
             if line == b"EPANDESC":
+                diagnostics.record_expected()
                 if current_fields is not None:
                     results.append(self._parse_scan_result(current_fields))
                 current_fields = {}
                 continue
 
             if current_fields is None or b":" not in line:
+                diagnostics.record_unexpected(line)
                 logger.debug(
                     "スキャン中の要求外行を無視しました: %s",
                     line.decode("ascii", errors="replace"),
@@ -521,13 +602,16 @@ class RsWsuhaPAdapter(BaseAdapter):
                 key = key_bytes.strip().decode("ascii")
                 value = value_bytes.strip().decode("ascii")
             except UnicodeDecodeError as exc:
+                diagnostics.record_unexpected(line)
                 raise AdapterScanError(
                     "アクティブスキャン応答に非ASCIIフィールドがあります。"
                 ) from exc
             if not key or not value:
+                diagnostics.record_unexpected(line)
                 raise AdapterScanError(
                     "アクティブスキャン応答に空のフィールドがあります。"
                 )
+            diagnostics.record_expected()
             current_fields[key] = value
 
     def _wait_for_udp_send_ack(self, response_deadline: float) -> None:
@@ -678,21 +762,41 @@ class RsWsuhaPAdapter(BaseAdapter):
         return self._monotonic() + timeout_seconds
 
     @contextmanager
-    def _translate_transport_errors(self) -> Iterator[None]:
+    def _translate_transport_errors(
+        self,
+        *,
+        operation: str | None = None,
+        diagnostics: _ResponseDiagnostics | None = None,
+    ) -> Iterator[None]:
         try:
             yield
         except SerialTimeoutError as exc:
             self._clear_receive_state()
+            self._log_transport_failure(
+                category="timeout",
+                operation=operation,
+                diagnostics=diagnostics,
+            )
             raise AdapterResponseTimeoutError(
                 "RS-WSUHA-Pから確認済み形式の応答を受信できませんでした。"
             ) from exc
         except SerialDisconnectedError as exc:
             self._clear_receive_state()
+            self._log_transport_failure(
+                category="serial_disconnect",
+                operation=operation,
+                diagnostics=diagnostics,
+            )
             raise AdapterCommunicationError(
                 "RS-WSUHA-Pとのシリアル接続が切断されました。"
             ) from exc
         except TransportError as exc:
             self._clear_receive_state()
+            self._log_transport_failure(
+                category="serial_error",
+                operation=operation,
+                diagnostics=diagnostics,
+            )
             raise AdapterCommunicationError(
                 "RS-WSUHA-Pとのシリアル通信に失敗しました。"
             ) from exc
@@ -708,6 +812,8 @@ class RsWsuhaPAdapter(BaseAdapter):
 
     def _read_response_line(self, response_deadline: float) -> bytes:
         while True:
+            if self._shutdown_event is not None and self._shutdown_event.is_set():
+                raise AdapterOperationCancelled("終了要求によりRS-WSUHA-P操作を中断しました。")
             if self._received_lines:
                 return self._received_lines.popleft()
 
@@ -717,10 +823,23 @@ class RsWsuhaPAdapter(BaseAdapter):
                     "RS-WSUHA-P応答の要求全体タイムアウトです。"
                 )
 
-            chunk = self._transport.read(
-                READ_SIZE_BYTES,
-                timeout_seconds=remaining_seconds,
-            )
+            try:
+                chunk = self._transport.read(
+                    READ_SIZE_BYTES,
+                    timeout_seconds=min(
+                        remaining_seconds,
+                        SHUTDOWN_POLL_SECONDS
+                        if self._shutdown_event is not None
+                        else remaining_seconds,
+                    ),
+                )
+            except SerialTimeoutError:
+                # pyserialの1回のreadタイムアウトは、コマンド全体の応答期限とは
+                # 別物である。SKSCANではEVENT 20/EPANDESCまで10秒程度かかる
+                # ことが公式サンプルでも示されているため、全体期限まで待機する。
+                if self._monotonic() >= response_deadline:
+                    raise
+                continue
             try:
                 self._received_lines.extend(self._line_buffer.feed(chunk))
             except _LineTooLongError:
@@ -728,6 +847,38 @@ class RsWsuhaPAdapter(BaseAdapter):
                 logger.warning(
                     "RS-WSUHA-Pから上限を超える受信行を破棄しました。"
                 )
+
+    def _log_transport_failure(
+        self,
+        *,
+        category: str,
+        operation: str | None,
+        diagnostics: _ResponseDiagnostics | None,
+    ) -> None:
+        """受信本文を出さず、障害分類に必要なメタデータだけを記録する。"""
+
+        if diagnostics is None:
+            logger.warning(
+                "RS-WSUHA-P応答待機失敗 category=%s operation=%s",
+                category,
+                operation or "unknown",
+            )
+            return
+
+        assert diagnostics.event_types is not None
+        logger.warning(
+            "RS-WSUHA-P応答待機失敗 category=%s operation=%s "
+            "expected_response=%s elapsed_seconds=%.3f received_line_count=%d "
+            "unexpected_response_count=%d malformed_response_count=%d event_types=%s",
+            category,
+            operation or "unknown",
+            diagnostics.expected_response_category,
+            max(0.0, self._monotonic() - diagnostics.started_at),
+            diagnostics.received_line_count,
+            diagnostics.unexpected_response_count,
+            diagnostics.malformed_response_count,
+            ",".join(sorted(diagnostics.event_types)) or "none",
+        )
 
     @staticmethod
     def _parse_read_setting_response(line: bytes) -> str | None:
