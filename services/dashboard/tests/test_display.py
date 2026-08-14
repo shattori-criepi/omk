@@ -638,6 +638,8 @@ elements["#broute-keyboard-overlay"].hidden = true;
 global.document = { querySelector: (selector) => elements[selector], createElement: () => element() };
 const requests = [];
 let response = { status: 200, detail: { configured: true, id_masked: "0000************************4CEF", password_configured: true, service_active: true, connection_state: "starting" } }, scheduledDelay = null;
+let currentNow = 0;
+Date.now = () => currentNow;
 global.setTimeout = (_callback, delay) => { scheduledDelay = delay; return 1; };
 global.clearTimeout = () => {};
 global.fetch = async (url, options = {}) => { requests.push({url, options}); return { status: response.status, ok: response.status < 400, json: async () => response.detail }; };
@@ -712,8 +714,13 @@ vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8") + "\nglobalThis.__b
   response = { status: 200, detail: { configured: true, service_active: true, connection_state: "connection_error" } };
   await __brouteTest.pollStatus();
   const connectionErrorTerminal = elements["#broute-message"].textContent === "スマートメータとの通信に失敗しました。" && scheduledDelay === 10000;
+  await submitReconnect();
+  currentNow = 180001;
+  response = { status: 200, detail: { configured: true, service_active: true, connection_state: "retry_wait", retry_after_seconds: 300, connection_attempt: 3 } };
+  await __brouteTest.pollStatus();
+  const longRetryWaitDoesNotTimeout = elements["#broute-connection"].textContent === "再試行待ち" && elements["#broute-message"].textContent === "スマートメータを検出できません。BルートID・パスワード、または通信状態を確認してください。" && !elements["#broute-retry"].hidden && scheduledDelay === 10000;
   const put = requests.find((request) => request.options.method === "PUT");
-  console.log(JSON.stringify({ formattedId: __brouteTest.formatToken(id, 32), formattedPassword: __brouteTest.formatToken(password, 12), normalizedPaste: __brouteTest.unformatToken("1234 5678 9ABC DEF0 1234 5678 9ABC DEF0", 32), validId: __brouteTest.validToken("1234 5678 9ABC DEF0 1234 5678 9ABC DEF0", 32), validPassword: __brouteTest.validToken("1234 5678 9ABC", 12), invalidShortId: __brouteTest.validToken("1234 5678 9ABC DEF0 1234 5678 9ABC DEF", 32), masked: __brouteTest.formatToken("0000************************4CEF", 32), idOpened, passwordOpened, idMaximum, passwordMaximum, idBackspace, cancellationRestored, confirmed, noPutBeforeSave, passwordBlankOnLoad, stateLabels, retryButtonVisibleAfterRepeatedFailures, retryButtonHiddenBeforeExtendedRetry, missingStateIsNotStarting, scanErrorMessage: __brouteTest.stateMessage("scan_error"), retryWaitMessage: __brouteTest.stateMessage("retry_wait", 30), idlePolling, upstreamErrorIsNotTransport, transportError, reconnectStates, scanErrorTerminal, authenticationErrorTerminal, connectionErrorTerminal, request: JSON.parse(put.options.body) }));
+  console.log(JSON.stringify({ formattedId: __brouteTest.formatToken(id, 32), formattedPassword: __brouteTest.formatToken(password, 12), normalizedPaste: __brouteTest.unformatToken("1234 5678 9ABC DEF0 1234 5678 9ABC DEF0", 32), validId: __brouteTest.validToken("1234 5678 9ABC DEF0 1234 5678 9ABC DEF0", 32), validPassword: __brouteTest.validToken("1234 5678 9ABC", 12), invalidShortId: __brouteTest.validToken("1234 5678 9ABC DEF0 1234 5678 9ABC DEF", 32), masked: __brouteTest.formatToken("0000************************4CEF", 32), idOpened, passwordOpened, idMaximum, passwordMaximum, idBackspace, cancellationRestored, confirmed, noPutBeforeSave, passwordBlankOnLoad, stateLabels, retryButtonVisibleAfterRepeatedFailures, retryButtonHiddenBeforeExtendedRetry, missingStateIsNotStarting, scanErrorMessage: __brouteTest.stateMessage("scan_error"), retryWaitMessage: __brouteTest.stateMessage("retry_wait", 30), idlePolling, upstreamErrorIsNotTransport, transportError, reconnectStates, scanErrorTerminal, authenticationErrorTerminal, connectionErrorTerminal, longRetryWaitDoesNotTimeout, request: JSON.parse(put.options.body) }));
 })();
 '''
     completed = subprocess.run(
@@ -763,13 +770,14 @@ vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8") + "\nglobalThis.__b
         {"state": "stopped", "label": "再起動中", "delay": 1500, "message": "Bルートへ再接続しています。"},
         {"state": "starting", "label": "起動中", "delay": 1500, "message": "Bルートへ再接続しています。"},
         {"state": "scanning", "label": "スマートメータを探索中", "delay": 1500, "message": "Bルートへ再接続しています。"},
-        {"state": "retry_wait", "label": "再試行待ち", "delay": 1500, "message": "30秒後にスマートメータを再探索します。"},
+        {"state": "retry_wait", "label": "再試行待ち", "delay": 10000, "message": "30秒後にスマートメータを再探索します。"},
         {"state": "authenticating", "label": "認証中", "delay": 1500, "message": "Bルートへ再接続しています。"},
         {"state": "connected", "label": "接続済み", "delay": 10000, "message": "Bルートへ接続しました。"},
     ]
     assert result["scanErrorTerminal"] is True
     assert result["authenticationErrorTerminal"] is True
     assert result["connectionErrorTerminal"] is True
+    assert result["longRetryWaitDoesNotTimeout"] is True
     assert result["request"] == {"id": "123456789ABCDEF0123456789ABCDEF0", "password": "123456789ABC"}
 
 
