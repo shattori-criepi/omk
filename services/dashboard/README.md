@@ -48,6 +48,19 @@ Waylandセッションが起動していない場合はセットアップを実�
 - 表示画面: http://localhost:8000/display
 - 表示更新API: http://localhost:8000/api/display
 - ヘルスチェック: http://localhost:8000/health
+- Bルート設定: http://localhost:8000/admin/broute
+
+## Bルート設定
+
+`/admin/broute`はDashboardバックエンドを経由して、ホスト上の
+system-manager（`host.docker.internal:8788`）へ認証情報の状態確認・更新を依頼します。
+保存済みのパスワードや生のBルートIDは画面・Dashboard APIへ返しません。
+
+Dashboardコンテナは認証情報YAMLをmountしません。`scripts/setup-system-manager.sh`が
+root-onlyのsystem-manager tokenから`/etc/omk/dashboard-system-manager.env`を作成し、
+Composeの`env_file`でDashboardプロセスにだけ環境変数として渡します。tokenはHTML、
+JavaScript、ブラウザAPIへ渡されません。このファイルは`root:<OMKユーザーの主グループ>`、
+mode `0640`で、Docker Composeを起動するOMKユーザーだけが読めます。
 
 Raspberry Pi自身またはLAN内からは、`localhost` をPiのIPアドレスに置き換えてください。
 

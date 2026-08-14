@@ -457,6 +457,147 @@ def test_delete_sensor_proxy_forwards_device_key_and_propagates_not_found(monkey
     assert error.value.status_code == 404
 
 
+def test_broute_status_proxy_returns_only_safe_status(monkeypatch: pytest.MonkeyPatch) -> None:
+    raw_identifier = "A" * 32
+    raw_password = "B" * 12
+
+    async def successful_request(method: str, path: str, body: dict | None = None) -> dict:
+        assert (method, path, body) == ("GET", "/api/broute/credentials/status", None)
+        return {
+            "configured": True,
+            "id_masked": "AAAA************************AAAA",
+            "password_configured": True,
+            "service_active": True,
+        }
+
+    monkeypatch.setattr(dashboard_main, "_system_manager_request", successful_request)
+    response = client.get("/api/admin/broute-credentials")
+
+    assert response.status_code == 200
+    assert response.json()["id_masked"] == "AAAA************************AAAA"
+    assert raw_identifier not in response.text
+    assert raw_password not in response.text
+
+
+def test_broute_update_proxy_forwards_body_and_preserves_safe_failure_state(monkeypatch: pytest.MonkeyPatch) -> None:
+    identifier = "A" * 32
+    password = "B" * 12
+
+    async def restart_failure(method: str, path: str, body: dict | None = None) -> dict:
+        assert (method, path) == ("PUT", "/api/broute/credentials")
+        assert body == {"id": identifier, "password": password}
+        raise dashboard_main.HTTPException(
+            502,
+            {"code": "credentials_saved_restart_failed", "credentials_saved": True},
+        )
+
+    monkeypatch.setattr(dashboard_main, "_system_manager_request", restart_failure)
+    response = client.put(
+        "/api/admin/broute-credentials",
+        json={"id": identifier, "password": password},
+    )
+
+    assert response.status_code == 502
+    assert response.json()["detail"] == {
+        "code": "credentials_saved_restart_failed",
+        "credentials_saved": True,
+    }
+    assert identifier not in response.text
+    assert password not in response.text
+
+
+@pytest.mark.parametrize("status_code", [401, 403, 400])
+def test_broute_proxy_propagates_system_manager_errors(monkeypatch: pytest.MonkeyPatch, status_code: int) -> None:
+    async def failed_request(*_: object, **__: object) -> dict:
+        raise dashboard_main.HTTPException(status_code, "upstream error")
+
+    monkeypatch.setattr(dashboard_main, "_system_manager_request", failed_request)
+    response = client.get("/api/admin/broute-credentials")
+
+    assert response.status_code == status_code
+    assert response.json() == {"detail": "upstream error"}
+
+
+def test_broute_proxy_reports_missing_system_manager_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(dashboard_main, "SYSTEM_MANAGER_TOKEN", None)
+
+    with pytest.raises(dashboard_main.HTTPException) as error:
+        asyncio.run(dashboard_main._system_manager_request("GET", "/api/broute/credentials/status"))
+
+    assert error.value.status_code == 503
+
+
+def test_broute_proxy_translates_system_manager_connection_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    class UnreachableClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_: object) -> None:
+            return None
+
+        async def request(self, *_: object, **__: object) -> object:
+            raise dashboard_main.httpx.ConnectError("unreachable")
+
+    monkeypatch.setattr(dashboard_main, "SYSTEM_MANAGER_TOKEN", "token-canary")
+    monkeypatch.setattr(dashboard_main.httpx, "AsyncClient", lambda **_: UnreachableClient())
+
+    with pytest.raises(dashboard_main.HTTPException) as error:
+        asyncio.run(dashboard_main._system_manager_request("GET", "/api/broute/credentials/status"))
+
+    assert error.value.status_code == 503
+
+
+def test_broute_proxy_adds_bearer_token_only_to_host_request(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    class SuccessfulClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_: object) -> None:
+            return None
+
+        async def request(self, method: str, url: str, **kwargs: object):
+            captured.update({"method": method, "url": url, **kwargs})
+            return type("Response", (), {"status_code": 200, "json": lambda self: {"configured": False}})()
+
+    monkeypatch.setattr(dashboard_main, "SYSTEM_MANAGER_TOKEN", "token-canary")
+    monkeypatch.setattr(dashboard_main.httpx, "AsyncClient", lambda **_: SuccessfulClient())
+    response = asyncio.run(dashboard_main._system_manager_request("GET", "/api/broute/credentials/status"))
+
+    assert response == {"configured": False}
+    assert captured["url"] == "http://host.docker.internal:8788/api/broute/credentials/status"
+    assert captured["headers"] == {"Authorization": "Bearer token-canary"}
+
+
+def test_broute_admin_page_keeps_credentials_and_token_out_of_html() -> None:
+    token = "dashboard-token-canary"
+    raw_identifier = "A" * 32
+    response = client.get("/admin/broute")
+    javascript = (Path(__file__).parents[1] / "app" / "static" / "broute.js").read_text(encoding="utf-8")
+
+    assert response.status_code == 200
+    assert "Bルート設定" in response.text
+    assert 'id="broute-password"' in response.text
+    assert 'autocomplete="new-password"' in response.text
+    assert token not in response.text + javascript
+    assert raw_identifier not in response.text + javascript
+    assert "validToken(id, 32)" in javascript
+    assert "validToken(pass, 12)" in javascript
+    assert "保存しました。Bルートへ再接続しました。" in javascript
+    assert "設定は保存されましたが、Bルートサービスの再起動に失敗しました。" in javascript
+
+
+def test_dashboard_compose_uses_env_file_without_credentials_mount() -> None:
+    compose = Path(__file__).parents[3] / "compose.yaml"
+    source = compose.read_text(encoding="utf-8")
+    dashboard_section = source.split("  dashboard:\n", 1)[1].split("\n  sensor-collector:", 1)[0]
+
+    assert "OMK_SYSTEM_MANAGER_URL: http://host.docker.internal:8788" in dashboard_section
+    assert "- /etc/omk/dashboard-system-manager.env" in dashboard_section
+    assert "credentials.yaml" not in dashboard_section
+
+
 def test_static_files_are_available() -> None:
     assert client.get("/static/display.css").status_code == 200
     assert client.get("/static/display.js").status_code == 200

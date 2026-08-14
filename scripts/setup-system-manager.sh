@@ -11,6 +11,7 @@ UNIT_TEMPLATE="${OMK_ROOT}/systemd/${SERVICE_NAME}.in"
 UNIT_DEST="/etc/systemd/system/${SERVICE_NAME}"
 ENV_DIR="/etc/omk"
 ENV_FILE="${ENV_DIR}/system-manager.env"
+DASHBOARD_ENV_FILE="${ENV_DIR}/dashboard-system-manager.env"
 SUDOERS_DEST="/etc/sudoers.d/omk-system-manager"
 VENV_PATH="${OMK_ROOT}/services/system-manager/.venv"
 SYSTEMCTL_PATH="$(command -v systemctl || true)"
@@ -61,6 +62,13 @@ ensure_token_file() {
   log "Created root-only system-manager token file."
 }
 
+sync_dashboard_token_file() {
+  # Compose reads env_file as TARGET_USER. Copy the one-line token without
+  # printing it; this is an environment injection file, not a container mount.
+  "${SUDO[@]}" install -o root -g "${TARGET_GROUP}" -m 0640 "${ENV_FILE}" "${DASHBOARD_ENV_FILE}"
+  log "Updated Dashboard system-manager token environment file."
+}
+
 "${SUDO[@]}" install -d -o root -g root -m 0755 "${ENV_DIR}"
 log 'Creating or reusing Python virtual environment.'
 "${SUDO[@]}" -u "${TARGET_USER}" python3 -m venv "${VENV_PATH}"
@@ -68,6 +76,7 @@ log 'Installing system-manager requirements.'
 "${SUDO[@]}" -u "${TARGET_USER}" "${VENV_PATH}/bin/pip" install --upgrade pip
 "${SUDO[@]}" -u "${TARGET_USER}" "${VENV_PATH}/bin/pip" install -r "${OMK_ROOT}/services/system-manager/requirements.txt"
 ensure_token_file
+sync_dashboard_token_file
 
 temporary_unit="$(mktemp)"
 temporary_sudoers="$(mktemp)"
