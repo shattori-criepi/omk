@@ -1,30 +1,21 @@
 # OMK System Manager
 
-`system-manager` is a host-side FastAPI service for rotating B-route
-credentials. It runs as the OMK user, writes only
-`broute-meter/config/credentials.yaml`, and invokes only the two sudoers-
-approved `systemctl` commands for `omk-broute-meter.service`.
+`system-manager` は、Bルート認証情報を更新するためのホスト側FastAPIサービスです。OMKユーザーとして実行し、書き込む対象を`broute-meter/config/credentials.yaml`のみに限定します。また、sudoersで許可された`omk-broute-meter.service`向けの2つの`systemctl`コマンドだけを実行します。
 
-Install it on the OMK host from the repository root:
+リポジトリのルートから、OMKホストへインストールします。
 
 ```bash
 ./scripts/setup-system-manager.sh
 ```
 
-The installer creates `/etc/omk/system-manager.env` as `root:root`, mode
-`0600`. It contains `OMK_SYSTEM_MANAGER_TOKEN`; do not print, commit, or copy
-that token into a browser client. The API requires
-`Authorization: Bearer <token>` for all B-route endpoints.
+インストーラーは、`/etc/omk/system-manager.env`を所有者`root:root`、モード`0600`で作成します。このファイルには`OMK_SYSTEM_MANAGER_TOKEN`が含まれます。tokenを表示・commitしたり、ブラウザクライアントへコピーしたりしてはいけません。すべてのBルートAPIエンドポイントでは、`Authorization: Bearer <token>`が必要です。
 
-Endpoints:
+エンドポイント:
 
-- `GET /api/broute/credentials/status` returns only a masked ID and whether a
-  password is configured.
-- `PUT /api/broute/credentials` accepts a 32-byte printable-ASCII ID and a
-  12-byte printable-ASCII password, atomically saves a mode-`0600` YAML file,
-  then restarts and verifies the B-route service.
+- `GET /api/broute/credentials/status` は、マスク済みIDとパスワード設定の有無だけを返します。
+- `PUT /api/broute/credentials` は、32 byteの表示可能ASCII IDと12 byteの表示可能ASCIIパスワードを受け取ります。モード`0600`のYAMLファイルへatomicに保存し、その後Bルートサービスを再起動して状態を確認します。
 
-Run tests:
+テスト実行:
 
 ```bash
 cd services/system-manager
