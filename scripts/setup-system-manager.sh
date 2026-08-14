@@ -44,7 +44,10 @@ ensure_token_file() {
     [[ -f "${ENV_FILE}" ]] || fail "Token path is not a regular file: ${ENV_FILE}"
     "${SUDO[@]}" chown root:root "${ENV_FILE}"
     "${SUDO[@]}" chmod 0600 "${ENV_FILE}"
-    grep -q '^OMK_SYSTEM_MANAGER_TOKEN=.' "${ENV_FILE}" || fail "Token file has no OMK_SYSTEM_MANAGER_TOKEN value: ${ENV_FILE}"
+    # This file is intentionally root-only. Validate only that a non-empty
+    # token assignment exists; never read or print its value as the caller.
+    "${SUDO[@]}" grep -q '^OMK_SYSTEM_MANAGER_TOKEN=.' "${ENV_FILE}" ||
+      fail "Token file has no OMK_SYSTEM_MANAGER_TOKEN value: ${ENV_FILE}"
     log "Preserving existing root-only token file."
     return
   fi
