@@ -103,6 +103,11 @@ async def update_sensor(device_key: str, request: Request) -> dict:
     return await _ble_request("PATCH", f"/api/sensors/{device_key}", await request.json())
 
 
+@app.delete("/api/admin/sensors/{device_key}")
+async def delete_sensor(device_key: str) -> dict:
+    return await _ble_request("DELETE", f"/api/sensors/{device_key}")
+
+
 @app.get("/api/display")
 async def display_api() -> dict[str, str | bool]:
     """Return the current dashboard snapshot for in-page refreshes."""

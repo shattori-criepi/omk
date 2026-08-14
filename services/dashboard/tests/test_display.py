@@ -1,3 +1,4 @@
+import asyncio
 import json
 import re
 from datetime import datetime, timedelta
@@ -5,8 +6,10 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import duckdb
+import pytest
 from fastapi.testclient import TestClient
 
+import app.main as dashboard_main
 from app.data.latest_repository import LatestRepository
 from app.data.parquet_repository import LatestPower, ParquetRepository
 from app.main import app
@@ -431,6 +434,27 @@ def test_health_returns_ok() -> None:
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+def test_delete_sensor_proxy_forwards_device_key_and_propagates_not_found(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[str, str]] = []
+
+    async def successful_request(method: str, path: str, body: dict | None = None) -> dict:
+        calls.append((method, path))
+        assert body is None
+        return {"deleted": True, "device_key": "switchbot:plug", "sensor_id": "plug-001"}
+
+    monkeypatch.setattr(dashboard_main, "_ble_request", successful_request)
+    assert asyncio.run(dashboard_main.delete_sensor("switchbot:plug")) == {"deleted": True, "device_key": "switchbot:plug", "sensor_id": "plug-001"}
+    assert calls == [("DELETE", "/api/sensors/switchbot:plug")]
+
+    async def missing_request(_method: str, _path: str, _body: dict | None = None) -> dict:
+        raise dashboard_main.HTTPException(404, "sensor was not found")
+
+    monkeypatch.setattr(dashboard_main, "_ble_request", missing_request)
+    with pytest.raises(dashboard_main.HTTPException) as error:
+        asyncio.run(dashboard_main.delete_sensor("switchbot:missing"))
+    assert error.value.status_code == 404
 
 
 def test_static_files_are_available() -> None:
