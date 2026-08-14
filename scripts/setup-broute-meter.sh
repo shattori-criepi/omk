@@ -116,6 +116,21 @@ ensure_log_directory() {
   "${SUDO[@]}" chown "${TARGET_USER}:${TARGET_GROUP}" "${LOG_DIR}"
 }
 
+ensure_credentials_permissions() {
+  local credentials_path="${OMK_ROOT}/broute-meter/config/credentials.yaml" actual
+  if [[ ! -e "${credentials_path}" ]]; then
+    log "Credentials file is absent; preserving it as absent: ${credentials_path}"
+    return
+  fi
+  [[ -f "${credentials_path}" ]] || fail "Credentials path is not a regular file: ${credentials_path}"
+  actual="$(stat -c '%U:%G:%a' "${credentials_path}")"
+  if [[ "${actual}" != "${TARGET_USER}:${TARGET_GROUP}:600" ]]; then
+    log "Correcting owner/mode for credentials file without changing its contents: ${credentials_path}"
+    "${SUDO[@]}" chown "${TARGET_USER}:${TARGET_GROUP}" "${credentials_path}"
+    "${SUDO[@]}" chmod 0600 "${credentials_path}"
+  fi
+}
+
 ensure_system_directory() {
   local directory="$1"
   if [[ -d "${directory}" ]]; then
@@ -273,6 +288,10 @@ verify_installation() {
   "${SUDO[@]}" visudo -cf "${SUDOERS_DEST}"
   cmp -s <(render_unit) "${UNIT_DEST}" || fail "Installed unit differs from the rendered template."
   "${SUDO[@]}" systemctl is-enabled --quiet "${SERVICE}" || fail "Service is not enabled: ${SERVICE}"
+  if [[ -e "${OMK_ROOT}/broute-meter/config/credentials.yaml" ]]; then
+    [[ "$(stat -c '%U:%G:%a' "${OMK_ROOT}/broute-meter/config/credentials.yaml")" == "${TARGET_USER}:${TARGET_GROUP}:600" ]] ||
+      fail "Credentials file owner or mode is incorrect."
+  fi
   if ! "${SUDO[@]}" systemctl is-active --quiet "${SERVICE}"; then
     log "Check: sudo systemctl status ${SERVICE} --no-pager"
     log "Check: sudo journalctl -u ${SERVICE} -n 100 --no-pager"
@@ -372,6 +391,7 @@ exec > >(tee -a "${LOG_FILE}") 2>&1
 log "B-route meter setup started. Log file: ${LOG_FILE}"
 ensure_runtime_directory "${OMK_ROOT}/data/broute-meter"
 ensure_runtime_directory "${OMK_ROOT}/logs/broute-meter"
+ensure_credentials_permissions
 
 temporary_sudoers="$(mktemp)"
 temporary_unit="$(mktemp)"

@@ -19,6 +19,8 @@ app = FastAPI(title="OMK Dashboard")
 app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=APP_DIR / "templates")
 BLE_MANAGER_URL = os.environ.get("OMK_BLE_MANAGER_URL", "http://host.docker.internal:8787")
+SYSTEM_MANAGER_URL = os.environ.get("OMK_SYSTEM_MANAGER_URL", "http://host.docker.internal:8788")
+SYSTEM_MANAGER_TOKEN = os.environ.get("OMK_SYSTEM_MANAGER_TOKEN")
 
 
 def get_parquet_repository() -> ParquetRepository:
@@ -57,6 +59,12 @@ async def admin_sensors(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(request=request, name="admin_sensors.html", context={})
 
 
+@app.get("/admin/broute", response_class=HTMLResponse)
+async def admin_broute(request: Request) -> HTMLResponse:
+    """Render B-route configuration without embedding saved credentials or tokens."""
+    return templates.TemplateResponse(request=request, name="admin_broute.html", context={})
+
+
 async def _ble_request(method: str, path: str, body: dict | None = None) -> dict:
     try:
         async with httpx.AsyncClient(timeout=5) as client:
@@ -66,6 +74,33 @@ async def _ble_request(method: str, path: str, body: dict | None = None) -> dict
         return response.json()
     except httpx.RequestError as error:
         raise HTTPException(503, "BLE管理サービスに接続できません") from error
+
+
+async def _system_manager_request(method: str, path: str, body: dict | None = None) -> dict:
+    """Proxy management requests without exposing the host API token to browsers."""
+    if not SYSTEM_MANAGER_TOKEN:
+        raise HTTPException(503, "システム管理サービスの認証設定がありません")
+    try:
+        # system-manager can legitimately wait for its bounded 45-second
+        # systemctl operation. Keep this longer than that bound so a working
+        # host service is not mislabeled as unreachable by the proxy.
+        async with httpx.AsyncClient(timeout=60) as client:
+            response = await client.request(
+                method,
+                f"{SYSTEM_MANAGER_URL}{path}",
+                json=body,
+                headers={"Authorization": f"Bearer {SYSTEM_MANAGER_TOKEN}"},
+            )
+        try:
+            payload = response.json()
+        except ValueError:
+            payload = {}
+        if response.status_code >= 400:
+            detail = payload.get("detail", "システム管理サービスの処理に失敗しました") if isinstance(payload, dict) else "システム管理サービスの処理に失敗しました"
+            raise HTTPException(response.status_code, detail)
+        return payload
+    except httpx.RequestError as error:
+        raise HTTPException(503, "システム管理サービスに接続できません") from error
 
 
 @app.get("/api/admin/sensors")
@@ -106,6 +141,21 @@ async def update_sensor(device_key: str, request: Request) -> dict:
 @app.delete("/api/admin/sensors/{device_key}")
 async def delete_sensor(device_key: str) -> dict:
     return await _ble_request("DELETE", f"/api/sensors/{device_key}")
+
+
+@app.get("/api/admin/broute-credentials")
+async def broute_credentials_status() -> dict:
+    return await _system_manager_request("GET", "/api/broute/credentials/status")
+
+
+@app.put("/api/admin/broute-credentials")
+async def update_broute_credentials(request: Request) -> dict:
+    return await _system_manager_request("PUT", "/api/broute/credentials", await request.json())
+
+
+@app.post("/api/admin/broute-retry")
+async def retry_broute_connection() -> dict:
+    return await _system_manager_request("POST", "/api/broute/retry")
 
 
 @app.get("/api/display")

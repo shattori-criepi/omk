@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title>OMK Bルート設定</title>
+    <link rel="stylesheet" href="{{ url_for('static', path='/display.css') }}?v=20260814-broute-long-retry">
+    <script src="{{ url_for('static', path='/broute.js') }}?v=20260814-broute-long-retry" defer></script>
+  </head>
+  <body>
+    <main class="admin-page broute-management-page" aria-label="OMK Bルート設定">
+      <header class="admin-page-header">
+        <a href="/admin" class="back-link">← 管理</a>
+        <h1>Bルート設定</h1>
+      </header>
+      <section class="broute-panel" aria-label="現在のBルート状態">
+        <dl class="broute-status-list">
+          <div><dt>接続状態</dt><dd id="broute-connection" class="broute-connection">確認中</dd></div>
+          <div><dt>現在のID</dt><dd id="broute-id-masked">確認中</dd></div>
+          <div><dt>パスワード</dt><dd id="broute-password-configured">確認中</dd></div>
+        </dl>
+      </section>
+      <form id="broute-form" class="broute-form" autocomplete="off" novalidate>
+        <div class="broute-field">
+          <label for="broute-id">BルートID</label>
+          <div>
+          <input id="broute-id" name="id" required maxlength="39" autocomplete="off" spellcheck="false" aria-describedby="broute-id-hint">
+            <p id="broute-id-hint" class="field-hint">4文字ごとに区切って表示 · ASCII 32文字</p>
+          </div>
+        </div>
+        <div class="broute-field">
+          <label for="broute-password">パスワード</label>
+          <div>
+          <input id="broute-password" name="password" type="password" required maxlength="14" autocomplete="new-password" spellcheck="false" aria-describedby="broute-password-hint">
+            <p id="broute-password-hint" class="field-hint">4文字ごとに区切って表示 · ASCII 12文字</p>
+          </div>
+        </div>
+        <p id="broute-message" class="setup-status" role="status" aria-live="polite">保存済みのIDとパスワードは表示しません。</p>
+        <button id="broute-save" class="primary" type="submit">保存して接続</button>
+        <button id="broute-retry" type="button" hidden>今すぐ再試行</button>
+      </form>
+    </main>
+    <section id="broute-keyboard-overlay" class="broute-keyboard-overlay" role="dialog" aria-modal="true" aria-labelledby="broute-keyboard-title" hidden>
+      <header class="broute-keyboard-header">
+        <h2 id="broute-keyboard-title">BルートID</h2>
+        <p id="broute-keyboard-count" class="broute-keyboard-count">0 / 32文字</p>
+        <p id="broute-keyboard-value" class="broute-keyboard-value" aria-live="polite"></p>
+      </header>
+      <div id="broute-keyboard-keys" class="broute-keyboard-keys" aria-label="英数字キーボード"></div>
+      <footer class="broute-keyboard-actions">
+        <button id="broute-keyboard-cancel" type="button">キャンセル</button>
+        <button id="broute-keyboard-confirm" class="primary" type="button">決定</button>
+      </footer>
+    </section>
+  </body>
+</html>

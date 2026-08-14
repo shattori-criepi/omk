@@ -24,6 +24,10 @@ class AdapterResponseTimeoutError(AdapterCommunicationError):
     """アダプターから確認済み形式の応答を受信できなかった。"""
 
 
+class AdapterOperationCancelled(AdapterError):
+    """終了要求により進行中のアダプター操作を中断した。"""
+
+
 class AdapterSettingError(AdapterError):
     """アダプター設定が不正、未対応、または検証不能だった。"""
 

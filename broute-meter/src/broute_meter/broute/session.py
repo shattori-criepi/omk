@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Sequence
 from ipaddress import IPv6Address
-from typing import Protocol, runtime_checkable
+from typing import Callable, Protocol, runtime_checkable
 
 from broute_meter.models import ActiveScanResult, BRouteConnection
 
@@ -80,6 +80,7 @@ class BRouteSession:
         adapter: BRouteConnectionAdapter,
         *,
         scan_max_attempts: int = 1,
+        on_state_change: Callable[[str], None] | None = None,
     ) -> None:
         if (
             not isinstance(scan_max_attempts, int)
@@ -89,6 +90,7 @@ class BRouteSession:
             raise ValueError("scan_max_attempts must be a positive integer")
         self._adapter = adapter
         self._scan_max_attempts = scan_max_attempts
+        self._on_state_change = on_state_change
         self._connection: BRouteConnection | None = None
 
     @property
@@ -114,6 +116,7 @@ class BRouteSession:
 
         candidates: tuple[ActiveScanResult, ...] = ()
         for attempt in range(1, self._scan_max_attempts + 1):
+            self._notify_state("scanning")
             logger.info(
                 "スマートメーターのアクティブスキャンを開始します "
                 "attempt=%d/%d",
@@ -149,6 +152,7 @@ class BRouteSession:
         self._adapter.set_pan_id(selected.pan_id)
         ipv6_address = self._adapter.resolve_ipv6_address(selected.address)
 
+        self._notify_state("authenticating")
         logger.info("PANA接続を開始します ipv6=%s", ipv6_address)
         self._adapter.join(ipv6_address)
         connection = BRouteConnection(
@@ -158,6 +162,10 @@ class BRouteSession:
         self._connection = connection
         logger.info("PANA接続に成功しました ipv6=%s", ipv6_address)
         return connection
+
+    def _notify_state(self, state: str) -> None:
+        if self._on_state_change is not None:
+            self._on_state_change(state)
 
 
 def _validate_credential_token(

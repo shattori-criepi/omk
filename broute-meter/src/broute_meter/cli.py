@@ -10,6 +10,7 @@ import platform
 import signal
 import sys
 import threading
+import time
 from collections.abc import Callable, Sequence
 from datetime import datetime
 from pathlib import Path
@@ -17,15 +18,22 @@ from typing import Any
 
 from broute_meter import __version__
 from broute_meter.adapter import (
+    AdapterCommunicationError,
     AdapterConfigurationResult,
     AdapterError,
+    AdapterOperationCancelled,
     AdapterPanaJoinError,
     AdapterResponseTimeoutError,
     AdapterScanError,
     MockAdapter,
     RsWsuhaPAdapter,
 )
-from broute_meter.broute import BRouteSession, BRouteSessionError
+from broute_meter.broute import (
+    BRouteSession,
+    BRouteSessionError,
+    InvalidBRouteCredentialsError,
+    NoSmartMeterFoundError,
+)
 from broute_meter.config import AppConfig, ConfigError, load_config, safe_config_summary
 from broute_meter.echonet import EchonetFrameError
 from broute_meter.logging_config import configure_logging
@@ -33,6 +41,7 @@ from broute_meter.meter import SmartMeterClient, SmartMeterError
 from broute_meter.models import BRouteConnection
 from broute_meter.mqtt import NullMeasurementPublisher, create_measurement_publisher
 from broute_meter.resilience import RecoveringMeterReader
+from broute_meter.runtime_status import RetryRequestStore, RuntimeStatusStore
 from broute_meter.scheduler import MeasurementScheduler
 from broute_meter.serial.port_detector import (
     PortDetectionError,
@@ -50,6 +59,15 @@ from broute_meter.usb_recovery import (
     UsbRecoveryError,
     usb_reset_allowed,
 )
+
+INITIAL_CONNECTION_RETRY_ATTEMPTS = 2
+EXTENDED_CONNECTION_RETRY_WAIT_SECONDS = 300.0
+ADAPTER_PRESENCE_CHECK_SECONDS = 5.0
+ADAPTER_SETTLE_SECONDS = 2.0
+ADAPTER_INITIALIZATION_RETRY_SECONDS = 5.0
+ADAPTER_READINESS_RETRY_ATTEMPTS = 6
+ADAPTER_READINESS_RETRY_SECONDS = 2.0
+ADAPTER_POST_RESET_RETRY_ATTEMPTS = 3
 
 DEFAULT_SETTINGS_PATH = Path("config/settings.yaml")
 DEFAULT_CREDENTIALS_PATH = Path("config/credentials.yaml")
@@ -180,6 +198,9 @@ def _run(args: argparse.Namespace) -> int:
     logger.info("runに使用するポート: %s", port)
     adapter = _create_rs_wsuha_p_adapter(config, port)
     storage = CsvMeasurementStorage(config.storage.data_directory)
+    runtime_status = RuntimeStatusStore(config.storage.data_directory / "status.json")
+    retry_request = RetryRequestStore(config.storage.data_directory / "retry-request")
+    _write_runtime_status(runtime_status, "starting", logger)
     try:
         publisher = create_measurement_publisher(config.mqtt)
         publisher.start()
@@ -190,6 +211,9 @@ def _run(args: argparse.Namespace) -> int:
         )
         publisher = NullMeasurementPublisher()
     shutdown_event = threading.Event()
+    set_shutdown_event = getattr(adapter, "set_shutdown_event", None)
+    if callable(set_shutdown_event):
+        set_shutdown_event(shutdown_event)
     previous_handlers = _install_stop_signal_handlers(shutdown_event, logger)
 
     try:
@@ -197,14 +221,17 @@ def _run(args: argparse.Namespace) -> int:
             config.storage.data_directory / "broute-recovery-state.json"
         )
         try:
-            setup_result = _configure_adapter_with_usb_recovery(
+            setup_result = _configure_adapter_after_adapter_presence(
                 adapter,
                 config,
                 port,
                 recovery_state,
                 shutdown_event,
                 logger,
+                runtime_status,
             )
+            if setup_result is None:
+                return 0
             if not setup_result.is_configured:
                 mismatched = ", ".join(setup_result.mismatched_settings)
                 logger.error(
@@ -222,6 +249,9 @@ def _run(args: argparse.Namespace) -> int:
                 shutdown_event,
                 logger,
                 recovery_state,
+                runtime_status,
+                retry_request,
+                port=port,
             )
             if connection is None:
                 logger.info("初期Bルート接続の再試行を終了します")
@@ -236,28 +266,48 @@ def _run(args: argparse.Namespace) -> int:
 
             def reconnect_meter() -> SmartMeterClient:
                 logger.warning("シリアルポートとPANA接続を再確立します")
-                adapter.close()
-                adapter.open()
-                reconnect_setup = adapter.configure(
-                    config.adapter.expected_settings,
-                    write_changes=config.adapter.auto_configure,
-                )
-                if not reconnect_setup.is_configured:
-                    raise AdapterError(
-                        "再接続後のアダプター設定が期待値と一致しません。"
+                while not shutdown_event.is_set():
+                    if not _wait_for_adapter_device(
+                        port,
+                        runtime_status,
+                        shutdown_event,
+                        logger,
+                    ):
+                        break
+                    try:
+                        adapter.close()
+                        adapter.open()
+                        reconnect_setup = adapter.configure(
+                            config.adapter.expected_settings,
+                            write_changes=config.adapter.auto_configure,
+                        )
+                        if not reconnect_setup.is_configured:
+                            raise AdapterError(
+                                "再接続後のアダプター設定が期待値と一致しません。"
+                            )
+                        _write_runtime_status(runtime_status, "scanning", logger)
+                        reconnected = BRouteSession(
+                            adapter,
+                            scan_max_attempts=config.retry.request_max_attempts,
+                            on_state_change=lambda state: _write_runtime_status(runtime_status, state, logger),
+                        ).connect(
+                            credentials.b_route_id,
+                            credentials.password,
+                        )
+                    except (AdapterError, BRouteSessionError, TransportError) as exc:
+                        if not _adapter_device_present(port):
+                            logger.warning("アダプター再接続中にデバイスが取り外されました")
+                            continue
+                        _write_runtime_status(runtime_status, _error_connection_state(exc), logger)
+                        raise
+                    return SmartMeterClient(
+                        adapter,
+                        reconnected.smart_meter_ipv6,
+                        request_max_attempts=config.retry.request_max_attempts,
+                        request_timeout_seconds=config.retry.request_timeout_seconds,
                     )
-                reconnected = BRouteSession(
-                    adapter,
-                    scan_max_attempts=config.retry.request_max_attempts,
-                ).connect(
-                    credentials.b_route_id,
-                    credentials.password,
-                )
-                return SmartMeterClient(
-                    adapter,
-                    reconnected.smart_meter_ipv6,
-                    request_max_attempts=config.retry.request_max_attempts,
-                    request_timeout_seconds=config.retry.request_timeout_seconds,
+                raise AdapterOperationCancelled(
+                    "終了要求によりアダプター再接続を中止しました。"
                 )
 
             initial_meter = SmartMeterClient(
@@ -328,11 +378,67 @@ def _run(args: argparse.Namespace) -> int:
                 storage.close()
             finally:
                 adapter.close()
+                _write_runtime_status(runtime_status, "stopped", logger)
     finally:
         _restore_signal_handlers(previous_handlers)
 
     logger.info("アプリケーションコマンド終了 command=run exit_code=0")
     return 0
+
+
+def _configure_adapter_after_adapter_presence(
+    adapter: RsWsuhaPAdapter,
+    config: AppConfig,
+    port: str,
+    state: RecoveryStateStore,
+    stop_event: threading.Event,
+    logger: logging.Logger,
+    runtime_status: RuntimeStatusStore,
+) -> AdapterConfigurationResult | None:
+    """Configure only while the serial device is present.
+
+    The second presence check in the exception branch closes the small race
+    between a successful path check and ``adapter.open()``.
+    """
+
+    while not stop_event.is_set():
+        if not _wait_for_adapter_device(port, runtime_status, stop_event, logger):
+            return None
+        _write_runtime_status(runtime_status, "adapter_initializing", logger)
+        if stop_event.wait(ADAPTER_SETTLE_SECONDS):
+            return None
+        try:
+            return _configure_adapter_with_usb_recovery(
+                adapter,
+                config,
+                port,
+                state,
+                stop_event,
+                logger,
+            )
+        except (
+            SerialTimeoutError,
+            AdapterResponseTimeoutError,
+            AdapterCommunicationError,
+        ):
+            if not _adapter_device_present(port):
+                logger.warning("アダプター設定中にデバイスが取り外されました")
+                continue
+            logger.warning(
+                "RS-WSUHA-Pの応答待ちを継続します retry_seconds=%s",
+                ADAPTER_INITIALIZATION_RETRY_SECONDS,
+            )
+            if stop_event.wait(ADAPTER_INITIALIZATION_RETRY_SECONDS):
+                return None
+        except (AdapterError, TransportError):
+            if _adapter_device_present(port):
+                raise
+            logger.warning("アダプター設定中にデバイスが取り外されました")
+            try:
+                adapter.close()
+            except AdapterError:
+                pass
+    return None
 
 
 def _configure_adapter_with_usb_recovery(
@@ -347,7 +453,7 @@ def _configure_adapter_with_usb_recovery(
 
     state.write("starting", now=datetime.now().astimezone())
     last_error: Exception | None = None
-    for attempt in range(1, STARTUP_RETRY_ATTEMPTS + 1):
+    for attempt in range(1, ADAPTER_READINESS_RETRY_ATTEMPTS + 1):
         try:
             adapter.open()
             result = adapter.configure(
@@ -356,13 +462,17 @@ def _configure_adapter_with_usb_recovery(
             )
             logger.info("RS-WSUHA-P設定読出しに成功しました startup_attempt=%d", attempt)
             return result
-        except (SerialTimeoutError, AdapterResponseTimeoutError) as exc:
+        except (
+            SerialTimeoutError,
+            AdapterResponseTimeoutError,
+            AdapterCommunicationError,
+        ) as exc:
             last_error = exc
             state.write("serial_timeout", now=datetime.now().astimezone())
             logger.warning(
                 "RS-WSUHA-P設定読出しがタイムアウトしました startup_attempt=%d/%d",
                 attempt,
-                STARTUP_RETRY_ATTEMPTS,
+                ADAPTER_READINESS_RETRY_ATTEMPTS,
             )
             try:
                 adapter.close()
@@ -375,14 +485,16 @@ def _configure_adapter_with_usb_recovery(
                 raise AdapterResponseTimeoutError(
                     "Cannot safely reset RS-WSUHA-P while serial close failed."
                 ) from close_error
-            if attempt < STARTUP_RETRY_ATTEMPTS and stop_event.wait(2):
+            if attempt < ADAPTER_READINESS_RETRY_ATTEMPTS and stop_event.wait(
+                ADAPTER_READINESS_RETRY_SECONDS
+            ):
                 raise AdapterResponseTimeoutError(
                     "終了要求により起動時再試行を中止しました。"
                 ) from exc
 
     assert last_error is not None
     now = datetime.now().astimezone()
-    if not usb_reset_allowed(STARTUP_RETRY_ATTEMPTS, 0, state, now=now):
+    if not usb_reset_allowed(ADAPTER_READINESS_RETRY_ATTEMPTS, 0, state, now=now):
         logger.error("USBリセットはクールダウン中のため抑止しました reason=startup_serial_timeout")
         state.write("failed", now=now)
         raise AdapterResponseTimeoutError(
@@ -409,10 +521,14 @@ def _configure_adapter_with_usb_recovery(
             device.serial,
             device.sysfs_path,
         )
-        adapter.open()
-        result = adapter.configure(
-            config.adapter.expected_settings,
-            write_changes=config.adapter.auto_configure,
+        if stop_event.wait(ADAPTER_SETTLE_SECONDS):
+            raise AdapterResponseTimeoutError(
+                "終了要求によりUSBリセット後の起動待機を中止しました。"
+            )
+        result = _configure_after_usb_reset(
+            adapter,
+            config,
+            stop_event,
         )
     except (AdapterError, SerialTimeoutError, UsbRecoveryError) as exc:
         state.write("failed", now=datetime.now().astimezone())
@@ -423,12 +539,50 @@ def _configure_adapter_with_usb_recovery(
     return result
 
 
+def _configure_after_usb_reset(
+    adapter: RsWsuhaPAdapter,
+    config: AppConfig,
+    stop_event: threading.Event,
+) -> AdapterConfigurationResult:
+    """Allow the re-enumerated adapter time to become command-ready."""
+
+    last_error: Exception | None = None
+    for attempt in range(1, ADAPTER_POST_RESET_RETRY_ATTEMPTS + 1):
+        try:
+            adapter.open()
+            return adapter.configure(
+                config.adapter.expected_settings,
+                write_changes=config.adapter.auto_configure,
+            )
+        except (SerialTimeoutError, AdapterResponseTimeoutError) as exc:
+            last_error = exc
+            try:
+                adapter.close()
+            except AdapterError as close_error:
+                raise AdapterResponseTimeoutError(
+                    "Cannot safely retry RS-WSUHA-P after USB reset while serial close failed."
+                ) from close_error
+            if attempt < ADAPTER_POST_RESET_RETRY_ATTEMPTS and stop_event.wait(
+                ADAPTER_READINESS_RETRY_SECONDS
+            ):
+                raise AdapterResponseTimeoutError(
+                    "終了要求によりUSBリセット後の起動時再試行を中止しました。"
+                ) from exc
+    assert last_error is not None
+    raise AdapterResponseTimeoutError(
+        "RS-WSUHA-P did not become ready after USB reset."
+    ) from last_error
+
+
 def _connect_broute_until_ready(
     adapter: RsWsuhaPAdapter,
     config: AppConfig,
     stop_event: threading.Event,
     logger: logging.Logger,
     recovery_state: RecoveryStateStore | None = None,
+    runtime_status: RuntimeStatusStore | None = None,
+    retry_request: RetryRequestStore | None = None,
+    port: str | None = None,
 ) -> BRouteConnection | None:
     """終了要求までBルート接続シーケンス全体を再試行する。
 
@@ -442,21 +596,76 @@ def _connect_broute_until_ready(
     assert credentials.password is not None
 
     attempt = 0
+    authentication_rejected = False
+
+    def report_runtime_state(state: str) -> None:
+        # EVENT 24 is a definitive authentication rejection.  Keep that
+        # diagnosis visible while background retries encounter secondary
+        # scan/time-out failures caused by the rejected PANA session.
+        if runtime_status is not None and not (
+            authentication_rejected
+            and state in {
+                "scanning",
+                "authenticating",
+                "retry_wait",
+                "scan_error",
+                "connection_error",
+            }
+        ):
+            _write_runtime_status(
+                runtime_status,
+                state,
+                logger,
+                connection_attempt=attempt,
+            )
+
     while not stop_event.is_set():
         attempt += 1
         try:
-            connection = BRouteSession(
-                adapter,
-                scan_max_attempts=config.retry.request_max_attempts,
-            ).connect(
+            if port is not None and runtime_status is not None and not _wait_for_adapter_device(
+                port,
+                runtime_status,
+                stop_event,
+                logger,
+            ):
+                break
+            report_runtime_state("scanning")
+            session_kwargs: dict[str, Any] = {
+                "scan_max_attempts": config.retry.request_max_attempts,
+            }
+            if runtime_status is not None:
+                session_kwargs["on_state_change"] = report_runtime_state
+            connection = BRouteSession(adapter, **session_kwargs).connect(
                 credentials.b_route_id,
                 credentials.password,
             )
             if recovery_state is not None:
                 recovery_state.write("connected", now=datetime.now().astimezone())
+            report_runtime_state("connected")
             logger.info("アクティブスキャンとPANA接続に成功しました")
             return connection
         except (AdapterError, BRouteSessionError, TransportError) as exc:
+            if isinstance(exc, AdapterOperationCancelled) and stop_event.is_set():
+                break
+            if (
+                port is not None
+                and runtime_status is not None
+                and not _adapter_device_present(port)
+            ):
+                if not _wait_for_adapter_device(
+                    port,
+                    runtime_status,
+                    stop_event,
+                    logger,
+                ):
+                    break
+                continue
+            authentication_rejected = authentication_rejected or _is_authentication_failure(exc)
+            report_runtime_state(
+                "authentication_error"
+                if authentication_rejected
+                else _error_connection_state(exc)
+            )
             if recovery_state is not None:
                 status = (
                     "scan_failed"
@@ -470,13 +679,128 @@ def _connect_broute_until_ready(
                 "初期Bルート接続に失敗しました。再試行します "
                 "connection_attempt=%d retry_wait_seconds=%s error=%s",
                 attempt,
-                config.retry.reconnect_wait_seconds,
+                _connection_retry_wait_seconds(config.retry.reconnect_wait_seconds, attempt),
                 exc,
             )
-            if stop_event.wait(config.retry.reconnect_wait_seconds):
+            retry_wait_seconds = _connection_retry_wait_seconds(
+                config.retry.reconnect_wait_seconds,
+                attempt,
+            )
+            if runtime_status is not None and not authentication_rejected:
+                _write_runtime_status(
+                    runtime_status,
+                    "retry_wait",
+                    logger,
+                    retry_after_seconds=retry_wait_seconds,
+                    connection_attempt=attempt,
+                )
+            if _wait_for_connection_retry(
+                stop_event,
+                retry_wait_seconds,
+                retry_request=retry_request,
+                logger=logger,
+            ):
                 break
 
     return None
+
+
+def _connection_retry_wait_seconds(configured_seconds: float, attempt: int) -> float:
+    """Back off after repeated full connection attempts without a candidate."""
+
+    if attempt <= INITIAL_CONNECTION_RETRY_ATTEMPTS:
+        return configured_seconds
+    return max(configured_seconds, EXTENDED_CONNECTION_RETRY_WAIT_SECONDS)
+
+
+def _adapter_device_present(port: str) -> bool:
+    """Return whether an absolute serial device path is currently present.
+
+    Non-path port names remain supported for development platforms where a
+    device node does not exist (for example ``COM5``).
+    """
+
+    path = Path(port)
+    return not path.is_absolute() or path.exists()
+
+
+def _wait_for_adapter_device(
+    port: str,
+    runtime_status: RuntimeStatusStore,
+    stop_event: threading.Event,
+    logger: logging.Logger,
+) -> bool:
+    """Wait for a physically absent adapter without ending the service."""
+
+    was_missing = False
+    while not _adapter_device_present(port):
+        was_missing = True
+        _write_runtime_status(runtime_status, "adapter_missing", logger)
+        logger.warning("Bルートアダプターが見つかりません。再確認します")
+        if stop_event.wait(ADAPTER_PRESENCE_CHECK_SECONDS):
+            return False
+    if was_missing:
+        _write_runtime_status(runtime_status, "adapter_initializing", logger)
+    return True
+
+
+def _wait_for_connection_retry(
+    stop_event: threading.Event,
+    retry_wait_seconds: float,
+    *,
+    retry_request: RetryRequestStore | None,
+    logger: logging.Logger,
+) -> bool:
+    """Return True only when shutdown was requested during the retry wait."""
+
+    if retry_request is None:
+        return stop_event.wait(retry_wait_seconds)
+
+    deadline = time.monotonic() + retry_wait_seconds
+    while True:
+        if retry_request.consume():
+            logger.info("手動要求によりBルート接続を直ちに再試行します")
+            return False
+        remaining_seconds = deadline - time.monotonic()
+        if remaining_seconds <= 0:
+            return False
+        if stop_event.wait(min(1.0, remaining_seconds)):
+            return True
+
+
+def _write_runtime_status(
+    store: RuntimeStatusStore,
+    state: str,
+    logger: logging.Logger,
+    *,
+    retry_after_seconds: float | None = None,
+    connection_attempt: int | None = None,
+) -> None:
+    """Status persistence must never stop metering or disclose credentials."""
+
+    try:
+        store.write(
+            state,
+            now=datetime.now().astimezone(),
+            retry_after_seconds=retry_after_seconds,
+            connection_attempt=connection_attempt,
+        )
+    except OSError:
+        logger.warning("Bルート接続状態を保存できませんでした", exc_info=True)
+
+
+def _error_connection_state(exc: Exception) -> str:
+    return (
+        "scan_error"
+        if isinstance(exc, (AdapterScanError, NoSmartMeterFoundError))
+        else "authentication_error"
+        if isinstance(exc, (AdapterPanaJoinError, InvalidBRouteCredentialsError))
+        else "connection_error"
+    )
+
+
+def _is_authentication_failure(exc: Exception) -> bool:
+    return _error_connection_state(exc) == "authentication_error"
 
 
 def _install_stop_signal_handlers(
