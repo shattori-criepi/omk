@@ -65,6 +65,12 @@ async def admin_broute(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(request=request, name="admin_broute.html", context={})
 
 
+@app.get("/admin/system", response_class=HTMLResponse)
+async def admin_system(request: Request) -> HTMLResponse:
+    """Render host power controls without exposing the system-manager token."""
+    return templates.TemplateResponse(request=request, name="admin_system.html", context={})
+
+
 async def _ble_request(method: str, path: str, body: dict | None = None) -> dict:
     try:
         async with httpx.AsyncClient(timeout=5) as client:
@@ -156,6 +162,16 @@ async def update_broute_credentials(request: Request) -> dict:
 @app.post("/api/admin/broute-retry")
 async def retry_broute_connection() -> dict:
     return await _system_manager_request("POST", "/api/broute/retry")
+
+
+@app.post("/api/admin/system/reboot")
+async def reboot_system() -> dict:
+    return await _system_manager_request("POST", "/api/system/reboot")
+
+
+@app.post("/api/admin/system/shutdown")
+async def shutdown_system() -> dict:
+    return await _system_manager_request("POST", "/api/system/shutdown")
 
 
 @app.get("/api/display")

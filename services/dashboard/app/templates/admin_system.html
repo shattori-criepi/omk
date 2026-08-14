@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title>OMK システム操作</title>
+    <link rel="stylesheet" href="{{ url_for('static', path='/display.css') }}?v=20260814-system-controls">
+  </head>
+  <body>
+    <main class="system-management-page" aria-label="システム操作">
+      <header class="admin-page-header">
+        <a href="/admin" class="back-link">← 管理</a>
+        <h1>システム操作</h1>
+      </header>
+      <section class="system-controls" aria-label="電源操作">
+        <p id="system-message" class="setup-status" role="status" aria-live="polite">再起動またはシャットダウンするには、操作を選択してください。</p>
+        <button id="system-reboot" type="button" class="system-action system-action--reboot">再起動</button>
+        <button id="system-shutdown" type="button" class="system-action system-action--shutdown">シャットダウン</button>
+      </section>
+      <dialog id="system-confirm" class="register-dialog system-confirm-dialog" aria-labelledby="system-confirm-title">
+        <form method="dialog">
+          <h2 id="system-confirm-title">確認</h2>
+          <p id="system-confirm-message" class="dialog-device"></p>
+          <div class="dialog-actions">
+            <button id="system-confirm-cancel" type="button">キャンセル</button>
+            <button id="system-confirm-execute" type="button" class="danger">実行</button>
+          </div>
+        </form>
+      </dialog>
+    </main>
+    <script src="{{ url_for('static', path='/system.js') }}?v=20260814-system-controls"></script>
+  </body>
+</html>

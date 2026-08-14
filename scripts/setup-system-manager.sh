@@ -36,8 +36,8 @@ render_unit() {
 }
 
 render_sudoers() {
-  printf '%s ALL=(root) NOPASSWD: %s restart omk-broute-meter.service, %s is-active omk-broute-meter.service\n' \
-    "${TARGET_USER}" "${SYSTEMCTL_PATH}" "${SYSTEMCTL_PATH}"
+  printf '%s ALL=(root) NOPASSWD: %s restart omk-broute-meter.service, %s is-active omk-broute-meter.service, %s reboot, %s poweroff\n' \
+    "${TARGET_USER}" "${SYSTEMCTL_PATH}" "${SYSTEMCTL_PATH}" "${SYSTEMCTL_PATH}" "${SYSTEMCTL_PATH}"
 }
 
 ensure_token_file() {
