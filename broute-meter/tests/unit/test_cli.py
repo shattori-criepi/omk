@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -732,6 +733,172 @@ def test_missing_adapter_waits_then_initializes_when_device_reappears(
     )
     assert stop_event.waits == [cli.ADAPTER_PRESENCE_CHECK_SECONDS] * 2
     assert status.states == ["adapter_missing", "adapter_missing", "adapter_initializing"]
+
+
+def test_startup_missing_adapter_does_not_open_or_exit_with_an_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class StopAfterFirstCheck:
+        def is_set(self) -> bool:
+            return False
+
+        def wait(self, timeout: float) -> bool:
+            assert timeout == cli.ADAPTER_PRESENCE_CHECK_SECONDS
+            return True
+
+    class RecordingStatus:
+        def __init__(self) -> None:
+            self.states: list[str] = []
+
+        def write(self, state: str, **_kwargs: object) -> None:
+            self.states.append(state)
+
+    adapter = _FakeSetupAdapter()
+    monkeypatch.setattr(cli, "_adapter_device_present", lambda _port: False)
+    status = RecordingStatus()
+
+    assert cli._configure_adapter_after_adapter_presence(  # type: ignore[arg-type]
+        adapter,  # type: ignore[arg-type]
+        object(),  # type: ignore[arg-type]
+        "/dev/serial/by-id/rs-wsuha-p",
+        object(),  # type: ignore[arg-type]
+        StopAfterFirstCheck(),  # type: ignore[arg-type]
+        logging.getLogger("broute_meter.test"),
+        status,  # type: ignore[arg-type]
+    ) is None
+    assert not adapter.opened
+    assert status.states == ["adapter_missing"]
+
+
+def test_adapter_open_race_rechecks_path_and_enters_missing_wait(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class StopAfterMissingCheck:
+        def is_set(self) -> bool:
+            return False
+
+        def wait(self, timeout: float) -> bool:
+            assert timeout == cli.ADAPTER_PRESENCE_CHECK_SECONDS
+            return True
+
+    class RecordingStatus:
+        def __init__(self) -> None:
+            self.states: list[str] = []
+
+        def write(self, state: str, **_kwargs: object) -> None:
+            self.states.append(state)
+
+    calls = 0
+
+    def open_then_fail(*_args: object, **_kwargs: object) -> AdapterConfigurationResult:
+        nonlocal calls
+        calls += 1
+        raise AdapterCommunicationError("serial path disappeared")
+
+    presence = iter((True, False, False))
+    monkeypatch.setattr(cli, "_adapter_device_present", lambda _port: next(presence))
+    monkeypatch.setattr(cli, "_configure_adapter_with_usb_recovery", open_then_fail)
+    status = RecordingStatus()
+
+    assert cli._configure_adapter_after_adapter_presence(  # type: ignore[arg-type]
+        _FakeSetupAdapter(),  # type: ignore[arg-type]
+        object(),  # type: ignore[arg-type]
+        "/dev/serial/by-id/rs-wsuha-p",
+        object(),  # type: ignore[arg-type]
+        StopAfterMissingCheck(),  # type: ignore[arg-type]
+        logging.getLogger("broute_meter.test"),
+        status,  # type: ignore[arg-type]
+    ) is None
+    assert calls == 1
+    assert status.states == ["adapter_missing"]
+
+
+def test_reinserted_adapter_initializes_then_scans(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class StopEvent:
+        def is_set(self) -> bool:
+            return False
+
+        def wait(self, _timeout: float) -> bool:
+            return False
+
+    class RecordingStatus:
+        def __init__(self) -> None:
+            self.states: list[str] = []
+
+        def write(self, state: str, **_kwargs: object) -> None:
+            self.states.append(state)
+
+    class FakeSession:
+        def __init__(self, _adapter: object, *, scan_max_attempts: int, on_state_change=None) -> None:
+            pass
+
+        def connect(self, _identifier: str, _password: str) -> SimpleNamespace:
+            return SimpleNamespace(smart_meter_ipv6=IPv6Address("fe80::1"))
+
+    adapter = _FakeSetupAdapter()
+    presence = iter((False, True, True))
+    monkeypatch.setattr(cli, "_adapter_device_present", lambda _port: next(presence))
+    monkeypatch.setattr(cli, "BRouteSession", FakeSession)
+    monkeypatch.setattr(
+        cli,
+        "_configure_adapter_with_usb_recovery",
+        lambda selected_adapter, *_args, **_kwargs: (
+            selected_adapter.open(),
+            AdapterConfigurationResult(
+                expected_settings={}, initial_settings={}, final_settings={}, changed_settings=(), write_changes=True
+            ),
+        )[1],
+    )
+    status = RecordingStatus()
+    stop_event = StopEvent()
+    config = SimpleNamespace(
+        credentials=SimpleNamespace(b_route_id="A" * 32, password="P" * 12),
+        retry=SimpleNamespace(request_max_attempts=3, reconnect_wait_seconds=30),
+    )
+
+    assert cli._configure_adapter_after_adapter_presence(  # type: ignore[arg-type]
+        adapter,  # type: ignore[arg-type]
+        config,  # type: ignore[arg-type]
+        "/dev/serial/by-id/rs-wsuha-p",
+        object(),  # type: ignore[arg-type]
+        stop_event,  # type: ignore[arg-type]
+        logging.getLogger("broute_meter.test"),
+        status,  # type: ignore[arg-type]
+    ) is not None
+    assert adapter.opened
+    assert cli._connect_broute_until_ready(  # type: ignore[arg-type]
+        adapter,
+        config,  # type: ignore[arg-type]
+        stop_event,  # type: ignore[arg-type]
+        logging.getLogger("broute_meter.test"),
+        runtime_status=status,  # type: ignore[arg-type]
+        port="/dev/serial/by-id/rs-wsuha-p",
+    ) is not None
+    assert status.states == ["adapter_missing", "adapter_initializing", "scanning", "connected"]
+
+
+def test_present_adapter_open_error_does_not_become_adapter_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(cli, "_adapter_device_present", lambda _port: True)
+    monkeypatch.setattr(
+        cli,
+        "_configure_adapter_with_usb_recovery",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AdapterCommunicationError("I/O error")),
+    )
+
+    with pytest.raises(AdapterCommunicationError):
+        cli._configure_adapter_after_adapter_presence(  # type: ignore[arg-type]
+            _FakeSetupAdapter(),  # type: ignore[arg-type]
+            object(),  # type: ignore[arg-type]
+            "/dev/serial/by-id/rs-wsuha-p",
+            object(),  # type: ignore[arg-type]
+            threading.Event(),
+            logging.getLogger("broute_meter.test"),
+            RuntimeStatusStore(Path("/tmp/unused-status.json")),
+        )
 
 
 def test_serial_disconnect_with_missing_device_is_not_connection_error(

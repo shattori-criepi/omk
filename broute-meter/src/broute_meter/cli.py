@@ -215,21 +215,17 @@ def _run(args: argparse.Namespace) -> int:
             config.storage.data_directory / "broute-recovery-state.json"
         )
         try:
-            if not _wait_for_adapter_device(
-                port,
-                runtime_status,
-                shutdown_event,
-                logger,
-            ):
-                return 0
-            setup_result = _configure_adapter_with_usb_recovery(
+            setup_result = _configure_adapter_after_adapter_presence(
                 adapter,
                 config,
                 port,
                 recovery_state,
                 shutdown_event,
                 logger,
+                runtime_status,
             )
+            if setup_result is None:
+                return 0
             if not setup_result.is_configured:
                 mismatched = ", ".join(setup_result.mismatched_settings)
                 logger.error(
@@ -264,43 +260,48 @@ def _run(args: argparse.Namespace) -> int:
 
             def reconnect_meter() -> SmartMeterClient:
                 logger.warning("シリアルポートとPANA接続を再確立します")
-                try:
+                while not shutdown_event.is_set():
                     if not _wait_for_adapter_device(
                         port,
                         runtime_status,
                         shutdown_event,
                         logger,
                     ):
-                        raise AdapterOperationCancelled(
-                            "終了要求によりアダプター再接続を中止しました。"
+                        break
+                    try:
+                        adapter.close()
+                        adapter.open()
+                        reconnect_setup = adapter.configure(
+                            config.adapter.expected_settings,
+                            write_changes=config.adapter.auto_configure,
                         )
-                    adapter.close()
-                    adapter.open()
-                    reconnect_setup = adapter.configure(
-                        config.adapter.expected_settings,
-                        write_changes=config.adapter.auto_configure,
-                    )
-                    if not reconnect_setup.is_configured:
-                        raise AdapterError(
-                            "再接続後のアダプター設定が期待値と一致しません。"
+                        if not reconnect_setup.is_configured:
+                            raise AdapterError(
+                                "再接続後のアダプター設定が期待値と一致しません。"
+                            )
+                        _write_runtime_status(runtime_status, "scanning", logger)
+                        reconnected = BRouteSession(
+                            adapter,
+                            scan_max_attempts=config.retry.request_max_attempts,
+                            on_state_change=lambda state: _write_runtime_status(runtime_status, state, logger),
+                        ).connect(
+                            credentials.b_route_id,
+                            credentials.password,
                         )
-                    _write_runtime_status(runtime_status, "scanning", logger)
-                    reconnected = BRouteSession(
+                    except (AdapterError, BRouteSessionError, TransportError) as exc:
+                        if not _adapter_device_present(port):
+                            logger.warning("アダプター再接続中にデバイスが取り外されました")
+                            continue
+                        _write_runtime_status(runtime_status, _error_connection_state(exc), logger)
+                        raise
+                    return SmartMeterClient(
                         adapter,
-                        scan_max_attempts=config.retry.request_max_attempts,
-                        on_state_change=lambda state: _write_runtime_status(runtime_status, state, logger),
-                    ).connect(
-                        credentials.b_route_id,
-                        credentials.password,
+                        reconnected.smart_meter_ipv6,
+                        request_max_attempts=config.retry.request_max_attempts,
+                        request_timeout_seconds=config.retry.request_timeout_seconds,
                     )
-                except (AdapterError, BRouteSessionError, TransportError) as exc:
-                    _write_runtime_status(runtime_status, _error_connection_state(exc), logger)
-                    raise
-                return SmartMeterClient(
-                    adapter,
-                    reconnected.smart_meter_ipv6,
-                    request_max_attempts=config.retry.request_max_attempts,
-                    request_timeout_seconds=config.retry.request_timeout_seconds,
+                raise AdapterOperationCancelled(
+                    "終了要求によりアダプター再接続を中止しました。"
                 )
 
             initial_meter = SmartMeterClient(
@@ -377,6 +378,44 @@ def _run(args: argparse.Namespace) -> int:
 
     logger.info("アプリケーションコマンド終了 command=run exit_code=0")
     return 0
+
+
+def _configure_adapter_after_adapter_presence(
+    adapter: RsWsuhaPAdapter,
+    config: AppConfig,
+    port: str,
+    state: RecoveryStateStore,
+    stop_event: threading.Event,
+    logger: logging.Logger,
+    runtime_status: RuntimeStatusStore,
+) -> AdapterConfigurationResult | None:
+    """Configure only while the serial device is present.
+
+    The second presence check in the exception branch closes the small race
+    between a successful path check and ``adapter.open()``.
+    """
+
+    while not stop_event.is_set():
+        if not _wait_for_adapter_device(port, runtime_status, stop_event, logger):
+            return None
+        try:
+            return _configure_adapter_with_usb_recovery(
+                adapter,
+                config,
+                port,
+                state,
+                stop_event,
+                logger,
+            )
+        except (AdapterError, TransportError):
+            if _adapter_device_present(port):
+                raise
+            logger.warning("アダプター設定中にデバイスが取り外されました")
+            try:
+                adapter.close()
+            except AdapterError:
+                pass
+    return None
 
 
 def _configure_adapter_with_usb_recovery(
