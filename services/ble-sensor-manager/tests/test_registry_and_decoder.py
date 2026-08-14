@@ -100,6 +100,12 @@ def test_plug_sensor_decodes_service_and_manufacturer_power_layouts() -> None:
     on_high = decode("60:55:F9:2E:77:82", -50, {SWITCHBOT_COMPANY_ID: bytes.fromhex("6055f92e77827080163806c4")}, {}, "now")
     overload_high = decode("60:55:F9:2E:77:82", -50, {SWITCHBOT_COMPANY_ID: bytes.fromhex("6055f92e77827080163886c4")}, {}, "now")
     unrelated = decode("x", -1, {SWITCHBOT_COMPANY_ID: bytes.fromhex("6055f92e7782378015360035")}, {}, "now")
+    old_verified = decode("60:55:F9:2E:77:82", -50, {SWITCHBOT_COMPANY_ID: bytes.fromhex("6055f92e77826f80163805f2")}, {}, "now")
+    new_verified = decode(
+        "AC:27:6E:43:26:9E", -50,
+        {SWITCHBOT_COMPANY_ID: bytes.fromhex("ac276e43269e778010370037")},
+        {METER_SERVICE_UUID: bytes.fromhex("6a0064")}, "now",
+    )
     assert service_only is not None and service_only.model == "plug_sensor" and service_only.sensor_type == "power" and service_only.values == {}
     assert on_low is not None and on_low.device_key == "switchbot:6055f92e7782"
     assert on_low.values == {"power_w": 5.3, "switch_state": 1}
@@ -107,6 +113,9 @@ def test_plug_sensor_decodes_service_and_manufacturer_power_layouts() -> None:
     assert on_high is not None and on_high.values == {"power_w": 173.2, "switch_state": 1}
     assert overload_high is not None and overload_high.values == {"power_w": 173.2, "switch_state": 1}
     assert unrelated is not None and unrelated.model == "unknown_switchbot"
+    assert old_verified is not None and old_verified.values == {"power_w": 152.2, "switch_state": 1}
+    assert new_verified is not None and new_verified.model == "plug_sensor" and new_verified.sensor_type == "power"
+    assert new_verified.values == {"power_w": 5.5, "switch_state": 1}
 
 
 def test_short_and_unknown_manufacturer_packets_remain_raw_unknown_candidates() -> None:
