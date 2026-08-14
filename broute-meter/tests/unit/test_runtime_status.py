@@ -29,10 +29,12 @@ def test_runtime_status_records_non_sensitive_retry_wait(tmp_path) -> None:
         "retry_wait",
         now=datetime(2026, 8, 14, tzinfo=UTC),
         retry_after_seconds=30,
+        connection_attempt=3,
     )
 
     assert json.loads(path.read_text(encoding="utf-8")) == {
         "retry_after_seconds": 30,
+        "connection_attempt": 3,
         "state": "retry_wait",
         "updated_at": "2026-08-14T00:00:00+00:00",
     }

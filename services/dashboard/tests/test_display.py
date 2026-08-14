@@ -508,6 +508,17 @@ def test_broute_update_proxy_forwards_body_and_preserves_safe_failure_state(monk
     assert password not in response.text
 
 
+def test_broute_retry_proxy_uses_fixed_upstream_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def accepted(method: str, path: str, body: dict | None = None) -> dict:
+        assert (method, path, body) == ("POST", "/api/broute/retry", None)
+        return {"accepted": True}
+
+    monkeypatch.setattr(dashboard_main, "_system_manager_request", accepted)
+    response = client.post("/api/admin/broute-retry")
+
+    assert response.json() == {"accepted": True}
+
+
 @pytest.mark.parametrize("status_code", [401, 403, 400])
 def test_broute_proxy_propagates_system_manager_errors(monkeypatch: pytest.MonkeyPatch, status_code: int) -> None:
     async def failed_request(*_: object, **__: object) -> dict:
@@ -622,7 +633,7 @@ def test_broute_browser_formatter_groups_normalizes_and_submits_unformatted_valu
 const fs = require("fs"), vm = require("vm");
 const elements = {};
 function element() { return { value: "", selectionStart: 0, disabled: false, className: "", textContent: "", hidden: false, children: [], listeners: {}, addEventListener(type, listener) { this.listeners[type] = listener; }, append(child) { this.children.push(child); }, setAttribute() {}, setSelectionRange(position) { this.selectionStart = position; }, reset() { elements["#broute-id"].value = ""; elements["#broute-password"].value = ""; } }; }
-for (const selector of ["#broute-form", "#broute-id", "#broute-password", "#broute-save", "#broute-message", "#broute-connection", "#broute-id-masked", "#broute-password-configured", "#broute-keyboard-overlay", "#broute-keyboard-title", "#broute-keyboard-count", "#broute-keyboard-value", "#broute-keyboard-keys", "#broute-keyboard-cancel", "#broute-keyboard-confirm"]) elements[selector] = element();
+for (const selector of ["#broute-form", "#broute-id", "#broute-password", "#broute-save", "#broute-retry", "#broute-message", "#broute-connection", "#broute-id-masked", "#broute-password-configured", "#broute-keyboard-overlay", "#broute-keyboard-title", "#broute-keyboard-count", "#broute-keyboard-value", "#broute-keyboard-keys", "#broute-keyboard-cancel", "#broute-keyboard-confirm"]) elements[selector] = element();
 elements["#broute-keyboard-overlay"].hidden = true;
 global.document = { querySelector: (selector) => elements[selector], createElement: () => element() };
 const requests = [];
@@ -659,6 +670,10 @@ vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8") + "\nglobalThis.__b
   const noPutBeforeSave = !requests.some((request) => request.options.method === "PUT");
   const stateLabels = {};
   for (const state of ["starting", "scanning", "authenticating", "connected", "retry_wait", "scan_error", "authentication_error", "connection_error", "status_unavailable"]) { __brouteTest.showStatus({service_active: true, connection_state: state}); stateLabels[state] = elements["#broute-connection"].textContent; }
+  __brouteTest.showStatus({service_active: true, connection_state: "retry_wait", connection_attempt: 3});
+  const retryButtonVisibleAfterRepeatedFailures = !elements["#broute-retry"].hidden;
+  __brouteTest.showStatus({service_active: true, connection_state: "retry_wait", connection_attempt: 2});
+  const retryButtonHiddenBeforeExtendedRetry = elements["#broute-retry"].hidden;
   const missingStateIsNotStarting = __brouteTest.showStatus({service_active: true}) === "status_unavailable" && elements["#broute-connection"].textContent === "状態確認中";
   response = { status: 200, detail: { configured: true, service_active: true, connection_state: "scanning" } };
   await __brouteTest.pollStatus();
@@ -698,7 +713,7 @@ vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8") + "\nglobalThis.__b
   await __brouteTest.pollStatus();
   const connectionErrorTerminal = elements["#broute-message"].textContent === "スマートメータとの通信に失敗しました。" && scheduledDelay === 10000;
   const put = requests.find((request) => request.options.method === "PUT");
-  console.log(JSON.stringify({ formattedId: __brouteTest.formatToken(id, 32), formattedPassword: __brouteTest.formatToken(password, 12), normalizedPaste: __brouteTest.unformatToken("1234 5678 9ABC DEF0 1234 5678 9ABC DEF0", 32), validId: __brouteTest.validToken("1234 5678 9ABC DEF0 1234 5678 9ABC DEF0", 32), validPassword: __brouteTest.validToken("1234 5678 9ABC", 12), invalidShortId: __brouteTest.validToken("1234 5678 9ABC DEF0 1234 5678 9ABC DEF", 32), masked: __brouteTest.formatToken("0000************************4CEF", 32), idOpened, passwordOpened, idMaximum, passwordMaximum, idBackspace, cancellationRestored, confirmed, noPutBeforeSave, passwordBlankOnLoad, stateLabels, missingStateIsNotStarting, scanErrorMessage: __brouteTest.stateMessage("scan_error"), retryWaitMessage: __brouteTest.stateMessage("retry_wait", 30), idlePolling, upstreamErrorIsNotTransport, transportError, reconnectStates, scanErrorTerminal, authenticationErrorTerminal, connectionErrorTerminal, request: JSON.parse(put.options.body) }));
+  console.log(JSON.stringify({ formattedId: __brouteTest.formatToken(id, 32), formattedPassword: __brouteTest.formatToken(password, 12), normalizedPaste: __brouteTest.unformatToken("1234 5678 9ABC DEF0 1234 5678 9ABC DEF0", 32), validId: __brouteTest.validToken("1234 5678 9ABC DEF0 1234 5678 9ABC DEF0", 32), validPassword: __brouteTest.validToken("1234 5678 9ABC", 12), invalidShortId: __brouteTest.validToken("1234 5678 9ABC DEF0 1234 5678 9ABC DEF", 32), masked: __brouteTest.formatToken("0000************************4CEF", 32), idOpened, passwordOpened, idMaximum, passwordMaximum, idBackspace, cancellationRestored, confirmed, noPutBeforeSave, passwordBlankOnLoad, stateLabels, retryButtonVisibleAfterRepeatedFailures, retryButtonHiddenBeforeExtendedRetry, missingStateIsNotStarting, scanErrorMessage: __brouteTest.stateMessage("scan_error"), retryWaitMessage: __brouteTest.stateMessage("retry_wait", 30), idlePolling, upstreamErrorIsNotTransport, transportError, reconnectStates, scanErrorTerminal, authenticationErrorTerminal, connectionErrorTerminal, request: JSON.parse(put.options.body) }));
 })();
 '''
     completed = subprocess.run(
@@ -737,6 +752,8 @@ vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8") + "\nglobalThis.__b
         "status_unavailable": "状態確認中",
     }
     assert result["missingStateIsNotStarting"] is True
+    assert result["retryButtonVisibleAfterRepeatedFailures"] is True
+    assert result["retryButtonHiddenBeforeExtendedRetry"] is True
     assert result["scanErrorMessage"] == "スマートメータを検出できませんでした。"
     assert result["retryWaitMessage"] == "30秒後にスマートメータを再探索します。"
     assert result["idlePolling"] is True

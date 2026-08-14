@@ -153,6 +153,11 @@ async def update_broute_credentials(request: Request) -> dict:
     return await _system_manager_request("PUT", "/api/broute/credentials", await request.json())
 
 
+@app.post("/api/admin/broute-retry")
+async def retry_broute_connection() -> dict:
+    return await _system_manager_request("POST", "/api/broute/retry")
+
+
 @app.get("/api/display")
 async def display_api() -> dict[str, str | bool]:
     """Return the current dashboard snapshot for in-page refreshes."""

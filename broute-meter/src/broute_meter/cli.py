@@ -10,6 +10,7 @@ import platform
 import signal
 import sys
 import threading
+import time
 from collections.abc import Callable, Sequence
 from datetime import datetime
 from pathlib import Path
@@ -39,7 +40,7 @@ from broute_meter.meter import SmartMeterClient, SmartMeterError
 from broute_meter.models import BRouteConnection
 from broute_meter.mqtt import NullMeasurementPublisher, create_measurement_publisher
 from broute_meter.resilience import RecoveringMeterReader
-from broute_meter.runtime_status import RuntimeStatusStore
+from broute_meter.runtime_status import RetryRequestStore, RuntimeStatusStore
 from broute_meter.scheduler import MeasurementScheduler
 from broute_meter.serial.port_detector import (
     PortDetectionError,
@@ -57,6 +58,9 @@ from broute_meter.usb_recovery import (
     UsbRecoveryError,
     usb_reset_allowed,
 )
+
+INITIAL_CONNECTION_RETRY_ATTEMPTS = 2
+EXTENDED_CONNECTION_RETRY_WAIT_SECONDS = 300.0
 
 DEFAULT_SETTINGS_PATH = Path("config/settings.yaml")
 DEFAULT_CREDENTIALS_PATH = Path("config/credentials.yaml")
@@ -188,6 +192,7 @@ def _run(args: argparse.Namespace) -> int:
     adapter = _create_rs_wsuha_p_adapter(config, port)
     storage = CsvMeasurementStorage(config.storage.data_directory)
     runtime_status = RuntimeStatusStore(config.storage.data_directory / "status.json")
+    retry_request = RetryRequestStore(config.storage.data_directory / "retry-request")
     _write_runtime_status(runtime_status, "starting", logger)
     try:
         publisher = create_measurement_publisher(config.mqtt)
@@ -235,6 +240,7 @@ def _run(args: argparse.Namespace) -> int:
                 logger,
                 recovery_state,
                 runtime_status,
+                retry_request,
             )
             if connection is None:
                 logger.info("初期Bルート接続の再試行を終了します")
@@ -450,6 +456,7 @@ def _connect_broute_until_ready(
     logger: logging.Logger,
     recovery_state: RecoveryStateStore | None = None,
     runtime_status: RuntimeStatusStore | None = None,
+    retry_request: RetryRequestStore | None = None,
 ) -> BRouteConnection | None:
     """終了要求までBルート接続シーケンス全体を再試行する。
 
@@ -479,7 +486,12 @@ def _connect_broute_until_ready(
                 "connection_error",
             }
         ):
-            _write_runtime_status(runtime_status, state, logger)
+            _write_runtime_status(
+                runtime_status,
+                state,
+                logger,
+                connection_attempt=attempt,
+            )
 
     while not stop_event.is_set():
         attempt += 1
@@ -521,20 +533,62 @@ def _connect_broute_until_ready(
                 "初期Bルート接続に失敗しました。再試行します "
                 "connection_attempt=%d retry_wait_seconds=%s error=%s",
                 attempt,
-                config.retry.reconnect_wait_seconds,
+                _connection_retry_wait_seconds(config.retry.reconnect_wait_seconds, attempt),
                 exc,
+            )
+            retry_wait_seconds = _connection_retry_wait_seconds(
+                config.retry.reconnect_wait_seconds,
+                attempt,
             )
             if runtime_status is not None and not authentication_rejected:
                 _write_runtime_status(
                     runtime_status,
                     "retry_wait",
                     logger,
-                    retry_after_seconds=config.retry.reconnect_wait_seconds,
+                    retry_after_seconds=retry_wait_seconds,
+                    connection_attempt=attempt,
                 )
-            if stop_event.wait(config.retry.reconnect_wait_seconds):
+            if _wait_for_connection_retry(
+                stop_event,
+                retry_wait_seconds,
+                retry_request=retry_request,
+                logger=logger,
+            ):
                 break
 
     return None
+
+
+def _connection_retry_wait_seconds(configured_seconds: float, attempt: int) -> float:
+    """Back off after repeated full connection attempts without a candidate."""
+
+    if attempt <= INITIAL_CONNECTION_RETRY_ATTEMPTS:
+        return configured_seconds
+    return max(configured_seconds, EXTENDED_CONNECTION_RETRY_WAIT_SECONDS)
+
+
+def _wait_for_connection_retry(
+    stop_event: threading.Event,
+    retry_wait_seconds: float,
+    *,
+    retry_request: RetryRequestStore | None,
+    logger: logging.Logger,
+) -> bool:
+    """Return True only when shutdown was requested during the retry wait."""
+
+    if retry_request is None:
+        return stop_event.wait(retry_wait_seconds)
+
+    deadline = time.monotonic() + retry_wait_seconds
+    while True:
+        if retry_request.consume():
+            logger.info("手動要求によりBルート接続を直ちに再試行します")
+            return False
+        remaining_seconds = deadline - time.monotonic()
+        if remaining_seconds <= 0:
+            return False
+        if stop_event.wait(min(1.0, remaining_seconds)):
+            return True
 
 
 def _write_runtime_status(
@@ -543,6 +597,7 @@ def _write_runtime_status(
     logger: logging.Logger,
     *,
     retry_after_seconds: float | None = None,
+    connection_attempt: int | None = None,
 ) -> None:
     """Status persistence must never stop metering or disclose credentials."""
 
@@ -551,6 +606,7 @@ def _write_runtime_status(
             state,
             now=datetime.now().astimezone(),
             retry_after_seconds=retry_after_seconds,
+            connection_attempt=connection_attempt,
         )
     except OSError:
         logger.warning("Bルート接続状態を保存できませんでした", exc_info=True)

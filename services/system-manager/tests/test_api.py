@@ -37,6 +37,7 @@ def client_for(tmp_path: Path) -> TestClient:
             tmp_path / "credentials.yaml",
             "/usr/bin/systemctl",
             tmp_path / "status.json",
+            tmp_path / "retry-request",
         )
     )
     return TestClient(app)
@@ -71,6 +72,8 @@ def test_update_returns_no_password_or_raw_id_and_logs_no_secret(tmp_path: Path,
         "connection_state": "starting",
         "status_updated_at": None,
         "retry_after_seconds": None,
+        "connection_attempt": None,
+        "connection_state_source": "credentials_update_restart",
     }
     combined = response.text + caplog.text
     assert VALID_ID not in combined
@@ -185,6 +188,7 @@ def test_status_returns_broute_runtime_state_without_secrets(
     assert response.json()["connection_state"] == expected
     assert response.json()["status_updated_at"] == "2026-08-14T00:00:00+00:00"
     assert response.json()["retry_after_seconds"] is None
+    assert response.json()["connection_state_source"] == "runtime_status"
     assert VALID_ID not in response.text
     assert VALID_PASSWORD not in response.text
 
@@ -225,3 +229,30 @@ def test_status_returns_retry_wait_delay_without_credentials(tmp_path: Path) -> 
     assert response.json()["retry_after_seconds"] == 30
     assert VALID_ID not in response.text
     assert VALID_PASSWORD not in response.text
+
+
+def test_retry_request_is_allowed_only_after_repeated_retry_wait(tmp_path: Path) -> None:
+    (tmp_path / "status.json").write_text(
+        '{"state":"retry_wait","updated_at":"2026-08-14T00:00:00+00:00","retry_after_seconds":300,"connection_attempt":3}',
+        encoding="utf-8",
+    )
+    with client_for(tmp_path) as client:
+        client.app.state.controller = ActiveController()
+        response = client.post("/api/broute/retry", headers=headers())
+
+    assert response.json() == {"accepted": True}
+    assert (tmp_path / "retry-request").read_text(encoding="ascii") == "retry\n"
+    assert (tmp_path / "retry-request").stat().st_mode & 0o777 == 0o600
+
+
+def test_retry_request_is_rejected_before_extended_retry_wait(tmp_path: Path) -> None:
+    (tmp_path / "status.json").write_text(
+        '{"state":"retry_wait","updated_at":"2026-08-14T00:00:00+00:00","retry_after_seconds":30,"connection_attempt":2}',
+        encoding="utf-8",
+    )
+    with client_for(tmp_path) as client:
+        client.app.state.controller = ActiveController()
+        response = client.post("/api/broute/retry", headers=headers())
+
+    assert response.status_code == 409
+    assert not (tmp_path / "retry-request").exists()

@@ -23,7 +23,7 @@ from .credentials import (
     write_credentials_atomically,
 )
 from .service_control import BRouteServiceController, ServiceControlError
-from .runtime_status import connection_status
+from .runtime_status import connection_status, request_immediate_retry
 
 
 @dataclass(frozen=True)
@@ -32,6 +32,7 @@ class Settings:
     credentials_path: Path
     systemctl_path: str
     status_path: Path = Path("/home/omkdev/projects/omk/data/broute-meter/status.json")
+    retry_request_path: Path = Path("/home/omkdev/projects/omk/data/broute-meter/retry-request")
 
     @classmethod
     def from_environment(cls) -> "Settings":
@@ -51,6 +52,12 @@ class Settings:
                 os.environ.get(
                     "OMK_BROUTE_STATUS_PATH",
                     "/home/omkdev/projects/omk/data/broute-meter/status.json",
+                )
+            ),
+            retry_request_path=Path(
+                os.environ.get(
+                    "OMK_BROUTE_RETRY_REQUEST_PATH",
+                    "/home/omkdev/projects/omk/data/broute-meter/retry-request",
                 )
             ),
         )
@@ -101,7 +108,7 @@ def create_app(configured_settings: Settings | None = None) -> FastAPI:
         configured, identifier_masked, password_configured = credential_status(settings.credentials_path)
         controller: BRouteServiceController = request.app.state.controller
         service_active = controller.is_active()
-        connection_state, status_updated_at, retry_after_seconds = connection_status(
+        connection_state, status_updated_at, retry_after_seconds, connection_attempt, connection_state_source = connection_status(
             settings.status_path,
             service_active=service_active,
         )
@@ -113,6 +120,8 @@ def create_app(configured_settings: Settings | None = None) -> FastAPI:
             "connection_state": connection_state,
             "status_updated_at": status_updated_at,
             "retry_after_seconds": retry_after_seconds,
+            "connection_attempt": connection_attempt,
+            "connection_state_source": connection_state_source,
         }
 
     @app.put("/api/broute/credentials", dependencies=[Depends(authenticated)])
@@ -155,7 +164,26 @@ def create_app(configured_settings: Settings | None = None) -> FastAPI:
             "connection_state": "starting",
             "status_updated_at": None,
             "retry_after_seconds": None,
+            "connection_attempt": None,
+            "connection_state_source": "credentials_update_restart",
         }
+
+    @app.post("/api/broute/retry", dependencies=[Depends(authenticated)])
+    def retry_broute_connection(request: Request) -> dict[str, bool]:
+        settings: Settings = request.app.state.settings
+        controller: BRouteServiceController = request.app.state.controller
+        service_active = controller.is_active()
+        state, _, _, connection_attempt, _ = connection_status(
+            settings.status_path,
+            service_active=service_active,
+        )
+        if state != "retry_wait" or connection_attempt is None or connection_attempt <= 2:
+            raise HTTPException(status_code=409, detail="現在は即時再試行できません")
+        try:
+            request_immediate_retry(settings.retry_request_path)
+        except OSError as error:
+            raise HTTPException(status_code=500, detail="再試行要求を保存できませんでした") from error
+        return {"accepted": True}
 
     @app.get("/health")
     def health() -> dict[str, str]:
