@@ -4,8 +4,8 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <title>OMK センサ管理</title>
-    <link rel="stylesheet" href="{{ url_for('static', path='/display.css') }}?v=20260812-admin2">
-    <script src="{{ url_for('static', path='/admin.js') }}?v=20260812-admin2" defer></script>
+    <link rel="stylesheet" href="{{ url_for('static', path='/display.css') }}?v=20260814-sensor-delete">
+    <script src="{{ url_for('static', path='/admin.js') }}?v=20260814-sensor-delete" defer></script>
   </head>
   <body>
     <main class="admin-page sensor-management-page" aria-label="OMK センサ管理">
@@ -47,6 +47,7 @@
         <label class="enabled-control"><input id="edit-enabled" name="enabled" type="checkbox"> このセンサを有効にする</label>
         <p id="edit-error" class="error" hidden></p>
         <div class="dialog-actions"><button type="button" id="cancel-edit">キャンセル</button><button type="submit" class="primary">保存する</button></div>
+        <button type="button" id="delete-sensor" class="danger">センサ登録を削除</button>
       </form>
     </dialog>
   </body>

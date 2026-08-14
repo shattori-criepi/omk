@@ -97,6 +97,17 @@ def update_sensor(device_key: str, request: UpdateSensorRequest) -> dict[str, An
     except RegistryError as error:
         raise HTTPException(400, str(error)) from error
 
+
+@app.delete("/api/sensors/{device_key}")
+def delete_sensor(device_key: str) -> dict[str, Any]:
+    try:
+        deleted = manager.delete_registered_sensor(device_key)
+    except KeyError as error:
+        raise HTTPException(404, "sensor was not found") from error
+    except RegistryError as error:
+        raise HTTPException(500, str(error)) from error
+    return {"deleted": True, "device_key": deleted.device_key, "sensor_id": deleted.sensor_id}
+
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
