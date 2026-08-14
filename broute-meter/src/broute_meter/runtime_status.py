@@ -36,6 +36,7 @@ class RuntimeStatusStore:
         *,
         now: datetime,
         retry_after_seconds: float | None = None,
+        connection_attempt: int | None = None,
     ) -> None:
         if state not in CONNECTION_STATES:
             raise ValueError("Unsupported B-route connection state")
@@ -43,6 +44,8 @@ class RuntimeStatusStore:
             state != "retry_wait" or retry_after_seconds <= 0
         ):
             raise ValueError("retry_after_seconds is only valid for retry_wait")
+        if connection_attempt is not None and connection_attempt < 1:
+            raise ValueError("connection_attempt must be positive")
         self.path.parent.mkdir(parents=True, exist_ok=True)
         descriptor, temporary_name = tempfile.mkstemp(prefix=".status.", dir=self.path.parent)
         try:
@@ -52,6 +55,8 @@ class RuntimeStatusStore:
                 payload = {"state": state, "updated_at": now.astimezone(UTC).isoformat()}
                 if retry_after_seconds is not None:
                     payload["retry_after_seconds"] = retry_after_seconds
+                if connection_attempt is not None:
+                    payload["connection_attempt"] = connection_attempt
                 json.dump(
                     payload,
                     output,
@@ -70,6 +75,20 @@ class RuntimeStatusStore:
                 os.unlink(temporary_name)
             except FileNotFoundError:
                 pass
+
+
+class RetryRequestStore:
+    """Consume a non-sensitive, one-shot request to end a retry wait early."""
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+
+    def consume(self) -> bool:
+        try:
+            self.path.unlink()
+        except FileNotFoundError:
+            return False
+        return True
 
 
 def _fsync_directory(directory: Path) -> None:

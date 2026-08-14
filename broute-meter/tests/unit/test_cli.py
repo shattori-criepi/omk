@@ -24,7 +24,7 @@ from broute_meter.adapter import (
 from broute_meter.broute import BRouteSessionError, NoSmartMeterFoundError
 from broute_meter.config import AppConfig
 from broute_meter.models import CumulativeEnergyReading, InstantaneousPowerReading
-from broute_meter.runtime_status import RuntimeStatusStore
+from broute_meter.runtime_status import RetryRequestStore, RuntimeStatusStore
 from broute_meter.serial.port_detector import PortInfo
 
 ENVIRONMENT_KEYS = (
@@ -670,7 +670,14 @@ def test_connection_retries_do_not_reenter_starting_state(
         def __init__(self) -> None:
             self.states: list[tuple[str, float | None]] = []
 
-        def write(self, state: str, *, now: datetime, retry_after_seconds: float | None = None) -> None:
+        def write(
+            self,
+            state: str,
+            *,
+            now: datetime,
+            retry_after_seconds: float | None = None,
+            connection_attempt: int | None = None,
+        ) -> None:
             self.states.append((state, retry_after_seconds))
 
     monkeypatch.setattr(cli, "BRouteSession", FakeSession)
@@ -692,6 +699,23 @@ def test_connection_retries_do_not_reenter_starting_state(
         ("retry_wait", 30),
     ]
     assert all(state != "starting" for state, _ in status.states)
+
+
+def test_manual_retry_request_ends_retry_wait_without_shutdown(tmp_path: Path) -> None:
+    request_path = tmp_path / "retry-request"
+    request_path.write_text("retry\n", encoding="ascii")
+
+    class StopEvent:
+        def wait(self, _timeout: float) -> bool:
+            raise AssertionError("manual retry must be consumed before waiting")
+
+    assert not cli._wait_for_connection_retry(  # type: ignore[arg-type]
+        StopEvent(),
+        300,
+        retry_request=RetryRequestStore(request_path),
+        logger=logging.getLogger("broute_meter.test"),
+    )
+    assert not request_path.exists()
 
 
 def test_pana_authentication_rejection_is_not_overwritten_by_retry_timeout(
