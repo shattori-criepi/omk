@@ -18,6 +18,7 @@ from typing import TypeVar
 from broute_meter.adapter.base import (
     AdapterCommunicationError,
     AdapterCredentialError,
+    AdapterOperationCancelled,
     AdapterPanaJoinError,
     AdapterResponseTimeoutError,
     AdapterScanError,
@@ -44,6 +45,7 @@ DEFAULT_PANA_JOIN_TIMEOUT_SECONDS = 60.0
 COMMAND_TERMINATOR = b"\r\n"
 READ_SIZE_BYTES = 1
 MAX_LINE_BYTES = 8192
+SHUTDOWN_POLL_SECONDS = 1.0
 
 _HEX_BYTE_PATTERN = re.compile(r"[0-9A-Fa-f]{2}\Z")
 _READ_SETTING_RESPONSE_PATTERN = re.compile(rb"OK ([0-9A-Fa-f]{2})\Z")
@@ -173,6 +175,12 @@ class RsWsuhaPAdapter(BaseAdapter):
         self._line_buffer = _ResponseLineBuffer()
         self._received_lines: deque[bytes] = deque()
         self._startup_wait_pending = True
+        self._shutdown_event: threading.Event | None = None
+
+    def set_shutdown_event(self, shutdown_event: threading.Event | None) -> None:
+        """Allow long scan/PANA reads to observe service shutdown promptly."""
+
+        self._shutdown_event = shutdown_event
 
     @property
     def is_open(self) -> bool:
@@ -708,6 +716,8 @@ class RsWsuhaPAdapter(BaseAdapter):
 
     def _read_response_line(self, response_deadline: float) -> bytes:
         while True:
+            if self._shutdown_event is not None and self._shutdown_event.is_set():
+                raise AdapterOperationCancelled("終了要求によりRS-WSUHA-P操作を中断しました。")
             if self._received_lines:
                 return self._received_lines.popleft()
 
@@ -719,7 +729,10 @@ class RsWsuhaPAdapter(BaseAdapter):
 
             chunk = self._transport.read(
                 READ_SIZE_BYTES,
-                timeout_seconds=remaining_seconds,
+                timeout_seconds=min(
+                    remaining_seconds,
+                    SHUTDOWN_POLL_SECONDS if self._shutdown_event is not None else remaining_seconds,
+                ),
             )
             try:
                 self._received_lines.extend(self._line_buffer.feed(chunk))

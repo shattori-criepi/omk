@@ -630,7 +630,7 @@ let response = { status: 200, detail: { configured: true, id_masked: "0000******
 global.setTimeout = (_callback, delay) => { scheduledDelay = delay; return 1; };
 global.clearTimeout = () => {};
 global.fetch = async (url, options = {}) => { requests.push({url, options}); return { status: response.status, ok: response.status < 400, json: async () => response.detail }; };
-vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8") + "\nglobalThis.__brouteTest = {formatToken, unformatToken, validToken, appendKeyboardKey, backspaceKeyboardKey, showStatus, pollStatus, loadStatus};");
+vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8") + "\nglobalThis.__brouteTest = {formatToken, unformatToken, validToken, appendKeyboardKey, backspaceKeyboardKey, showStatus, stateMessage, pollStatus, loadStatus};");
 (async () => {
   const id = "123456789ABCDEF0123456789ABCDEF0", password = "123456789ABC";
   const identifier = elements["#broute-id"], passInput = elements["#broute-password"], overlay = elements["#broute-keyboard-overlay"];
@@ -658,7 +658,7 @@ vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8") + "\nglobalThis.__b
   const confirmed = overlay.hidden && passInput.value === "1234 BBBB BBBB";
   const noPutBeforeSave = !requests.some((request) => request.options.method === "PUT");
   const stateLabels = {};
-  for (const state of ["scanning", "authenticating", "connected", "authentication_error", "connection_error"]) { __brouteTest.showStatus({service_active: true, connection_state: state}); stateLabels[state] = elements["#broute-connection"].textContent; }
+  for (const state of ["scanning", "authenticating", "connected", "scan_error", "authentication_error", "connection_error"]) { __brouteTest.showStatus({service_active: true, connection_state: state}); stateLabels[state] = elements["#broute-connection"].textContent; }
   response = { status: 200, detail: { configured: true, service_active: true, connection_state: "scanning" } };
   await __brouteTest.pollStatus();
   const polling = elements["#broute-connection"].textContent === "スマートメータを探索中" && scheduledDelay === 1500;
@@ -673,7 +673,7 @@ vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8") + "\nglobalThis.__b
   elements["#broute-password"].value = "1234 5678 9ABC";
   await elements["#broute-form"].onsubmit({preventDefault() {}});
   const put = requests.find((request) => request.options.method === "PUT");
-  console.log(JSON.stringify({ formattedId: __brouteTest.formatToken(id, 32), formattedPassword: __brouteTest.formatToken(password, 12), normalizedPaste: __brouteTest.unformatToken("1234 5678 9ABC DEF0 1234 5678 9ABC DEF0", 32), validId: __brouteTest.validToken("1234 5678 9ABC DEF0 1234 5678 9ABC DEF0", 32), validPassword: __brouteTest.validToken("1234 5678 9ABC", 12), invalidShortId: __brouteTest.validToken("1234 5678 9ABC DEF0 1234 5678 9ABC DEF", 32), masked: __brouteTest.formatToken("0000************************4CEF", 32), idOpened, passwordOpened, idMaximum, passwordMaximum, idBackspace, cancellationRestored, confirmed, noPutBeforeSave, passwordBlankOnLoad, stateLabels, polling, upstreamErrorIsNotTransport, transportError, reconnectingMessage: elements["#broute-message"].textContent === "設定を保存しました。Bルートへ再接続しています。", request: JSON.parse(put.options.body) }));
+  console.log(JSON.stringify({ formattedId: __brouteTest.formatToken(id, 32), formattedPassword: __brouteTest.formatToken(password, 12), normalizedPaste: __brouteTest.unformatToken("1234 5678 9ABC DEF0 1234 5678 9ABC DEF0", 32), validId: __brouteTest.validToken("1234 5678 9ABC DEF0 1234 5678 9ABC DEF0", 32), validPassword: __brouteTest.validToken("1234 5678 9ABC", 12), invalidShortId: __brouteTest.validToken("1234 5678 9ABC DEF0 1234 5678 9ABC DEF", 32), masked: __brouteTest.formatToken("0000************************4CEF", 32), idOpened, passwordOpened, idMaximum, passwordMaximum, idBackspace, cancellationRestored, confirmed, noPutBeforeSave, passwordBlankOnLoad, stateLabels, scanErrorMessage: __brouteTest.stateMessage("scan_error"), polling, upstreamErrorIsNotTransport, transportError, reconnectingMessage: elements["#broute-message"].textContent === "設定を保存しました。Bルートへ再接続しています。", request: JSON.parse(put.options.body) }));
 })();
 '''
     completed = subprocess.run(
@@ -704,9 +704,11 @@ vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8") + "\nglobalThis.__b
         "scanning": "スマートメータを探索中",
         "authenticating": "認証中",
         "connected": "接続済み",
+        "scan_error": "スマートメータ未検出",
         "authentication_error": "認証エラー",
-        "connection_error": "接続エラー",
+        "connection_error": "通信エラー",
     }
+    assert result["scanErrorMessage"] == "スマートメータを検出できませんでした。"
     assert result["polling"] is True
     assert result["upstreamErrorIsNotTransport"] is True
     assert result["transportError"] is True

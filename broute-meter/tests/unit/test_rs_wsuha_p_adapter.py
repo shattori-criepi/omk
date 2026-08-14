@@ -13,6 +13,7 @@ import pytest
 from broute_meter.adapter.base import (
     AdapterCommunicationError,
     AdapterCredentialError,
+    AdapterOperationCancelled,
     AdapterPanaJoinError,
     AdapterResponseTimeoutError,
     AdapterScanError,
@@ -610,6 +611,29 @@ def test_join_event_24_is_reported_without_exposing_credentials() -> None:
 
     with pytest.raises(AdapterPanaJoinError, match="認証情報"):
         adapter.join(IPv6Address("fe80::211:22ff:fe33:4455"))
+
+
+def test_active_scan_observes_shutdown_while_waiting_for_radio_response() -> None:
+    class ShutdownOnReadTransport(ScriptedTransport):
+        def __init__(self, event: threading.Event) -> None:
+            super().__init__()
+            self._event = event
+
+        def read(self, size: int = 1, *, timeout_seconds: float | None = None) -> bytes:
+            self.read_sizes.append(size)
+            self.read_timeouts.append(timeout_seconds)
+            self._event.set()
+            return b""
+
+    shutdown_event = threading.Event()
+    transport = ShutdownOnReadTransport(shutdown_event)
+    adapter = RsWsuhaPAdapter(transport, sleeper=lambda _: None)
+    adapter.set_shutdown_event(shutdown_event)
+
+    with pytest.raises(AdapterOperationCancelled):
+        adapter.active_scan()
+
+    assert transport.writes == [b"SKSCAN 2 FFFFFFFF 6 0\r\n"]
 
 
 def test_open_close_and_reopen_schedule_startup_wait_for_each_session() -> None:

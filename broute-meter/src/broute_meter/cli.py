@@ -19,6 +19,7 @@ from broute_meter import __version__
 from broute_meter.adapter import (
     AdapterConfigurationResult,
     AdapterError,
+    AdapterOperationCancelled,
     AdapterPanaJoinError,
     AdapterResponseTimeoutError,
     AdapterScanError,
@@ -29,6 +30,7 @@ from broute_meter.broute import (
     BRouteSession,
     BRouteSessionError,
     InvalidBRouteCredentialsError,
+    NoSmartMeterFoundError,
 )
 from broute_meter.config import AppConfig, ConfigError, load_config, safe_config_summary
 from broute_meter.echonet import EchonetFrameError
@@ -197,6 +199,9 @@ def _run(args: argparse.Namespace) -> int:
         )
         publisher = NullMeasurementPublisher()
     shutdown_event = threading.Event()
+    set_shutdown_event = getattr(adapter, "set_shutdown_event", None)
+    if callable(set_shutdown_event):
+        set_shutdown_event(shutdown_event)
     previous_handlers = _install_stop_signal_handlers(shutdown_event, logger)
 
     try:
@@ -465,7 +470,8 @@ def _connect_broute_until_ready(
         # diagnosis visible while background retries encounter secondary
         # scan/time-out failures caused by the rejected PANA session.
         if runtime_status is not None and not (
-            authentication_rejected and state in {"scanning", "authenticating", "connection_error"}
+            authentication_rejected
+            and state in {"scanning", "authenticating", "scan_error", "connection_error"}
         ):
             _write_runtime_status(runtime_status, state, logger)
 
@@ -488,9 +494,13 @@ def _connect_broute_until_ready(
             logger.info("アクティブスキャンとPANA接続に成功しました")
             return connection
         except (AdapterError, BRouteSessionError, TransportError) as exc:
+            if isinstance(exc, AdapterOperationCancelled) and stop_event.is_set():
+                break
             authentication_rejected = authentication_rejected or _is_authentication_failure(exc)
             report_runtime_state(
-                "authentication_error" if authentication_rejected else "connection_error"
+                "authentication_error"
+                if authentication_rejected
+                else _error_connection_state(exc)
             )
             if recovery_state is not None:
                 status = (
@@ -529,7 +539,9 @@ def _write_runtime_status(
 
 def _error_connection_state(exc: Exception) -> str:
     return (
-        "authentication_error"
+        "scan_error"
+        if isinstance(exc, (AdapterScanError, NoSmartMeterFoundError))
+        else "authentication_error"
         if isinstance(exc, (AdapterPanaJoinError, InvalidBRouteCredentialsError))
         else "connection_error"
     )
