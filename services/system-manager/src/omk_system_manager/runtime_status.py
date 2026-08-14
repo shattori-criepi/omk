@@ -33,13 +33,13 @@ def connection_status(
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        return "starting", None, None
+        return "status_unavailable", None, None
     if not isinstance(data, dict):
-        return "starting", None, None
+        return "status_unavailable", None, None
     state = data.get("state")
     updated_at = data.get("updated_at")
     if state not in CONNECTION_STATES:
-        return "starting", None, None
+        return "status_unavailable", None, None
     retry_after_seconds = data.get("retry_after_seconds")
     if state != "retry_wait" or not isinstance(retry_after_seconds, (int, float)) or retry_after_seconds <= 0:
         retry_after_seconds = None

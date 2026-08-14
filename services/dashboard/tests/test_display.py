@@ -658,7 +658,8 @@ vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8") + "\nglobalThis.__b
   const confirmed = overlay.hidden && passInput.value === "1234 BBBB BBBB";
   const noPutBeforeSave = !requests.some((request) => request.options.method === "PUT");
   const stateLabels = {};
-  for (const state of ["scanning", "authenticating", "connected", "retry_wait", "scan_error", "authentication_error", "connection_error"]) { __brouteTest.showStatus({service_active: true, connection_state: state}); stateLabels[state] = elements["#broute-connection"].textContent; }
+  for (const state of ["starting", "scanning", "authenticating", "connected", "retry_wait", "scan_error", "authentication_error", "connection_error", "status_unavailable"]) { __brouteTest.showStatus({service_active: true, connection_state: state}); stateLabels[state] = elements["#broute-connection"].textContent; }
+  const missingStateIsNotStarting = __brouteTest.showStatus({service_active: true}) === "status_unavailable" && elements["#broute-connection"].textContent === "状態確認中";
   response = { status: 200, detail: { configured: true, service_active: true, connection_state: "scanning" } };
   await __brouteTest.pollStatus();
   const idlePolling = elements["#broute-connection"].textContent === "スマートメータを探索中" && scheduledDelay === 10000;
@@ -697,7 +698,7 @@ vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8") + "\nglobalThis.__b
   await __brouteTest.pollStatus();
   const connectionErrorTerminal = elements["#broute-message"].textContent === "スマートメータとの通信に失敗しました。" && scheduledDelay === 10000;
   const put = requests.find((request) => request.options.method === "PUT");
-  console.log(JSON.stringify({ formattedId: __brouteTest.formatToken(id, 32), formattedPassword: __brouteTest.formatToken(password, 12), normalizedPaste: __brouteTest.unformatToken("1234 5678 9ABC DEF0 1234 5678 9ABC DEF0", 32), validId: __brouteTest.validToken("1234 5678 9ABC DEF0 1234 5678 9ABC DEF0", 32), validPassword: __brouteTest.validToken("1234 5678 9ABC", 12), invalidShortId: __brouteTest.validToken("1234 5678 9ABC DEF0 1234 5678 9ABC DEF", 32), masked: __brouteTest.formatToken("0000************************4CEF", 32), idOpened, passwordOpened, idMaximum, passwordMaximum, idBackspace, cancellationRestored, confirmed, noPutBeforeSave, passwordBlankOnLoad, stateLabels, scanErrorMessage: __brouteTest.stateMessage("scan_error"), retryWaitMessage: __brouteTest.stateMessage("retry_wait", 30), idlePolling, upstreamErrorIsNotTransport, transportError, reconnectStates, scanErrorTerminal, authenticationErrorTerminal, connectionErrorTerminal, request: JSON.parse(put.options.body) }));
+  console.log(JSON.stringify({ formattedId: __brouteTest.formatToken(id, 32), formattedPassword: __brouteTest.formatToken(password, 12), normalizedPaste: __brouteTest.unformatToken("1234 5678 9ABC DEF0 1234 5678 9ABC DEF0", 32), validId: __brouteTest.validToken("1234 5678 9ABC DEF0 1234 5678 9ABC DEF0", 32), validPassword: __brouteTest.validToken("1234 5678 9ABC", 12), invalidShortId: __brouteTest.validToken("1234 5678 9ABC DEF0 1234 5678 9ABC DEF", 32), masked: __brouteTest.formatToken("0000************************4CEF", 32), idOpened, passwordOpened, idMaximum, passwordMaximum, idBackspace, cancellationRestored, confirmed, noPutBeforeSave, passwordBlankOnLoad, stateLabels, missingStateIsNotStarting, scanErrorMessage: __brouteTest.stateMessage("scan_error"), retryWaitMessage: __brouteTest.stateMessage("retry_wait", 30), idlePolling, upstreamErrorIsNotTransport, transportError, reconnectStates, scanErrorTerminal, authenticationErrorTerminal, connectionErrorTerminal, request: JSON.parse(put.options.body) }));
 })();
 '''
     completed = subprocess.run(
@@ -725,6 +726,7 @@ vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8") + "\nglobalThis.__b
     assert result["noPutBeforeSave"] is True
     assert result["passwordBlankOnLoad"] is True
     assert result["stateLabels"] == {
+        "starting": "起動中",
         "scanning": "スマートメータを探索中",
         "authenticating": "認証中",
         "connected": "接続済み",
@@ -732,7 +734,9 @@ vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8") + "\nglobalThis.__b
         "scan_error": "スマートメータ未検出",
         "authentication_error": "認証エラー",
         "connection_error": "通信エラー",
+        "status_unavailable": "状態確認中",
     }
+    assert result["missingStateIsNotStarting"] is True
     assert result["scanErrorMessage"] == "スマートメータを検出できませんでした。"
     assert result["retryWaitMessage"] == "30秒後にスマートメータを再探索します。"
     assert result["idlePolling"] is True
