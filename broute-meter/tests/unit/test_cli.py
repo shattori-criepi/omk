@@ -16,10 +16,14 @@ from broute_meter import cli
 from broute_meter.adapter import (
     AdapterCommunicationError,
     AdapterConfigurationResult,
+    AdapterPanaJoinError,
+    AdapterResponseTimeoutError,
+    AdapterScanError,
 )
 from broute_meter.broute import BRouteSessionError
 from broute_meter.config import AppConfig
 from broute_meter.models import CumulativeEnergyReading, InstantaneousPowerReading
+from broute_meter.runtime_status import RuntimeStatusStore
 from broute_meter.serial.port_detector import PortInfo
 
 ENVIRONMENT_KEYS = (
@@ -634,6 +638,95 @@ def test_run_connection_retry_wait_stops_on_shutdown(
         is None
     )
 
+
+def test_pana_authentication_rejection_is_not_overwritten_by_retry_timeout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A wrong password can be followed by a retry timeout; retain EVENT 24's diagnosis."""
+
+    failures = iter(
+        (
+            AdapterPanaJoinError("PANA authentication rejected"),
+            AdapterResponseTimeoutError("PANA response timed out"),
+        )
+    )
+
+    class FakeSession:
+        def __init__(self, _adapter: object, *, scan_max_attempts: int, on_state_change) -> None:
+            assert scan_max_attempts == 3
+            self._on_state_change = on_state_change
+
+        def connect(self, _identifier: str, _password: str) -> SimpleNamespace:
+            self._on_state_change("scanning")
+            self._on_state_change("authenticating")
+            raise next(failures)
+
+    class StopAfterRetry:
+        attempts = 0
+
+        def is_set(self) -> bool:
+            return False
+
+        def wait(self, _timeout: float) -> bool:
+            self.attempts += 1
+            return self.attempts == 2
+
+    monkeypatch.setattr(cli, "BRouteSession", FakeSession)
+    status_path = tmp_path / "status.json"
+    config = SimpleNamespace(
+        credentials=SimpleNamespace(b_route_id="A" * 32, password="P" * 12),
+        retry=SimpleNamespace(request_max_attempts=3, reconnect_wait_seconds=30),
+    )
+
+    assert cli._connect_broute_until_ready(  # type: ignore[arg-type]
+        object(), config, StopAfterRetry(), logging.getLogger("broute_meter.test"), runtime_status=RuntimeStatusStore(status_path)
+    ) is None
+
+    assert "authentication_error" in status_path.read_text(encoding="utf-8")
+    assert "P" * 12 not in status_path.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        AdapterResponseTimeoutError("PANA response timed out"),
+        AdapterCommunicationError("serial disconnected"),
+        AdapterScanError("smart meter not found"),
+    ],
+)
+def test_pana_transport_failures_remain_connection_errors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: Exception,
+) -> None:
+    class FakeSession:
+        def __init__(self, _adapter: object, *, scan_max_attempts: int, on_state_change) -> None:
+            self._on_state_change = on_state_change
+
+        def connect(self, _identifier: str, _password: str) -> SimpleNamespace:
+            self._on_state_change("authenticating")
+            raise failure
+
+    class StopImmediately:
+        def is_set(self) -> bool:
+            return False
+
+        def wait(self, _timeout: float) -> bool:
+            return True
+
+    monkeypatch.setattr(cli, "BRouteSession", FakeSession)
+    status_path = tmp_path / "status.json"
+    config = SimpleNamespace(
+        credentials=SimpleNamespace(b_route_id="A" * 32, password="P" * 12),
+        retry=SimpleNamespace(request_max_attempts=3, reconnect_wait_seconds=30),
+    )
+
+    cli._connect_broute_until_ready(  # type: ignore[arg-type]
+        object(), config, StopImmediately(), logging.getLogger("broute_meter.test"), runtime_status=RuntimeStatusStore(status_path)
+    )
+
+    assert "connection_error" in status_path.read_text(encoding="utf-8")
 
 def test_run_treats_inflight_failure_after_stop_signal_as_graceful(
     tmp_path: Path,

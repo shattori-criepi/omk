@@ -458,31 +458,40 @@ def _connect_broute_until_ready(
     assert credentials.password is not None
 
     attempt = 0
+    authentication_rejected = False
+
+    def report_runtime_state(state: str) -> None:
+        # EVENT 24 is a definitive authentication rejection.  Keep that
+        # diagnosis visible while background retries encounter secondary
+        # scan/time-out failures caused by the rejected PANA session.
+        if runtime_status is not None and not (
+            authentication_rejected and state in {"scanning", "authenticating", "connection_error"}
+        ):
+            _write_runtime_status(runtime_status, state, logger)
+
     while not stop_event.is_set():
         attempt += 1
         try:
-            if runtime_status is not None:
-                _write_runtime_status(runtime_status, "scanning", logger)
+            report_runtime_state("scanning")
             session_kwargs: dict[str, Any] = {
                 "scan_max_attempts": config.retry.request_max_attempts,
             }
             if runtime_status is not None:
-                session_kwargs["on_state_change"] = (
-                    lambda state: _write_runtime_status(runtime_status, state, logger)
-                )
+                session_kwargs["on_state_change"] = report_runtime_state
             connection = BRouteSession(adapter, **session_kwargs).connect(
                 credentials.b_route_id,
                 credentials.password,
             )
             if recovery_state is not None:
                 recovery_state.write("connected", now=datetime.now().astimezone())
-            if runtime_status is not None:
-                _write_runtime_status(runtime_status, "connected", logger)
+            report_runtime_state("connected")
             logger.info("アクティブスキャンとPANA接続に成功しました")
             return connection
         except (AdapterError, BRouteSessionError, TransportError) as exc:
-            if runtime_status is not None:
-                _write_runtime_status(runtime_status, _error_connection_state(exc), logger)
+            authentication_rejected = authentication_rejected or _is_authentication_failure(exc)
+            report_runtime_state(
+                "authentication_error" if authentication_rejected else "connection_error"
+            )
             if recovery_state is not None:
                 status = (
                     "scan_failed"
@@ -524,6 +533,10 @@ def _error_connection_state(exc: Exception) -> str:
         if isinstance(exc, (AdapterPanaJoinError, InvalidBRouteCredentialsError))
         else "connection_error"
     )
+
+
+def _is_authentication_failure(exc: Exception) -> bool:
+    return _error_connection_state(exc) == "authentication_error"
 
 
 def _install_stop_signal_handlers(
