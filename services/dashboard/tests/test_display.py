@@ -631,11 +631,11 @@ def test_broute_browser_formatter_groups_normalizes_and_submits_unformatted_valu
     javascript_path = Path(__file__).parents[1] / "app" / "static" / "broute.js"
     harness = r'''
 const fs = require("fs"), vm = require("vm");
-const elements = {};
+const elements = {}, documentListeners = {};
 function element() { return { value: "", selectionStart: 0, disabled: false, className: "", textContent: "", hidden: false, children: [], listeners: {}, addEventListener(type, listener) { this.listeners[type] = listener; }, append(child) { this.children.push(child); }, setAttribute() {}, setSelectionRange(position) { this.selectionStart = position; }, reset() { elements["#broute-id"].value = ""; elements["#broute-password"].value = ""; } }; }
 for (const selector of ["#broute-form", "#broute-id", "#broute-password", "#broute-save", "#broute-retry", "#broute-message", "#broute-connection", "#broute-id-masked", "#broute-password-configured", "#broute-keyboard-overlay", "#broute-keyboard-title", "#broute-keyboard-count", "#broute-keyboard-value", "#broute-keyboard-keys", "#broute-keyboard-cancel", "#broute-keyboard-confirm"]) elements[selector] = element();
 elements["#broute-keyboard-overlay"].hidden = true;
-global.document = { querySelector: (selector) => elements[selector], createElement: () => element() };
+global.document = { querySelector: (selector) => elements[selector], createElement: () => element(), addEventListener(type, listener) { documentListeners[type] = listener; } };
 const requests = [];
 let response = { status: 200, detail: { configured: true, id_masked: "0000************************4CEF", password_configured: true, service_active: true, connection_state: "starting" } }, scheduledDelay = null;
 let currentNow = 0;
@@ -655,6 +655,19 @@ vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8") + "\nglobalThis.__b
   __brouteTest.backspaceKeyboardKey();
   elements["#broute-keyboard-cancel"].listeners.click();
   const cancellationRestored = overlay.hidden && identifier.value === "1234 5678";
+  function physicalKey(key) { let prevented = false; documentListeners.keydown({key, preventDefault() { prevented = true; }}); return prevented; }
+  identifier.value = "";
+  identifier.listeners.pointerdown({preventDefault() {}});
+  physicalKey("a");
+  __brouteTest.appendKeyboardKey("B");
+  physicalKey("3");
+  const mixedKeyboardInput = identifier.value === "aB3" && elements["#broute-keyboard-value"].textContent === "aB3";
+  for (let index = 0; index < 40; index += 1) physicalKey("z");
+  const physicalIdMaximum = __brouteTest.unformatToken(identifier.value, 32).length === 32;
+  physicalKey("Backspace");
+  const physicalBackspace = __brouteTest.unformatToken(identifier.value, 32).length === 31;
+  physicalKey("Escape");
+  const physicalEscapeRestored = overlay.hidden && identifier.value === "";
   identifier.value = "";
   identifier.listeners.pointerdown({preventDefault() {}});
   for (let index = 0; index < 40; index += 1) __brouteTest.appendKeyboardKey("A");
@@ -669,6 +682,10 @@ vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8") + "\nglobalThis.__b
   const passwordMaximum = __brouteTest.unformatToken(passInput.value, 12).length === 12 && elements["#broute-keyboard-value"].textContent === "1234 BBBB BBBB";
   elements["#broute-keyboard-confirm"].listeners.click();
   const confirmed = overlay.hidden && passInput.value === "1234 BBBB BBBB";
+  passInput.value = "ab";
+  passInput.listeners.pointerdown({preventDefault() {}});
+  physicalKey("c");
+  const physicalEnter = physicalKey("Enter") && overlay.hidden && passInput.value === "abc";
   const noPutBeforeSave = !requests.some((request) => request.options.method === "PUT");
   const stateLabels = {};
   for (const state of ["starting", "adapter_missing", "adapter_initializing", "scanning", "authenticating", "connected", "retry_wait", "scan_error", "authentication_error", "connection_error", "status_unavailable"]) { __brouteTest.showStatus({service_active: true, connection_state: state}); stateLabels[state] = elements["#broute-connection"].textContent; }
@@ -726,7 +743,7 @@ vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8") + "\nglobalThis.__b
   await __brouteTest.pollStatus();
   const longRetryWaitDoesNotTimeout = elements["#broute-connection"].textContent === "再試行待ち" && elements["#broute-message"].textContent === "スマートメータを検出できません。BルートID・パスワード、または通信状態を確認してください。" && !elements["#broute-retry"].hidden && scheduledDelay === 10000;
   const put = requests.find((request) => request.options.method === "PUT");
-  console.log(JSON.stringify({ formattedId: __brouteTest.formatToken(id, 32), formattedPassword: __brouteTest.formatToken(password, 12), normalizedPaste: __brouteTest.unformatToken("1234 5678 9ABC DEF0 1234 5678 9ABC DEF0", 32), validId: __brouteTest.validToken("1234 5678 9ABC DEF0 1234 5678 9ABC DEF0", 32), validPassword: __brouteTest.validToken("1234 5678 9ABC", 12), invalidShortId: __brouteTest.validToken("1234 5678 9ABC DEF0 1234 5678 9ABC DEF", 32), masked: __brouteTest.formatToken("0000************************4CEF", 32), idOpened, passwordOpened, idMaximum, passwordMaximum, idBackspace, cancellationRestored, confirmed, noPutBeforeSave, passwordBlankOnLoad, stateLabels, retryButtonVisibleAfterRepeatedFailures, retryButtonHiddenBeforeExtendedRetry, retryButtonHiddenWhenAdapterMissing, missingStateIsNotStarting, adapterMissingMessage: __brouteTest.stateMessage("adapter_missing"), adapterInitializingMessage: __brouteTest.stateMessage("adapter_initializing"), scanErrorMessage: __brouteTest.stateMessage("scan_error"), retryWaitMessage: __brouteTest.stateMessage("retry_wait", 30), idlePolling, upstreamErrorIsNotTransport, transportError, reconnectStates, scanErrorTerminal, authenticationErrorTerminal, connectionErrorTerminal, adapterMissingStatus, longRetryWaitDoesNotTimeout, request: JSON.parse(put.options.body) }));
+  console.log(JSON.stringify({ formattedId: __brouteTest.formatToken(id, 32), formattedPassword: __brouteTest.formatToken(password, 12), normalizedPaste: __brouteTest.unformatToken("1234 5678 9ABC DEF0 1234 5678 9ABC DEF0", 32), validId: __brouteTest.validToken("1234 5678 9ABC DEF0 1234 5678 9ABC DEF0", 32), validPassword: __brouteTest.validToken("1234 5678 9ABC", 12), invalidShortId: __brouteTest.validToken("1234 5678 9ABC DEF0 1234 5678 9ABC DEF", 32), masked: __brouteTest.formatToken("0000************************4CEF", 32), idOpened, passwordOpened, idMaximum, passwordMaximum, idBackspace, cancellationRestored, mixedKeyboardInput, physicalIdMaximum, physicalBackspace, physicalEscapeRestored, physicalEnter, confirmed, noPutBeforeSave, passwordBlankOnLoad, stateLabels, retryButtonVisibleAfterRepeatedFailures, retryButtonHiddenBeforeExtendedRetry, retryButtonHiddenWhenAdapterMissing, missingStateIsNotStarting, adapterMissingMessage: __brouteTest.stateMessage("adapter_missing"), adapterInitializingMessage: __brouteTest.stateMessage("adapter_initializing"), scanErrorMessage: __brouteTest.stateMessage("scan_error"), retryWaitMessage: __brouteTest.stateMessage("retry_wait", 30), idlePolling, upstreamErrorIsNotTransport, transportError, reconnectStates, scanErrorTerminal, authenticationErrorTerminal, connectionErrorTerminal, adapterMissingStatus, longRetryWaitDoesNotTimeout, request: JSON.parse(put.options.body) }));
 })();
 '''
     completed = subprocess.run(
@@ -750,6 +767,11 @@ vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8") + "\nglobalThis.__b
     assert result["passwordMaximum"] is True
     assert result["idBackspace"] is True
     assert result["cancellationRestored"] is True
+    assert result["mixedKeyboardInput"] is True
+    assert result["physicalIdMaximum"] is True
+    assert result["physicalBackspace"] is True
+    assert result["physicalEscapeRestored"] is True
+    assert result["physicalEnter"] is True
     assert result["confirmed"] is True
     assert result["noPutBeforeSave"] is True
     assert result["passwordBlankOnLoad"] is True
