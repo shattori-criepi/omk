@@ -25,7 +25,11 @@ from broute_meter.adapter import (
     MockAdapter,
     RsWsuhaPAdapter,
 )
-from broute_meter.broute import BRouteSession, BRouteSessionError
+from broute_meter.broute import (
+    BRouteSession,
+    BRouteSessionError,
+    InvalidBRouteCredentialsError,
+)
 from broute_meter.config import AppConfig, ConfigError, load_config, safe_config_summary
 from broute_meter.echonet import EchonetFrameError
 from broute_meter.logging_config import configure_logging
@@ -33,6 +37,7 @@ from broute_meter.meter import SmartMeterClient, SmartMeterError
 from broute_meter.models import BRouteConnection
 from broute_meter.mqtt import NullMeasurementPublisher, create_measurement_publisher
 from broute_meter.resilience import RecoveringMeterReader
+from broute_meter.runtime_status import RuntimeStatusStore
 from broute_meter.scheduler import MeasurementScheduler
 from broute_meter.serial.port_detector import (
     PortDetectionError,
@@ -180,6 +185,8 @@ def _run(args: argparse.Namespace) -> int:
     logger.info("runに使用するポート: %s", port)
     adapter = _create_rs_wsuha_p_adapter(config, port)
     storage = CsvMeasurementStorage(config.storage.data_directory)
+    runtime_status = RuntimeStatusStore(config.storage.data_directory / "status.json")
+    _write_runtime_status(runtime_status, "starting", logger)
     try:
         publisher = create_measurement_publisher(config.mqtt)
         publisher.start()
@@ -222,6 +229,7 @@ def _run(args: argparse.Namespace) -> int:
                 shutdown_event,
                 logger,
                 recovery_state,
+                runtime_status,
             )
             if connection is None:
                 logger.info("初期Bルート接続の再試行を終了します")
@@ -236,23 +244,29 @@ def _run(args: argparse.Namespace) -> int:
 
             def reconnect_meter() -> SmartMeterClient:
                 logger.warning("シリアルポートとPANA接続を再確立します")
-                adapter.close()
-                adapter.open()
-                reconnect_setup = adapter.configure(
-                    config.adapter.expected_settings,
-                    write_changes=config.adapter.auto_configure,
-                )
-                if not reconnect_setup.is_configured:
-                    raise AdapterError(
-                        "再接続後のアダプター設定が期待値と一致しません。"
+                try:
+                    adapter.close()
+                    adapter.open()
+                    reconnect_setup = adapter.configure(
+                        config.adapter.expected_settings,
+                        write_changes=config.adapter.auto_configure,
                     )
-                reconnected = BRouteSession(
-                    adapter,
-                    scan_max_attempts=config.retry.request_max_attempts,
-                ).connect(
-                    credentials.b_route_id,
-                    credentials.password,
-                )
+                    if not reconnect_setup.is_configured:
+                        raise AdapterError(
+                            "再接続後のアダプター設定が期待値と一致しません。"
+                        )
+                    _write_runtime_status(runtime_status, "scanning", logger)
+                    reconnected = BRouteSession(
+                        adapter,
+                        scan_max_attempts=config.retry.request_max_attempts,
+                        on_state_change=lambda state: _write_runtime_status(runtime_status, state, logger),
+                    ).connect(
+                        credentials.b_route_id,
+                        credentials.password,
+                    )
+                except (AdapterError, BRouteSessionError, TransportError) as exc:
+                    _write_runtime_status(runtime_status, _error_connection_state(exc), logger)
+                    raise
                 return SmartMeterClient(
                     adapter,
                     reconnected.smart_meter_ipv6,
@@ -328,6 +342,7 @@ def _run(args: argparse.Namespace) -> int:
                 storage.close()
             finally:
                 adapter.close()
+                _write_runtime_status(runtime_status, "stopped", logger)
     finally:
         _restore_signal_handlers(previous_handlers)
 
@@ -429,6 +444,7 @@ def _connect_broute_until_ready(
     stop_event: threading.Event,
     logger: logging.Logger,
     recovery_state: RecoveryStateStore | None = None,
+    runtime_status: RuntimeStatusStore | None = None,
 ) -> BRouteConnection | None:
     """終了要求までBルート接続シーケンス全体を再試行する。
 
@@ -445,18 +461,28 @@ def _connect_broute_until_ready(
     while not stop_event.is_set():
         attempt += 1
         try:
-            connection = BRouteSession(
-                adapter,
-                scan_max_attempts=config.retry.request_max_attempts,
-            ).connect(
+            if runtime_status is not None:
+                _write_runtime_status(runtime_status, "scanning", logger)
+            session_kwargs: dict[str, Any] = {
+                "scan_max_attempts": config.retry.request_max_attempts,
+            }
+            if runtime_status is not None:
+                session_kwargs["on_state_change"] = (
+                    lambda state: _write_runtime_status(runtime_status, state, logger)
+                )
+            connection = BRouteSession(adapter, **session_kwargs).connect(
                 credentials.b_route_id,
                 credentials.password,
             )
             if recovery_state is not None:
                 recovery_state.write("connected", now=datetime.now().astimezone())
+            if runtime_status is not None:
+                _write_runtime_status(runtime_status, "connected", logger)
             logger.info("アクティブスキャンとPANA接続に成功しました")
             return connection
         except (AdapterError, BRouteSessionError, TransportError) as exc:
+            if runtime_status is not None:
+                _write_runtime_status(runtime_status, _error_connection_state(exc), logger)
             if recovery_state is not None:
                 status = (
                     "scan_failed"
@@ -477,6 +503,27 @@ def _connect_broute_until_ready(
                 break
 
     return None
+
+
+def _write_runtime_status(
+    store: RuntimeStatusStore,
+    state: str,
+    logger: logging.Logger,
+) -> None:
+    """Status persistence must never stop metering or disclose credentials."""
+
+    try:
+        store.write(state, now=datetime.now().astimezone())
+    except OSError:
+        logger.warning("Bルート接続状態を保存できませんでした", exc_info=True)
+
+
+def _error_connection_state(exc: Exception) -> str:
+    return (
+        "authentication_error"
+        if isinstance(exc, (AdapterPanaJoinError, InvalidBRouteCredentialsError))
+        else "connection_error"
+    )
 
 
 def _install_stop_signal_handlers(

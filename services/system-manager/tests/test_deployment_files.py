@@ -18,6 +18,7 @@ def test_system_manager_unit_allows_the_narrow_sudoers_escalation() -> None:
     assert "ProtectSystem=strict" in unit
     assert "ProtectHome=read-only" in unit
     assert "ReadWritePaths=@OMK_ROOT@/broute-meter/config" in unit
+    assert "Environment=OMK_BROUTE_STATUS_PATH=@OMK_ROOT@/data/broute-meter/status.json" in unit
 
 
 def test_setup_reloads_and_restarts_active_system_manager() -> None:

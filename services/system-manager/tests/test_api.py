@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import json
 from pathlib import Path
 
 import pytest
@@ -30,7 +31,14 @@ class ActiveController:
 
 
 def client_for(tmp_path: Path) -> TestClient:
-    app = create_app(Settings(TOKEN, tmp_path / "credentials.yaml", "/usr/bin/systemctl"))
+    app = create_app(
+        Settings(
+            TOKEN,
+            tmp_path / "credentials.yaml",
+            "/usr/bin/systemctl",
+            tmp_path / "status.json",
+        )
+    )
     return TestClient(app)
 
 
@@ -60,6 +68,8 @@ def test_update_returns_no_password_or_raw_id_and_logs_no_secret(tmp_path: Path,
         "id_masked": "AAAA************************AAAA",
         "password_configured": True,
         "service_active": True,
+        "connection_state": "starting",
+        "status_updated_at": None,
     }
     combined = response.text + caplog.text
     assert VALID_ID not in combined
@@ -143,3 +153,46 @@ def test_status_never_returns_password_or_raw_id(tmp_path: Path) -> None:
     assert response.json()["service_active"] is False
     assert VALID_ID not in response.text
     assert VALID_PASSWORD not in response.text
+
+
+@pytest.mark.parametrize(
+    ("state", "expected"),
+    [
+        ("scanning", "scanning"),
+        ("authenticating", "authenticating"),
+        ("connected", "connected"),
+        ("authentication_error", "authentication_error"),
+        ("connection_error", "connection_error"),
+    ],
+)
+def test_status_returns_broute_runtime_state_without_secrets(
+    tmp_path: Path,
+    state: str,
+    expected: str,
+) -> None:
+    (tmp_path / "status.json").write_text(
+        json.dumps({"state": state, "updated_at": "2026-08-14T00:00:00+00:00"}),
+        encoding="utf-8",
+    )
+    with client_for(tmp_path) as client:
+        client.app.state.controller = ActiveController()
+        response = client.get("/api/broute/credentials/status", headers=headers())
+
+    assert response.status_code == 200
+    assert response.json()["connection_state"] == expected
+    assert response.json()["status_updated_at"] == "2026-08-14T00:00:00+00:00"
+    assert VALID_ID not in response.text
+    assert VALID_PASSWORD not in response.text
+
+
+def test_inactive_service_is_stopped_even_with_a_stale_connected_status(tmp_path: Path) -> None:
+    (tmp_path / "status.json").write_text(
+        '{"state":"connected","updated_at":"2026-08-14T00:00:00+00:00"}',
+        encoding="utf-8",
+    )
+    with client_for(tmp_path) as client:
+        client.app.state.controller = ActiveController(active=False)
+        response = client.get("/api/broute/credentials/status", headers=headers())
+
+    assert response.json()["service_active"] is False
+    assert response.json()["connection_state"] == "stopped"
