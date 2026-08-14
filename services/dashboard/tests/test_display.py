@@ -1,6 +1,8 @@
 import asyncio
 import json
 import re
+import shutil
+import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -580,12 +582,53 @@ def test_broute_admin_page_keeps_credentials_and_token_out_of_html() -> None:
     assert "Bルート設定" in response.text
     assert 'id="broute-password"' in response.text
     assert 'autocomplete="new-password"' in response.text
+    assert 'id="broute-id" name="id" required maxlength="39"' in response.text
+    assert 'id="broute-password" name="password" type="password" required maxlength="14"' in response.text
     assert token not in response.text + javascript
     assert raw_identifier not in response.text + javascript
     assert "validToken(id, 32)" in javascript
     assert "validToken(pass, 12)" in javascript
     assert "保存しました。Bルートへ再接続しました。" in javascript
     assert "設定は保存されましたが、Bルートサービスの再起動に失敗しました。" in javascript
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is required for browser formatter tests")
+def test_broute_browser_formatter_groups_normalizes_and_submits_unformatted_values() -> None:
+    javascript_path = Path(__file__).parents[1] / "app" / "static" / "broute.js"
+    harness = r'''
+const fs = require("fs"), vm = require("vm");
+const elements = {};
+function element() { return { value: "", selectionStart: 0, disabled: false, className: "", textContent: "", addEventListener() {}, setSelectionRange(position) { this.selectionStart = position; }, reset() { elements["#broute-id"].value = ""; elements["#broute-password"].value = ""; } }; }
+for (const selector of ["#broute-form", "#broute-id", "#broute-password", "#broute-save", "#broute-message", "#broute-connection", "#broute-id-masked", "#broute-password-configured"]) elements[selector] = element();
+global.document = { querySelector: (selector) => elements[selector] };
+const requests = [];
+global.fetch = async (url, options = {}) => { requests.push({url, options}); return { status: 200, json: async () => ({ configured: true, id_masked: "0000************************4CEF", password_configured: true, service_active: true }) }; };
+vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8") + "\nglobalThis.__brouteTest = {formatToken, unformatToken, validToken};");
+(async () => {
+  const id = "123456789ABCDEF0123456789ABCDEF0", password = "123456789ABC";
+  elements["#broute-id"].value = "1234 5678 9ABC DEF0 1234 5678 9ABC DEF0";
+  elements["#broute-password"].value = "1234 5678 9ABC";
+  await elements["#broute-form"].onsubmit({preventDefault() {}});
+  const put = requests.find((request) => request.options.method === "PUT");
+  console.log(JSON.stringify({ formattedId: __brouteTest.formatToken(id, 32), formattedPassword: __brouteTest.formatToken(password, 12), normalizedPaste: __brouteTest.unformatToken("1234 5678 9ABC DEF0 1234 5678 9ABC DEF0", 32), validId: __brouteTest.validToken("1234 5678 9ABC DEF0 1234 5678 9ABC DEF0", 32), validPassword: __brouteTest.validToken("1234 5678 9ABC", 12), invalidShortId: __brouteTest.validToken("1234 5678 9ABC DEF0 1234 5678 9ABC DEF", 32), masked: __brouteTest.formatToken("0000************************4CEF", 32), request: JSON.parse(put.options.body) }));
+})();
+'''
+    completed = subprocess.run(
+        ["node", "-e", harness, str(javascript_path)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    result = json.loads(completed.stdout)
+
+    assert result["formattedId"] == "1234 5678 9ABC DEF0 1234 5678 9ABC DEF0"
+    assert result["formattedPassword"] == "1234 5678 9ABC"
+    assert result["normalizedPaste"] == "123456789ABCDEF0123456789ABCDEF0"
+    assert result["validId"] is True
+    assert result["validPassword"] is True
+    assert result["invalidShortId"] is False
+    assert result["masked"] == "0000 **** **** **** **** **** **** 4CEF"
+    assert result["request"] == {"id": "123456789ABCDEF0123456789ABCDEF0", "password": "123456789ABC"}
 
 
 def test_dashboard_compose_uses_env_file_without_credentials_mount() -> None:

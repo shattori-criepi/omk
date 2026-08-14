@@ -21,15 +21,15 @@
           <div><dt>パスワード</dt><dd id="broute-password-configured">確認中</dd></div>
         </dl>
       </section>
-      <form id="broute-form" class="broute-form" autocomplete="off">
+      <form id="broute-form" class="broute-form" autocomplete="off" novalidate>
         <label>BルートID
-          <input id="broute-id" name="id" required minlength="32" maxlength="32" pattern="[!-~]{32}" autocomplete="off" spellcheck="false" aria-describedby="broute-id-hint">
+          <input id="broute-id" name="id" required maxlength="39" autocomplete="off" spellcheck="false" aria-describedby="broute-id-hint">
         </label>
-        <p id="broute-id-hint" class="field-hint">空白を含まないASCII 32文字</p>
+        <p id="broute-id-hint" class="field-hint">4文字ごとに区切って表示 · ASCII 32文字</p>
         <label>パスワード
-          <input id="broute-password" name="password" type="password" required minlength="12" maxlength="12" pattern="[!-~]{12}" autocomplete="new-password" spellcheck="false" aria-describedby="broute-password-hint">
+          <input id="broute-password" name="password" type="password" required maxlength="14" autocomplete="new-password" spellcheck="false" aria-describedby="broute-password-hint">
         </label>
-        <p id="broute-password-hint" class="field-hint">空白を含まないASCII 12文字</p>
+        <p id="broute-password-hint" class="field-hint">4文字ごとに区切って表示 · ASCII 12文字</p>
         <p id="broute-message" class="setup-status" role="status" aria-live="polite">保存済みのIDとパスワードは表示しません。</p>
         <button id="broute-save" class="primary" type="submit">保存して接続</button>
       </form>
