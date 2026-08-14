@@ -30,6 +30,23 @@ class ActiveController:
             raise ServiceControlError("credentials_saved_restart_failed")
 
 
+class PowerController:
+    def __init__(self, failure: str | None = None) -> None:
+        self.failure = failure
+        self.calls: list[str] = []
+
+    def reboot(self) -> None:
+        self._run("reboot")
+
+    def shutdown(self) -> None:
+        self._run("shutdown")
+
+    def _run(self, operation: str) -> None:
+        self.calls.append(operation)
+        if self.failure is not None:
+            raise ServiceControlError(self.failure)
+
+
 def client_for(tmp_path: Path) -> TestClient:
     app = create_app(
         Settings(
@@ -51,6 +68,35 @@ def test_token_is_required_and_checked(tmp_path: Path) -> None:
     with client_for(tmp_path) as client:
         assert client.get("/api/broute/credentials/status").status_code == 401
         assert client.get("/api/broute/credentials/status", headers={"Authorization": "Bearer wrong"}).status_code == 401
+
+
+@pytest.mark.parametrize("path", ["/api/system/reboot", "/api/system/shutdown"])
+def test_host_power_apis_require_token(tmp_path: Path, path: str) -> None:
+    with client_for(tmp_path) as client:
+        assert client.post(path).status_code == 401
+        assert client.post(path, headers={"Authorization": "Bearer wrong"}).status_code == 401
+
+
+@pytest.mark.parametrize(("path", "operation"), [("/api/system/reboot", "reboot"), ("/api/system/shutdown", "shutdown")])
+def test_host_power_apis_invoke_only_the_fixed_operation(tmp_path: Path, path: str, operation: str) -> None:
+    with client_for(tmp_path) as client:
+        controller = PowerController()
+        client.app.state.controller = controller
+        response = client.post(path, headers=headers())
+
+    assert response.status_code == 200
+    assert response.json() == {"accepted": True}
+    assert controller.calls == [operation]
+
+
+@pytest.mark.parametrize(("path", "code"), [("/api/system/reboot", "system_reboot_failed"), ("/api/system/shutdown", "system_shutdown_failed")])
+def test_host_power_api_reports_systemctl_failure(tmp_path: Path, path: str, code: str) -> None:
+    with client_for(tmp_path) as client:
+        client.app.state.controller = PowerController(code)
+        response = client.post(path, headers=headers())
+
+    assert response.status_code == 502
+    assert response.json() == {"detail": {"code": code}}
 
 
 def test_update_returns_no_password_or_raw_id_and_logs_no_secret(tmp_path: Path, caplog) -> None:

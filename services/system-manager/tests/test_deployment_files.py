@@ -49,3 +49,5 @@ def test_setup_preserves_and_validates_a_root_only_existing_token() -> None:
     assert 'log "Preserving existing root-only token file."' in setup
     assert 'DASHBOARD_ENV_FILE="${ENV_DIR}/dashboard-system-manager.env"' in setup
     assert 'install -o root -g "${TARGET_GROUP}" -m 0640 "${ENV_FILE}" "${DASHBOARD_ENV_FILE}"' in setup
+    assert '%s reboot, %s poweroff' in setup
+    assert '"${TARGET_USER}" "${SYSTEMCTL_PATH}" "${SYSTEMCTL_PATH}" "${SYSTEMCTL_PATH}" "${SYSTEMCTL_PATH}"' in setup

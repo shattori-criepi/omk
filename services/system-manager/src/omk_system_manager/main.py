@@ -185,6 +185,28 @@ def create_app(configured_settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=500, detail="再試行要求を保存できませんでした") from error
         return {"accepted": True}
 
+    @app.post("/api/system/reboot", dependencies=[Depends(authenticated)])
+    def reboot_system(request: Request) -> dict[str, bool]:
+        controller: BRouteServiceController = request.app.state.controller
+        try:
+            controller.reboot()
+        except ServiceControlError as error:
+            raise HTTPException(status_code=502, detail={"code": error.code}) from None
+        except (OSError, subprocess.TimeoutExpired):
+            raise HTTPException(status_code=502, detail={"code": "system_reboot_failed"}) from None
+        return {"accepted": True}
+
+    @app.post("/api/system/shutdown", dependencies=[Depends(authenticated)])
+    def shutdown_system(request: Request) -> dict[str, bool]:
+        controller: BRouteServiceController = request.app.state.controller
+        try:
+            controller.shutdown()
+        except ServiceControlError as error:
+            raise HTTPException(status_code=502, detail={"code": error.code}) from None
+        except (OSError, subprocess.TimeoutExpired):
+            raise HTTPException(status_code=502, detail={"code": "system_shutdown_failed"}) from None
+        return {"accepted": True}
+
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}

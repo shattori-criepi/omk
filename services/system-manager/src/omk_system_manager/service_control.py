@@ -1,4 +1,4 @@
-"""Fixed, non-shell systemctl operations for the B-route service."""
+"""Fixed, non-shell systemctl operations authorized by sudoers."""
 
 from __future__ import annotations
 
@@ -34,8 +34,19 @@ class BRouteServiceController:
         # surface a completed command with the active state on stdout.
         return result.returncode == 0 or result.stdout.strip().casefold() == "active"
 
+    def reboot(self) -> None:
+        self._run_system("reboot", "system_reboot_failed")
+
+    def shutdown(self) -> None:
+        self._run_system("poweroff", "system_shutdown_failed")
+
     def _run(self, verb: str, failure_code: str) -> None:
         result = self._execute(verb)
+        if result.returncode != 0:
+            raise ServiceControlError(failure_code)
+
+    def _run_system(self, verb: str, failure_code: str) -> None:
+        result = self._execute_system(verb)
         if result.returncode != 0:
             raise ServiceControlError(failure_code)
 
@@ -43,6 +54,17 @@ class BRouteServiceController:
         # No value from an HTTP request is ever included in this argv list.
         return subprocess.run(
             ["sudo", "-n", self._systemctl_path, verb, BROUTE_SERVICE],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=45,
+            shell=False,
+        )
+
+    def _execute_system(self, verb: str) -> subprocess.CompletedProcess[str]:
+        # These verbs are defined in this module and never come from an API request.
+        return subprocess.run(
+            ["sudo", "-n", self._systemctl_path, verb],
             check=False,
             capture_output=True,
             text=True,

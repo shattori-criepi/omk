@@ -23,6 +23,42 @@ def test_controller_uses_only_fixed_sudo_systemctl_commands(monkeypatch: pytest.
     ]
 
 
+def test_controller_uses_only_fixed_host_power_commands(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[list[str]] = []
+
+    def run(args: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    controller = BRouteServiceController("/usr/bin/systemctl")
+    controller.reboot()
+    controller.shutdown()
+
+    assert calls == [
+        ["sudo", "-n", "/usr/bin/systemctl", "reboot"],
+        ["sudo", "-n", "/usr/bin/systemctl", "poweroff"],
+    ]
+
+
+@pytest.mark.parametrize(
+    ("operation", "expected_code"),
+    [("reboot", "system_reboot_failed"), ("shutdown", "system_shutdown_failed")],
+)
+def test_controller_reports_host_power_failure(
+    monkeypatch: pytest.MonkeyPatch, operation: str, expected_code: str
+) -> None:
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda args, **_: subprocess.CompletedProcess(args, 1, "", "private error"),
+    )
+
+    with pytest.raises(ServiceControlError) as caught:
+        getattr(BRouteServiceController("/usr/bin/systemctl"), operation)()
+    assert caught.value.code == expected_code
+
+
 @pytest.mark.parametrize("returncodes", [(1,), (0, 3)])
 def test_controller_reports_restart_or_active_failure(
     monkeypatch: pytest.MonkeyPatch, returncodes: tuple[int, ...]

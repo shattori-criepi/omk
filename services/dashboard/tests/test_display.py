@@ -519,6 +519,27 @@ def test_broute_retry_proxy_uses_fixed_upstream_endpoint(monkeypatch: pytest.Mon
     assert response.json() == {"accepted": True}
 
 
+@pytest.mark.parametrize(
+    ("dashboard_path", "system_manager_path"),
+    [
+        ("/api/admin/system/reboot", "/api/system/reboot"),
+        ("/api/admin/system/shutdown", "/api/system/shutdown"),
+    ],
+)
+def test_system_power_proxy_uses_fixed_upstream_endpoint(
+    monkeypatch: pytest.MonkeyPatch, dashboard_path: str, system_manager_path: str
+) -> None:
+    async def accepted(method: str, path: str, body: dict | None = None) -> dict:
+        assert (method, path, body) == ("POST", system_manager_path, None)
+        return {"accepted": True}
+
+    monkeypatch.setattr(dashboard_main, "_system_manager_request", accepted)
+    response = client.post(dashboard_path)
+
+    assert response.status_code == 200
+    assert response.json() == {"accepted": True}
+
+
 @pytest.mark.parametrize("status_code", [401, 403, 400])
 def test_broute_proxy_propagates_system_manager_errors(monkeypatch: pytest.MonkeyPatch, status_code: int) -> None:
     async def failed_request(*_: object, **__: object) -> dict:
@@ -613,6 +634,53 @@ def test_broute_admin_page_keeps_credentials_and_token_out_of_html() -> None:
     assert "validToken(pass, 12)" in javascript
     assert "設定を保存しました。Bルートへの接続を開始します。" in javascript
     assert "設定は保存されましたが、Bルートサービスの再起動に失敗しました。" in javascript
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is required for system controls tests")
+def test_system_controls_require_confirmation_before_fixed_power_requests() -> None:
+    javascript_path = Path(__file__).parents[1] / "app" / "static" / "system.js"
+    response = client.get("/admin/system")
+    assert response.status_code == 200
+    assert "再起動" in response.text
+    assert "シャットダウン" in response.text
+    assert 'id="system-reboot"' in response.text
+    assert 'id="system-shutdown"' in response.text
+
+    harness = r'''
+const fs = require("fs"), vm = require("vm");
+const elements = {};
+function element() { return { textContent: "", disabled: false, listeners: {}, open: false, addEventListener(type, listener) { this.listeners[type] = listener; }, showModal() { this.open = true; }, close() { this.open = false; } }; }
+for (const selector of ["#system-reboot", "#system-shutdown", "#system-message", "#system-confirm", "#system-confirm-message", "#system-confirm-cancel", "#system-confirm-execute"]) elements[selector] = element();
+const requests = []; let return503 = false;
+global.document = {querySelector: (selector) => elements[selector]};
+global.window = {setTimeout() {}, location: {assign() {}}};
+global.fetch = async (url, options) => { requests.push({url, options}); return {ok: !return503, status: return503 ? 503 : 200, json: async () => return503 ? {detail: "システム管理サービスに接続できません"} : {accepted: true}}; };
+vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8"));
+(async () => {
+  elements["#system-reboot"].listeners.click();
+  const rebootConfirmation = elements["#system-confirm"].open && elements["#system-confirm-message"].textContent === "OMKを再起動しますか？";
+  elements["#system-confirm-cancel"].listeners.click();
+  const cancelDoesNotRequest = requests.length === 0 && !elements["#system-confirm"].open;
+  elements["#system-shutdown"].listeners.click();
+  const shutdownConfirmation = elements["#system-confirm-message"].textContent.includes("電源を入れ直すまで利用できません");
+  await elements["#system-confirm-execute"].listeners.click();
+  const shutdownRequested = requests.length === 1 && requests[0].url === "/api/admin/system/shutdown" && requests[0].options.method === "POST" && elements["#system-message"].textContent === "OMKをシャットダウンしています…";
+  elements["#system-reboot"].listeners.click(); return503 = true;
+  await elements["#system-confirm-execute"].listeners.click();
+  const interruptedRebootIsNotError = elements["#system-message"].textContent === "OMKを再起動しています…";
+  console.log(JSON.stringify({rebootConfirmation, cancelDoesNotRequest, shutdownConfirmation, shutdownRequested, interruptedRebootIsNotError}));
+})();
+'''
+    completed = subprocess.run(
+        ["node", "-e", harness, str(javascript_path)], check=True, capture_output=True, text=True
+    )
+    assert json.loads(completed.stdout) == {
+        "rebootConfirmation": True,
+        "cancelDoesNotRequest": True,
+        "shutdownConfirmation": True,
+        "shutdownRequested": True,
+        "interruptedRebootIsNotError": True,
+    }
 
 
 def test_broute_layout_uses_wide_grid_rows_with_narrow_screen_fallback() -> None:
