@@ -61,6 +61,7 @@ from broute_meter.usb_recovery import (
 
 INITIAL_CONNECTION_RETRY_ATTEMPTS = 2
 EXTENDED_CONNECTION_RETRY_WAIT_SECONDS = 300.0
+ADAPTER_PRESENCE_CHECK_SECONDS = 5.0
 
 DEFAULT_SETTINGS_PATH = Path("config/settings.yaml")
 DEFAULT_CREDENTIALS_PATH = Path("config/credentials.yaml")
@@ -214,6 +215,13 @@ def _run(args: argparse.Namespace) -> int:
             config.storage.data_directory / "broute-recovery-state.json"
         )
         try:
+            if not _wait_for_adapter_device(
+                port,
+                runtime_status,
+                shutdown_event,
+                logger,
+            ):
+                return 0
             setup_result = _configure_adapter_with_usb_recovery(
                 adapter,
                 config,
@@ -241,6 +249,7 @@ def _run(args: argparse.Namespace) -> int:
                 recovery_state,
                 runtime_status,
                 retry_request,
+                port=port,
             )
             if connection is None:
                 logger.info("初期Bルート接続の再試行を終了します")
@@ -256,6 +265,15 @@ def _run(args: argparse.Namespace) -> int:
             def reconnect_meter() -> SmartMeterClient:
                 logger.warning("シリアルポートとPANA接続を再確立します")
                 try:
+                    if not _wait_for_adapter_device(
+                        port,
+                        runtime_status,
+                        shutdown_event,
+                        logger,
+                    ):
+                        raise AdapterOperationCancelled(
+                            "終了要求によりアダプター再接続を中止しました。"
+                        )
                     adapter.close()
                     adapter.open()
                     reconnect_setup = adapter.configure(
@@ -457,6 +475,7 @@ def _connect_broute_until_ready(
     recovery_state: RecoveryStateStore | None = None,
     runtime_status: RuntimeStatusStore | None = None,
     retry_request: RetryRequestStore | None = None,
+    port: str | None = None,
 ) -> BRouteConnection | None:
     """終了要求までBルート接続シーケンス全体を再試行する。
 
@@ -496,6 +515,13 @@ def _connect_broute_until_ready(
     while not stop_event.is_set():
         attempt += 1
         try:
+            if port is not None and runtime_status is not None and not _wait_for_adapter_device(
+                port,
+                runtime_status,
+                stop_event,
+                logger,
+            ):
+                break
             report_runtime_state("scanning")
             session_kwargs: dict[str, Any] = {
                 "scan_max_attempts": config.retry.request_max_attempts,
@@ -514,6 +540,19 @@ def _connect_broute_until_ready(
         except (AdapterError, BRouteSessionError, TransportError) as exc:
             if isinstance(exc, AdapterOperationCancelled) and stop_event.is_set():
                 break
+            if (
+                port is not None
+                and runtime_status is not None
+                and not _adapter_device_present(port)
+            ):
+                if not _wait_for_adapter_device(
+                    port,
+                    runtime_status,
+                    stop_event,
+                    logger,
+                ):
+                    break
+                continue
             authentication_rejected = authentication_rejected or _is_authentication_failure(exc)
             report_runtime_state(
                 "authentication_error"
@@ -565,6 +604,37 @@ def _connection_retry_wait_seconds(configured_seconds: float, attempt: int) -> f
     if attempt <= INITIAL_CONNECTION_RETRY_ATTEMPTS:
         return configured_seconds
     return max(configured_seconds, EXTENDED_CONNECTION_RETRY_WAIT_SECONDS)
+
+
+def _adapter_device_present(port: str) -> bool:
+    """Return whether an absolute serial device path is currently present.
+
+    Non-path port names remain supported for development platforms where a
+    device node does not exist (for example ``COM5``).
+    """
+
+    path = Path(port)
+    return not path.is_absolute() or path.exists()
+
+
+def _wait_for_adapter_device(
+    port: str,
+    runtime_status: RuntimeStatusStore,
+    stop_event: threading.Event,
+    logger: logging.Logger,
+) -> bool:
+    """Wait for a physically absent adapter without ending the service."""
+
+    was_missing = False
+    while not _adapter_device_present(port):
+        was_missing = True
+        _write_runtime_status(runtime_status, "adapter_missing", logger)
+        logger.warning("Bルートアダプターが見つかりません。再確認します")
+        if stop_event.wait(ADAPTER_PRESENCE_CHECK_SECONDS):
+            return False
+    if was_missing:
+        _write_runtime_status(runtime_status, "adapter_initializing", logger)
+    return True
 
 
 def _wait_for_connection_retry(
