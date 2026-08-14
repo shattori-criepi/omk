@@ -76,6 +76,13 @@ render_sudoers > "${temporary_sudoers}"
 "${SUDO[@]}" install -o root -g root -m 0440 "${temporary_sudoers}" "${SUDOERS_DEST}"
 "${SUDO[@]}" visudo -cf "${SUDOERS_DEST}"
 "${SUDO[@]}" systemctl daemon-reload
-"${SUDO[@]}" systemctl enable --now "${SERVICE_NAME}"
+"${SUDO[@]}" systemctl enable "${SERVICE_NAME}"
+if "${SUDO[@]}" systemctl is-active --quiet "${SERVICE_NAME}"; then
+  log "Restarting active ${SERVICE_NAME} to apply the installed unit."
+  "${SUDO[@]}" systemctl restart "${SERVICE_NAME}"
+else
+  log "Starting inactive ${SERVICE_NAME}."
+  "${SUDO[@]}" systemctl start "${SERVICE_NAME}"
+fi
 "${SUDO[@]}" systemctl --no-pager --full status "${SERVICE_NAME}"
 log "Installed ${SERVICE_NAME}. Token file: ${ENV_FILE} (root-only; do not print or commit it)."

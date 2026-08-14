@@ -16,7 +16,6 @@ Environment=TZ=Asia/Tokyo
 ExecStart=@OMK_ROOT@/services/system-manager/.venv/bin/uvicorn omk_system_manager.main:app --host 0.0.0.0 --port 8788
 Restart=always
 RestartSec=5
-NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
