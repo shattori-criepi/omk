@@ -13,23 +13,28 @@
         <a href="/admin" class="back-link">← 管理</a>
         <h1>Bルート設定</h1>
       </header>
-      <section class="broute-panel" aria-labelledby="broute-connection-title">
-        <h2 id="broute-connection-title">接続状態</h2>
-        <p id="broute-connection" class="broute-connection">確認中</p>
+      <section class="broute-panel" aria-label="現在のBルート状態">
         <dl class="broute-status-list">
+          <div><dt>接続状態</dt><dd id="broute-connection" class="broute-connection">確認中</dd></div>
           <div><dt>現在のID</dt><dd id="broute-id-masked">確認中</dd></div>
           <div><dt>パスワード</dt><dd id="broute-password-configured">確認中</dd></div>
         </dl>
       </section>
       <form id="broute-form" class="broute-form" autocomplete="off" novalidate>
-        <label>BルートID
+        <div class="broute-field">
+          <label for="broute-id">BルートID</label>
+          <div>
           <input id="broute-id" name="id" required maxlength="39" autocomplete="off" spellcheck="false" aria-describedby="broute-id-hint">
-        </label>
-        <p id="broute-id-hint" class="field-hint">4文字ごとに区切って表示 · ASCII 32文字</p>
-        <label>パスワード
+            <p id="broute-id-hint" class="field-hint">4文字ごとに区切って表示 · ASCII 32文字</p>
+          </div>
+        </div>
+        <div class="broute-field">
+          <label for="broute-password">パスワード</label>
+          <div>
           <input id="broute-password" name="password" type="password" required maxlength="14" autocomplete="new-password" spellcheck="false" aria-describedby="broute-password-hint">
-        </label>
-        <p id="broute-password-hint" class="field-hint">4文字ごとに区切って表示 · ASCII 12文字</p>
+            <p id="broute-password-hint" class="field-hint">4文字ごとに区切って表示 · ASCII 12文字</p>
+          </div>
+        </div>
         <p id="broute-message" class="setup-status" role="status" aria-live="polite">保存済みのIDとパスワードは表示しません。</p>
         <button id="broute-save" class="primary" type="submit">保存して接続</button>
       </form>

@@ -584,12 +584,24 @@ def test_broute_admin_page_keeps_credentials_and_token_out_of_html() -> None:
     assert 'autocomplete="new-password"' in response.text
     assert 'id="broute-id" name="id" required maxlength="39"' in response.text
     assert 'id="broute-password" name="password" type="password" required maxlength="14"' in response.text
+    assert '<label for="broute-id">BルートID</label>' in response.text
+    assert '<label for="broute-password">パスワード</label>' in response.text
+    assert "接続状態" in response.text
     assert token not in response.text + javascript
     assert raw_identifier not in response.text + javascript
     assert "validToken(id, 32)" in javascript
     assert "validToken(pass, 12)" in javascript
     assert "保存しました。Bルートへ再接続しました。" in javascript
     assert "設定は保存されましたが、Bルートサービスの再起動に失敗しました。" in javascript
+
+
+def test_broute_layout_uses_wide_grid_rows_with_narrow_screen_fallback() -> None:
+    stylesheet = (Path(__file__).parents[1] / "app" / "static" / "display.css").read_text(encoding="utf-8")
+
+    assert ".broute-field { display: grid; grid-template-columns: 8.5rem minmax(0, 1fr);" in stylesheet
+    assert ".broute-status-list div { display: grid; grid-template-columns: 8.5rem minmax(0, 1fr);" in stylesheet
+    assert "@media (max-width: 700px)" in stylesheet
+    assert ".broute-status-list div, .broute-field { grid-template-columns: 1fr;" in stylesheet
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is required for browser formatter tests")
