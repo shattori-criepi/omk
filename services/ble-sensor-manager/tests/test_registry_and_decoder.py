@@ -9,6 +9,7 @@ from fastapi import HTTPException
 from omk_ble import main as ble_main
 from omk_ble.registry import RegistryError, SensorRegistry
 from omk_ble.models import DecodedAdvertisement, RegisteredSensor
+from omk_ble.omk_node import OMK_NODE_SERVICE_UUID, decode as decode_omk_node
 from omk_ble.switchbot import METER_SERVICE_UUID, SWITCHBOT_COMPANY_ID, decode
 from omk_ble.service import BleManager
 
@@ -37,6 +38,68 @@ def test_unknown_switchbot_and_malformed_meter_remain_safe_raw_candidates() -> N
 
 def test_non_switchbot_packet_is_not_classified_as_unknown_switchbot() -> None:
     assert decode("AA:BB:CC:DD:EE:FF", -70, {0xFFFF: b"\x01"}, {}, "now") is None
+
+
+def test_omk_node_provisioning_advertisement_is_decoded_without_secrets() -> None:
+    decoded = decode_omk_node(
+        -41,
+        {OMK_NODE_SERVICE_UUID: bytes.fromhex("01000001112233445566")},
+        "2026-08-14T10:00:00+09:00",
+    )
+    assert decoded is not None
+    assert decoded.device_key == "omk-node:112233445566"
+    assert decoded.rssi == -41
+    assert decoded.values == {
+        "protocol_version": 1,
+        "node_id": "112233445566",
+        "capabilities": ["ble_scan"],
+        "provisioning_state": "unregistered",
+    }
+    assert "site_uuid" not in str(decoded.as_dict())
+
+
+@pytest.mark.parametrize(
+    "service_data",
+    [
+        {},
+        {OMK_NODE_SERVICE_UUID: b"\x01"},
+        {OMK_NODE_SERVICE_UUID: bytes.fromhex("02000001112233445566")},
+        {OMK_NODE_SERVICE_UUID: bytes.fromhex("01010001112233445566")},
+        {OMK_NODE_SERVICE_UUID: bytes.fromhex("01008000112233445566")},
+        {OMK_NODE_SERVICE_UUID: bytes.fromhex("01000001000000000000")},
+    ],
+)
+def test_invalid_or_unrelated_omk_node_advertisements_are_ignored(service_data: dict[str, bytes]) -> None:
+    assert decode_omk_node(-50, service_data, "now") is None
+
+
+def test_omk_node_candidate_cannot_be_formally_registered_yet(tmp_path: Path) -> None:
+    manager = BleManager(SensorRegistry(tmp_path / "sensors.json"))
+    manager.scanning = True
+    decoded = decode_omk_node(-41, {OMK_NODE_SERVICE_UUID: bytes.fromhex("01000002112233445566")}, "now")
+    assert decoded is not None
+    manager.record_advertisement(decoded)
+    candidate = manager.candidate_list()[0]
+    assert candidate["values"]["capabilities"] == ["sen66"]
+    with pytest.raises(ValueError, match="まだ実装されていません"):
+        manager.register({"device_key": decoded.device_key, "sensor_id": "node-001", "display_name": "Node"})
+
+
+def test_ble_scan_callback_adds_omk_node_candidate_without_affecting_switchbot_decoder(tmp_path: Path) -> None:
+    manager = BleManager(SensorRegistry(tmp_path / "sensors.json"))
+    manager.scanning = True
+    device = type("Device", (), {"address": "AA:BB:CC:DD:EE:FF"})()
+    advertisement = type(
+        "Advertisement",
+        (),
+        {
+            "rssi": -41,
+            "manufacturer_data": {},
+            "service_data": {OMK_NODE_SERVICE_UUID.upper(): bytes.fromhex("01000001112233445566")},
+        },
+    )()
+    manager._on_detection(device, advertisement)
+    assert manager.candidate_list()[0]["device_key"] == "omk-node:112233445566"
 
 
 def test_pi_captured_meter_manufacturer_packets_decode_temperature_and_humidity() -> None:

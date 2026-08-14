@@ -11,6 +11,7 @@ from typing import Any, Callable
 import paho.mqtt.client as mqtt
 
 from .models import DecodedAdvertisement, RegisteredSensor, now_iso
+from .omk_node import decode as decode_omk_node
 from .registry import SensorRegistry
 from .switchbot import decode
 
@@ -85,7 +86,10 @@ class BleManager:
 
     def _on_detection(self, device: Any, advertisement: Any) -> None:
         try:
-            decoded = decode(device.address, advertisement.rssi, advertisement.manufacturer_data, advertisement.service_data, now_iso())
+            received_at = now_iso()
+            decoded = decode_omk_node(advertisement.rssi, advertisement.service_data, received_at)
+            if decoded is None:
+                decoded = decode(device.address, advertisement.rssi, advertisement.manufacturer_data, advertisement.service_data, received_at)
             if decoded:
                 self.record_advertisement(decoded)
         except Exception:
@@ -150,6 +154,8 @@ class BleManager:
         candidate = self.setup_candidates.get(request["device_key"])
         if not candidate:
             raise ValueError("device was not found in the current setup scan")
+        if candidate.model == "omk_node":
+            raise ValueError("OMK Nodeの登録とWi-Fi provisioningはまだ実装されていません")
         sensor = RegisteredSensor(
             device_key=candidate.device_key, sensor_id=request["sensor_id"], sensor_type=candidate.sensor_type,
             vendor=candidate.vendor, model=candidate.model, location=request.get("location", ""),
@@ -166,6 +172,8 @@ class BleManager:
         candidate = self.setup_candidates.get(device_key)
         if not candidate:
             raise ValueError("device was not found in the current setup scan")
+        if candidate.model == "omk_node":
+            raise ValueError("OMK Nodeの登録とWi-Fi provisioningはまだ実装されていません")
         prefix = {
             "temperature_humidity_sensor": "th", "waterproof_sensor": "th", "co2_sensor": "co2",
             "motion_sensor": "motion", "contact_sensor": "contact", "plug_sensor": "plug",
