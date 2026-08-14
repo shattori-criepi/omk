@@ -701,6 +701,133 @@ def test_connection_retries_do_not_reenter_starting_state(
     assert all(state != "starting" for state, _ in status.states)
 
 
+def test_missing_adapter_waits_then_initializes_when_device_reappears(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class StopEvent:
+        def __init__(self) -> None:
+            self.waits: list[float] = []
+
+        def wait(self, timeout: float) -> bool:
+            self.waits.append(timeout)
+            return False
+
+    class RecordingStatus:
+        def __init__(self) -> None:
+            self.states: list[str] = []
+
+        def write(self, state: str, **_kwargs: object) -> None:
+            self.states.append(state)
+
+    presence = iter((False, False, True))
+    monkeypatch.setattr(cli, "_adapter_device_present", lambda _port: next(presence))
+    stop_event = StopEvent()
+    status = RecordingStatus()
+
+    assert cli._wait_for_adapter_device(  # type: ignore[arg-type]
+        "/dev/serial/by-id/rs-wsuha-p",
+        status,  # type: ignore[arg-type]
+        stop_event,  # type: ignore[arg-type]
+        logging.getLogger("broute_meter.test"),
+    )
+    assert stop_event.waits == [cli.ADAPTER_PRESENCE_CHECK_SECONDS] * 2
+    assert status.states == ["adapter_missing", "adapter_missing", "adapter_initializing"]
+
+
+def test_serial_disconnect_with_missing_device_is_not_connection_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeSession:
+        def __init__(self, _adapter: object, *, scan_max_attempts: int, on_state_change=None) -> None:
+            pass
+
+        def connect(self, _identifier: str, _password: str) -> SimpleNamespace:
+            raise AdapterCommunicationError("serial disconnected")
+
+    class StopDuringAdapterWait:
+        def is_set(self) -> bool:
+            return False
+
+        def wait(self, timeout: float) -> bool:
+            assert timeout == cli.ADAPTER_PRESENCE_CHECK_SECONDS
+            return True
+
+    class RecordingStatus:
+        def __init__(self) -> None:
+            self.states: list[str] = []
+
+        def write(self, state: str, **_kwargs: object) -> None:
+            self.states.append(state)
+
+    monkeypatch.setattr(cli, "BRouteSession", FakeSession)
+    presence = iter((True, False, False))
+    monkeypatch.setattr(cli, "_adapter_device_present", lambda _port: next(presence))
+    status = RecordingStatus()
+    config = SimpleNamespace(
+        credentials=SimpleNamespace(b_route_id="A" * 32, password="P" * 12),
+        retry=SimpleNamespace(request_max_attempts=3, reconnect_wait_seconds=30),
+    )
+
+    assert cli._connect_broute_until_ready(  # type: ignore[arg-type]
+        object(),
+        config,  # type: ignore[arg-type]
+        StopDuringAdapterWait(),  # type: ignore[arg-type]
+        logging.getLogger("broute_meter.test"),
+        runtime_status=status,  # type: ignore[arg-type]
+        port="/dev/serial/by-id/rs-wsuha-p",
+    ) is None
+    assert status.states == ["scanning", "adapter_missing"]
+    assert "connection_error" not in status.states
+
+
+def test_serial_error_with_present_device_remains_connection_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeSession:
+        def __init__(self, _adapter: object, *, scan_max_attempts: int, on_state_change=None) -> None:
+            pass
+
+        def connect(self, _identifier: str, _password: str) -> SimpleNamespace:
+            raise AdapterCommunicationError("serial I/O failed")
+
+    class StopDuringConnectionWait:
+        def is_set(self) -> bool:
+            return False
+
+        def wait(self, timeout: float) -> bool:
+            assert timeout == 30
+            return True
+
+    class RecordingStatus:
+        def __init__(self) -> None:
+            self.states: list[str] = []
+
+        def write(self, state: str, **_kwargs: object) -> None:
+            self.states.append(state)
+
+    monkeypatch.setattr(cli, "BRouteSession", FakeSession)
+    monkeypatch.setattr(cli, "_adapter_device_present", lambda _port: True)
+    status = RecordingStatus()
+    config = SimpleNamespace(
+        credentials=SimpleNamespace(b_route_id="A" * 32, password="P" * 12),
+        retry=SimpleNamespace(request_max_attempts=3, reconnect_wait_seconds=30),
+    )
+
+    assert cli._connect_broute_until_ready(  # type: ignore[arg-type]
+        object(),
+        config,  # type: ignore[arg-type]
+        StopDuringConnectionWait(),  # type: ignore[arg-type]
+        logging.getLogger("broute_meter.test"),
+        runtime_status=status,  # type: ignore[arg-type]
+        port="/dev/serial/by-id/rs-wsuha-p",
+    ) is None
+    assert status.states == [
+        "scanning",
+        "connection_error",
+        "retry_wait",
+    ]
+
+
 def test_manual_retry_request_ends_retry_wait_without_shutdown(tmp_path: Path) -> None:
     request_path = tmp_path / "retry-request"
     request_path.write_text("retry\n", encoding="ascii")

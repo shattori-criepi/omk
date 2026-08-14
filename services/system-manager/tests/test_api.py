@@ -162,6 +162,8 @@ def test_status_never_returns_password_or_raw_id(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     ("state", "expected"),
     [
+        ("adapter_missing", "adapter_missing"),
+        ("adapter_initializing", "adapter_initializing"),
         ("scan_error", "scan_error"),
         ("scanning", "scanning"),
         ("authenticating", "authenticating"),

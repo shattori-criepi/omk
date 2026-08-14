@@ -671,11 +671,13 @@ vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8") + "\nglobalThis.__b
   const confirmed = overlay.hidden && passInput.value === "1234 BBBB BBBB";
   const noPutBeforeSave = !requests.some((request) => request.options.method === "PUT");
   const stateLabels = {};
-  for (const state of ["starting", "scanning", "authenticating", "connected", "retry_wait", "scan_error", "authentication_error", "connection_error", "status_unavailable"]) { __brouteTest.showStatus({service_active: true, connection_state: state}); stateLabels[state] = elements["#broute-connection"].textContent; }
+  for (const state of ["starting", "adapter_missing", "adapter_initializing", "scanning", "authenticating", "connected", "retry_wait", "scan_error", "authentication_error", "connection_error", "status_unavailable"]) { __brouteTest.showStatus({service_active: true, connection_state: state}); stateLabels[state] = elements["#broute-connection"].textContent; }
   __brouteTest.showStatus({service_active: true, connection_state: "retry_wait", connection_attempt: 3});
   const retryButtonVisibleAfterRepeatedFailures = !elements["#broute-retry"].hidden;
   __brouteTest.showStatus({service_active: true, connection_state: "retry_wait", connection_attempt: 2});
   const retryButtonHiddenBeforeExtendedRetry = elements["#broute-retry"].hidden;
+  __brouteTest.showStatus({service_active: true, connection_state: "adapter_missing", connection_attempt: 3});
+  const retryButtonHiddenWhenAdapterMissing = elements["#broute-retry"].hidden;
   const missingStateIsNotStarting = __brouteTest.showStatus({service_active: true}) === "status_unavailable" && elements["#broute-connection"].textContent === "状態確認中";
   response = { status: 200, detail: { configured: true, service_active: true, connection_state: "scanning" } };
   await __brouteTest.pollStatus();
@@ -715,12 +717,16 @@ vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8") + "\nglobalThis.__b
   await __brouteTest.pollStatus();
   const connectionErrorTerminal = elements["#broute-message"].textContent === "スマートメータとの通信に失敗しました。" && scheduledDelay === 10000;
   await submitReconnect();
+  response = { status: 200, detail: { configured: true, service_active: true, connection_state: "adapter_missing", connection_attempt: 3 } };
+  await __brouteTest.pollStatus();
+  const adapterMissingStatus = elements["#broute-connection"].textContent === "Bルートアダプターが接続されていません。" && elements["#broute-message"].textContent === "Bルートアダプターを接続してください。" && elements["#broute-retry"].hidden && scheduledDelay === 10000;
+  await submitReconnect();
   currentNow = 180001;
   response = { status: 200, detail: { configured: true, service_active: true, connection_state: "retry_wait", retry_after_seconds: 300, connection_attempt: 3 } };
   await __brouteTest.pollStatus();
   const longRetryWaitDoesNotTimeout = elements["#broute-connection"].textContent === "再試行待ち" && elements["#broute-message"].textContent === "スマートメータを検出できません。BルートID・パスワード、または通信状態を確認してください。" && !elements["#broute-retry"].hidden && scheduledDelay === 10000;
   const put = requests.find((request) => request.options.method === "PUT");
-  console.log(JSON.stringify({ formattedId: __brouteTest.formatToken(id, 32), formattedPassword: __brouteTest.formatToken(password, 12), normalizedPaste: __brouteTest.unformatToken("1234 5678 9ABC DEF0 1234 5678 9ABC DEF0", 32), validId: __brouteTest.validToken("1234 5678 9ABC DEF0 1234 5678 9ABC DEF0", 32), validPassword: __brouteTest.validToken("1234 5678 9ABC", 12), invalidShortId: __brouteTest.validToken("1234 5678 9ABC DEF0 1234 5678 9ABC DEF", 32), masked: __brouteTest.formatToken("0000************************4CEF", 32), idOpened, passwordOpened, idMaximum, passwordMaximum, idBackspace, cancellationRestored, confirmed, noPutBeforeSave, passwordBlankOnLoad, stateLabels, retryButtonVisibleAfterRepeatedFailures, retryButtonHiddenBeforeExtendedRetry, missingStateIsNotStarting, scanErrorMessage: __brouteTest.stateMessage("scan_error"), retryWaitMessage: __brouteTest.stateMessage("retry_wait", 30), idlePolling, upstreamErrorIsNotTransport, transportError, reconnectStates, scanErrorTerminal, authenticationErrorTerminal, connectionErrorTerminal, longRetryWaitDoesNotTimeout, request: JSON.parse(put.options.body) }));
+  console.log(JSON.stringify({ formattedId: __brouteTest.formatToken(id, 32), formattedPassword: __brouteTest.formatToken(password, 12), normalizedPaste: __brouteTest.unformatToken("1234 5678 9ABC DEF0 1234 5678 9ABC DEF0", 32), validId: __brouteTest.validToken("1234 5678 9ABC DEF0 1234 5678 9ABC DEF0", 32), validPassword: __brouteTest.validToken("1234 5678 9ABC", 12), invalidShortId: __brouteTest.validToken("1234 5678 9ABC DEF0 1234 5678 9ABC DEF", 32), masked: __brouteTest.formatToken("0000************************4CEF", 32), idOpened, passwordOpened, idMaximum, passwordMaximum, idBackspace, cancellationRestored, confirmed, noPutBeforeSave, passwordBlankOnLoad, stateLabels, retryButtonVisibleAfterRepeatedFailures, retryButtonHiddenBeforeExtendedRetry, retryButtonHiddenWhenAdapterMissing, missingStateIsNotStarting, adapterMissingMessage: __brouteTest.stateMessage("adapter_missing"), adapterInitializingMessage: __brouteTest.stateMessage("adapter_initializing"), scanErrorMessage: __brouteTest.stateMessage("scan_error"), retryWaitMessage: __brouteTest.stateMessage("retry_wait", 30), idlePolling, upstreamErrorIsNotTransport, transportError, reconnectStates, scanErrorTerminal, authenticationErrorTerminal, connectionErrorTerminal, adapterMissingStatus, longRetryWaitDoesNotTimeout, request: JSON.parse(put.options.body) }));
 })();
 '''
     completed = subprocess.run(
@@ -749,6 +755,8 @@ vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8") + "\nglobalThis.__b
     assert result["passwordBlankOnLoad"] is True
     assert result["stateLabels"] == {
         "starting": "起動中",
+        "adapter_missing": "Bルートアダプターが接続されていません。",
+        "adapter_initializing": "Bルートアダプターを初期化しています。",
         "scanning": "スマートメータを探索中",
         "authenticating": "認証中",
         "connected": "接続済み",
@@ -761,6 +769,9 @@ vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8") + "\nglobalThis.__b
     assert result["missingStateIsNotStarting"] is True
     assert result["retryButtonVisibleAfterRepeatedFailures"] is True
     assert result["retryButtonHiddenBeforeExtendedRetry"] is True
+    assert result["retryButtonHiddenWhenAdapterMissing"] is True
+    assert result["adapterMissingMessage"] == "Bルートアダプターを接続してください。"
+    assert result["adapterInitializingMessage"] == "Bルートアダプターを初期化しています。"
     assert result["scanErrorMessage"] == "スマートメータを検出できませんでした。"
     assert result["retryWaitMessage"] == "30秒後にスマートメータを再探索します。"
     assert result["idlePolling"] is True
@@ -777,6 +788,7 @@ vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8") + "\nglobalThis.__b
     assert result["scanErrorTerminal"] is True
     assert result["authenticationErrorTerminal"] is True
     assert result["connectionErrorTerminal"] is True
+    assert result["adapterMissingStatus"] is True
     assert result["longRetryWaitDoesNotTimeout"] is True
     assert result["request"] == {"id": "123456789ABCDEF0123456789ABCDEF0", "password": "123456789ABC"}
 

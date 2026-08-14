@@ -11,6 +11,8 @@ from typing import Final
 CONNECTION_STATES: Final = frozenset(
     {
         "starting",
+        "adapter_missing",
+        "adapter_initializing",
         "scanning",
         "authenticating",
         "connected",

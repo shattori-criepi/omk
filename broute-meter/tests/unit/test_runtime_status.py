@@ -23,6 +23,15 @@ def test_runtime_status_rejects_unknown_states(tmp_path) -> None:
         RuntimeStatusStore(tmp_path / "status.json").write("unsafe", now=datetime.now(UTC))
 
 
+@pytest.mark.parametrize("state", ["adapter_missing", "adapter_initializing"])
+def test_runtime_status_records_adapter_states(tmp_path, state: str) -> None:
+    path = tmp_path / "status.json"
+
+    RuntimeStatusStore(path).write(state, now=datetime.now(UTC))
+
+    assert json.loads(path.read_text(encoding="utf-8"))["state"] == state
+
+
 def test_runtime_status_records_non_sensitive_retry_wait(tmp_path) -> None:
     path = tmp_path / "status.json"
     RuntimeStatusStore(path).write(
