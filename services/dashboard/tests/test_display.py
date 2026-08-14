@@ -587,6 +587,10 @@ def test_broute_admin_page_keeps_credentials_and_token_out_of_html() -> None:
     assert '<label for="broute-id">BルートID</label>' in response.text
     assert '<label for="broute-password">パスワード</label>' in response.text
     assert "接続状態" in response.text
+    assert 'id="broute-keyboard-overlay"' in response.text
+    assert 'id="broute-keyboard-value"' in response.text
+    assert 'id="broute-keyboard-cancel"' in response.text
+    assert 'id="broute-keyboard-confirm"' in response.text
     assert token not in response.text + javascript
     assert raw_identifier not in response.text + javascript
     assert "validToken(id, 32)" in javascript
@@ -602,6 +606,8 @@ def test_broute_layout_uses_wide_grid_rows_with_narrow_screen_fallback() -> None
     assert ".broute-status-list div { display: grid; grid-template-columns: 8.5rem minmax(0, 1fr);" in stylesheet
     assert "@media (max-width: 700px)" in stylesheet
     assert ".broute-status-list div, .broute-field { grid-template-columns: 1fr;" in stylesheet
+    assert ".broute-keyboard-overlay { position: fixed;" in stylesheet
+    assert ".broute-keyboard-actions { display: grid; grid-template-columns: 1fr 1fr;" in stylesheet
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is required for browser formatter tests")
@@ -610,19 +616,44 @@ def test_broute_browser_formatter_groups_normalizes_and_submits_unformatted_valu
     harness = r'''
 const fs = require("fs"), vm = require("vm");
 const elements = {};
-function element() { return { value: "", selectionStart: 0, disabled: false, className: "", textContent: "", addEventListener() {}, setSelectionRange(position) { this.selectionStart = position; }, reset() { elements["#broute-id"].value = ""; elements["#broute-password"].value = ""; } }; }
-for (const selector of ["#broute-form", "#broute-id", "#broute-password", "#broute-save", "#broute-message", "#broute-connection", "#broute-id-masked", "#broute-password-configured"]) elements[selector] = element();
-global.document = { querySelector: (selector) => elements[selector] };
+function element() { return { value: "", selectionStart: 0, disabled: false, className: "", textContent: "", hidden: false, children: [], listeners: {}, addEventListener(type, listener) { this.listeners[type] = listener; }, append(child) { this.children.push(child); }, setAttribute() {}, setSelectionRange(position) { this.selectionStart = position; }, reset() { elements["#broute-id"].value = ""; elements["#broute-password"].value = ""; } }; }
+for (const selector of ["#broute-form", "#broute-id", "#broute-password", "#broute-save", "#broute-message", "#broute-connection", "#broute-id-masked", "#broute-password-configured", "#broute-keyboard-overlay", "#broute-keyboard-title", "#broute-keyboard-count", "#broute-keyboard-value", "#broute-keyboard-keys", "#broute-keyboard-cancel", "#broute-keyboard-confirm"]) elements[selector] = element();
+elements["#broute-keyboard-overlay"].hidden = true;
+global.document = { querySelector: (selector) => elements[selector], createElement: () => element() };
 const requests = [];
 global.fetch = async (url, options = {}) => { requests.push({url, options}); return { status: 200, json: async () => ({ configured: true, id_masked: "0000************************4CEF", password_configured: true, service_active: true }) }; };
-vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8") + "\nglobalThis.__brouteTest = {formatToken, unformatToken, validToken};");
+vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8") + "\nglobalThis.__brouteTest = {formatToken, unformatToken, validToken, appendKeyboardKey, backspaceKeyboardKey};");
 (async () => {
   const id = "123456789ABCDEF0123456789ABCDEF0", password = "123456789ABC";
+  const identifier = elements["#broute-id"], passInput = elements["#broute-password"], overlay = elements["#broute-keyboard-overlay"];
+  const passwordBlankOnLoad = passInput.value === "";
+  identifier.value = "1234 5678";
+  identifier.listeners.pointerdown({preventDefault() {}});
+  const idOpened = !overlay.hidden && elements["#broute-keyboard-title"].textContent === "BルートID";
+  __brouteTest.appendKeyboardKey("A");
+  __brouteTest.backspaceKeyboardKey();
+  elements["#broute-keyboard-cancel"].listeners.click();
+  const cancellationRestored = overlay.hidden && identifier.value === "1234 5678";
+  identifier.value = "";
+  identifier.listeners.pointerdown({preventDefault() {}});
+  for (let index = 0; index < 40; index += 1) __brouteTest.appendKeyboardKey("A");
+  const idMaximum = __brouteTest.unformatToken(identifier.value, 32).length === 32 && identifier.value === "AAAA AAAA AAAA AAAA AAAA AAAA AAAA AAAA";
+  __brouteTest.backspaceKeyboardKey();
+  const idBackspace = __brouteTest.unformatToken(identifier.value, 32).length === 31;
+  elements["#broute-keyboard-cancel"].listeners.click();
+  passInput.value = "1234";
+  passInput.listeners.pointerdown({preventDefault() {}});
+  const passwordOpened = !overlay.hidden && elements["#broute-keyboard-title"].textContent === "パスワード";
+  for (let index = 0; index < 12; index += 1) __brouteTest.appendKeyboardKey("B");
+  const passwordMaximum = __brouteTest.unformatToken(passInput.value, 12).length === 12 && elements["#broute-keyboard-value"].textContent === "1234 BBBB BBBB";
+  elements["#broute-keyboard-confirm"].listeners.click();
+  const confirmed = overlay.hidden && passInput.value === "1234 BBBB BBBB";
+  const noPutBeforeSave = !requests.some((request) => request.options.method === "PUT");
   elements["#broute-id"].value = "1234 5678 9ABC DEF0 1234 5678 9ABC DEF0";
   elements["#broute-password"].value = "1234 5678 9ABC";
   await elements["#broute-form"].onsubmit({preventDefault() {}});
   const put = requests.find((request) => request.options.method === "PUT");
-  console.log(JSON.stringify({ formattedId: __brouteTest.formatToken(id, 32), formattedPassword: __brouteTest.formatToken(password, 12), normalizedPaste: __brouteTest.unformatToken("1234 5678 9ABC DEF0 1234 5678 9ABC DEF0", 32), validId: __brouteTest.validToken("1234 5678 9ABC DEF0 1234 5678 9ABC DEF0", 32), validPassword: __brouteTest.validToken("1234 5678 9ABC", 12), invalidShortId: __brouteTest.validToken("1234 5678 9ABC DEF0 1234 5678 9ABC DEF", 32), masked: __brouteTest.formatToken("0000************************4CEF", 32), request: JSON.parse(put.options.body) }));
+  console.log(JSON.stringify({ formattedId: __brouteTest.formatToken(id, 32), formattedPassword: __brouteTest.formatToken(password, 12), normalizedPaste: __brouteTest.unformatToken("1234 5678 9ABC DEF0 1234 5678 9ABC DEF0", 32), validId: __brouteTest.validToken("1234 5678 9ABC DEF0 1234 5678 9ABC DEF0", 32), validPassword: __brouteTest.validToken("1234 5678 9ABC", 12), invalidShortId: __brouteTest.validToken("1234 5678 9ABC DEF0 1234 5678 9ABC DEF", 32), masked: __brouteTest.formatToken("0000************************4CEF", 32), idOpened, passwordOpened, idMaximum, passwordMaximum, idBackspace, cancellationRestored, confirmed, noPutBeforeSave, passwordBlankOnLoad, request: JSON.parse(put.options.body) }));
 })();
 '''
     completed = subprocess.run(
@@ -640,6 +671,15 @@ vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8") + "\nglobalThis.__b
     assert result["validPassword"] is True
     assert result["invalidShortId"] is False
     assert result["masked"] == "0000 **** **** **** **** **** **** 4CEF"
+    assert result["idOpened"] is True
+    assert result["passwordOpened"] is True
+    assert result["idMaximum"] is True
+    assert result["passwordMaximum"] is True
+    assert result["idBackspace"] is True
+    assert result["cancellationRestored"] is True
+    assert result["confirmed"] is True
+    assert result["noPutBeforeSave"] is True
+    assert result["passwordBlankOnLoad"] is True
     assert result["request"] == {"id": "123456789ABCDEF0123456789ABCDEF0", "password": "123456789ABC"}
 
 
