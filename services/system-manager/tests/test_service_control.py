@@ -41,3 +41,24 @@ def test_controller_reports_restart_or_active_failure(
 def test_relative_systemctl_path_is_rejected() -> None:
     with pytest.raises(ValueError):
         BRouteServiceController("systemctl")
+
+
+@pytest.mark.parametrize(
+    ("returncode", "stdout", "expected"),
+    [
+        (0, "active\n", True),
+        (3, "inactive\n", False),
+    ],
+)
+def test_is_active_uses_systemctl_result(
+    monkeypatch: pytest.MonkeyPatch,
+    returncode: int,
+    stdout: str,
+    expected: bool,
+) -> None:
+    def run(args: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args, returncode, stdout, "")
+
+    monkeypatch.setattr(subprocess, "run", run)
+
+    assert BRouteServiceController("/usr/bin/systemctl").is_active() is expected

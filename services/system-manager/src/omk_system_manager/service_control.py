@@ -29,7 +29,10 @@ class BRouteServiceController:
 
     def is_active(self) -> bool:
         result = self._execute("is-active")
-        return result.returncode == 0
+        # systemctl's documented success signal is exit status 0.  Preserve
+        # its textual state as a defensive success signal too: wrappers may
+        # surface a completed command with the active state on stdout.
+        return result.returncode == 0 or result.stdout.strip().casefold() == "active"
 
     def _run(self, verb: str, failure_code: str) -> None:
         result = self._execute(verb)
