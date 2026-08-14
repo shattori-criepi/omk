@@ -611,7 +611,7 @@ def test_broute_admin_page_keeps_credentials_and_token_out_of_html() -> None:
     assert raw_identifier not in response.text + javascript
     assert "validToken(id, 32)" in javascript
     assert "validToken(pass, 12)" in javascript
-    assert "設定を保存しました。Bルートへ再接続しています。" in javascript
+    assert "設定を保存しました。Bルートへの接続を開始します。" in javascript
     assert "設定は保存されましたが、Bルートサービスの再起動に失敗しました。" in javascript
 
 
@@ -778,11 +778,11 @@ vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8") + "\nglobalThis.__b
     assert result["upstreamErrorIsNotTransport"] is True
     assert result["transportError"] is True
     assert result["reconnectStates"] == [
-        {"state": "stopped", "label": "再起動中", "delay": 1500, "message": "Bルートへ再接続しています。"},
-        {"state": "starting", "label": "起動中", "delay": 1500, "message": "Bルートへ再接続しています。"},
-        {"state": "scanning", "label": "スマートメータを探索中", "delay": 1500, "message": "Bルートへ再接続しています。"},
+        {"state": "stopped", "label": "再起動中", "delay": 1500, "message": "Bルートへ接続しています。"},
+        {"state": "starting", "label": "起動中", "delay": 1500, "message": "Bルートへ接続しています。"},
+        {"state": "scanning", "label": "スマートメータを探索中", "delay": 1500, "message": "Bルートへ接続しています。"},
         {"state": "retry_wait", "label": "再試行待ち", "delay": 10000, "message": "30秒後にスマートメータを再探索します。"},
-        {"state": "authenticating", "label": "認証中", "delay": 1500, "message": "Bルートへ再接続しています。"},
+        {"state": "authenticating", "label": "認証中", "delay": 1500, "message": "Bルートへ接続しています。"},
         {"state": "connected", "label": "接続済み", "delay": 10000, "message": "Bルートへ接続しました。"},
     ]
     assert result["scanErrorTerminal"] is True
