@@ -25,6 +25,7 @@ fail() { log "ERROR: $*" >&2; exit 1; }
 [[ -f "${UNIT_TEMPLATE}" ]] || fail "Missing unit template: ${UNIT_TEMPLATE}"
 [[ -f "${OMK_ROOT}/services/system-manager/requirements.txt" ]] || fail 'Missing system-manager requirements.'
 [[ -d "${OMK_ROOT}/broute-meter/config" ]] || fail 'Missing broute-meter config directory.'
+[[ -d "${OMK_ROOT}/data" ]] || fail 'Missing persistent data directory.'
 for command_name in python3 sudo install sed visudo mktemp openssl; do command -v "${command_name}" >/dev/null 2>&1 || fail "Required command is unavailable: ${command_name}"; done
 id "${TARGET_USER}" >/dev/null 2>&1 || fail "Target user does not exist: ${TARGET_USER}"
 render_unit() {
@@ -70,6 +71,7 @@ sync_dashboard_token_file() {
 }
 
 "${SUDO[@]}" install -d -o root -g root -m 0755 "${ENV_DIR}"
+"${SUDO[@]}" install -d -o "${TARGET_USER}" -g "${TARGET_GROUP}" -m 0755 "${OMK_ROOT}/data/site"
 log 'Creating or reusing Python virtual environment.'
 "${SUDO[@]}" -u "${TARGET_USER}" python3 -m venv "${VENV_PATH}"
 log 'Installing system-manager requirements.'

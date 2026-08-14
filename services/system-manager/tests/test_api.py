@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from omk_system_manager.main import Settings, create_app
 from omk_system_manager.service_control import ServiceControlError
 
+
 VALID_ID = "A" * 32
 VALID_PASSWORD = "B" * 12
 TOKEN = "test-token"
@@ -48,6 +49,15 @@ class PowerController:
 
 
 def client_for(tmp_path: Path) -> TestClient:
+    site_uuid = "123e4567-e89b-42d3-a456-426614174000"
+
+    class MetadataStub:
+        def get_site_uuid(self) -> str:
+            return site_uuid
+
+        def put_site_uuid(self, _: str) -> None:
+            raise AssertionError("the matching SORACOM tag must not be updated")
+
     app = create_app(
         Settings(
             TOKEN,
@@ -55,7 +65,9 @@ def client_for(tmp_path: Path) -> TestClient:
             "/usr/bin/systemctl",
             tmp_path / "status.json",
             tmp_path / "retry-request",
-        )
+            tmp_path / "site_uuid",
+        ),
+        site_uuid_metadata=MetadataStub(),
     )
     return TestClient(app)
 

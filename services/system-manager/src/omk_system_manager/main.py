@@ -8,7 +8,7 @@ import subprocess
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import AsyncIterator
+from typing import AsyncIterator, Protocol
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
@@ -24,6 +24,13 @@ from .credentials import (
 )
 from .service_control import BRouteServiceController, ServiceControlError
 from .runtime_status import connection_status, request_immediate_retry
+from .site_uuid import SoracomMetadataClient, resolve_site_uuid
+
+
+class SiteUUIDMetadataClient(Protocol):
+    def get_site_uuid(self) -> str | None: ...
+
+    def put_site_uuid(self, value: str) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -33,6 +40,7 @@ class Settings:
     systemctl_path: str
     status_path: Path = Path("/home/omkdev/projects/omk/data/broute-meter/status.json")
     retry_request_path: Path = Path("/home/omkdev/projects/omk/data/broute-meter/retry-request")
+    site_uuid_path: Path = Path("/home/omkdev/projects/omk/data/site/site_uuid")
 
     @classmethod
     def from_environment(cls) -> "Settings":
@@ -60,6 +68,12 @@ class Settings:
                     "/home/omkdev/projects/omk/data/broute-meter/retry-request",
                 )
             ),
+            site_uuid_path=Path(
+                os.environ.get(
+                    "OMK_SITE_UUID_PATH",
+                    "/home/omkdev/projects/omk/data/site/site_uuid",
+                )
+            ),
         )
 
 
@@ -75,12 +89,20 @@ class UpdateCredentialsRequest(BaseModel):
         return []
 
 
-def create_app(configured_settings: Settings | None = None) -> FastAPI:
+def create_app(
+    configured_settings: Settings | None = None,
+    *,
+    site_uuid_metadata: SiteUUIDMetadataClient | None = None,
+) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         settings = configured_settings or Settings.from_environment()
         app.state.settings = settings
         app.state.controller = BRouteServiceController(settings.systemctl_path)
+        app.state.site_uuid = resolve_site_uuid(
+            settings.site_uuid_path,
+            site_uuid_metadata or SoracomMetadataClient(),
+        )
         yield
 
     app = FastAPI(title="OMK System Manager", lifespan=lifespan)
