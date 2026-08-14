@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import threading
 from collections import deque
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from ipaddress import IPv6Address
 
 import pytest
@@ -40,6 +40,7 @@ class ScriptedTransport:
         responses: Iterable[bytes | Exception] = (),
         *,
         is_open: bool = True,
+        on_read_timeout: Callable[[], None] | None = None,
     ) -> None:
         self.is_open = is_open
         self._responses = deque(responses)
@@ -49,6 +50,7 @@ class ScriptedTransport:
         self.open_count = 0
         self.close_count = 0
         self.reset_count = 0
+        self._on_read_timeout = on_read_timeout
 
     def open(self) -> None:
         self.open_count += 1
@@ -69,6 +71,8 @@ class ScriptedTransport:
         while self._responses:
             item = self._responses.popleft()
             if isinstance(item, Exception):
+                if isinstance(item, SerialTimeoutError) and self._on_read_timeout:
+                    self._on_read_timeout()
                 raise item
             if not item:
                 continue
@@ -77,6 +81,8 @@ class ScriptedTransport:
             if tail:
                 self._responses.appendleft(tail)
             return head
+        if self._on_read_timeout:
+            self._on_read_timeout()
         raise SerialTimeoutError("script exhausted")
 
     def write(self, data: bytes) -> int:
@@ -90,9 +96,22 @@ class ScriptedTransport:
 def _adapter(
     responses: Iterable[bytes | Exception],
 ) -> tuple[RsWsuhaPAdapter, ScriptedTransport, list[float]]:
-    transport = ScriptedTransport(responses)
+    current_time = 0.0
+
+    def advance_past_deadline() -> None:
+        nonlocal current_time
+        current_time += 10.0
+
+    transport = ScriptedTransport(
+        responses,
+        on_read_timeout=advance_past_deadline,
+    )
     sleeps: list[float] = []
-    adapter = RsWsuhaPAdapter(transport, sleeper=sleeps.append)
+    adapter = RsWsuhaPAdapter(
+        transport,
+        sleeper=sleeps.append,
+        monotonic=lambda: current_time,
+    )
     return adapter, transport, sleeps
 
 
@@ -529,6 +548,62 @@ def test_active_scan_rejects_descriptor_missing_required_field() -> None:
 
     with pytest.raises(AdapterScanError, match="Addr"):
         adapter.active_scan()
+
+
+def test_active_scan_retries_single_read_timeout_until_whole_deadline() -> None:
+    current_time = 0.0
+
+    def advance_one_second() -> None:
+        nonlocal current_time
+        current_time += 1.0
+
+    transport = ScriptedTransport(
+        [SerialTimeoutError("one read timed out"), b"OK\r\nEVENT 22\r\n"],
+        on_read_timeout=advance_one_second,
+    )
+    adapter = RsWsuhaPAdapter(
+        transport,
+        sleeper=lambda _seconds: None,
+        monotonic=lambda: current_time,
+    )
+
+    assert adapter.active_scan() == ()
+    assert transport.writes == [b"SKSCAN 2 FFFFFFFF 6 0\r\n"]
+
+
+def test_active_scan_timeout_logs_classified_response_diagnostics(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    timeout = SerialTimeoutError("whole scan timed out")
+    adapter, _, _ = _adapter(
+        [
+            b"SKSCAN 2 FFFFFFFF 6 0\r\nOK\r\n"
+            b"EVENT 20 0011223344556677 0\r\n"
+            b"unexpected-notice\r\n"
+            b"\xff\r\n",
+            timeout,
+        ]
+    )
+
+    with caplog.at_level(logging.WARNING):
+        with pytest.raises(AdapterResponseTimeoutError) as exc_info:
+            adapter.active_scan()
+
+    assert isinstance(exc_info.value.__cause__, SerialTimeoutError)
+    messages = [record.getMessage() for record in caplog.records]
+    diagnostic = next(
+        message
+        for message in messages
+        if "RS-WSUHA-P応答待機失敗" in message
+    )
+    assert "category=timeout" in diagnostic
+    assert "operation=active_scan" in diagnostic
+    assert "expected_response=scan_completion_event_22" in diagnostic
+    assert "received_line_count=5" in diagnostic
+    assert "unexpected_response_count=1" in diagnostic
+    assert "malformed_response_count=1" in diagnostic
+    assert "event_types=20" in diagnostic
+    assert "unexpected-notice" not in diagnostic
 
 
 def test_radio_settings_and_ipv6_resolution_use_scan_values() -> None:
