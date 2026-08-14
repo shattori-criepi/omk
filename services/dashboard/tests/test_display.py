@@ -645,6 +645,8 @@ def test_system_controls_require_confirmation_before_fixed_power_requests() -> N
     assert "シャットダウン" in response.text
     assert 'id="system-reboot"' in response.text
     assert 'id="system-shutdown"' in response.text
+    assert 'class="system-confirm-title"' in response.text
+    assert 'class="dialog-device system-confirm-message"' in response.text
 
     harness = r'''
 const fs = require("fs"), vm = require("vm");
@@ -681,6 +683,27 @@ vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8"));
         "shutdownRequested": True,
         "interruptedRebootIsNotError": True,
     }
+
+
+def test_admin_menu_has_only_available_management_functions() -> None:
+    response = client.get("/admin")
+
+    assert response.status_code == 200
+    assert "<title>OMK 管理メニュー</title>" in response.text
+    assert "<h1>管理メニュー</h1>" in response.text
+    assert "Bルート設定" in response.text
+    assert "システム操作" in response.text
+    assert "ネットワーク" not in response.text
+    assert "システム情報" not in response.text
+    assert "準備中" not in response.text
+
+
+def test_management_subpages_link_back_to_admin_menu() -> None:
+    for path in ("/admin/sensors", "/admin/broute", "/admin/system"):
+        response = client.get(path)
+
+        assert response.status_code == 200
+        assert "← 管理メニュー" in response.text
 
 
 def test_broute_layout_uses_wide_grid_rows_with_narrow_screen_fallback() -> None:
