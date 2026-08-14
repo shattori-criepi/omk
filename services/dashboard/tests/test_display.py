@@ -661,7 +661,7 @@ vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8") + "\nglobalThis.__b
   for (const state of ["scanning", "authenticating", "connected", "scan_error", "authentication_error", "connection_error"]) { __brouteTest.showStatus({service_active: true, connection_state: state}); stateLabels[state] = elements["#broute-connection"].textContent; }
   response = { status: 200, detail: { configured: true, service_active: true, connection_state: "scanning" } };
   await __brouteTest.pollStatus();
-  const polling = elements["#broute-connection"].textContent === "スマートメータを探索中" && scheduledDelay === 1500;
+  const idlePolling = elements["#broute-connection"].textContent === "スマートメータを探索中" && scheduledDelay === 10000;
   response = { status: 400, detail: {detail: "入力値が不正です"} };
   await __brouteTest.loadStatus();
   const upstreamErrorIsNotTransport = elements["#broute-connection"].textContent === "状態を取得できません";
@@ -672,8 +672,32 @@ vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8") + "\nglobalThis.__b
   elements["#broute-id"].value = "1234 5678 9ABC DEF0 1234 5678 9ABC DEF0";
   elements["#broute-password"].value = "1234 5678 9ABC";
   await elements["#broute-form"].onsubmit({preventDefault() {}});
+  const reconnectStates = [];
+  for (const state of ["stopped", "starting", "scanning", "authenticating", "connected"]) {
+    response = { status: 200, detail: { configured: true, service_active: state !== "stopped", connection_state: state } };
+    await __brouteTest.pollStatus();
+    reconnectStates.push({state, label: elements["#broute-connection"].textContent, delay: scheduledDelay, message: elements["#broute-message"].textContent});
+  }
+  async function submitReconnect() {
+    elements["#broute-id"].value = "1234 5678 9ABC DEF0 1234 5678 9ABC DEF0";
+    elements["#broute-password"].value = "1234 5678 9ABC";
+    response = { status: 200, detail: { configured: true, service_active: false, connection_state: "stopped" } };
+    await elements["#broute-form"].onsubmit({preventDefault() {}});
+  }
+  await submitReconnect();
+  response = { status: 200, detail: { configured: true, service_active: true, connection_state: "scan_error" } };
+  await __brouteTest.pollStatus();
+  const scanErrorTerminal = elements["#broute-message"].textContent === "スマートメータを検出できませんでした。" && scheduledDelay === 10000;
+  await submitReconnect();
+  response = { status: 200, detail: { configured: true, service_active: true, connection_state: "authentication_error" } };
+  await __brouteTest.pollStatus();
+  const authenticationErrorTerminal = elements["#broute-message"].textContent === "認証エラー。BルートIDまたはパスワードを確認してください。" && scheduledDelay === 10000;
+  await submitReconnect();
+  response = { status: 200, detail: { configured: true, service_active: true, connection_state: "connection_error" } };
+  await __brouteTest.pollStatus();
+  const connectionErrorTerminal = elements["#broute-message"].textContent === "スマートメータとの通信に失敗しました。" && scheduledDelay === 10000;
   const put = requests.find((request) => request.options.method === "PUT");
-  console.log(JSON.stringify({ formattedId: __brouteTest.formatToken(id, 32), formattedPassword: __brouteTest.formatToken(password, 12), normalizedPaste: __brouteTest.unformatToken("1234 5678 9ABC DEF0 1234 5678 9ABC DEF0", 32), validId: __brouteTest.validToken("1234 5678 9ABC DEF0 1234 5678 9ABC DEF0", 32), validPassword: __brouteTest.validToken("1234 5678 9ABC", 12), invalidShortId: __brouteTest.validToken("1234 5678 9ABC DEF0 1234 5678 9ABC DEF", 32), masked: __brouteTest.formatToken("0000************************4CEF", 32), idOpened, passwordOpened, idMaximum, passwordMaximum, idBackspace, cancellationRestored, confirmed, noPutBeforeSave, passwordBlankOnLoad, stateLabels, scanErrorMessage: __brouteTest.stateMessage("scan_error"), polling, upstreamErrorIsNotTransport, transportError, reconnectingMessage: elements["#broute-message"].textContent === "設定を保存しました。Bルートへ再接続しています。", request: JSON.parse(put.options.body) }));
+  console.log(JSON.stringify({ formattedId: __brouteTest.formatToken(id, 32), formattedPassword: __brouteTest.formatToken(password, 12), normalizedPaste: __brouteTest.unformatToken("1234 5678 9ABC DEF0 1234 5678 9ABC DEF0", 32), validId: __brouteTest.validToken("1234 5678 9ABC DEF0 1234 5678 9ABC DEF0", 32), validPassword: __brouteTest.validToken("1234 5678 9ABC", 12), invalidShortId: __brouteTest.validToken("1234 5678 9ABC DEF0 1234 5678 9ABC DEF", 32), masked: __brouteTest.formatToken("0000************************4CEF", 32), idOpened, passwordOpened, idMaximum, passwordMaximum, idBackspace, cancellationRestored, confirmed, noPutBeforeSave, passwordBlankOnLoad, stateLabels, scanErrorMessage: __brouteTest.stateMessage("scan_error"), idlePolling, upstreamErrorIsNotTransport, transportError, reconnectStates, scanErrorTerminal, authenticationErrorTerminal, connectionErrorTerminal, request: JSON.parse(put.options.body) }));
 })();
 '''
     completed = subprocess.run(
@@ -709,10 +733,19 @@ vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8") + "\nglobalThis.__b
         "connection_error": "通信エラー",
     }
     assert result["scanErrorMessage"] == "スマートメータを検出できませんでした。"
-    assert result["polling"] is True
+    assert result["idlePolling"] is True
     assert result["upstreamErrorIsNotTransport"] is True
     assert result["transportError"] is True
-    assert result["reconnectingMessage"] is True
+    assert result["reconnectStates"] == [
+        {"state": "stopped", "label": "再起動中", "delay": 1500, "message": "設定を保存しました。Bルートへ再接続しています。"},
+        {"state": "starting", "label": "起動中", "delay": 1500, "message": "設定を保存しました。Bルートへ再接続しています。"},
+        {"state": "scanning", "label": "スマートメータを探索中", "delay": 1500, "message": "設定を保存しました。Bルートへ再接続しています。"},
+        {"state": "authenticating", "label": "認証中", "delay": 1500, "message": "設定を保存しました。Bルートへ再接続しています。"},
+        {"state": "connected", "label": "接続済み", "delay": 10000, "message": "Bルートへ接続しました。"},
+    ]
+    assert result["scanErrorTerminal"] is True
+    assert result["authenticationErrorTerminal"] is True
+    assert result["connectionErrorTerminal"] is True
     assert result["request"] == {"id": "123456789ABCDEF0123456789ABCDEF0", "password": "123456789ABC"}
 
 
