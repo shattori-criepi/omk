@@ -202,6 +202,16 @@ def test_inactive_service_is_stopped_even_with_a_stale_connected_status(tmp_path
     assert response.json()["connection_state"] == "stopped"
 
 
+def test_active_service_with_unreadable_status_is_not_reported_as_starting(tmp_path: Path) -> None:
+    (tmp_path / "status.json").write_text("{", encoding="utf-8")
+    with client_for(tmp_path) as client:
+        client.app.state.controller = ActiveController()
+        response = client.get("/api/broute/credentials/status", headers=headers())
+
+    assert response.json()["connection_state"] == "status_unavailable"
+    assert response.json()["status_updated_at"] is None
+
+
 def test_status_returns_retry_wait_delay_without_credentials(tmp_path: Path) -> None:
     (tmp_path / "status.json").write_text(
         '{"state":"retry_wait","updated_at":"2026-08-14T00:00:00+00:00","retry_after_seconds":30}',

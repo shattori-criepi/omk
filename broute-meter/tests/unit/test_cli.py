@@ -645,6 +645,55 @@ def test_run_connection_retry_wait_stops_on_shutdown(
     ] == 30
 
 
+def test_connection_retries_do_not_reenter_starting_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeSession:
+        def __init__(self, _adapter: object, *, scan_max_attempts: int, on_state_change=None) -> None:
+            assert scan_max_attempts == 3
+
+        def connect(self, _identifier: str, _password: str) -> SimpleNamespace:
+            raise NoSmartMeterFoundError("no scan candidates")
+
+    class StopAfterTwoRetries:
+        retries = 0
+
+        def is_set(self) -> bool:
+            return False
+
+        def wait(self, timeout: float) -> bool:
+            assert timeout == 30
+            self.retries += 1
+            return self.retries == 2
+
+    class RecordingStatus:
+        def __init__(self) -> None:
+            self.states: list[tuple[str, float | None]] = []
+
+        def write(self, state: str, *, now: datetime, retry_after_seconds: float | None = None) -> None:
+            self.states.append((state, retry_after_seconds))
+
+    monkeypatch.setattr(cli, "BRouteSession", FakeSession)
+    status = RecordingStatus()
+    config = SimpleNamespace(
+        credentials=SimpleNamespace(b_route_id="A" * 32, password="P" * 12),
+        retry=SimpleNamespace(request_max_attempts=3, reconnect_wait_seconds=30),
+    )
+
+    assert cli._connect_broute_until_ready(  # type: ignore[arg-type]
+        object(), config, StopAfterTwoRetries(), logging.getLogger("broute_meter.test"), runtime_status=status
+    ) is None
+    assert status.states == [
+        ("scanning", None),
+        ("scan_error", None),
+        ("retry_wait", 30),
+        ("scanning", None),
+        ("scan_error", None),
+        ("retry_wait", 30),
+    ]
+    assert all(state != "starting" for state, _ in status.states)
+
+
 def test_pana_authentication_rejection_is_not_overwritten_by_retry_timeout(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
