@@ -20,7 +20,7 @@ from broute_meter.adapter import (
     AdapterResponseTimeoutError,
     AdapterScanError,
 )
-from broute_meter.broute import BRouteSessionError
+from broute_meter.broute import BRouteSessionError, NoSmartMeterFoundError
 from broute_meter.config import AppConfig
 from broute_meter.models import CumulativeEnergyReading, InstantaneousPowerReading
 from broute_meter.runtime_status import RuntimeStatusStore
@@ -688,17 +688,19 @@ def test_pana_authentication_rejection_is_not_overwritten_by_retry_timeout(
 
 
 @pytest.mark.parametrize(
-    "failure",
+    ("failure", "expected_state"),
     [
-        AdapterResponseTimeoutError("PANA response timed out"),
-        AdapterCommunicationError("serial disconnected"),
-        AdapterScanError("smart meter not found"),
+        (AdapterResponseTimeoutError("PANA response timed out"), "connection_error"),
+        (AdapterCommunicationError("serial disconnected"), "connection_error"),
+        (AdapterScanError("smart meter not found"), "scan_error"),
+        (NoSmartMeterFoundError("no scan candidates"), "scan_error"),
     ],
 )
 def test_pana_transport_failures_remain_connection_errors(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     failure: Exception,
+    expected_state: str,
 ) -> None:
     class FakeSession:
         def __init__(self, _adapter: object, *, scan_max_attempts: int, on_state_change) -> None:
@@ -726,7 +728,7 @@ def test_pana_transport_failures_remain_connection_errors(
         object(), config, StopImmediately(), logging.getLogger("broute_meter.test"), runtime_status=RuntimeStatusStore(status_path)
     )
 
-    assert "connection_error" in status_path.read_text(encoding="utf-8")
+    assert expected_state in status_path.read_text(encoding="utf-8")
 
 def test_run_treats_inflight_failure_after_stop_signal_as_graceful(
     tmp_path: Path,

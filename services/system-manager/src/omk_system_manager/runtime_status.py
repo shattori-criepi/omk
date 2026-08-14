@@ -12,6 +12,7 @@ CONNECTION_STATES: Final = frozenset(
         "scanning",
         "authenticating",
         "connected",
+        "scan_error",
         "authentication_error",
         "connection_error",
         "stopped",
