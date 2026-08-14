@@ -93,7 +93,7 @@ class SoracomMetadataClient:
 
     def get_site_uuid(self) -> str | None:
         try:
-            response = httpx.get(f"{self._base_url}/tags", timeout=self._timeout_seconds)
+            response = httpx.get(f"{self._base_url}.tags", timeout=self._timeout_seconds)
             response.raise_for_status()
             return _site_uuid_from_response(response.json())
         except (httpx.HTTPError, ValueError, TypeError) as error:

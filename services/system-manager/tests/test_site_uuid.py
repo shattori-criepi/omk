@@ -147,6 +147,6 @@ def test_soracom_http_client_uses_documented_endpoints_and_payload(monkeypatch: 
     assert client.get_site_uuid() == value
     client.put_site_uuid(value)
     assert calls == [
-        ("GET", "http://metadata.soracom.io/v1/subscriber/tags", None, 2.5),
+        ("GET", "http://metadata.soracom.io/v1/subscriber.tags", None, 2.5),
         ("PUT", "http://metadata.soracom.io/v1/subscriber/tags", [{"tagName": "site_uuid", "tagValue": value}], 2.5),
     ]
