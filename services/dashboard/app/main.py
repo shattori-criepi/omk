@@ -1,6 +1,7 @@
 """HTTP entry point for the OMK touch display dashboard."""
 
 import os
+from collections.abc import Mapping
 from pathlib import Path
 
 import httpx
@@ -76,10 +77,47 @@ async def _ble_request(method: str, path: str, body: dict | None = None) -> dict
         async with httpx.AsyncClient(timeout=5) as client:
             response = await client.request(method, f"{BLE_MANAGER_URL}{path}", json=body)
         if response.status_code >= 400:
-            raise HTTPException(response.status_code, response.json().get("detail", "BLE manager error"))
+            raise HTTPException(response.status_code, _backend_error_detail(response, "BLE manager error"))
         return response.json()
     except httpx.RequestError as error:
         raise HTTPException(503, "BLE管理サービスに接続できません") from error
+
+
+def _validation_detail(value: object) -> str | None:
+    """Render FastAPI/Pydantic validation errors without exposing internals."""
+    if isinstance(value, Mapping):
+        message = value.get("msg")
+        location = value.get("loc")
+        if isinstance(message, str):
+            if isinstance(location, (list, tuple)):
+                field = ".".join(str(item) for item in location if item not in {"body", "query", "path"})
+                return f"{field}: {message}" if field else message
+            return message
+        return None
+    if isinstance(value, list):
+        rendered = [detail for item in value if (detail := _validation_detail(item))]
+        return "; ".join(rendered) if rendered else None
+    return None
+
+
+def _backend_error_detail(response: httpx.Response, fallback: str) -> str:
+    """Preserve an upstream status while safely rendering its error body."""
+    try:
+        payload = response.json()
+    except ValueError:
+        text = response.text.strip()
+        # A traceback or path is not a browser-facing error message.
+        if text and "Traceback" not in text and "/" not in text and "\\" not in text:
+            return text[:300]
+        return f"{fallback} (HTTP {response.status_code})"
+
+    detail = payload.get("detail") if isinstance(payload, Mapping) else None
+    if isinstance(detail, str) and detail:
+        return detail[:300]
+    rendered = _validation_detail(detail)
+    if rendered:
+        return rendered[:300]
+    return f"{fallback} (HTTP {response.status_code})"
 
 
 async def _system_manager_request(method: str, path: str, body: dict | None = None) -> dict:

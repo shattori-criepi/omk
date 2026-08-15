@@ -51,5 +51,8 @@ sudo -u "${TARGET_USER}" "${VENV_PATH}/bin/pip" install -r "${OMK_ROOT}/services
 log "Installing systemd unit."
 sed -e "s|@OMK_USER@|${TARGET_USER}|g" -e "s|@OMK_GROUP@|$(id -gn "${TARGET_USER}")|g" -e "s|@OMK_ROOT@|${OMK_ROOT}|g" "${SERVICE_SOURCE}" | sudo tee "/etc/systemd/system/${SERVICE_NAME}" >/dev/null
 sudo systemctl daemon-reload
-sudo systemctl enable --now "${SERVICE_NAME}"
+sudo systemctl enable "${SERVICE_NAME}"
+# enable --now does not restart an already-active unit, so it would leave a
+# newly added Environment= line unapplied during an update.
+sudo systemctl restart "${SERVICE_NAME}"
 sudo systemctl --no-pager --full status "${SERVICE_NAME}"

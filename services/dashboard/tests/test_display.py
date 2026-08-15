@@ -459,6 +459,82 @@ def test_delete_sensor_proxy_forwards_device_key_and_propagates_not_found(monkey
     assert error.value.status_code == 404
 
 
+@pytest.mark.parametrize(
+    ("status", "payload", "text", "expected"),
+    [
+        (404, {"detail": "node was not found"}, "", "node was not found"),
+        (422, {"detail": [{"loc": ["body", "logical_id"], "msg": "invalid value"}]}, "", "logical_id: invalid value"),
+        (500, ValueError(), "BLE manager unavailable", "BLE manager unavailable"),
+        (500, ValueError(), "", "BLE manager error (HTTP 500)"),
+    ],
+)
+def test_ble_proxy_preserves_status_and_safely_formats_backend_errors(
+    monkeypatch: pytest.MonkeyPatch, status: int, payload: object, text: str, expected: str,
+) -> None:
+    class ErrorResponse:
+        status_code = status
+
+        def json(self):
+            if isinstance(payload, Exception):
+                raise payload
+            return payload
+
+        @property
+        def text(self) -> str:
+            return text
+
+    class ErrorClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_: object) -> None:
+            return None
+
+        async def request(self, *_: object, **__: object):
+            return ErrorResponse()
+
+    monkeypatch.setattr(dashboard_main.httpx, "AsyncClient", lambda **_: ErrorClient())
+    with pytest.raises(dashboard_main.HTTPException) as error:
+        asyncio.run(dashboard_main._ble_request("POST", "/api/nodes/x/register", {"logical_id": "bad"}))
+    assert error.value.status_code == status
+    assert error.value.detail == expected
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is required for admin UI tests")
+def test_node_registration_ui_formats_errors_and_renders_state_transitions() -> None:
+    javascript_path = Path(__file__).parents[1] / "app" / "static" / "admin.js"
+    harness = r'''
+const fs = require("fs"), vm = require("vm");
+function element() { return { hidden: false, textContent: "", className: "", value: "", disabled: false, onclick: null, onsubmit: null, addEventListener() {}, closest() { return null; }, querySelector() { return element(); }, showModal() {}, close() {} }; }
+const selectors = ["#setup-status", "#candidates", "#registered-sensors", "#omk-nodes", "#start-scan", "#stop-scan", "#register-dialog", "#register-form", "#register-error", "#edit-dialog", "#edit-form", "#edit-error", "#cancel-register", "#cancel-edit", "#delete-sensor"];
+const elements = Object.fromEntries(selectors.map(key => [key, element()]));
+global.document = {querySelector: selector => elements[selector] || element()};
+global.window = {setInterval() {}, confirm() { return false; }};
+global.fetch = async () => ({ok: true, json: async () => ({sensors: [], nodes: []})});
+vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8"));
+const provisioned = nodeCard({node_id: "112233445566", registration_state: "provisioned", capabilities: ["ble_scan"]});
+const requested = nodeCard({node_id: "112233445566", registration_state: "provisioned", request_state: "request_sent", capabilities: ["ble_scan"]});
+const registered = nodeCard({node_id: "112233445566", registration_state: "registered", logical_id: "ble-relay-001", capabilities: ["ble_scan"]});
+console.log(JSON.stringify({
+  string: formatApiError("bad request"),
+  object: formatApiError({loc: ["body", "logical_id"], msg: "invalid value"}),
+  list: formatApiError([{loc: ["body", "logical_id"], msg: "invalid value"}]),
+  provisioned: provisioned.includes("register-node"),
+  requested: requested.includes("登録要求を送信済み") && !requested.includes("register-node"),
+  registered: registered.includes("登録済み") && registered.includes("ble-relay-001") && !registered.includes("register-node"),
+}));
+'''
+    completed = subprocess.run(["node", "-e", harness, str(javascript_path)], check=True, capture_output=True, text=True)
+    assert json.loads(completed.stdout) == {
+        "string": "bad request",
+        "object": "logical_id: invalid value",
+        "list": "logical_id: invalid value",
+        "provisioned": True,
+        "requested": True,
+        "registered": True,
+    }
+
+
 def test_broute_status_proxy_returns_only_safe_status(monkeypatch: pytest.MonkeyPatch) -> None:
     raw_identifier = "A" * 32
     raw_password = "B" * 12
