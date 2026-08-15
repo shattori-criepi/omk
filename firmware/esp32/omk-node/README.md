@@ -99,25 +99,26 @@ Dashboard登録フローを再試験する場合だけ、次を明示的に実�
 
 ## Discovery BLE v1
 
-通常bootのNodeは、未Provisioningか保存済みWi-Fi credentialを持つかにかかわらず、
-次のService UUIDのraw legacy advertisingを出します。Provisioning済みNodeでも
-Discoveryは再Provisioning開始経路として維持します。
+保存済みWi-Fi credentialを持つ通常bootのNodeは、次のService UUIDのraw legacy
+advertisingを出します。Wi-Fi STAおよびMQTT registrationと並行して動作し、Gatewayが
+Nodeを発見・状態確認する用途に使います。Wi-Fi未設定NodeはこのDiscoveryを開始せず、
+後述のEspressif Provisioning BLEだけをadvertiseします。
 
 - Service UUID: `7d2a4d90-7b64-4e3a-9f37-95e77d7b5101`
 - Service Data: 厳密に10 bytes
   `protocol_version(1) | provisioning_state(1) | capabilities(2, big-endian) | node_id(6)`
-- 現在の値: protocol version `1`、provisioning state `0`（未登録として定義）
+- Protocol version: `1`
+- Provisioning state: `0` = unregistered、`1` = provisioned、`2` = registered。
+  保存済みWi-Fi credentialと`omk/registered`から決定する。
 - Capability bits: `ble_scan = 0x0001`、`sen66 = 0x0002`。複数bitの組合せを許容する
 
 Service Dataには`site_uuid`、SSID、Wi-Fi password、PoP、MQTT credential、
 SORACOM情報その他の秘密情報を載せません。AtomS3 Liteのadvertising v1はGateway
 管理画面で未登録OMK Nodeとして実機検出済みです。
 
-Provisioning済みNodeも現在はstate `0`を広告するため、広告上の状態表現と実際の
-Provisioning済み状態の整理は今後のプロトコル設計課題です。
-
 接続後の開始要求用Control GATT serviceはadvertising payloadへ追加せず、service
-discoveryで見つけます。
+discoveryで見つけます。これはWi-Fi設定済みNodeの再Provisioning用に残している移行中の
+互換経路であり、初回Wi-Fi Provisioningには使用しません。
 
 - Control Service UUID: `c1347091-4268-2fb1-884a-7d019a432154`
 - START characteristic UUID: `c1347091-4268-2fb1-884a-7d019a432155`
@@ -127,30 +128,46 @@ discoveryで見つけます。
 応答、固定長4のFreeRTOS event queueへの投入だけを担当し、NVS操作、再起動、BLE
 停止、Provisioning開始は行いません。`node_state_task`だけがeventを解釈します。
 
-## DiscoveryからProvisioningへのboot境界
+## Wi-Fi credentialによるboot flow
 
 ESP-IDF 6ではBluetooth controllerの同一boot内でのdeinit後再initを前提にしません。
 そのためDiscovery BLEとnetwork provisioning BLEを同時に動かしたり、同一boot内で
-所有権移譲したりしません。
+所有権移譲したりしません。起動時のfactory secretから`omk/prov_pop`への移送後、保存済み
+Wi-Fi STA credentialで次のように分岐します。
 
-1. 通常bootはDiscovery BLE（raw advertising + Control GATT）を開始する。保存済み
-   Wi-Fi設定があればWi-Fi STAも並行して開始する。
-2. `0x01`はstate taskへ渡され、PoPが有効なら`omk/next_boot_mode`へuint8の
-   `PROVISIONING`を保存・commitしてから再起動する。
-3. Provisioning bootは最初にこのflagをeraseしてcommitする。クラッシュ、watchdog、
-   電源断後にProvisioning boot loopへ入らないためである。
-4. Provisioning bootではDiscovery BLEを開始せず、network provisioningだけが
-   controller / Bluedroidを初期化する。通常boot用の`wifi_station`も開始しないが、
-   network provisioning manager自身はWi-Fi / STAを初期化し、credentials apply後に
-   接続する。
+```text
+factory PoP import
+        |
+        +-- Wi-Fi credentialなし
+        |     -> Espressif Provisioning BLE
+        |     -> Security 1 + Node固有PoP
+        |     -> Wi-Fi設定と接続
+        |     -> Provisioning終了後にreboot
+        |
+        +-- Wi-Fi credentialあり
+              -> Wi-Fi STA
+              -> MQTT registration
+              -> OMK Discovery BLE
+```
 
-flag消去またはcommitに失敗した場合はProvisioningを開始せずsafe idleに留まります。
-Discovery bootのClassic BT memory releaseはboot中に一度だけ行い、BLE-onlyとWi-Fi
+`wifi_station_prepare()`はnetif、default event loop、default STA netif、Wi-Fi driverを
+初期化してから、Flashに保存されたSTA credentialの有無を確認します。
+`wifi_station_start_prepared()`はcredentialがある場合だけevent handler登録、STA開始、接続を
+担当します。未設定Nodeはprepare済みのnetwork/Wi-Fi初期化をそのままProvisioning側で使うため、
+`esp_netif`、event loop、Wi-Fi driverを二重に初期化しません。
+
+従来のControl GATT `0x01`は、Wi-Fi設定済みNodeを明示的に再Provisioningする互換経路として
+残っています。PoPが有効なら`omk/next_boot_mode`へ`PROVISIONING`を保存・commitして再起動し、
+次bootの先頭でflagを消去・commitします。これはクラッシュ、watchdog、電源断後の
+Provisioning boot loopを防ぐためです。このControl Service、START characteristic、boot flag、
+Gateway側Control retryは将来のStep 4で整理・削除予定です。
+
+Discoveryを使う通常bootでのClassic BT memory releaseはboot中に一度だけ行い、BLE-onlyとWi-Fi
 STAの併用には影響しません。
 
 ## Security 1 BLE Provisioning
 
-Provisioning bootは`network_prov_scheme_ble`と`NETWORK_PROV_SECURITY_1`のみを
+Wi-Fi未設定bootのProvisioningは`network_prov_scheme_ble`と`NETWORK_PROV_SECURITY_1`のみを
 使用します。Security 0 / Security 2へfallbackしません。`CONFIG_ESP_PROTOCOMM_SUPPORT_SECURITY_VERSION_1=y`
 が必要です。
 
@@ -158,9 +175,19 @@ Provisioning bootは`network_prov_scheme_ble`と`NETWORK_PROV_SECURITY_1`のみ�
 - Service name: `OMK_<12 hex node_id>`（例: `OMK_9af9509eb8b6`）
 - PoP: 前節のNode固有secretをlowercase hexへ変換したもの
 
-DiscoveryのSTART操作は再Provisioningを明示する要求です。したがって既存Wi-Fi
-credentialが保存済みでも、Provisioning bootではSecurity 1 BLE serviceを必ず開始
-します。起動時に既存credentialを消去しません。
+Provisioning BLEのservice nameは`OMK_<node_id>`です。`node_id`は12桁lowercase hexの
+安定した内部識別子ですが認証情報ではありません。最終的なNode所有確認は、Security 1と
+Node固有PoPによるhandshakeで行います。Gateway側はfactory flash時に作成したNode credential
+storeを使ってPoPを取得します。PoP、SSID、Wi-Fi passwordはadvertising、通常ログ、MQTT、APIへ
+載せません。
+
+`NETWORK_PROV_WIFI_CRED_SUCCESS`でWi-Fi接続成功を記録し、`NETWORK_PROV_END`でProvisioning
+managerをdeinitします。その後、event callbackから直接ではなくFreeRTOS task経由で
+`esp_restart()`します。再起動後は保存済みcredentialを検出するため、Wi-Fi STA、MQTT registration、
+OMK Discovery BLEの通常bootへ進みます。
+
+Control GATT STARTは既存Wi-Fi credentialを消去せずに再Provisioningを明示する互換操作です。
+この経路でもSecurity 1 BLE serviceを開始します。
 
 AtomS3 LiteではPC側credentialのPoPを用いたSecurity 1 session、SSID/passwordの
 保存、直後のWi-Fi接続を実機で確認済みです。SetConfigおよびApplyConfigはいずれも
@@ -170,25 +197,44 @@ AtomS3 LiteではPC側credentialのPoPを用いたSecurity 1 session、SSID/pass
 
 WSLには通常BLE adapterが渡らないため、Security 1 clientはWindows側のPython 3.13
 環境で実行します。Espressif公式`esp_prov`コードと`bleak`、`protobuf`、
-`cryptography`を使います。Windowsの標準clientがpair処理で停止する場合は、pairを
-強制しないBLE read/write経路で確認できます。Control characteristicへの`0x01` write
-はNodeの再起動を起こすため、Windows側が"user cancelled"と報告しても、その後に
-Provisioning advertisementが出れば開始要求は成功しています。service nameが取得
-できない場合もBluetooth MACで対象を識別して確認できます。
+`cryptography`を使います。service nameが取得できない場合もBluetooth MACで対象を識別して
+確認できます。Wi-Fi未設定Nodeは起動直後からProvisioning BLEをadvertiseするため、Control
+characteristicへの事前writeは不要です。
 
 ## 通常bootのWi-Fi STA
 
-`wifi_station`モジュールは保存済みcredentialの有無を確認し、未設定ならエラーに
-せずDiscovery BLEだけを継続します。設定済みなら`esp_netif`、default event loop、
-default STA netif、Wi-Fi driverを初期化してSTA接続を開始します。切断時は通常運用の
-再接続を行い、`IP_EVENT_STA_GOT_IP`で成功を記録します。SSID/passwordはログしません。
-Wi-Fi初期化が失敗してもDiscovery BLEは可能な限り継続します。
+`wifi_station_prepare()`は保存済みcredentialの有無を確認し、必要なnetif/event loop/Wi-Fi
+初期化を一度だけ行います。設定済みの場合だけ`wifi_station_start_prepared()`がSTA接続を開始します。
+切断時は通常運用の再接続を行い、`IP_EVENT_STA_GOT_IP`で成功を記録します。SSID/passwordは
+ログしません。Wi-Fi初期化が失敗した場合は、Provisioning/STAを開始せず、既存の安全側エラー処理に
+従い、Discovery BLEは可能な範囲で継続します。
 
 AtomS3 Liteでは再起動後およそ15秒でRaspberry Pi APへ再接続することを確認済みです。
 AP側はSTA MAC `ac:a7:04:03:d7:f8`を観測し、`192.168.50.175`はreachable、pingは
-4/4応答・packet loss 0%でした。Provisioning bootでは通常boot用の`wifi_station`と
-Discovery BLEを開始せず、BLEはnetwork provisioningが単独で所有します。Wi-Fi / STAは
-network provisioning managerがcredentials apply後の接続のために初期化します。
+4/4応答・packet loss 0%でした。Wi-Fi未設定bootではOMK Discovery BLEを開始せず、BLEは
+network provisioningが単独で所有します。
+
+### Provisioning BLEの実機確認とBlueZ cache
+
+AtomS3 Lite実機（Node ID `9af9509eb8b6`、BLE address `AC:A7:04:03:D7:FA`）で、Raspberry Pi
+Gateway / BlueZ 5.82から次を確認済みです。
+
+```text
+Name: OMK_9af9509eb8b6
+Provisioning UUID: c2f08e31-75fd-4f81-9e6d-4f89a3bc1d27
+```
+
+これにより、Wi-Fi未設定Nodeが起動直後からProvisioning BLEへ入るStep 1を実機確認しました。
+確認時に`bluetoothctl info`が旧Discovery UUID
+`7d2a4d90-7b64-4e3a-9f37-95e77d7b5101`のService Dataを表示することがあります。未設定bootは
+`discovery_ble_start()`へ到達せず、Provisioning実装もこのService Dataを設定しないため、同じ
+BLE addressに対するBlueZの過去属性が残っている可能性が高いです。現在送信中のadvertisingを
+厳密に確認するときは、`bluetoothctl info`だけで断定せず、次のようにraw LE Advertising Reportを
+確認します。
+
+```bash
+sudo btmon
+```
 
 ## OMK networkと今後のNode
 

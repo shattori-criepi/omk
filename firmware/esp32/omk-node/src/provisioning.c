@@ -7,7 +7,10 @@
 #include "esp_event.h"
 #include "esp_log.h"
 #include "esp_netif.h"
+#include "esp_system.h"
 #include "esp_wifi.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "network_provisioning/manager.h"
 #include "network_provisioning/scheme_ble.h"
 #include "nvs.h"
@@ -26,6 +29,27 @@ static uint8_t provisioning_service_uuid[16] = {
 /* The manager API accepts a NUL-terminated Security 1 PoP string. Keep this
  * buffer alive for the whole provisioning service lifetime. */
 static char provisioning_pop_hex[PROVISIONING_POP_HEX_LENGTH + 1];
+static bool provisioning_succeeded;
+static bool reboot_scheduled;
+
+static void provisioning_reboot_task(void *arg) {
+    (void)arg;
+    /* Return from the provisioning event callback before resetting. */
+    vTaskDelay(pdMS_TO_TICKS(100));
+    ESP_LOGI(TAG, "Provisioning completed; restarting into normal boot");
+    esp_restart();
+}
+
+static void schedule_provisioning_reboot(void) {
+    if (reboot_scheduled) {
+        return;
+    }
+    reboot_scheduled = true;
+    if (xTaskCreate(provisioning_reboot_task, "prov_reboot", 2048, NULL, 5, NULL) != pdPASS) {
+        reboot_scheduled = false;
+        ESP_LOGE(TAG, "Failed to schedule provisioning reboot");
+    }
+}
 
 static esp_err_t load_provisioning_pop_hex(void) {
     nvs_handle_t nvs;
@@ -86,6 +110,7 @@ static void provisioning_event_handler(void *arg, esp_event_base_t event_base,
         break;
     case NETWORK_PROV_WIFI_CRED_SUCCESS:
         ESP_LOGI(TAG, "Wi-Fi credential connection succeeded");
+        provisioning_succeeded = true;
         break;
     case NETWORK_PROV_END: {
         ESP_LOGI(TAG, "Provisioning service ended");
@@ -93,6 +118,10 @@ static void provisioning_event_handler(void *arg, esp_event_base_t event_base,
         if (err != ESP_OK) {
             ESP_LOGE(TAG, "Failed to de-initialize provisioning manager: %s",
                      esp_err_to_name(err));
+        } else if (provisioning_succeeded) {
+            /* NETWORK_PROV_END confirms that the BLE service has stopped.
+             * Reboot from a task, not this event callback, after cleanup. */
+            schedule_provisioning_reboot();
         }
         break;
     }
@@ -117,18 +146,23 @@ static esp_err_t init_provisioning_wifi(void) {
     return esp_wifi_init(&wifi_config);
 }
 
-esp_err_t provisioning_start(uint64_t node_id) {
+esp_err_t provisioning_start(uint64_t node_id, bool wifi_stack_ready) {
     esp_err_t err = load_provisioning_pop_hex();
     if (err != ESP_OK) {
         return err;
     }
 
-    err = init_provisioning_wifi();
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to initialize provisioning network stack: %s",
-                 esp_err_to_name(err));
-        return err;
+    if (!wifi_stack_ready) {
+        err = init_provisioning_wifi();
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to initialize provisioning network stack: %s",
+                     esp_err_to_name(err));
+            return err;
+        }
     }
+
+    provisioning_succeeded = false;
+    reboot_scheduled = false;
 
     err = esp_event_handler_register(NETWORK_PROV_EVENT, ESP_EVENT_ANY_ID,
                                      provisioning_event_handler, NULL);
