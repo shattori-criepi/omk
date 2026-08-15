@@ -43,4 +43,6 @@ firmware/esp32/sen66-node/src/network_config.h
 even-terminal-*.log
 data/provisioning/nodes/
 firmware/esp32/omk-node/.pio/
+firmware/esp32/omk-node/sdkconfig.*-wifi-set
+firmware/esp32/omk-node/src/development_wifi_config.h
 firmware/esp32/omk-node/managed_components/

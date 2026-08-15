@@ -15,6 +15,10 @@
 #include "network_provisioning/manager.h"
 #include "network_provisioning/scheme_ble.h"
 
+#ifdef OMK_DEVELOPMENT_SET_WIFI_CREDENTIALS
+#include "development_wifi_config.h"
+#endif
+
 #define FACTORY_MAGIC "OMKP"
 #define POP_BYTES 32
 static const char *TAG = "omk-node";
@@ -114,6 +118,27 @@ void app_main(void) {
         ESP_LOGI(TAG, "Development registration reset verified");
     } else {
         ESP_LOGE(TAG, "Development registration reset failed: %s", esp_err_to_name(reset_err));
+    }
+    return;
+#endif
+#ifdef OMK_DEVELOPMENT_SET_WIFI_CREDENTIALS
+    /* This image is built only by set-omk-node-wifi.sh. It verifies the
+     * node-specific PoP before and after writing only ESP-IDF's persisted STA
+     * configuration. The script immediately restores production firmware. */
+    esp_err_t set_err = node_state_verify_provisioning_pop();
+    if (set_err == ESP_OK) {
+        set_err = wifi_station_set_saved_credentials_for_development(
+            OMK_DEVELOPMENT_WIFI_SSID, OMK_DEVELOPMENT_WIFI_SSID_LENGTH,
+            OMK_DEVELOPMENT_WIFI_PSK, OMK_DEVELOPMENT_WIFI_PSK_LENGTH);
+    }
+    if (set_err == ESP_OK) {
+        set_err = node_state_verify_provisioning_pop();
+    }
+    if (set_err == ESP_OK) {
+        ESP_LOGI(TAG, "Development Wi-Fi credential write verified");
+    } else {
+        ESP_LOGE(TAG, "Development Wi-Fi credential write failed: %s",
+                 esp_err_to_name(set_err));
     }
     return;
 #endif
