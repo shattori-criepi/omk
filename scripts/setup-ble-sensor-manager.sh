@@ -20,13 +20,35 @@ ESP_PROVISIONING_RUNTIME="${ESP_PROVISIONING_ROOT}/runtime-network-${NETWORK_PRO
 log() { printf '[omk-ble-setup] %s\n' "$*"; }
 warn() { printf '[omk-ble-setup] WARN: %s\n' "$*" >&2; }
 
+network_provisioning_version_matches() {
+  local manifest="$1"
+  awk -v expected="${NETWORK_PROVISIONING_VERSION}" '
+    /^[[:space:]]*version:[[:space:]]*/ {
+      value = $0
+      sub(/^[[:space:]]*version:[[:space:]]*/, "", value)
+      sub(/[[:space:]]*#.*/, "", value)
+      gsub(/^[[:space:]]+/, "", value)
+      gsub(/[[:space:]]+$/, "", value)
+      single_quote = sprintf("%c", 39)
+      first = substr(value, 1, 1)
+      last = substr(value, length(value), 1)
+      if ((first == "\"" && last == "\"") || (first == single_quote && last == single_quote)) {
+        value = substr(value, 2, length(value) - 2)
+      }
+      if (value == expected) found = 1
+      exit
+    }
+    END { exit(found ? 0 : 1) }
+  ' "${manifest}"
+}
+
 valid_network_provisioning_tree() {
   local tree="$1"
   [[ -f "${tree}/LICENSE" ]] &&
     [[ -f "${tree}/idf_component.yml" ]] &&
     [[ -f "${tree}/tool/esp_prov/esp_prov.py" ]] &&
     [[ -f "${tree}/tool/esp_prov/transport/transport_ble.py" ]] &&
-    grep -Fqx "version: ${NETWORK_PROVISIONING_VERSION}" "${tree}/idf_component.yml"
+    network_provisioning_version_matches "${tree}/idf_component.yml"
 }
 
 valid_protocomm_tree() {
