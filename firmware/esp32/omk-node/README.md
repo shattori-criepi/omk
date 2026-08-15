@@ -83,6 +83,20 @@ partition設定の両方が必要です。PlatformIOのデフォルトsingle-app
 secretを書き込むことは危険です。書込み前に生成物・実機双方のpartition tableを
 確認します。
 
+### 開発時だけの登録状態reset
+
+Dashboard登録フローを再試験する場合だけ、次を明示的に実行します。
+
+```bash
+./scripts/reset-omk-node-registration.sh atom-s3-lite /dev/ttyACM0 --confirm
+```
+
+このスクリプトは一時的な開発用imageをflashし、NVS namespace `omk`の
+`registered`と`logical_id`だけをeraseしてcommitします。両keyがread-backで
+存在しないことを確認した後、通常firmwareを自動的に戻します。NVS partitionの
+全消去、Wi-Fi credentials、`prov_pop`、`factory_secret` partitionへの操作はしません。
+通常firmwareにはこの操作へ到達するruntime経路はありません。
+
 ## Discovery BLE v1
 
 通常bootのNodeは、未Provisioningか保存済みWi-Fi credentialを持つかにかかわらず、
