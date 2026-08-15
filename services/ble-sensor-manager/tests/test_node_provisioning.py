@@ -156,7 +156,7 @@ def test_control_connect_failure_is_a_definite_failure(tmp_path: Path, monkeypat
     monkeypatch.setattr(module, "CONTROL_CONNECT_RETRY_SECONDS", 0)
     with pytest.raises(RuntimeError, match="could not connect to node control service"):
         asyncio.run(_manager_with_control_node(tmp_path)._send_start_provisioning(NODE_ID))
-    assert len(attempts) == 3
+    assert len(attempts) == module.CONTROL_CONNECT_MAX_ATTEMPTS
     assert all(not isinstance(device, str) for device in attempts)
 
 
@@ -206,7 +206,7 @@ def test_control_start_continues_when_write_is_interrupted_by_reboot(tmp_path: P
     assert calls == ["connect", "write", "disconnect"]
 
 
-def test_control_connect_retries_then_uses_cached_ble_device(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_control_connect_retries_six_failures_then_uses_cached_ble_device(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     attempts: list[object] = []
     connects = 0
 
@@ -217,7 +217,7 @@ def test_control_connect_retries_then_uses_cached_ble_device(tmp_path: Path, mon
         async def connect(self) -> None:
             nonlocal connects
             connects += 1
-            if connects == 1:
+            if connects <= 6:
                 raise RuntimeError("connection failed to be established")
 
         async def write_gatt_char(self, uuid: str, value: bytes, response: bool) -> None:
@@ -230,8 +230,8 @@ def test_control_connect_retries_then_uses_cached_ble_device(tmp_path: Path, mon
     import omk_ble.service as module
     monkeypatch.setattr(module, "CONTROL_CONNECT_RETRY_SECONDS", 0)
     asyncio.run(_manager_with_control_node(tmp_path)._send_start_provisioning(NODE_ID))
-    assert connects == 2
-    assert len(attempts) == 2
+    assert connects == 7
+    assert len(attempts) == 7
     assert all(not isinstance(device, str) for device in attempts)
 
 

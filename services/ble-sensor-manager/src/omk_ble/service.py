@@ -25,7 +25,8 @@ STATE_PUBLISH_INTERVAL_SECONDS = 10.0
 POWER_PUBLISH_INTERVAL_SECONDS = 10.0
 NODE_CAPABILITY_NAMES = ((1 << 0, "ble_scan"), (1 << 1, "sen66"))
 DISCOVERY_CONTROL_START_UUID = "c1347091-4268-2fb1-884a-7d019a432155"
-CONTROL_CONNECT_ATTEMPTS = 3
+CONTROL_CONNECT_MAX_ATTEMPTS = 8
+CONTROL_CONNECT_TIMEOUT_SECONDS = 4.0
 CONTROL_CONNECT_RETRY_SECONDS = 0.25
 
 
@@ -121,7 +122,7 @@ class BleManager:
 
         client: Any | None = None
         last_error: Exception | None = None
-        for attempt in range(1, CONTROL_CONNECT_ATTEMPTS + 1):
+        for attempt in range(1, CONTROL_CONNECT_MAX_ATTEMPTS + 1):
             try:
                 from bleak import BleakClient
                 client = BleakClient(ble_device)
@@ -129,9 +130,9 @@ class BleManager:
                     "Connecting to OMK Node control service node_id=%s attempt=%d/%d",
                     node_id,
                     attempt,
-                    CONTROL_CONNECT_ATTEMPTS,
+                    CONTROL_CONNECT_MAX_ATTEMPTS,
                 )
-                await client.connect()
+                await asyncio.wait_for(client.connect(), timeout=CONTROL_CONNECT_TIMEOUT_SECONDS)
                 break
             except Exception as error:
                 last_error = error
@@ -139,15 +140,15 @@ class BleManager:
                     "OMK Node control connection failed node_id=%s attempt=%d/%d",
                     node_id,
                     attempt,
-                    CONTROL_CONNECT_ATTEMPTS,
+                    CONTROL_CONNECT_MAX_ATTEMPTS,
                 )
                 if client is not None:
                     try:
                         await client.disconnect()
                     except Exception:
                         pass
-                if attempt < CONTROL_CONNECT_ATTEMPTS:
-                    await asyncio.sleep(CONTROL_CONNECT_RETRY_SECONDS * attempt)
+                if attempt < CONTROL_CONNECT_MAX_ATTEMPTS:
+                    await asyncio.sleep(CONTROL_CONNECT_RETRY_SECONDS)
         else:
             # No START request could have reached the Node without a control
             # connection, so this remains a definite failure.
