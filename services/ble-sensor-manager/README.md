@@ -10,7 +10,14 @@
 Piのファイアウォールでポート8787をDockerブリッジに限定してください。
 
 Pi上で`scripts/setup-ble-sensor-manager.sh`を実行すると、virtualenvの作成とsystemd unitの
-導入を行えます。登録情報は`data/ble/sensors.json`に可読なJSONとして保存します。
+導入・再起動を行えます。unitは`OMK_BLE_REGISTRY`と`OMK_NODE_REGISTRY`をそれぞれ
+`data/ble/sensors.json`と`data/ble/nodes.json`へ設定し、`data/ble`だけを書込み可能にした
+まま`ProtectSystem=strict`を維持します。登録情報はこれらの可読なJSONへ保存します。
+
+既存Gatewayを更新する場合も同じスクリプトを再実行します。過去に`OMK_NODE_REGISTRY`の
+手動drop-inを追加していた場合、更新後のunitには正式設定が含まれるため、そのdrop-inは
+不要です。削除する前に`systemctl cat omk-ble-sensor-manager.service`で生成unitに正しい
+Environment行があることを確認してください。
 
 `device_key`は物理的な識別子（`switchbot:<コロンを除いた小文字MAC>`）、`sensor_id`は
 OMKの論理的な識別子です。registryには`device_key`、`sensor_id`、`sensor_type`、vendor、
