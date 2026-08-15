@@ -20,6 +20,7 @@
 static const char *TAG = "omk-mqtt";
 static esp_mqtt_client_handle_t client;
 static bool client_started;
+static volatile bool client_connected;
 static bool ip_handler_registered;
 static char registration_topic[OMK_MQTT_TOPIC_SIZE];
 static char registration_config_topic[OMK_MQTT_TOPIC_SIZE];
@@ -140,6 +141,7 @@ static void mqtt_event_handler(void *arg, esp_event_base_t event_base,
 
     switch ((esp_mqtt_event_id_t)event_id) {
     case MQTT_EVENT_CONNECTED:
+        client_connected = true;
         ESP_LOGI(TAG, "Connected to MQTT broker");
         if (esp_mqtt_client_subscribe(client, registration_config_topic, 1) < 0) {
             ESP_LOGW(TAG, "Could not subscribe to registration config");
@@ -150,6 +152,7 @@ static void mqtt_event_handler(void *arg, esp_event_base_t event_base,
         process_registration_config(event_data);
         break;
     case MQTT_EVENT_DISCONNECTED:
+        client_connected = false;
         ESP_LOGW(TAG, "Disconnected from MQTT broker; automatic reconnect pending");
         break;
     case MQTT_EVENT_ERROR:
@@ -242,4 +245,37 @@ esp_err_t mqtt_registration_start(uint64_t node_id) {
         start_or_reconnect_mqtt();
     }
     return ESP_OK;
+}
+
+esp_err_t mqtt_registration_publish_environment(const char *sensor_id,
+                                                float temperature_c,
+                                                uint8_t relative_humidity_percent) {
+    if (sensor_id == NULL || sensor_id[0] == '\0' ||
+        relative_humidity_percent > 100 || temperature_c < -20.0f ||
+        temperature_c > 60.0f) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (client == NULL || !client_connected) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    char topic[OMK_MQTT_TOPIC_SIZE];
+    char payload[OMK_MQTT_PAYLOAD_SIZE];
+    int written = snprintf(topic, sizeof(topic), "omk/%s/environment", sensor_id);
+    if (written < 0 || written >= (int)sizeof(topic)) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+    written = snprintf(payload, sizeof(payload),
+                       "{\"device_id\":\"%s\",\"quality\":\"normal\","
+                       "\"temperature_c\":%.1f,\"relative_humidity_percent\":%u}",
+                       sensor_id, (double)temperature_c,
+                       relative_humidity_percent);
+    if (written < 0 || written >= (int)sizeof(payload)) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    /* This may be called from the Bluedroid callback task. Enqueueing hands
+     * the message to ESP-MQTT's own task without blocking BLE scanning. */
+    int message_id = esp_mqtt_client_enqueue(client, topic, payload, 0, 0, 0, true);
+    return message_id < 0 ? ESP_FAIL : ESP_OK;
 }

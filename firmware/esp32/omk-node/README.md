@@ -6,8 +6,9 @@ OMK NodeはAtomS3 Lite、オリジナルM5StickC、および将来のESP32-C3/S3
 基盤を使います。
 
 この文書では、実装済みかつ実機で確認済みのDiscovery、Security 1
-Provisioning、通常起動時のWi-Fi再接続を記録します。MQTTによるBLE中継、
-Gateway/Dashboardからの登録自動化、logical IDの割当は未実装です。
+Provisioning、通常起動時のWi-Fi再接続を記録します。MQTTによるBLE中継は
+SwitchBot Meter一台の初期E2E実装だけを確認済みです。Gateway/Dashboardからの
+汎用登録自動化、logical IDの割当は未実装です。
 
 ## 対応環境
 
@@ -145,6 +146,27 @@ discoveryで見つけます。これはWi-Fi設定済みNodeの再Provisioning�
 不正長、値、prepared writeはGATT errorとして応答します。GATT callbackは検証、
 応答、固定長4のFreeRTOS event queueへの投入だけを担当し、NVS操作、再起動、BLE
 停止、Provisioning開始は行いません。`node_state_task`だけがeventを解釈します。
+
+## SwitchBot Meter BLE relay（初期E2E）
+
+通常bootのNodeはOMK Discovery advertisingと並行してpassive scanを行います。
+最初の実機E2Eとして、SwitchBot Company ID `0x0969`のうち物理MAC
+`cf:39:41:c7:ed:79`だけを対象に、既存Gateway decoderと同じMeter manufacturer
+layoutを検証・復号します。これは汎用SwitchBot relayではありません。
+
+対象広告を受信すると、最短10秒間隔で次をpublishします。
+
+```text
+omk/switchbot-meter-001/environment
+```
+
+```json
+{"device_id":"switchbot-meter-001","quality":"normal","temperature_c":25.0,"relative_humidity_percent":49}
+```
+
+QoSは0、retainはfalseです。ESP側は時刻同期を行わないため`measured_at`は含めず、
+Gatewayの`sensor-collector`が受信時刻を付けてJSONLへ保存します。将来はDashboard
+登録情報を用いて、固定MACと固定`sensor_id`を置き換える予定です。
 
 ## Wi-Fi credentialによるboot flow
 
