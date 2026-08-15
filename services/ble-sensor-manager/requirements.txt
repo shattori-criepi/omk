@@ -1,5 +1,7 @@
 bleak==0.22.3
+cryptography==44.0.2
 fastapi==0.115.12
 paho-mqtt==2.1.0
+protobuf==5.29.4
 uvicorn[standard]==0.34.2
 pytest==8.3.5
