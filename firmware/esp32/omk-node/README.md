@@ -97,6 +97,24 @@ Dashboard登録フローを再試験する場合だけ、次を明示的に実�
 全消去、Wi-Fi credentials、`prov_pop`、`factory_secret` partitionへの操作はしません。
 通常firmwareにはこの操作へ到達するruntime経路はありません。
 
+### 開発時だけのWi-Fi credential投入
+
+Wi-Fi Provisioningを介さずBLE relayなどを検証する場合だけ、次を実行します。
+
+```bash
+./scripts/set-omk-node-wifi.sh atom-s3-lite /dev/ttyACM0
+```
+
+SSIDは通常入力、PSKは非表示入力です。どちらもrepository、build flag、ログ、通常の
+firmware sourceには保存しません。一時imageだけがESP-IDFの`esp_wifi_set_config()`を
+使ってFlash保存のSTA configurationを書込み、read-backで一致を検証します。さらに
+書込み前後で`omk/prov_pop`が32 bytesのままであることを確認し、`registered`、
+`logical_id`、factory secret、Node IDは変更しません。スクリプトは直後に通常firmwareを
+書き戻し、credentialを含む一時headerと専用build directoryを削除します。
+
+これは開発専用の明示的なone-shot操作であり、production firmwareの通常boot、BLE
+Provisioning、MQTT APIから到達する経路はありません。
+
 ## Discovery BLE v1
 
 保存済みWi-Fi credentialを持つ通常bootのNodeは、次のService UUIDのraw legacy
