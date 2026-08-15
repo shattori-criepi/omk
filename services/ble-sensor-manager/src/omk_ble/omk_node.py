@@ -11,7 +11,7 @@ from .models import DecodedAdvertisement
 
 OMK_NODE_SERVICE_UUID = "7d2a4d90-7b64-4e3a-9f37-95e77d7b5101"
 PROTOCOL_VERSION = 1
-PROVISIONING_UNREGISTERED = 0
+PROVISIONING_STATES = {0: "unregistered", 1: "provisioned", 2: "registered"}
 CAPABILITY_BLE_SCAN = 1 << 0
 CAPABILITY_SEN66 = 1 << 1
 _KNOWN_CAPABILITIES = CAPABILITY_BLE_SCAN | CAPABILITY_SEN66
@@ -26,8 +26,9 @@ def decode(
     rssi: int,
     service_data: dict[str, bytes],
     received_at: str,
+    address: str | None = None,
 ) -> DecodedAdvertisement | None:
-    """Decode only the exact v1 unregistered OMK Node advertisement."""
+    """Decode the exact v1 OMK Node advertisement without secrets."""
 
     if not isinstance(service_data, dict):
         return None
@@ -42,7 +43,7 @@ def decode(
     node_id = data[4:10]
     if (
         protocol_version != PROTOCOL_VERSION
-        or provisioning_state != PROVISIONING_UNREGISTERED
+        or provisioning_state not in PROVISIONING_STATES
         or capabilities & ~_KNOWN_CAPABILITIES
         or node_id == b"\x00" * 6
     ):
@@ -60,7 +61,7 @@ def decode(
             "protocol_version": protocol_version,
             "node_id": node_id_text,
             "capabilities": capability_names,
-            "provisioning_state": "unregistered",
+            "provisioning_state": PROVISIONING_STATES[provisioning_state],
         },
-        raw={"service_uuid": OMK_NODE_SERVICE_UUID, "provisioning_only": True},
+        raw={"service_uuid": OMK_NODE_SERVICE_UUID, "ble_address": address},
     )

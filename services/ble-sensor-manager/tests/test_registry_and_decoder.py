@@ -8,6 +8,7 @@ from fastapi import HTTPException
 
 from omk_ble import main as ble_main
 from omk_ble.registry import RegistryError, SensorRegistry
+from omk_ble.node_registry import NodeRegistry
 from omk_ble.models import DecodedAdvertisement, RegisteredSensor
 from omk_ble.omk_node import OMK_NODE_SERVICE_UUID, decode as decode_omk_node
 from omk_ble.switchbot import METER_SERVICE_UUID, SWITCHBOT_COMPANY_ID, decode
@@ -64,13 +65,19 @@ def test_omk_node_provisioning_advertisement_is_decoded_without_secrets() -> Non
         {},
         {OMK_NODE_SERVICE_UUID: b"\x01"},
         {OMK_NODE_SERVICE_UUID: bytes.fromhex("02000001112233445566")},
-        {OMK_NODE_SERVICE_UUID: bytes.fromhex("01010001112233445566")},
         {OMK_NODE_SERVICE_UUID: bytes.fromhex("01008000112233445566")},
         {OMK_NODE_SERVICE_UUID: bytes.fromhex("01000001000000000000")},
     ],
 )
 def test_invalid_or_unrelated_omk_node_advertisements_are_ignored(service_data: dict[str, bytes]) -> None:
     assert decode_omk_node(-50, service_data, "now") is None
+
+
+def test_omk_node_provisioned_and_registered_states_decode() -> None:
+    for state, expected in ((1, "provisioned"), (2, "registered")):
+        packet = bytes([1, state, 0, 1, 1, 2, 3, 4, 5, 6])
+        decoded = decode_omk_node(-50, {OMK_NODE_SERVICE_UUID: packet}, "now")
+        assert decoded is not None and decoded.values["provisioning_state"] == expected
 
 
 def test_omk_node_candidate_cannot_be_formally_registered_yet(tmp_path: Path) -> None:
@@ -409,6 +416,48 @@ class _MqttPublisher:
 
     def publish(self, topic: str, payload: str, **_kwargs: object) -> None:
         self.messages.append((topic, payload))
+
+
+def test_node_registration_request_and_ack_are_persisted(tmp_path: Path) -> None:
+    publisher = _MqttPublisher()
+    node_registry = NodeRegistry(tmp_path / "nodes.json")
+    manager = BleManager(SensorRegistry(tmp_path / "sensors.json"), publisher, node_registry=node_registry)
+    decoded = decode_omk_node(-41, {OMK_NODE_SERVICE_UUID: bytes.fromhex("01010001112233445566")}, "now")
+    assert decoded is not None
+    manager.record_advertisement(decoded)
+
+    assert manager.request_node_registration("112233445566", "ble-relay-001") == {
+        "node_id": "112233445566", "logical_id": "ble-relay-001", "status": "request_sent",
+    }
+    assert publisher.messages == [("omk/node/112233445566/registration/config", '{"protocol_version": 1, "logical_id": "ble-relay-001"}')]
+    manager.handle_node_mqtt("omk/node/112233445566/registration/ack", b'{"protocol_version":1,"node_id":"112233445566","logical_id":"ble-relay-001","registration_state":"registered"}')
+    assert manager.node_list()[0]["registration_state"] == "registered"
+    with pytest.raises(ValueError, match="already registered"):
+        manager.request_node_registration("112233445566", "ble-relay-001")
+
+
+def test_node_mqtt_status_validation_does_not_persist_invalid_messages(tmp_path: Path) -> None:
+    node_registry = NodeRegistry(tmp_path / "nodes.json")
+    manager = BleManager(SensorRegistry(tmp_path / "sensors.json"), node_registry=node_registry)
+    manager.handle_node_mqtt("omk/node/112233445566/registration/status", b'{"protocol_version":2,"node_id":"112233445566","registration_state":"registered","capabilities":1}')
+    manager.handle_node_mqtt("omk/node/112233445566/registration/status", b'{"protocol_version":1,"node_id":"112233445566","registration_state":"registered","capabilities":1}')
+    assert manager.node_list() == [{"node_id": "112233445566", "protocol_version": 1, "capabilities": ["ble_scan"], "registration_state": "registered", "mqtt_status_seen_at": manager.node_list()[0]["mqtt_status_seen_at"]}]
+
+
+def test_node_registration_api_sends_a_pending_request(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    publisher = _MqttPublisher()
+    manager = BleManager(
+        SensorRegistry(tmp_path / "sensors.json"), publisher,
+        node_registry=NodeRegistry(tmp_path / "nodes.json"),
+    )
+    decoded = decode_omk_node(-41, {OMK_NODE_SERVICE_UUID: bytes.fromhex("01010001112233445566")}, "now")
+    assert decoded is not None
+    manager.record_advertisement(decoded)
+    monkeypatch.setattr(ble_main, "manager", manager)
+
+    response = ble_main.register_node("112233445566", ble_main.NodeRegistrationRequest(logical_id="ble-relay-001"))
+    assert response["status"] == "request_sent"
+    assert publisher.messages[0][0] == "omk/node/112233445566/registration/config"
 
 
 def test_update_registered_sensor_changes_only_logical_settings_and_keeps_runtime_state(tmp_path: Path) -> None:

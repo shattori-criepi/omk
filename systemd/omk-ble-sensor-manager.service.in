@@ -10,6 +10,7 @@ Group=@OMK_GROUP@
 SupplementaryGroups=bluetooth
 WorkingDirectory=@OMK_ROOT@/services/ble-sensor-manager
 Environment=OMK_BLE_REGISTRY=@OMK_ROOT@/data/ble/sensors.json
+Environment=OMK_NODE_REGISTRY=@OMK_ROOT@/data/ble/nodes.json
 Environment=MQTT_HOST=192.168.50.1
 Environment=MQTT_PORT=1883
 Environment=TZ=Asia/Tokyo

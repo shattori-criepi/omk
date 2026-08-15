@@ -41,3 +41,6 @@ firmware/esp32/sen66-node/src/network_config.h
 
 # Even terminal logs
 even-terminal-*.log
+data/provisioning/nodes/
+firmware/esp32/omk-node/.pio/
+firmware/esp32/omk-node/managed_components/

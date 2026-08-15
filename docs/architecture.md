@@ -72,7 +72,24 @@ ESP32はセンサの近くへ配置する軽量ノードです。
 
 ESP32側へ、表示、長期保存、クラウド固有ロジック、複雑な業務判断を持ち込まないことを原則とします。
 
-### 3.3 Windows開発PCの役割
+### 3.3 ESP32 NodeのDiscoveryとProvisioning
+
+ESP32 NodeはAtomS3 Lite、オリジナルM5StickC、将来のESP32-C3/S3で共用する
+ESP-IDF基盤である。通常bootでは、未設定NodeとProvisioning済みNodeのいずれも
+秘密情報を含まないBLE Discovery v1をGatewayへ提供する。保存済みcredentialがある
+場合はWi-Fi STAと並行し、Control GATTは再Provisioning開始経路として維持する。
+明示的な要求を受けると再起動後にだけSecurity 1 BLE Provisioningを開始する。同一boot
+内でDiscovery BLEとProvisioning BLEの所有権を切り替えないことで、ESP-IDF 6の
+Bluetooth controller再初期化制約を回避する。
+
+Security 1のPoPはNodeごとのfactory secretから得る。共通secretを使わず、secretは
+advertising・ログ・リポジトリへ出さない。Provisioning bootでは通常boot用のWi-Fi
+STA / Discovery BLEは開始せず、network provisioning managerがcredentials apply後の
+接続を含むWi-Fi処理とBLEを所有する。詳細なプロトコル、factory flash、実機確認済み
+事項と未実装範囲は
+[`firmware/esp32/omk-node/README.md`](../firmware/esp32/omk-node/README.md)を正とする。
+
+### 3.4 Windows開発PCの役割
 
 Windowsは、実機に依存しない部分を高速に開発する標準環境です。Bルート対応USBドングルを使う経路は、利用できる開発者が開発中にスマートメータ実機を確認するための任意検証環境としてだけ扱います。
 

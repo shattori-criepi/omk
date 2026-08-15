@@ -9,11 +9,16 @@ import paho.mqtt.client as mqtt
 from pydantic import BaseModel, ConfigDict, Field
 
 from .registry import RegistryError, SensorRegistry
+from .node_registry import NodeRegistry
 from .service import BleManager
 
 app = FastAPI(title="OMK BLE sensor manager")
 client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="omk-ble-sensor-manager")
-manager = BleManager(SensorRegistry(Path(os.getenv("OMK_BLE_REGISTRY", "/var/lib/omk/ble/sensors.json"))), client)
+manager = BleManager(
+    SensorRegistry(Path(os.getenv("OMK_BLE_REGISTRY", "/var/lib/omk/ble/sensors.json"))),
+    client,
+    node_registry=NodeRegistry(Path(os.getenv("OMK_NODE_REGISTRY", "/var/lib/omk/ble/nodes.json"))),
+)
 
 class RegisterRequest(BaseModel):
     device_key: str
@@ -31,8 +36,22 @@ class UpdateSensorRequest(BaseModel):
     location: str = Field(default="", max_length=64)
     enabled: bool
 
+class NodeRegistrationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    logical_id: str = Field(min_length=1, max_length=48, pattern=r"^[A-Za-z0-9_-]+$")
+
+def _on_mqtt_connect(client: mqtt.Client, userdata: Any, flags: Any, reason_code: Any, properties: Any) -> None:
+    if reason_code == 0:
+        client.subscribe("omk/node/+/registration/status", qos=1)
+        client.subscribe("omk/node/+/registration/ack", qos=1)
+
+def _on_mqtt_message(client: mqtt.Client, userdata: Any, message: mqtt.MQTTMessage) -> None:
+    manager.handle_node_mqtt(message.topic, message.payload)
+
 @app.on_event("startup")
 async def startup() -> None:
+    client.on_connect = _on_mqtt_connect
+    client.on_message = _on_mqtt_message
     client.connect_async(os.getenv("MQTT_HOST", "127.0.0.1"), int(os.getenv("MQTT_PORT", "1883")))
     client.loop_start()
     try:
@@ -79,6 +98,21 @@ def sensors() -> dict[str, Any]:
         return {"sensors": manager.registered_list()}
     except RegistryError as error:
         raise HTTPException(500, str(error)) from error
+
+@app.get("/api/nodes")
+def nodes() -> dict[str, Any]:
+    return {"nodes": manager.node_list()}
+
+@app.post("/api/nodes/{node_id}/register", status_code=202)
+def register_node(node_id: str, request: NodeRegistrationRequest) -> dict[str, Any]:
+    try:
+        return manager.request_node_registration(node_id, request.logical_id)
+    except KeyError as error:
+        raise HTTPException(404, "node was not found") from error
+    except ValueError as error:
+        raise HTTPException(400, str(error)) from error
+    except RuntimeError as error:
+        raise HTTPException(503, str(error)) from error
 
 @app.post("/api/sensors", status_code=201)
 def register(request: RegisterRequest) -> dict[str, Any]:

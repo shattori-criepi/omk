@@ -113,6 +113,14 @@ async def _system_manager_request(method: str, path: str, body: dict | None = No
 async def sensors() -> dict:
     return await _ble_request("GET", "/api/sensors")
 
+@app.get("/api/admin/nodes")
+async def nodes() -> dict:
+    return await _ble_request("GET", "/api/nodes")
+
+@app.post("/api/admin/nodes/{node_id}/register", status_code=202)
+async def register_node(node_id: str, request: Request) -> dict:
+    return await _ble_request("POST", f"/api/nodes/{node_id}/register", await request.json())
+
 
 @app.post("/api/admin/setup/scan")
 async def start_ble_scan() -> dict:

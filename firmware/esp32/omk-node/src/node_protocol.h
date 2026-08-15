@@ -1,0 +1,15 @@
+#pragma once
+
+#include <stdint.h>
+
+#define OMK_NODE_PROTOCOL_VERSION 1U
+
+#define OMK_NODE_PROVISIONING_STATE_UNREGISTERED 0U
+#define OMK_NODE_PROVISIONING_STATE_PROVISIONED 1U
+#define OMK_NODE_PROVISIONING_STATE_REGISTERED 2U
+
+#define OMK_NODE_CAPABILITY_BLE_SCAN (1U << 0)
+#define OMK_NODE_CAPABILITY_SEN66 (1U << 1)
+
+/* This common Node build currently identifies itself as a BLE scan relay. */
+#define OMK_NODE_CAPABILITIES OMK_NODE_CAPABILITY_BLE_SCAN
