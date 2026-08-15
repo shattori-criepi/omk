@@ -3,13 +3,17 @@ from pathlib import Path
 
 import pytest
 
-from omk_ble.esp_prov_adapter import EspProvisioningToolingError, ensure_available
+from omk_ble.esp_prov_adapter import DEFAULT_TOOLING_ROOT, EspProvisioningToolingError, ensure_available
 from omk_ble.ap_credentials import ApCredentialError, read_ap_psk
 from omk_ble.node_credentials import NodeCredentialError, NodeCredentialStore
 from omk_ble.node_provisioning import NodeProvisioner
 
 
 NODE_ID = "112233445566"
+
+
+def test_adapter_import_uses_only_stable_opt_runtime_path() -> None:
+    assert DEFAULT_TOOLING_ROOT == Path("/opt/omk/esp-provisioning/current")
 
 
 def _credential(directory: Path) -> NodeCredentialStore:
@@ -39,13 +43,18 @@ def test_systemd_ap_credential_fails_closed_when_missing_or_empty(tmp_path: Path
 
 
 def test_tooling_check_accepts_only_complete_fixed_tree(tmp_path: Path) -> None:
-    root = tmp_path / "esp-idf-6.0.1"
-    (root / "tools/esp_prov/transport").mkdir(parents=True)
-    (root / "components/protocomm/python").mkdir(parents=True)
-    for path in (root / "LICENSE", root / "tools/esp_prov/esp_prov.py", root / "tools/esp_prov/transport/transport_ble.py", root / "components/protocomm/python/session_pb2.py"):
+    root = tmp_path / "runtime"
+    component = root / "network_provisioning-1.2.4"
+    protocomm = root / "esp-idf-6.0.1-protocomm"
+    (component / "tool/esp_prov/transport").mkdir(parents=True)
+    (protocomm / "components/protocomm/python").mkdir(parents=True)
+    (protocomm / "tools/cmake").mkdir(parents=True)
+    (component / "idf_component.yml").write_text("version: 1.2.4\n", encoding="utf-8")
+    (protocomm / "tools/cmake/version.cmake").write_text("set(IDF_VERSION_MAJOR 6)\nset(IDF_VERSION_MINOR 0)\nset(IDF_VERSION_PATCH 1)\n", encoding="utf-8")
+    for path in (component / "LICENSE", component / "tool/esp_prov/esp_prov.py", component / "tool/esp_prov/transport/transport_ble.py", protocomm / "LICENSE", protocomm / "components/protocomm/python/session_pb2.py"):
         path.write_text("", encoding="utf-8")
     assert ensure_available(root) == root
-    (root / "tools/esp_prov/esp_prov.py").unlink()
+    (component / "tool/esp_prov/esp_prov.py").unlink()
     with pytest.raises(EspProvisioningToolingError):
         ensure_available(root)
 

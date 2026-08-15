@@ -17,10 +17,12 @@ Pi上で`scripts/setup-ble-sensor-manager.sh`を実行すると、virtualenvの�
 ## ESP32 Node Wi-Fi Provisioning
 
 未設定NodeのWi-Fi provisioningは、Gateway setup時に公式
-[Espressif ESP-IDF](https://github.com/espressif/esp-idf) **v6.0.1** のhost toolingを
-`/opt/omk/esp-provisioning/esp-idf-6.0.1`へ取得して利用します。これはfirmware開発用の
-PlatformIO環境や個人home directoryには依存しません。取得するESP-IDFはApache-2.0 licenseで、
-その`LICENSE`を配置先に維持します。
+[Espressif network_provisioning](https://github.com/espressif/idf-extra-components/tree/2de4980640bbe3d2d69473d7251640039e185b92/network_provisioning)
+**v1.2.4** の`tool/esp_prov`と、公式
+[Espressif ESP-IDF](https://github.com/espressif/esp-idf) **v6.0.1** のprotocomm Python moduleを取得して
+利用します。runtimeは`/opt/omk/esp-provisioning/current`（実体は
+`runtime-network-1.2.4-idf-6.0.1`）に配置され、firmware開発用PlatformIO環境や個人home directoryには
+依存しません。両方ともApache-2.0 licenseで、それぞれの`LICENSE`を配置先に維持します。
 
 BLE Sensor ManagerはESP-IDF公式`esp_prov` clientをadapter経由で使い、Security 1のNode固有PoPで
 SetConfig / ApplyConfigを行います。AP PSKはsystemd encrypted credential `omk_ap_psk`から必要時だけ
