@@ -4,6 +4,7 @@
 
 #include "esp_err.h"
 
-/* Starts a station connection only when ESP-IDF has persisted a STA SSID.
- * A node without Wi-Fi credentials returns ESP_OK and remains in discovery. */
-esp_err_t wifi_station_start_if_provisioned(bool *has_saved_credentials);
+/* Initializes shared netif/event loop/Wi-Fi state and checks the persisted
+ * STA configuration. The caller then starts either STA or provisioning. */
+esp_err_t wifi_station_prepare(bool *has_saved_credentials);
+esp_err_t wifi_station_start_prepared(void);

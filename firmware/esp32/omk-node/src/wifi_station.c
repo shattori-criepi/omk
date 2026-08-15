@@ -36,7 +36,7 @@ static void station_event_handler(void *arg, esp_event_base_t event_base,
     }
 }
 
-esp_err_t wifi_station_start_if_provisioned(bool *has_saved_credentials) {
+esp_err_t wifi_station_prepare(bool *has_saved_credentials) {
     if (has_saved_credentials == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
@@ -77,16 +77,21 @@ esp_err_t wifi_station_start_if_provisioned(bool *has_saved_credentials) {
         return err;
     }
     if (config.sta.ssid[0] == '\0') {
-        ESP_LOGI(TAG, "Wi-Fi not provisioned; discovery continues");
+        ESP_LOGI(TAG, "Wi-Fi not provisioned");
         return ESP_OK;
     }
     *has_saved_credentials = true;
 
-    err = esp_event_handler_register(WIFI_EVENT, WIFI_EVENT_STA_DISCONNECTED,
-                                     station_event_handler, NULL);
+    return ESP_OK;
+}
+
+esp_err_t wifi_station_start_prepared(void) {
+    esp_err_t err = esp_event_handler_register(WIFI_EVENT, WIFI_EVENT_STA_DISCONNECTED,
+                                               station_event_handler, NULL);
     if (err != ESP_OK) {
         return err;
     }
+
     err = esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP,
                                      station_event_handler, NULL);
     if (err != ESP_OK) {

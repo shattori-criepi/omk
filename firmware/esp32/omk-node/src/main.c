@@ -123,7 +123,9 @@ void app_main(void) {
     boot_flow_t boot_flow = select_boot_flow();
     if (boot_flow == BOOT_FLOW_PROVISIONING_IDLE) {
         ESP_LOGI(TAG, "Provisioning boot requested");
-        esp_err_t err = provisioning_start(node_id());
+        /* Legacy Control-GATT boot flag path. It owns the network stack in
+         * this boot because Discovery has not initialized Wi-Fi. */
+        esp_err_t err = provisioning_start(node_id(), false);
         if (err != ESP_OK) {
             ESP_LOGE(TAG, "Provisioning boot failed; entering safe idle: %s",
                      esp_err_to_name(err));
@@ -135,17 +137,35 @@ void app_main(void) {
         return;
     }
 
-    ESP_LOGI(TAG, "Starting discovery boot");
+    ESP_LOGI(TAG, "Starting normal boot");
     bool has_wifi_credentials = false;
-    esp_err_t wifi_err = wifi_station_start_if_provisioned(&has_wifi_credentials);
+    esp_err_t wifi_err = wifi_station_prepare(&has_wifi_credentials);
     if (wifi_err != ESP_OK) {
-        ESP_LOGW(TAG, "Wi-Fi station startup failed; discovery continues: %s",
+        ESP_LOGW(TAG, "Wi-Fi credential check failed; discovery continues: %s",
                  esp_err_to_name(wifi_err));
+    } else if (!has_wifi_credentials) {
+        /* No saved STA configuration means this boot belongs exclusively to
+         * Espressif provisioning BLE. wifi_station_prepare() has already
+         * initialized the shared network stack, so do not initialize it
+         * again in provisioning_start(). */
+        ESP_LOGI(TAG, "Wi-Fi not provisioned; starting provisioning service");
+        esp_err_t provisioning_err = provisioning_start(node_id(), true);
+        if (provisioning_err != ESP_OK) {
+            ESP_LOGE(TAG, "Direct provisioning boot failed: %s",
+                     esp_err_to_name(provisioning_err));
+        }
+        return;
     } else {
-        esp_err_t mqtt_err = mqtt_registration_start(node_id());
-        if (mqtt_err != ESP_OK) {
-            ESP_LOGW(TAG, "MQTT registration startup failed; discovery continues: %s",
-                     esp_err_to_name(mqtt_err));
+        wifi_err = wifi_station_start_prepared();
+        if (wifi_err != ESP_OK) {
+            ESP_LOGW(TAG, "Wi-Fi station startup failed; discovery continues: %s",
+                     esp_err_to_name(wifi_err));
+        } else {
+            esp_err_t mqtt_err = mqtt_registration_start(node_id());
+            if (mqtt_err != ESP_OK) {
+                ESP_LOGW(TAG, "MQTT registration startup failed; discovery continues: %s",
+                         esp_err_to_name(mqtt_err));
+            }
         }
     }
     // Safe once per boot for BLE-only operation; never repeat this in a
