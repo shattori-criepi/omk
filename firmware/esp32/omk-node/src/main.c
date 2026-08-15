@@ -105,6 +105,18 @@ static boot_flow_t select_boot_flow(void) {
 
 void app_main(void) {
     ESP_ERROR_CHECK(nvs_flash_init());
+#ifdef OMK_DEVELOPMENT_CLEAR_REGISTRATION
+    /* This image is built only by reset-omk-node-registration.sh.  Keep the
+     * operation before all normal boot work so it cannot alter Wi-Fi, PoP, or
+     * factory-secret state.  The script immediately restores production FW. */
+    esp_err_t reset_err = node_registration_clear_for_development();
+    if (reset_err == ESP_OK) {
+        ESP_LOGI(TAG, "Development registration reset verified");
+    } else {
+        ESP_LOGE(TAG, "Development registration reset failed: %s", esp_err_to_name(reset_err));
+    }
+    return;
+#endif
     import_factory_pop();
     ESP_LOGI(TAG, "Factory provisioning state initialized");
 

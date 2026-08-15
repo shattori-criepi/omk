@@ -83,3 +83,38 @@ esp_err_t node_registration_save(const char *logical_id) {
     }
     return ESP_OK;
 }
+
+esp_err_t node_registration_clear_for_development(void) {
+    nvs_handle_t nvs;
+    esp_err_t err = nvs_open(NODE_NVS_NAMESPACE, NVS_READWRITE, &nvs);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    err = nvs_erase_key(nvs, OMK_NVS_REGISTERED_KEY);
+    if (err == ESP_ERR_NVS_NOT_FOUND) {
+        err = ESP_OK;
+    }
+    if (err == ESP_OK) {
+        err = nvs_erase_key(nvs, OMK_NVS_LOGICAL_ID_KEY);
+        if (err == ESP_ERR_NVS_NOT_FOUND) {
+            err = ESP_OK;
+        }
+    }
+    if (err == ESP_OK) {
+        err = nvs_commit(nvs);
+    }
+    if (err != ESP_OK) {
+        nvs_close(nvs);
+        return err;
+    }
+
+    uint8_t registered = 0;
+    err = nvs_get_u8(nvs, OMK_NVS_REGISTERED_KEY, &registered);
+    if (err == ESP_ERR_NVS_NOT_FOUND) {
+        size_t logical_id_length = 0;
+        err = nvs_get_str(nvs, OMK_NVS_LOGICAL_ID_KEY, NULL, &logical_id_length);
+    }
+    nvs_close(nvs);
+    return err == ESP_ERR_NVS_NOT_FOUND ? ESP_OK : (err == ESP_OK ? ESP_FAIL : err);
+}
