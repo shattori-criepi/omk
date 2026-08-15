@@ -9,7 +9,8 @@ from types import ModuleType
 
 
 ESP_IDF_VERSION = "6.0.1"
-DEFAULT_TOOLING_ROOT = Path("/opt/omk/esp-provisioning/esp-idf-6.0.1")
+NETWORK_PROVISIONING_VERSION = "1.2.4"
+DEFAULT_TOOLING_ROOT = Path("/opt/omk/esp-provisioning/current")
 PROVISIONING_SERVICE_UUID = "c2f08e31-75fd-4f81-9e6d-4f89a3bc1d27"
 
 
@@ -21,32 +22,55 @@ def tooling_root() -> Path:
     return Path(os.getenv("OMK_ESP_PROVISIONING_ROOT", str(DEFAULT_TOOLING_ROOT)))
 
 
-def _paths(root: Path) -> tuple[Path, Path]:
-    return root / "tools" / "esp_prov", root / "components" / "protocomm" / "python"
+def _paths(root: Path) -> tuple[Path, Path, Path]:
+    component = root / f"network_provisioning-{NETWORK_PROVISIONING_VERSION}"
+    esp_prov_path = component / "tool" / "esp_prov"
+    protocomm_root = root / f"esp-idf-{ESP_IDF_VERSION}-protocomm"
+    return component, esp_prov_path, protocomm_root
 
 
 def ensure_available(root: Path | None = None) -> Path:
     root = root or tooling_root()
-    esp_prov_path, protocomm_path = _paths(root)
+    component, esp_prov_path, protocomm_root = _paths(root)
+    protocomm_path = protocomm_root / "components" / "protocomm" / "python"
     required = (
-        root / "LICENSE",
+        component / "LICENSE",
+        component / "idf_component.yml",
         esp_prov_path / "esp_prov.py",
         esp_prov_path / "transport" / "transport_ble.py",
+        protocomm_root / "LICENSE",
         protocomm_path / "session_pb2.py",
+        protocomm_root / "tools" / "cmake" / "version.cmake",
     )
-    if not all(path.is_file() for path in required):
+    try:
+        component_version = (component / "idf_component.yml").read_text(encoding="utf-8")
+        idf_version = (protocomm_root / "tools" / "cmake" / "version.cmake").read_text(encoding="utf-8")
+    except OSError as error:
+        raise EspProvisioningToolingError("ESP provisioning tooling is unavailable") from error
+    if (
+        not all(path.is_file() for path in required)
+        or f"version: {NETWORK_PROVISIONING_VERSION}" not in component_version
+        or "set(IDF_VERSION_MAJOR 6)" not in idf_version
+        or "set(IDF_VERSION_MINOR 0)" not in idf_version
+        or "set(IDF_VERSION_PATCH 1)" not in idf_version
+    ):
         raise EspProvisioningToolingError("ESP provisioning tooling is unavailable")
     return root
 
 
 def _load_client(root: Path | None = None) -> ModuleType:
     root = ensure_available(root)
-    esp_prov_path, protocomm_path = _paths(root)
+    _, esp_prov_path, protocomm_root = _paths(root)
+    protocomm_path = protocomm_root / "components" / "protocomm" / "python"
     # The official ESP-IDF module intentionally uses absolute imports (prov,
     # security, transport and proto). Keep that implementation isolated here.
     for path in (str(protocomm_path), str(esp_prov_path)):
         if path not in sys.path:
             sys.path.insert(0, path)
+    # network_provisioning's official proto loader resolves the generated
+    # protocomm files through IDF_PATH. Point it only to the fixed minimal
+    # ESP-IDF v6.0.1 protocomm tree under /opt.
+    os.environ["IDF_PATH"] = str(protocomm_root)
     try:
         return importlib.import_module("esp_prov")
     except (ImportError, ModuleNotFoundError) as error:
@@ -69,7 +93,7 @@ async def provision_wifi(service_name: str, pop: str, ssid: str, passphrase: str
     except Exception as error:
         raise EspProvisioningToolingError("ESP provisioning device is unavailable") from error
     try:
-        security = client.get_security(1, "", "", pop, verbose=False)
+        security = client.get_security(1, 0, "", "", pop, verbose=False)
         if security is None or not await client.establish_session(transport, security):
             raise EspProvisioningToolingError("ESP provisioning security session failed")
         if not await client.send_wifi_config(transport, security, ssid, passphrase):
