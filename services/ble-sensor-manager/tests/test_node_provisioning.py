@@ -135,28 +135,37 @@ def test_provisioning_failure_resumes_passive_collection(tmp_path: Path, monkeyp
 def _manager_with_control_node(tmp_path: Path) -> BleManager:
     manager = BleManager(SensorRegistry(tmp_path / "sensors.json"))
     manager.node_observations[NODE_ID] = types.SimpleNamespace(raw={"ble_address": "AA:BB:CC:DD:EE:FF"})
+    # This represents the object retained from the passive detection callback.
+    # No scanner needs to remain active while the provisioning job runs.
+    manager._node_devices[NODE_ID] = types.SimpleNamespace(address="AA:BB:CC:DD:EE:FF")
     return manager
 
 
 def test_control_connect_failure_is_a_definite_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    attempts: list[object] = []
+
     class Client:
-        def __init__(self, address: str) -> None:
-            assert address == "AA:BB:CC:DD:EE:FF"
+        def __init__(self, ble_device: object) -> None:
+            attempts.append(ble_device)
 
         async def connect(self) -> None:
             raise RuntimeError("adapter unavailable")
 
     monkeypatch.setitem(sys.modules, "bleak", types.SimpleNamespace(BleakClient=Client))
+    import omk_ble.service as module
+    monkeypatch.setattr(module, "CONTROL_CONNECT_RETRY_SECONDS", 0)
     with pytest.raises(RuntimeError, match="could not connect to node control service"):
         asyncio.run(_manager_with_control_node(tmp_path)._send_start_provisioning(NODE_ID))
+    assert len(attempts) == 3
+    assert all(not isinstance(device, str) for device in attempts)
 
 
 def test_control_start_continues_after_reboot_disconnect(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[str] = []
 
     class Client:
-        def __init__(self, address: str) -> None:
-            pass
+        def __init__(self, ble_device: object) -> None:
+            assert not isinstance(ble_device, str)
 
         async def connect(self) -> None:
             calls.append("connect")
@@ -179,7 +188,7 @@ def test_control_start_continues_when_write_is_interrupted_by_reboot(tmp_path: P
     calls: list[str] = []
 
     class Client:
-        def __init__(self, address: str) -> None:
+        def __init__(self, ble_device: object) -> None:
             pass
 
         async def connect(self) -> None:
@@ -195,6 +204,35 @@ def test_control_start_continues_when_write_is_interrupted_by_reboot(tmp_path: P
     monkeypatch.setitem(sys.modules, "bleak", types.SimpleNamespace(BleakClient=Client))
     asyncio.run(_manager_with_control_node(tmp_path)._send_start_provisioning(NODE_ID))
     assert calls == ["connect", "write", "disconnect"]
+
+
+def test_control_connect_retries_then_uses_cached_ble_device(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    attempts: list[object] = []
+    connects = 0
+
+    class Client:
+        def __init__(self, ble_device: object) -> None:
+            attempts.append(ble_device)
+
+        async def connect(self) -> None:
+            nonlocal connects
+            connects += 1
+            if connects == 1:
+                raise RuntimeError("connection failed to be established")
+
+        async def write_gatt_char(self, uuid: str, value: bytes, response: bool) -> None:
+            assert value == b"\x01"
+
+        async def disconnect(self) -> None:
+            pass
+
+    monkeypatch.setitem(sys.modules, "bleak", types.SimpleNamespace(BleakClient=Client))
+    import omk_ble.service as module
+    monkeypatch.setattr(module, "CONTROL_CONNECT_RETRY_SECONDS", 0)
+    asyncio.run(_manager_with_control_node(tmp_path)._send_start_provisioning(NODE_ID))
+    assert connects == 2
+    assert len(attempts) == 2
+    assert all(not isinstance(device, str) for device in attempts)
 
 
 def test_control_start_then_missing_provisioning_service_fails_later(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
