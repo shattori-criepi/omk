@@ -1,4 +1,6 @@
 import asyncio
+import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -7,6 +9,8 @@ from omk_ble.esp_prov_adapter import DEFAULT_TOOLING_ROOT, EspProvisioningToolin
 from omk_ble.ap_credentials import ApCredentialError, read_ap_psk
 from omk_ble.node_credentials import NodeCredentialError, NodeCredentialStore
 from omk_ble.node_provisioning import NodeProvisioner
+from omk_ble.registry import SensorRegistry
+from omk_ble.service import BleManager
 
 
 NODE_ID = "112233445566"
@@ -124,5 +128,96 @@ def test_provisioning_failure_resumes_passive_collection(tmp_path: Path, monkeyp
         assert job.state == "failed"
         assert job.error == "Wi-Fi provisioning failed"
         assert events == []
+
+    asyncio.run(scenario())
+
+
+def _manager_with_control_node(tmp_path: Path) -> BleManager:
+    manager = BleManager(SensorRegistry(tmp_path / "sensors.json"))
+    manager.node_observations[NODE_ID] = types.SimpleNamespace(raw={"ble_address": "AA:BB:CC:DD:EE:FF"})
+    return manager
+
+
+def test_control_connect_failure_is_a_definite_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    class Client:
+        def __init__(self, address: str) -> None:
+            assert address == "AA:BB:CC:DD:EE:FF"
+
+        async def connect(self) -> None:
+            raise RuntimeError("adapter unavailable")
+
+    monkeypatch.setitem(sys.modules, "bleak", types.SimpleNamespace(BleakClient=Client))
+    with pytest.raises(RuntimeError, match="could not connect to node control service"):
+        asyncio.run(_manager_with_control_node(tmp_path)._send_start_provisioning(NODE_ID))
+
+
+def test_control_start_continues_after_reboot_disconnect(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[str] = []
+
+    class Client:
+        def __init__(self, address: str) -> None:
+            pass
+
+        async def connect(self) -> None:
+            calls.append("connect")
+
+        async def write_gatt_char(self, uuid: str, value: bytes, response: bool) -> None:
+            assert value == b"\x01"
+            assert response is True
+            calls.append("write")
+
+        async def disconnect(self) -> None:
+            calls.append("disconnect")
+            raise RuntimeError("already disconnected")
+
+    monkeypatch.setitem(sys.modules, "bleak", types.SimpleNamespace(BleakClient=Client))
+    asyncio.run(_manager_with_control_node(tmp_path)._send_start_provisioning(NODE_ID))
+    assert calls == ["connect", "write", "disconnect"]
+
+
+def test_control_start_continues_when_write_is_interrupted_by_reboot(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[str] = []
+
+    class Client:
+        def __init__(self, address: str) -> None:
+            pass
+
+        async def connect(self) -> None:
+            calls.append("connect")
+
+        async def write_gatt_char(self, uuid: str, value: bytes, response: bool) -> None:
+            calls.append("write")
+            raise RuntimeError("connection lost")
+
+        async def disconnect(self) -> None:
+            calls.append("disconnect")
+
+    monkeypatch.setitem(sys.modules, "bleak", types.SimpleNamespace(BleakClient=Client))
+    asyncio.run(_manager_with_control_node(tmp_path)._send_start_provisioning(NODE_ID))
+    assert calls == ["connect", "write", "disconnect"]
+
+
+def test_control_start_then_missing_provisioning_service_fails_later(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def scenario() -> None:
+        import omk_ble.node_provisioning as module
+        monkeypatch.setattr(module, "ensure_available", lambda: Path("/official/tooling"))
+        events: list[str] = []
+
+        async def mark(value: str) -> None:
+            events.append(value)
+
+        async def unavailable(*_args: str) -> None:
+            raise EspProvisioningToolingError("provisioning service unavailable")
+
+        provisioner = NodeProvisioner(
+            lambda: mark("pause"), lambda: mark("resume"), lambda _: "unregistered",
+            _credential(tmp_path / "nodes"), lambda _: mark("control"), unavailable,
+            ssid_reader=lambda: "omk-ap", psk_reader=lambda: "not-logged",
+        )
+        job = await provisioner.start(NODE_ID)
+        await provisioner._active
+        assert job.state == "failed"
+        assert job.error == "Wi-Fi provisioning is unavailable or failed"
+        assert events == ["pause", "control", "resume"]
 
     asyncio.run(scenario())

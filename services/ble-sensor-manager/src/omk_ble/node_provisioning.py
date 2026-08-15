@@ -72,7 +72,9 @@ class NodeProvisioner:
 
     async def _run(self, job: ProvisioningJob) -> None:
         scanner_paused = False
+        stage = "starting"
         try:
+            LOGGER.info("Starting OMK Node provisioning node_id=%s", job.node_id)
             # Read secrets only for the active operation. They never become job
             # fields, logs, MQTT data, or HTTP response values.
             pop = self._credentials.read_pop(job.node_id)
@@ -80,17 +82,24 @@ class NodeProvisioner:
             ssid = self._ssid_reader()
             await self._pause_scan()
             scanner_paused = True
+            stage = "waiting_for_provisioning"
             job.state = "waiting_for_provisioning"
             await asyncio.wait_for(self._control_start(job.node_id), timeout=self._timeout_seconds)
+            stage = "security_session"
             job.state = "security_session"
+            LOGGER.info("Entering Security 1 provisioning node_id=%s", job.node_id)
             await asyncio.wait_for(
                 self._provision(f"OMK_{job.node_id}", pop, ssid, psk), timeout=self._timeout_seconds,
             )
+            stage = "applying_wifi"
             job.state = "applying_wifi"
+            LOGGER.info("Wi-Fi configuration applied node_id=%s", job.node_id)
             # ApplyConfig returns before the node has restarted and rejoined the
             # OMK AP. The normal boot's BLE state or retained MQTT status is the
             # only success signal accepted by the gateway.
+            stage = "waiting_for_node"
             job.state = "waiting_for_node"
+            LOGGER.info("Waiting for node to join OMK Wi-Fi node_id=%s", job.node_id)
             deadline = monotonic() + self._timeout_seconds
             while monotonic() < deadline:
                 if self._node_state(job.node_id) in {"provisioned", "registered"}:
@@ -99,11 +108,14 @@ class NodeProvisioner:
                 await asyncio.sleep(1)
             raise TimeoutError
         except (AccessPointConfigError, ApCredentialError, NodeCredentialError, EspProvisioningToolingError):
+            LOGGER.warning("OMK Node provisioning failed node_id=%s stage=%s", job.node_id, stage)
             job.error = "Wi-Fi provisioning is unavailable or failed"
         except TimeoutError:
+            LOGGER.warning("OMK Node provisioning failed node_id=%s stage=%s", job.node_id, stage)
             job.error = "Timed out waiting for the node to join OMK Wi-Fi"
         except Exception:
-            LOGGER.exception("OMK Node provisioning job failed for node %s", job.node_id)
+            # Avoid traceback logging from this secret-bearing operation.
+            LOGGER.warning("OMK Node provisioning failed node_id=%s stage=%s", job.node_id, stage)
             job.error = "Wi-Fi provisioning failed"
         finally:
             if job.state != "provisioned":

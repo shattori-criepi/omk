@@ -98,16 +98,37 @@ class BleManager:
         address = seen.raw.get("ble_address") if seen else None
         if not isinstance(address, str) or not address:
             raise RuntimeError("node is no longer visible over BLE")
+
+        LOGGER.info("Starting OMK Node provisioning node_id=%s", node_id)
         try:
             from bleak import BleakClient
             client = BleakClient(address)
             await client.connect()
+        except Exception as error:
+            # No START request could have reached the Node without a control
+            # connection, so this remains a definite failure.
+            raise RuntimeError("could not connect to node control service") from error
+
+        try:
+            # Keep a write request here: it is the characteristic's supported
+            # operation, and lets the Node acknowledge START when it has time.
+            # The Node may reboot immediately after accepting it, however, so a
+            # missing response is not evidence that START was not delivered.
+            LOGGER.info("Control START write attempted node_id=%s", node_id)
             try:
                 await client.write_gatt_char(DISCOVERY_CONTROL_START_UUID, b"\x01", response=True)
-            finally:
+            except Exception:
+                LOGGER.info(
+                    "Control connection ended after START; continuing to provisioning service node_id=%s",
+                    node_id,
+                )
+        finally:
+            try:
                 await client.disconnect()
-        except Exception as error:
-            raise RuntimeError("could not request node provisioning mode") from error
+            except Exception:
+                # A rebooted Node has already closed the link. Disconnect is
+                # best-effort cleanup and must not change the START outcome.
+                LOGGER.debug("Control disconnect completed after Node link closed node_id=%s", node_id)
 
     async def _stop_after(self, seconds: int) -> None:
         await asyncio.sleep(seconds)
