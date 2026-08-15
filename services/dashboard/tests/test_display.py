@@ -505,24 +505,51 @@ def test_node_registration_ui_formats_errors_and_renders_state_transitions() -> 
     javascript_path = Path(__file__).parents[1] / "app" / "static" / "admin.js"
     harness = r'''
 const fs = require("fs"), vm = require("vm");
-function element() { return { hidden: false, textContent: "", className: "", value: "", disabled: false, onclick: null, onsubmit: null, addEventListener() {}, closest() { return null; }, querySelector() { return element(); }, showModal() {}, close() {} }; }
+function element() { return { hidden: false, textContent: "", className: "", value: "", disabled: false, onclick: null, onsubmit: null, addEventListener() {}, closest() { return null; }, querySelector() { return element(); }, querySelectorAll() { return []; }, focus() { global.document.activeElement = this; }, setSelectionRange(start, end) { this.selectionStart = start; this.selectionEnd = end; }, showModal() {}, close() {} }; }
 const selectors = ["#setup-status", "#candidates", "#registered-sensors", "#omk-nodes", "#start-scan", "#stop-scan", "#register-dialog", "#register-form", "#register-error", "#edit-dialog", "#edit-form", "#edit-error", "#cancel-register", "#cancel-edit", "#delete-sensor"];
 const elements = Object.fromEntries(selectors.map(key => [key, element()]));
-global.document = {querySelector: selector => elements[selector] || element()};
+global.document = {activeElement: null, querySelector: selector => elements[selector] || element()};
 global.window = {setInterval() {}, confirm() { return false; }};
 global.fetch = async () => ({ok: true, json: async () => ({sensors: [], nodes: []})});
 vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8"));
 const provisioned = nodeCard({node_id: "112233445566", registration_state: "provisioned", capabilities: ["ble_scan"]});
 const requested = nodeCard({node_id: "112233445566", registration_state: "provisioned", request_state: "request_sent", capabilities: ["ble_scan"]});
-const registered = nodeCard({node_id: "112233445566", registration_state: "registered", logical_id: "ble-relay-001", capabilities: ["ble_scan"]});
-console.log(JSON.stringify({
+const registeredMarkup = nodeCard({node_id: "112233445566", registration_state: "registered", logical_id: "ble-relay-001", capabilities: ["ble_scan"]});
+const oldInput = Object.assign(element(), {dataset: {nodeId: "112233445566"}, value: "ble-relay-001", selectionStart: 4, selectionEnd: 7});
+const newInput = Object.assign(element(), {dataset: {nodeId: "112233445566"}, value: "", selectionStart: 0, selectionEnd: 0});
+elements["#omk-nodes"].querySelectorAll = () => [oldInput];
+elements["#omk-nodes"].querySelector = () => newInput;
+global.document.activeElement = oldInput;
+const saved = saveNodeInputState();
+restoreNodeInputState(saved);
+const inputForSubmit = Object.assign(element(), {value: ""});
+const submitButton = Object.assign(element(), {dataset: {nodeId: "112233445566"}, closest() { return {querySelector() { return inputForSubmit; }}; }});
+const requests = [];
+global.fetch = async (url, options = {}) => { requests.push({url, options}); return {ok: true, json: async () => url.endsWith("/nodes") ? {nodes: [{node_id: "112233445566", registration_state: "registered", logical_id: "ble-relay-001"}]} : {status: "request_sent"}}; };
+(async () => {
+  await submitNodeRegistration(submitButton);
+  const emptyDoesNotPost = requests.length === 0;
+  inputForSubmit.value = "bad id";
+  await submitNodeRegistration(submitButton);
+  const invalidDoesNotPost = requests.length === 0;
+  inputForSubmit.value = "ble-relay-001";
+  await submitNodeRegistration(submitButton);
+  const validPosts = requests[0]?.url === "/api/admin/nodes/112233445566/register" && JSON.parse(requests[0].options.body).logical_id === "ble-relay-001";
+  console.log(JSON.stringify({
   string: formatApiError("bad request"),
   object: formatApiError({loc: ["body", "logical_id"], msg: "invalid value"}),
   list: formatApiError([{loc: ["body", "logical_id"], msg: "invalid value"}]),
   provisioned: provisioned.includes("register-node"),
   requested: requested.includes("登録要求を送信済み") && !requested.includes("register-node"),
-  registered: registered.includes("登録済み") && registered.includes("ble-relay-001") && !registered.includes("register-node"),
-}));
+  registered: registeredMarkup.includes("登録済み") && registeredMarkup.includes("ble-relay-001") && !registeredMarkup.includes("register-node"),
+  preservedValue: newInput.value === "ble-relay-001",
+  preservedFocus: global.document.activeElement === newInput && newInput.selectionStart === 4 && newInput.selectionEnd === 7,
+  logicalIdValidation: !validLogicalId("") && !validLogicalId("bad id") && validLogicalId("ble-relay-001"),
+  emptyDoesNotPost,
+  invalidDoesNotPost,
+  validPosts,
+  }));
+})();
 '''
     completed = subprocess.run(["node", "-e", harness, str(javascript_path)], check=True, capture_output=True, text=True)
     assert json.loads(completed.stdout) == {
@@ -532,6 +559,12 @@ console.log(JSON.stringify({
         "provisioned": True,
         "requested": True,
         "registered": True,
+        "preservedValue": True,
+        "preservedFocus": True,
+        "logicalIdValidation": True,
+        "emptyDoesNotPost": True,
+        "invalidDoesNotPost": True,
+        "validPosts": True,
     }
 
 
