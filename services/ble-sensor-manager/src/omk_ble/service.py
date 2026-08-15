@@ -27,6 +27,7 @@ NODE_CAPABILITY_NAMES = ((1 << 0, "ble_scan"), (1 << 1, "sen66"))
 DISCOVERY_CONTROL_START_UUID = "c1347091-4268-2fb1-884a-7d019a432155"
 CONTROL_CONNECT_MAX_ATTEMPTS = 8
 CONTROL_CONNECT_TIMEOUT_SECONDS = 4.0
+CONTROL_REDISCOVERY_TIMEOUT_SECONDS = 2.0
 CONTROL_CONNECT_RETRY_SECONDS = 0.25
 
 
@@ -107,27 +108,45 @@ class BleManager:
             raise RuntimeError("node is no longer visible over BLE")
 
         LOGGER.info("Starting OMK Node provisioning node_id=%s", node_id)
+        # A cached device is valid for the first attempt only. A failed BlueZ
+        # connection may leave it stale, so every later attempt explicitly
+        # rediscovers the peripheral before creating a new client.
         ble_device = self._node_devices.get(node_id)
-        if ble_device is None:
-            # This is an explicit fallback discovery, never the implicit
-            # discovery triggered by passing an address string to BleakClient.
-            try:
-                from bleak import BleakScanner
-                ble_device = await BleakScanner.find_device_by_address(address)
-            except Exception as error:
-                raise RuntimeError("could not find node for control connection") from error
-            if ble_device is None:
-                raise RuntimeError("node is no longer visible over BLE")
-            self._node_devices[node_id] = ble_device
-
-        client: Any | None = None
         last_error: Exception | None = None
         for attempt in range(1, CONTROL_CONNECT_MAX_ATTEMPTS + 1):
+            client: Any | None = None
+            if attempt > 1 or ble_device is None:
+                try:
+                    from bleak import BleakScanner
+                    LOGGER.info(
+                        "Rediscovering OMK Node control device node_id=%s attempt=%d/%d phase=rediscovery",
+                        node_id,
+                        attempt,
+                        CONTROL_CONNECT_MAX_ATTEMPTS,
+                    )
+                    ble_device = await BleakScanner.find_device_by_address(
+                        address,
+                        timeout=CONTROL_REDISCOVERY_TIMEOUT_SECONDS,
+                    )
+                    if ble_device is None:
+                        raise RuntimeError("node was not found during rediscovery")
+                    self._node_devices[node_id] = ble_device
+                except Exception as error:
+                    last_error = error
+                    LOGGER.warning(
+                        "OMK Node control retry failed node_id=%s attempt=%d/%d phase=rediscovery",
+                        node_id,
+                        attempt,
+                        CONTROL_CONNECT_MAX_ATTEMPTS,
+                    )
+                    if attempt < CONTROL_CONNECT_MAX_ATTEMPTS:
+                        await asyncio.sleep(CONTROL_CONNECT_RETRY_SECONDS)
+                    continue
             try:
                 from bleak import BleakClient
                 client = BleakClient(ble_device)
                 LOGGER.info(
-                    "Connecting to OMK Node control service node_id=%s attempt=%d/%d",
+                    "Connecting to OMK Node control service node_id=%s attempt=%d/%d phase=connect",
                     node_id,
                     attempt,
                     CONTROL_CONNECT_MAX_ATTEMPTS,
@@ -137,7 +156,7 @@ class BleManager:
             except Exception as error:
                 last_error = error
                 LOGGER.warning(
-                    "OMK Node control connection failed node_id=%s attempt=%d/%d",
+                    "OMK Node control retry failed node_id=%s attempt=%d/%d phase=connect",
                     node_id,
                     attempt,
                     CONTROL_CONNECT_MAX_ATTEMPTS,
