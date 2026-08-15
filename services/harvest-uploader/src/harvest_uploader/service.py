@@ -5,7 +5,9 @@ from __future__ import annotations
 import json
 import logging
 import os
+import queue as thread_queue
 import time
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Protocol
@@ -25,6 +27,15 @@ LOGGER = logging.getLogger(__name__)
 
 class Sender(Protocol):
     def send(self, payload: dict[str, Any]) -> None: ...
+
+
+@dataclass(frozen=True)
+class ReceivedMqttMessage:
+    """A message captured by paho's network thread for main-thread handling."""
+
+    topic: str
+    payload: bytes
+    received_at: datetime
 
 
 class Uploader:
@@ -78,7 +89,17 @@ class Uploader:
 
 
 class MqttRuntime:
-    def __init__(self, uploader: Uploader, *, host: str, port: int, client_id: str, topic: str = "omk/#", client_factory: Callable[..., Any] | None = None) -> None:
+    def __init__(
+        self,
+        uploader: Uploader,
+        *,
+        host: str,
+        port: int,
+        client_id: str,
+        topic: str = "omk/#",
+        client_factory: Callable[..., Any] | None = None,
+        clock: Callable[[], datetime] | None = None,
+    ) -> None:
         if client_factory is None:
             if mqtt is None:
                 raise RuntimeError("paho-mqtt is required; install requirements.txt")
@@ -87,6 +108,11 @@ class MqttRuntime:
         if mqtt is not None:
             kwargs["callback_api_version"] = mqtt.CallbackAPIVersion.VERSION2
         self.host, self.port, self.topic, self.uploader = host, port, topic, uploader
+        self._clock = clock or (lambda: datetime.now(JST))
+        # paho invokes callbacks on its network thread. Only this Queue crosses
+        # into the application thread; aggregation, SQLite, and HTTP delivery
+        # remain exclusively owned by run().
+        self.inbox: thread_queue.Queue[ReceivedMqttMessage] = thread_queue.Queue()
         self.client = client_factory(**kwargs)
         self.client.on_connect = self._on_connect
         self.client.on_disconnect = self._on_disconnect
@@ -99,6 +125,7 @@ class MqttRuntime:
         self.client.loop_start()
         try:
             while True:
+                self._drain_inbox()
                 self.uploader.tick()
                 time.sleep(1)
         finally:
@@ -116,10 +143,23 @@ class MqttRuntime:
         LOGGER.info("MQTT disconnected") if reason_code == 0 else LOGGER.warning("MQTT disconnected (%s); reconnecting", reason_code)
 
     def _on_message(self, _client: Any, _userdata: Any, message: Any) -> None:
-        try:
-            self.uploader.receive(message.topic, message.payload)
-        except Exception:
-            LOGGER.exception("Unexpected MQTT message handling error topic=%s", message.topic)
+        # Keep this callback limited to a thread-safe handoff. In particular,
+        # it must not touch MinuteAggregator or RetryQueue's SQLite connection.
+        self.inbox.put(ReceivedMqttMessage(
+            topic=message.topic,
+            payload=bytes(message.payload),
+            received_at=self._clock().astimezone(JST),
+        ))
+
+    def _drain_inbox(self) -> None:
+        """Handle every message received so far, in FIFO callback order."""
+
+        while True:
+            try:
+                message = self.inbox.get_nowait()
+            except thread_queue.Empty:
+                return
+            self.uploader.receive(message.topic, message.payload, message.received_at)
 
 
 def run_from_environment() -> None:

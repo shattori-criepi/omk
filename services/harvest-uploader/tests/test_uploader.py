@@ -1,11 +1,14 @@
 import json
+import logging
+import sqlite3
+import threading
 from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from harvest_uploader.aggregation import MinuteAggregator
 from harvest_uploader.queue import RetryQueue
-from harvest_uploader.service import Uploader
+from harvest_uploader.service import MqttRuntime, Uploader
 
 JST = ZoneInfo("Asia/Tokyo")
 
@@ -151,6 +154,28 @@ class Sender:
         if self.fail: raise OSError("offline")
 
 
+class FakeMqttClient:
+    def __init__(self, **_kwargs):
+        self.on_connect = self.on_disconnect = self.on_message = None
+
+    def reconnect_delay_set(self, **_kwargs): pass
+    def connect_async(self, *_args, **_kwargs): pass
+    def loop_start(self): pass
+    def loop_stop(self): pass
+    def disconnect(self): pass
+
+
+class Message:
+    def __init__(self, topic: str, payload: bytes):
+        self.topic, self.payload = topic, payload
+
+
+def runtime_for(uploader: Uploader, callback_clock) -> MqttRuntime:
+    return MqttRuntime(
+        uploader, host="mqtt", port=1883, client_id="test", client_factory=FakeMqttClient, clock=callback_clock,
+    )
+
+
 def test_queue_success_failure_retry_and_expiry(tmp_path: Path):
     now = at(0)
     queue, sender = RetryQueue(tmp_path / "queue.sqlite3"), Sender(fail=True)
@@ -188,3 +213,68 @@ def test_restart_does_not_restore_open_minute(tmp_path: Path):
     uploader = Uploader(queue, Sender(), clock=lambda: at(5))
     uploader.receive("omk/a/sen66", b'{"temperature_celsius":20}', at(5))
     assert queue.count() == 0
+
+
+def test_mqtt_callback_thread_only_enqueues_before_main_thread_drain(tmp_path: Path, caplog):
+    queue = RetryQueue(tmp_path / "queue.sqlite3")
+    sender = Sender(fail=True)
+    uploader = Uploader(queue, sender, clock=lambda: at(0, 35))
+    uploader.receive("omk/a/sen66", b'{"temperature_celsius":20}', at(5))
+    runtime = runtime_for(uploader, lambda: at(5, 35))
+    errors = []
+
+    def invoke_callback() -> None:
+        try:
+            runtime._on_message(None, None, Message("omk/a/sen66", b'{"temperature_celsius":30}'))
+        except Exception as error:  # pragma: no cover - asserted below
+            errors.append(error)
+
+    with caplog.at_level(logging.ERROR, logger="harvest_uploader.service"):
+        callback_thread = threading.Thread(target=invoke_callback)
+        callback_thread.start()
+        callback_thread.join()
+
+    assert errors == []
+    assert not any(
+        isinstance(record.exc_info[1], sqlite3.ProgrammingError)
+        for record in caplog.records
+        if record.exc_info is not None
+    )
+    assert queue.count() == 0
+    runtime._drain_inbox()
+    assert queue.count() == 1
+
+
+def test_mqtt_callback_time_is_used_when_drain_crosses_minute_boundary(tmp_path: Path):
+    queue = RetryQueue(tmp_path / "queue.sqlite3")
+    sender = Sender()
+    uploader = Uploader(queue, sender, clock=lambda: at(1, 35))
+    runtime = runtime_for(uploader, lambda: at(59, 34))
+
+    runtime._on_message(None, None, Message("omk/a/sen66", b'{"temperature_celsius":20}'))
+    runtime._drain_inbox()
+    uploader.tick()
+
+    assert sender.calls == [{"time": "2026-08-05T10:34:00+09:00", "sen66_temperature_c": 20}]
+
+
+def test_mqtt_inbox_fifo_completes_one_old_minute_without_leaking_into_next(tmp_path: Path):
+    callback_times = iter((at(10, 34), at(40, 34), at(0, 35)))
+    queue = RetryQueue(tmp_path / "queue.sqlite3")
+    now = at(1, 35)
+    uploader = Uploader(queue, Sender(fail=True), clock=lambda: now)
+    runtime = runtime_for(uploader, lambda: next(callback_times))
+
+    for value in (10, 20, 30):
+        runtime._on_message(None, None, Message("omk/a/sen66", json.dumps({"temperature_celsius": value}).encode()))
+    runtime._drain_inbox()
+
+    first = queue.next_due(at(1, 35))
+    assert first is not None
+    assert first[1] == {"time": "2026-08-05T10:34:00+09:00", "sen66_temperature_c": 15}
+    now = at(0, 36)
+    uploader.tick()
+    assert queue.count() == 2
+    second = queue.next_due(at(0, 36))
+    assert second is not None
+    assert second[1] == {"time": "2026-08-05T10:35:00+09:00", "sen66_temperature_c": 30}
