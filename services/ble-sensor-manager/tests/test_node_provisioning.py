@@ -151,7 +151,12 @@ def test_control_connect_failure_is_a_definite_failure(tmp_path: Path, monkeypat
         async def connect(self) -> None:
             raise RuntimeError("adapter unavailable")
 
-    monkeypatch.setitem(sys.modules, "bleak", types.SimpleNamespace(BleakClient=Client))
+    class Scanner:
+        @staticmethod
+        async def find_device_by_address(address: str, timeout: float) -> object:
+            return types.SimpleNamespace(address=address)
+
+    monkeypatch.setitem(sys.modules, "bleak", types.SimpleNamespace(BleakClient=Client, BleakScanner=Scanner))
     import omk_ble.service as module
     monkeypatch.setattr(module, "CONTROL_CONNECT_RETRY_SECONDS", 0)
     with pytest.raises(RuntimeError, match="could not connect to node control service"):
@@ -208,6 +213,7 @@ def test_control_start_continues_when_write_is_interrupted_by_reboot(tmp_path: P
 
 def test_control_connect_retries_six_failures_then_uses_cached_ble_device(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     attempts: list[object] = []
+    rediscovered: list[object] = []
     connects = 0
 
     class Client:
@@ -226,13 +232,59 @@ def test_control_connect_retries_six_failures_then_uses_cached_ble_device(tmp_pa
         async def disconnect(self) -> None:
             pass
 
-    monkeypatch.setitem(sys.modules, "bleak", types.SimpleNamespace(BleakClient=Client))
+    class Scanner:
+        @staticmethod
+        async def find_device_by_address(address: str, timeout: float) -> object:
+            device = types.SimpleNamespace(address=address)
+            rediscovered.append(device)
+            return device
+
+    monkeypatch.setitem(sys.modules, "bleak", types.SimpleNamespace(BleakClient=Client, BleakScanner=Scanner))
     import omk_ble.service as module
     monkeypatch.setattr(module, "CONTROL_CONNECT_RETRY_SECONDS", 0)
-    asyncio.run(_manager_with_control_node(tmp_path)._send_start_provisioning(NODE_ID))
+    manager = _manager_with_control_node(tmp_path)
+    cached_device = manager._node_devices[NODE_ID]
+    asyncio.run(manager._send_start_provisioning(NODE_ID))
     assert connects == 7
     assert len(attempts) == 7
+    assert attempts[0] is cached_device
+    assert attempts[1] is rediscovered[0]
     assert all(not isinstance(device, str) for device in attempts)
+
+
+def test_control_rediscovery_none_retries_with_a_new_ble_device(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    clients: list[object] = []
+    rediscovered = types.SimpleNamespace(address="AA:BB:CC:DD:EE:FF")
+    rediscovery_results = [None, rediscovered]
+
+    class Client:
+        def __init__(self, ble_device: object) -> None:
+            clients.append(ble_device)
+
+        async def connect(self) -> None:
+            if len(clients) == 1:
+                raise RuntimeError("connection failed")
+
+        async def write_gatt_char(self, uuid: str, value: bytes, response: bool) -> None:
+            assert value == b"\x01"
+
+        async def disconnect(self) -> None:
+            pass
+
+    class Scanner:
+        @staticmethod
+        async def find_device_by_address(address: str, timeout: float) -> object | None:
+            assert timeout == 2.0
+            return rediscovery_results.pop(0)
+
+    monkeypatch.setitem(sys.modules, "bleak", types.SimpleNamespace(BleakClient=Client, BleakScanner=Scanner))
+    import omk_ble.service as module
+    monkeypatch.setattr(module, "CONTROL_CONNECT_RETRY_SECONDS", 0)
+    manager = _manager_with_control_node(tmp_path)
+    cached_device = manager._node_devices[NODE_ID]
+    asyncio.run(manager._send_start_provisioning(NODE_ID))
+    assert clients == [cached_device, rediscovered]
+    assert manager._node_devices[NODE_ID] is rediscovered
 
 
 def test_control_start_then_missing_provisioning_service_fails_later(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
