@@ -25,6 +25,8 @@ STATE_PUBLISH_INTERVAL_SECONDS = 10.0
 POWER_PUBLISH_INTERVAL_SECONDS = 10.0
 NODE_CAPABILITY_NAMES = ((1 << 0, "ble_scan"), (1 << 1, "sen66"))
 DISCOVERY_CONTROL_START_UUID = "c1347091-4268-2fb1-884a-7d019a432155"
+CONTROL_CONNECT_ATTEMPTS = 3
+CONTROL_CONNECT_RETRY_SECONDS = 0.25
 
 
 class BleManager:
@@ -43,6 +45,10 @@ class BleManager:
         # updates never affect position during a session.
         self.observations: dict[str, DecodedAdvertisement] = {}
         self.node_observations: dict[str, DecodedAdvertisement] = {}
+        # BLEDevice is deliberately runtime-only. It avoids BleakClient's
+        # address-string implicit discovery when a provisioning job pauses the
+        # passive scanner before opening the Control GATT connection.
+        self._node_devices: dict[str, Any] = {}
         self._previous_motion_state: dict[str, int] = {}
         self._previous_contact_state: dict[str, int] = {}
         self._last_environment_publish_at: dict[str, float] = {}
@@ -100,14 +106,52 @@ class BleManager:
             raise RuntimeError("node is no longer visible over BLE")
 
         LOGGER.info("Starting OMK Node provisioning node_id=%s", node_id)
-        try:
-            from bleak import BleakClient
-            client = BleakClient(address)
-            await client.connect()
-        except Exception as error:
+        ble_device = self._node_devices.get(node_id)
+        if ble_device is None:
+            # This is an explicit fallback discovery, never the implicit
+            # discovery triggered by passing an address string to BleakClient.
+            try:
+                from bleak import BleakScanner
+                ble_device = await BleakScanner.find_device_by_address(address)
+            except Exception as error:
+                raise RuntimeError("could not find node for control connection") from error
+            if ble_device is None:
+                raise RuntimeError("node is no longer visible over BLE")
+            self._node_devices[node_id] = ble_device
+
+        client: Any | None = None
+        last_error: Exception | None = None
+        for attempt in range(1, CONTROL_CONNECT_ATTEMPTS + 1):
+            try:
+                from bleak import BleakClient
+                client = BleakClient(ble_device)
+                LOGGER.info(
+                    "Connecting to OMK Node control service node_id=%s attempt=%d/%d",
+                    node_id,
+                    attempt,
+                    CONTROL_CONNECT_ATTEMPTS,
+                )
+                await client.connect()
+                break
+            except Exception as error:
+                last_error = error
+                LOGGER.warning(
+                    "OMK Node control connection failed node_id=%s attempt=%d/%d",
+                    node_id,
+                    attempt,
+                    CONTROL_CONNECT_ATTEMPTS,
+                )
+                if client is not None:
+                    try:
+                        await client.disconnect()
+                    except Exception:
+                        pass
+                if attempt < CONTROL_CONNECT_ATTEMPTS:
+                    await asyncio.sleep(CONTROL_CONNECT_RETRY_SECONDS * attempt)
+        else:
             # No START request could have reached the Node without a control
             # connection, so this remains a definite failure.
-            raise RuntimeError("could not connect to node control service") from error
+            raise RuntimeError("could not connect to node control service") from last_error
 
         try:
             # Keep a write request here: it is the characteristic's supported
@@ -151,6 +195,8 @@ class BleManager:
             if decoded is None:
                 decoded = decode(device.address, advertisement.rssi, advertisement.manufacturer_data, advertisement.service_data, received_at)
             if decoded:
+                if decoded.model == "omk_node":
+                    self._node_devices[decoded.values["node_id"]] = device
                 self.record_advertisement(decoded)
         except Exception:
             # A malformed packet must not prevent later BlueZ callbacks.
