@@ -49,11 +49,19 @@ def test_tooling_check_accepts_only_complete_fixed_tree(tmp_path: Path) -> None:
     (component / "tool/esp_prov/transport").mkdir(parents=True)
     (protocomm / "components/protocomm/python").mkdir(parents=True)
     (protocomm / "tools/cmake").mkdir(parents=True)
-    (component / "idf_component.yml").write_text("version: 1.2.4\n", encoding="utf-8")
+    manifest = component / "idf_component.yml"
+    manifest.write_text("version: 1.2.4\n", encoding="utf-8")
     (protocomm / "tools/cmake/version.cmake").write_text("set(IDF_VERSION_MAJOR 6)\nset(IDF_VERSION_MINOR 0)\nset(IDF_VERSION_PATCH 1)\n", encoding="utf-8")
     for path in (component / "LICENSE", component / "tool/esp_prov/esp_prov.py", component / "tool/esp_prov/transport/transport_ble.py", protocomm / "LICENSE", protocomm / "components/protocomm/python/session_pb2.py"):
         path.write_text("", encoding="utf-8")
     assert ensure_available(root) == root
+    for version_line in ('  version: "1.2.4" # official component\n', "version: '1.2.4'\n"):
+        manifest.write_text(version_line, encoding="utf-8")
+        assert ensure_available(root) == root
+    manifest.write_text('version: "1.2.5"\n', encoding="utf-8")
+    with pytest.raises(EspProvisioningToolingError):
+        ensure_available(root)
+    manifest.write_text("version: 1.2.4\n", encoding="utf-8")
     (component / "tool/esp_prov/esp_prov.py").unlink()
     with pytest.raises(EspProvisioningToolingError):
         ensure_available(root)

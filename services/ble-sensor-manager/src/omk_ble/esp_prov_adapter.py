@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import importlib
 import os
+import re
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -29,6 +30,19 @@ def _paths(root: Path) -> tuple[Path, Path, Path]:
     return component, esp_prov_path, protocomm_root
 
 
+def _manifest_version(manifest: str) -> str | None:
+    """Read the scalar ``version`` value used by an IDF component manifest."""
+    for line in manifest.splitlines():
+        match = re.match(r"^\s*version\s*:\s*(.*?)\s*(?:#.*)?$", line)
+        if not match:
+            continue
+        value = match.group(1).strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+            value = value[1:-1]
+        return value
+    return None
+
+
 def ensure_available(root: Path | None = None) -> Path:
     root = root or tooling_root()
     component, esp_prov_path, protocomm_root = _paths(root)
@@ -49,7 +63,7 @@ def ensure_available(root: Path | None = None) -> Path:
         raise EspProvisioningToolingError("ESP provisioning tooling is unavailable") from error
     if (
         not all(path.is_file() for path in required)
-        or f"version: {NETWORK_PROVISIONING_VERSION}" not in component_version
+        or _manifest_version(component_version) != NETWORK_PROVISIONING_VERSION
         or "set(IDF_VERSION_MAJOR 6)" not in idf_version
         or "set(IDF_VERSION_MINOR 0)" not in idf_version
         or "set(IDF_VERSION_PATCH 1)" not in idf_version
