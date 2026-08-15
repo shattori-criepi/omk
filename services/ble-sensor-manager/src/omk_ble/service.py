@@ -11,6 +11,7 @@ from typing import Any, Callable
 import paho.mqtt.client as mqtt
 
 from .models import DecodedAdvertisement, RegisteredSensor, now_iso
+from .node_registry import NodeRegistry
 from .omk_node import decode as decode_omk_node
 from .registry import SensorRegistry
 from .switchbot import decode
@@ -19,6 +20,7 @@ LOGGER = logging.getLogger(__name__)
 ENVIRONMENT_PUBLISH_INTERVAL_SECONDS = 10.0
 STATE_PUBLISH_INTERVAL_SECONDS = 10.0
 POWER_PUBLISH_INTERVAL_SECONDS = 10.0
+NODE_CAPABILITY_NAMES = ((1 << 0, "ble_scan"), (1 << 1, "sen66"))
 
 
 class BleManager:
@@ -28,12 +30,15 @@ class BleManager:
         mqtt_client: mqtt.Client | None = None,
         now_provider: Callable[[], datetime] | None = None,
         monotonic_provider: Callable[[], float] | None = None,
+        node_registry: NodeRegistry | None = None,
     ) -> None:
         self.registry = registry
+        self.node_registry = node_registry
         # Observations run continuously for registered-sensor health. Setup
         # candidate order and candidate payloads are deliberately separate:
         # updates never affect position during a session.
         self.observations: dict[str, DecodedAdvertisement] = {}
+        self.node_observations: dict[str, DecodedAdvertisement] = {}
         self._previous_motion_state: dict[str, int] = {}
         self._previous_contact_state: dict[str, int] = {}
         self._last_environment_publish_at: dict[str, float] = {}
@@ -87,7 +92,7 @@ class BleManager:
     def _on_detection(self, device: Any, advertisement: Any) -> None:
         try:
             received_at = now_iso()
-            decoded = decode_omk_node(advertisement.rssi, advertisement.service_data, received_at)
+            decoded = decode_omk_node(advertisement.rssi, advertisement.service_data, received_at, device.address)
             if decoded is None:
                 decoded = decode(device.address, advertisement.rssi, advertisement.manufacturer_data, advertisement.service_data, received_at)
             if decoded:
@@ -99,6 +104,8 @@ class BleManager:
     def record_advertisement(self, decoded: DecodedAdvertisement) -> None:
         """Record an advertisement without ever reordering setup candidates."""
         self.observations[decoded.device_key] = decoded
+        if decoded.model == "omk_node":
+            self.node_observations[decoded.values["node_id"]] = decoded
         registered_keys = {sensor.device_key for sensor in self.registry.list()}
         if self.scanning and decoded.device_key not in registered_keys:
             if decoded.device_key not in self.setup_candidates:
@@ -107,6 +114,78 @@ class BleManager:
             # raw packet, and visual highlighting all use the latest packet.
             self.setup_candidates[decoded.device_key] = decoded
         self._publish_if_registered(decoded)
+
+    def node_list(self) -> list[dict[str, Any]]:
+        persisted = self.node_registry.list() if self.node_registry else {}
+        ids = sorted(set(persisted) | set(self.node_observations))
+        result = []
+        for node_id in ids:
+            item = dict(persisted.get(node_id, {"node_id": node_id}))
+            seen = self.node_observations.get(node_id)
+            if seen:
+                item.update({"capabilities": seen.values["capabilities"], "ble_state": seen.values["provisioning_state"],
+                             "last_seen": seen.received_at, "ble_address": seen.raw.get("ble_address")})
+            elif isinstance(item.get("capabilities"), int):
+                item["capabilities"] = [name for bit, name in NODE_CAPABILITY_NAMES if item["capabilities"] & bit]
+            item["registration_state"] = item.get("registration_state", item.get("ble_state", "unregistered"))
+            result.append(item)
+        return result
+
+    @staticmethod
+    def _node_id_valid(value: Any) -> bool:
+        return isinstance(value, str) and len(value) == 12 and all(char in "0123456789abcdef" for char in value)
+
+    @staticmethod
+    def _logical_id_valid(value: Any) -> bool:
+        return isinstance(value, str) and 1 <= len(value) <= 48 and all(char.isascii() and (char.isalnum() or char in "-_") for char in value)
+
+    def request_node_registration(self, node_id: str, logical_id: str) -> dict[str, Any]:
+        if not self._node_id_valid(node_id) or not self._logical_id_valid(logical_id):
+            raise ValueError("invalid node_id or logical_id")
+        current = next((item for item in self.node_list() if item["node_id"] == node_id), None)
+        if current is None:
+            raise KeyError(node_id)
+        if current.get("registration_state") == "registered":
+            raise ValueError("node is already registered")
+        if current.get("registration_state") != "provisioned":
+            raise ValueError("node Wi-Fi provisioning is not complete")
+        if not self._mqtt:
+            raise RuntimeError("MQTT client is unavailable")
+        payload = json.dumps({"protocol_version": 1, "logical_id": logical_id})
+        info = self._mqtt.publish(f"omk/node/{node_id}/registration/config", payload, qos=1, retain=False)
+        if getattr(info, "rc", mqtt.MQTT_ERR_SUCCESS) != mqtt.MQTT_ERR_SUCCESS:
+            raise RuntimeError("MQTT publish failed")
+        if self.node_registry:
+            self.node_registry.update(node_id, logical_id=logical_id, request_state="request_sent")
+        return {"node_id": node_id, "logical_id": logical_id, "status": "request_sent"}
+
+    def handle_node_mqtt(self, topic: str, payload: bytes) -> None:
+        parts = topic.split("/")
+        if len(parts) != 5 or parts[:2] != ["omk", "node"] or parts[3] != "registration" or not self._node_id_valid(parts[2]):
+            return
+        if parts[4] not in {"status", "ack"} or self.node_registry is None:
+            return
+        try:
+            value = json.loads(payload.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            LOGGER.warning("Ignoring invalid OMK Node MQTT JSON")
+            return
+        if not isinstance(value, dict) or value.get("protocol_version") != 1 or value.get("node_id") != parts[2]:
+            LOGGER.warning("Ignoring invalid OMK Node MQTT fields")
+            return
+        if parts[4] == "status":
+            state = value.get("registration_state")
+            capabilities = value.get("capabilities")
+            if state not in {"provisioned", "registered"} or not isinstance(capabilities, int):
+                return
+            self.node_registry.update(parts[2], protocol_version=1, capabilities=capabilities,
+                                      registration_state=state, mqtt_status_seen_at=now_iso())
+            return
+        logical_id = value.get("logical_id")
+        if value.get("registration_state") != "registered" or not self._logical_id_valid(logical_id):
+            return
+        self.node_registry.update(parts[2], protocol_version=1, logical_id=logical_id,
+                                  registration_state="registered", request_state="registered", ack_seen_at=now_iso())
 
     def registered_list(self) -> list[dict[str, Any]]:
         """Join immutable registry settings with in-memory latest observations."""
