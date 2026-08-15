@@ -6,11 +6,14 @@ import logging
 import os
 from time import monotonic
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Callable
 
 import paho.mqtt.client as mqtt
 
 from .models import DecodedAdvertisement, RegisteredSensor, now_iso
+from .node_credentials import NodeCredentialStore
+from .node_provisioning import NodeProvisioner
 from .node_registry import NodeRegistry
 from .omk_node import decode as decode_omk_node
 from .registry import SensorRegistry
@@ -21,6 +24,7 @@ ENVIRONMENT_PUBLISH_INTERVAL_SECONDS = 10.0
 STATE_PUBLISH_INTERVAL_SECONDS = 10.0
 POWER_PUBLISH_INTERVAL_SECONDS = 10.0
 NODE_CAPABILITY_NAMES = ((1 << 0, "ble_scan"), (1 << 1, "sen66"))
+DISCOVERY_CONTROL_START_UUID = "c1347091-4268-2fb1-884a-7d019a432155"
 
 
 class BleManager:
@@ -54,6 +58,11 @@ class BleManager:
         self.offline_seconds = int(os.getenv("OMK_BLE_OFFLINE_SECONDS", "900"))
         self._now_provider = now_provider or (lambda: datetime.now(timezone.utc))
         self._monotonic_provider = monotonic_provider or monotonic
+        credential_directory = Path(os.getenv("OMK_NODE_CREDENTIAL_DIRECTORY", "data/provisioning/nodes"))
+        self._node_provisioner = NodeProvisioner(
+            self.pause_collection, self.start_collection, self._node_effective_state,
+            NodeCredentialStore(credential_directory), self._send_start_provisioning,
+        )
 
     async def start_scan(self, timeout_seconds: int = 60) -> None:
         await self.start_collection()
@@ -74,6 +83,31 @@ class BleManager:
         except Exception as error:
             LOGGER.warning("BLE scan could not start: %s", error)
             raise RuntimeError("Bluetooth adapter or BlueZ is unavailable") from error
+
+    async def pause_collection(self) -> None:
+        """Release the adapter before the official provisioning client scans."""
+        if self._scanner is None:
+            return
+        try:
+            await self._scanner.stop()
+        finally:
+            self._scanner = None
+
+    async def _send_start_provisioning(self, node_id: str) -> None:
+        seen = self.node_observations.get(node_id)
+        address = seen.raw.get("ble_address") if seen else None
+        if not isinstance(address, str) or not address:
+            raise RuntimeError("node is no longer visible over BLE")
+        try:
+            from bleak import BleakClient
+            client = BleakClient(address)
+            await client.connect()
+            try:
+                await client.write_gatt_char(DISCOVERY_CONTROL_START_UUID, b"\x01", response=True)
+            finally:
+                await client.disconnect()
+        except Exception as error:
+            raise RuntimeError("could not request node provisioning mode") from error
 
     async def _stop_after(self, seconds: int) -> None:
         await asyncio.sleep(seconds)
@@ -128,8 +162,21 @@ class BleManager:
             elif isinstance(item.get("capabilities"), int):
                 item["capabilities"] = [name for bit, name in NODE_CAPABILITY_NAMES if item["capabilities"] & bit]
             item["registration_state"] = item.get("registration_state", item.get("ble_state", "unregistered"))
+            job = self._node_provisioner.job(node_id)
+            if job:
+                item.update(job.as_dict())
             result.append(item)
         return result
+
+    def _node_effective_state(self, node_id: str) -> str | None:
+        item = next((item for item in self.node_list() if item["node_id"] == node_id), None)
+        return item.get("registration_state") if item else None
+
+    async def request_node_provisioning(self, node_id: str) -> dict[str, str]:
+        if not self._node_id_valid(node_id):
+            raise ValueError("invalid node_id")
+        job = await self._node_provisioner.start(node_id)
+        return {"node_id": node_id, **job.as_dict()}
 
     @staticmethod
     def _node_id_valid(value: Any) -> bool:

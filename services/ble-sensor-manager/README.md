@@ -14,6 +14,20 @@ Pi上で`scripts/setup-ble-sensor-manager.sh`を実行すると、virtualenvの�
 `data/ble/sensors.json`と`data/ble/nodes.json`へ設定し、`data/ble`だけを書込み可能にした
 まま`ProtectSystem=strict`を維持します。登録情報はこれらの可読なJSONへ保存します。
 
+## ESP32 Node Wi-Fi Provisioning
+
+未設定NodeのWi-Fi provisioningは、Gateway setup時に公式
+[Espressif ESP-IDF](https://github.com/espressif/esp-idf) **v6.0.1** のhost toolingを
+`/opt/omk/esp-provisioning/esp-idf-6.0.1`へ取得して利用します。これはfirmware開発用の
+PlatformIO環境や個人home directoryには依存しません。取得するESP-IDFはApache-2.0 licenseで、
+その`LICENSE`を配置先に維持します。
+
+BLE Sensor ManagerはESP-IDF公式`esp_prov` clientをadapter経由で使い、Security 1のNode固有PoPで
+SetConfig / ApplyConfigを行います。AP PSKはsystemd encrypted credential `omk_ap_psk`から必要時だけ
+読み、NetworkManagerのsecret profile、環境変数、HTTP API、ログには出しません。toolingまたはcredentialが
+利用不能でも、通常のBLE scan、SwitchBot管理、MQTT Node registrationは継続し、Wi-Fi provisioningだけが
+利用不可になります。
+
 既存Gatewayを更新する場合も同じスクリプトを再実行します。過去に`OMK_NODE_REGISTRY`の
 手動drop-inを追加していた場合、更新後のunitには正式設定が含まれるため、そのdrop-inは
 不要です。削除する前に`systemctl cat omk-ble-sensor-manager.service`で生成unitに正しい
