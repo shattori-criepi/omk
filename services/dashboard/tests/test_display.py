@@ -449,6 +449,7 @@ def test_hero_display_html_and_javascript_expose_polling_targets(tmp_path: Path,
         assert f'data-item-id="{item_id}"' in response.text
     assert "display-card--large" in response.text
     assert "display-card--hero" in response.text
+    assert 'data-item-count="3"' in response.text
     assert 'class="display-card-primary"' in response.text
     assert 'class="display-card-secondary"' in response.text
     assert 'class="display-secondary-label"' in response.text
@@ -481,12 +482,15 @@ def test_strip_and_compact_display_html_use_their_own_dom_contracts(tmp_path: Pa
         _write_generic_item(latest_root, suffix, topic="omk/sen66/environment", device_id="sen66", field=field, value=value, received_at=datetime.now(JST))
         for suffix, field, value in (("k", "temperature_c", 25.4), ("l", "relative_humidity_percent", 48.0), ("m", "co2_ppm", 650))
     ]
-    compact_id = _write_generic_item(latest_root, "n", topic="omk/plug-001/power", device_id="plug-001", field="power_w", value=12.3, received_at=datetime.now(JST))
+    compact_ids = [
+        _write_generic_item(latest_root, suffix, topic="omk/plug-001/status", device_id="plug-001", field=field, value=value, received_at=datetime.now(JST))
+        for suffix, field, value in (("n", "power_w", 12.3), ("o", "switch_state", True), ("p", "metric_a", 1), ("q", "metric_b", 2), ("r", "metric_c", 3))
+    ]
     settings_path = tmp_path / "dashboard" / "settings.json"
     settings_path.parent.mkdir(parents=True)
     settings_path.write_text(json.dumps(_block_payload(
         {"block_id": "strip_sen66", "group": "sen66", "title": "SEN66", "size": "medium", "layout_pattern": "strip", "primary_item_id": strip_ids[0], "item_ids": strip_ids},
-        {"block_id": "compact_plug", "group": "plug-001", "title": "Plug", "size": "small", "layout_pattern": "compact", "primary_item_id": compact_id, "item_ids": [compact_id]},
+        {"block_id": "compact_plug", "group": "plug-001", "title": "Plug", "size": "medium", "layout_pattern": "compact", "primary_item_id": compact_ids[0], "item_ids": compact_ids},
     )), encoding="utf-8")
     monkeypatch.setenv("OMK_LATEST_DATA_ROOT", str(latest_root))
     monkeypatch.setenv("OMK_DASHBOARD_SETTINGS_PATH", str(settings_path))
@@ -497,13 +501,16 @@ def test_strip_and_compact_display_html_use_their_own_dom_contracts(tmp_path: Pa
     assert 'data-block-id="strip_sen66"' in response.text
     assert "display-card--medium" in response.text
     assert "display-card--strip" in response.text
+    assert 'data-item-count="3"' in response.text
     assert 'class="display-card-strip-items"' in response.text
     for item_id in strip_ids:
         assert f'data-item-id="{item_id}"' in response.text
     assert 'data-block-id="compact_plug"' in response.text
-    assert "display-card--small" in response.text
+    assert "display-card--medium" in response.text
     assert "display-card--compact" in response.text
-    assert f'data-item-id="{compact_id}"' in response.text
+    assert 'data-item-count="5"' in response.text
+    for item_id in compact_ids:
+        assert f'data-item-id="{item_id}"' in response.text
 
 
 def test_power_direction_rules() -> None:
@@ -793,6 +800,12 @@ def test_display_pattern_css_keeps_only_hero_primary_large_and_fits_the_viewport
     assert ".display-card-compact-items { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));" in stylesheet
     assert ".display-secondary-value { justify-self: end;" in stylesheet
     assert ".display-secondary-unit { min-height: 0;" in stylesheet
+    assert ".display-card--large.display-card--hero" in stylesheet
+    assert ".display-card--medium.display-card--hero" in stylesheet
+    assert ".display-card--small.display-card--hero" in stylesheet
+    assert ".display-card--medium.display-card--strip.display-card--items-" in stylesheet
+    assert ".display-card--small.display-card--strip.display-card--items-" in stylesheet
+    assert ".display-compact-reading { display: flex; align-items: baseline;" in stylesheet
     assert "{% elif block.layout_pattern == 'compact' %}" in template
     assert 'class="display-card-compact-items"' in template
 
