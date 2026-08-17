@@ -34,6 +34,26 @@ static char registration_ack_topic[OMK_MQTT_TOPIC_SIZE];
 static char registration_payload[OMK_MQTT_PAYLOAD_SIZE];
 static char client_id[OMK_MQTT_CLIENT_ID_SIZE];
 
+static bool is_lower_hex_identifier(const char *value, size_t length) {
+    if (value == NULL || strlen(value) != length) {
+        return false;
+    }
+    for (size_t index = 0; index < length; ++index) {
+        char character = value[index];
+        if (!((character >= '0' && character <= '9') ||
+              (character >= 'a' && character <= 'f'))) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool relay_device_key_is_valid(const char *device_key) {
+    static const char prefix[] = "switchbot:";
+    return device_key != NULL && strncmp(device_key, prefix, sizeof(prefix) - 1) == 0 &&
+           is_lower_hex_identifier(device_key + sizeof(prefix) - 1, 12);
+}
+
 static bool registration_is_persisted(void) {
     uint8_t state;
     esp_err_t err = node_registration_get_provisioning_state(false, &state);
@@ -292,12 +312,12 @@ esp_err_t mqtt_registration_publish_environment(const char *sensor_id,
     return message_id < 0 ? ESP_FAIL : ESP_OK;
 }
 
-esp_err_t mqtt_registration_publish_relay_environment(const char *sensor_id,
+esp_err_t mqtt_registration_publish_relay_environment(const char *device_key,
                                                        float temperature_c,
                                                        uint8_t relative_humidity_percent,
                                                        const char *relay_node_id) {
-    if (sensor_id == NULL || sensor_id[0] == '\0' || relay_node_id == NULL ||
-        strlen(relay_node_id) != OMK_NODE_ID_HEX_LENGTH ||
+    if (!relay_device_key_is_valid(device_key) ||
+        !is_lower_hex_identifier(relay_node_id, OMK_NODE_ID_HEX_LENGTH) ||
         relative_humidity_percent > 100 || temperature_c < -20.0f ||
         temperature_c > 60.0f) {
         return ESP_ERR_INVALID_ARG;
@@ -308,15 +328,15 @@ esp_err_t mqtt_registration_publish_relay_environment(const char *sensor_id,
 
     char topic[OMK_MQTT_TOPIC_SIZE];
     char payload[OMK_MQTT_RELAY_ENVIRONMENT_PAYLOAD_SIZE];
-    int written = snprintf(topic, sizeof(topic), "omk/%s/environment", sensor_id);
+    int written = snprintf(topic, sizeof(topic), "omk-relay/%s/ble/environment", relay_node_id);
     if (written < 0 || written >= (int)sizeof(topic)) {
         return ESP_ERR_INVALID_SIZE;
     }
     written = snprintf(payload, sizeof(payload),
-                       "{\"device_id\":\"%s\",\"quality\":\"normal\","
+                       "{\"device_key\":\"%s\",\"quality\":\"normal\","
                        "\"temperature_c\":%.1f,\"relative_humidity_percent\":%u,"
                        "\"source\":\"relay\",\"relay_node_id\":\"%s\"}",
-                       sensor_id, (double)temperature_c,
+                       device_key, (double)temperature_c,
                        relative_humidity_percent, relay_node_id);
     if (written < 0 || written >= (int)sizeof(payload)) {
         return ESP_ERR_INVALID_SIZE;
