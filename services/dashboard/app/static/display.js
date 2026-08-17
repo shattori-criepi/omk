@@ -63,6 +63,25 @@ function updateSourceStatus(sectionId, badgeId, freshness) {
 }
 
 function updateDisplay(data) {
+  if (data.mode === "standard" && Array.isArray(data.items)) {
+    data.items.forEach((item) => {
+      const card = document.querySelector(`[data-item-id="${CSS.escape(item.id)}"]`);
+      if (!card) return;
+      const value = card.querySelector('[data-role="value"]');
+      const unit = card.querySelector('[data-role="unit"]');
+      const freshness = card.querySelector('[data-role="freshness"]');
+      if (value) value.textContent = item.value;
+      if (unit) { unit.textContent = item.unit; unit.hidden = item.freshness === "unavailable" || !item.unit; }
+      if (freshness) freshness.textContent = sourceBadgeText(item.freshness);
+      card.classList.remove("display-card--normal", "display-card--delayed", "display-card--unavailable");
+      card.classList.add(`display-card--${item.freshness}`);
+    });
+    const updatedAt = document.querySelector("#updated-at");
+    if (updatedAt) { updatedAt.textContent = data.updated_at; updatedAt.dateTime = data.updated_at_iso; }
+    const freshness = document.querySelector("#freshness");
+    if (freshness) { freshness.textContent = data.freshness; freshness.className = `freshness freshness--${data.freshness}`; }
+    return;
+  }
   for (const [id, value] of Object.entries({
     "current-power-label": data.current_power_label,
     "current-power-kw": data.current_power_kw,
