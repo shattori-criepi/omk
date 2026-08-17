@@ -599,7 +599,7 @@ def test_waterproof_sensor_setup_uses_th_ids_and_runtime_uses_environment_topic(
     assert publisher.messages[-1][0] == "omk/th-002/environment"
     assert json.loads(publisher.messages[-1][1]) == {
         "device_id": "th-002", "measured_at": "now", "quality": "normal",
-        "temperature_c": 27.6, "relative_humidity_percent": 82,
+        "source": "direct", "temperature_c": 27.6, "relative_humidity_percent": 82,
     }
     manager.update_registered_sensor("switchbot:waterproof", {"sensor_id": "th-003", "display_name": "浴室温湿度", "location": "浴室", "enabled": True})
     clock[0] = 10.0

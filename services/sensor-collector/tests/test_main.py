@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
 
+from ble_route_selector import BleRouteSelector, should_store_record  # noqa: E402
 from main import JsonlWriter, LatestDataWriter, build_record  # noqa: E402
 
 
@@ -79,6 +80,30 @@ class CollectorTests(unittest.TestCase):
             self.assertEqual(json.loads(output.read_text(encoding="utf-8")), second)
             self.assertEqual(stat.S_IMODE(output.stat().st_mode), 0o644)
             self.assertEqual(list(Path(directory).iterdir()), [output])
+
+    def test_ble_route_selection_prefers_direct_and_limits_relay_fallback(self) -> None:
+        selector = BleRouteSelector()
+
+        def environment(device_id: str, source: str | None) -> dict:
+            payload = {"device_id": device_id, "temperature_c": 24.4}
+            if source is not None:
+                payload["source"] = source
+            return {"topic": f"omk/{device_id}/environment", "payload": payload}
+
+        self.assertTrue(should_store_record(environment("meter-001", "direct"), selector, 0.0))
+        self.assertFalse(should_store_record(environment("meter-001", "relay"), selector, 0.0))
+        self.assertFalse(should_store_record(environment("meter-001", "relay"), selector, 29.999))
+        self.assertTrue(should_store_record(environment("meter-001", "relay"), selector, 30.0))
+        self.assertTrue(should_store_record(environment("meter-001", "direct"), selector, 31.0))
+        self.assertFalse(should_store_record(environment("meter-001", "relay"), selector, 31.001))
+        self.assertTrue(should_store_record(environment("meter-002", "relay"), selector, 31.001))
+        self.assertTrue(should_store_record(environment("meter-003", None), selector, 31.001))
+        self.assertTrue(should_store_record(
+            {"topic": "omk/meter-004/sen66", "payload": {"device_id": "meter-004", "source": "direct"}},
+            selector,
+            31.001,
+        ))
+        self.assertTrue(should_store_record(environment("meter-004", "relay"), selector, 31.001))
 
 
 if __name__ == "__main__":
