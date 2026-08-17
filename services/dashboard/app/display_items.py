@@ -29,6 +29,7 @@ class DisplayItem:
     freshness: str = FreshnessStatus.UNAVAILABLE.value
     size: str = "small"
     short_label: str = ""
+    source_item_ids: tuple[str, ...] = ()
 
     def as_dict(self) -> dict[str, str | bool | None]:
         return self.__dict__.copy()
@@ -89,7 +90,34 @@ def candidate_for(
 
 def catalog_items_with_latest(repository: DisplayRepository, now: datetime) -> list[DisplayItem]:
     """Build candidates with their actual latest reading for the admin UI."""
-    return [candidate_for(item, repository.item(item.id), now) for item in repository.catalog()]
+    return display_candidates(repository, now)
+
+
+def display_candidates(repository: DisplayRepository, now: datetime | None = None) -> list[DisplayItem]:
+    """Return selectable Dashboard candidates, including virtual battery power."""
+    raw = [candidate_for(item, repository.item(item.id), now) for item in repository.catalog()]
+    paired: dict[tuple[str, str], dict[str, DisplayItem]] = {}
+    for item in raw:
+        if item.semantic_role in {"battery_charge", "battery_discharge"}:
+            paired.setdefault((item.group, item.device_id), {})[item.semantic_role] = item
+    hidden_ids: set[str] = set()
+    virtual: list[DisplayItem] = []
+    for values in paired.values():
+        charge, discharge = values.get("battery_charge"), values.get("battery_discharge")
+        if charge is not None and discharge is not None:
+            hidden_ids.update((charge.id, discharge.id))
+            virtual.append(_bidirectional_battery_item(charge, discharge, selectable=True))
+    return [item for item in raw if item.id not in hidden_ids] + virtual
+
+
+def display_item_migrations(candidates: list[DisplayItem]) -> dict[str, str]:
+    """Map legacy charge/discharge selections to their virtual Dashboard item."""
+    return {
+        source_id: item.id
+        for item in candidates
+        if item.semantic_role == "battery_power_bidirectional"
+        for source_id in item.source_item_ids
+    }
 
 
 def selected_items(
@@ -117,17 +145,17 @@ def selected_blocks(
     now: datetime,
 ) -> list[DisplayBlockView]:
     """Resolve persisted block membership into one display-ready snapshot."""
-    catalog = {item.id: item for item in repository.catalog()}
+    catalog = {item.id: item for item in display_candidates(repository, now)}
     rendered: list[DisplayBlockView] = []
     for block in blocks:
         values: list[DisplayItem] = []
         for item_id in block.item_ids:
-            catalog_item = catalog.get(item_id)
-            if catalog_item is None:
+            item = catalog.get(item_id)
+            if item is None:
                 values.append(DisplayItem(item_id, "利用できない表示項目", block.group, "", "", "", "unknown", "", "その他", None, False, ""))
             else:
-                values.append(_display_item(catalog_item, definition_for(catalog_item.field), repository.item(item_id), now))
-        values, primary_id = _merge_bidirectional_battery(values, block.primary_item_id)
+                values.append(item)
+        primary_id = block.primary_item_id
         primary = next((item for item in values if item.id == primary_id), values[0])
         secondary = tuple(item for item in values if item.id != primary.id)
         statuses = [item.freshness for item in values]
@@ -167,22 +195,12 @@ def _display_item(
         semantic_role=definition.semantic_role, selectable=definition.selectable,
         last_received_at=item.last_received_at, value=value, freshness=freshness.value,
         size=size, short_label=definition.label,
+        source_item_ids=(item.id,),
     )
 
 
-def _merge_bidirectional_battery(
-    values: list[DisplayItem], primary_item_id: str,
-) -> tuple[list[DisplayItem], str]:
-    """Represent charge/discharge as one Dashboard-only battery power row.
-
-    The collector keeps both raw fields.  Combining them here affects only a
-    configured block that contains both fields and never changes persistence.
-    """
-    charge = next((item for item in values if item.semantic_role == "battery_charge"), None)
-    discharge = next((item for item in values if item.semantic_role == "battery_discharge"), None)
-    if charge is None or discharge is None:
-        return values, primary_item_id
-
+def _bidirectional_battery_item(charge: DisplayItem, discharge: DisplayItem, *, selectable: bool) -> DisplayItem:
+    """Build the one Dashboard-only representation of charge/discharge."""
     charge_value = _numeric_value(charge.value)
     discharge_value = _numeric_value(discharge.value)
     if discharge_value is not None and discharge_value > 0.005:
@@ -196,24 +214,17 @@ def _merge_bidirectional_battery(
 
     representative = discharge if discharge_value is not None else charge
     freshness = _combined_freshness(charge.freshness, discharge.freshness)
-    merged_id = f"battery_power_bidirectional:{charge.id}:{discharge.id}"
-    merged = DisplayItem(
-        id=merged_id, label=f"{representative.group} 蓄電池", short_label=f"蓄電池 {direction}",
+    virtual_id = f"virtual:battery_power_bidirectional:{representative.device_id}"
+    return DisplayItem(
+        id=virtual_id, label=f"{representative.group} 蓄電池充放電", short_label=f"蓄電池 {direction}",
         group=representative.group, topic=representative.topic, device_id=representative.device_id,
         field="battery_power_bidirectional", value_type="number", unit="kW",
         category=representative.category, semantic_role="battery_power_bidirectional",
-        selectable=False, last_received_at=max(charge.last_received_at, discharge.last_received_at),
+        selectable=selectable, last_received_at=max(charge.last_received_at, discharge.last_received_at),
         value=f"{value:.2f}" if value is not None and freshness != FreshnessStatus.UNAVAILABLE.value else "--",
         freshness=freshness,
+        source_item_ids=(charge.id, discharge.id),
     )
-    result: list[DisplayItem] = []
-    for item in values:
-        if item is charge:
-            result.append(merged)
-        elif item is not discharge:
-            result.append(item)
-    merged_primary = merged_id if primary_item_id in {charge.id, discharge.id} else primary_item_id
-    return result, merged_primary
 
 
 def _numeric_value(value: str) -> float | None:

@@ -120,9 +120,9 @@ Raspberry Pi自身またはLAN内から利用する場合は、`localhost`をPi�
 
 管理メニューの「表示設定」では、Phase 1の`catalog.json`と`items/`から検出したDisplay Itemを、
 同一sourceのDisplay Blockへまとめて標準プリセットへ選択できます。blockごとに主表示、補助表示、
-選択順、`large`、`medium`、`small`の三段階サイズ、表示形式（`hero`／`strip`／`compact`）を指定し、配置座標は指定しません。`hero`は左に主表示・右に補助値の縦一覧、`strip`は複数値の横長一覧、`compact`は主表示と少数の補助値向けです。block内ラベルはsource名を繰り返さない短縮名で表示します。太陽光・蓄電池sourceで充電と放電の両方を選択した場合だけ、raw値を変更せず画面上では1つの充放電行へ統合します。標準プリセットは
+選択順、`large`、`medium`、`small`の三段階サイズ、表示形式（`hero`／`strip`／`compact`）を指定し、配置座標は指定しません。`hero`は左に主表示・右に補助値の縦一覧、`strip`は複数値の横長一覧、`compact`は値を同程度の大きさで省スペースにまとめます。block内ラベルはsource名を繰り返さない短縮名で表示します。太陽光・蓄電池sourceの充電・放電は、raw値を変更せずDashboard候補では1つの仮想Display Item「蓄電池充放電」として扱います。既存設定の充電／放電選択は読込み時にこの仮想itemへ移行します。標準プリセットは
 容量6で、large=3、medium=2、small=1をblock単位で消費します。既存のitem単位version 1設定は
-初回読込み時にsourceごとのversion 2 block設定へ自動移行します。block内の最大項目数はhero=6、strip=5、compact=3です。
+初回読込み時にsourceごとのversion 2 block設定へ自動移行します。block内の最大項目数はsizeと表示形式の組合せで決まり、largeは5〜6、mediumは5、smallは3です。
 
 設定はホストの`data/dashboard/settings.json`へatomic replaceで保存し、Dashboardコンテナだけが
 このディレクトリを読み書きします。設定ファイルは秘密情報を含まないため`0644`で保存し、通常の

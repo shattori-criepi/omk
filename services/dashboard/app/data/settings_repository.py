@@ -10,7 +10,22 @@ from pathlib import Path
 
 SIZES = {"large": 3, "medium": 2, "small": 1}
 STANDARD_CAPACITY = 6
-LAYOUT_PATTERNS = {"hero": 6, "strip": 5, "compact": 3}
+LAYOUT_PATTERNS = frozenset({"hero", "strip", "compact"})
+# A block's grid size and its internal layout both affect how many short
+# readings remain legible on a 7-inch display.  Small blocks deliberately stay
+# strict; medium blocks can still show a practical sensor summary.
+ITEM_LIMITS = {
+    "large": {"hero": 6, "strip": 6, "compact": 5},
+    "medium": {"hero": 5, "strip": 5, "compact": 5},
+    "small": {"hero": 3, "strip": 3, "compact": 3},
+}
+
+
+def item_limit(size: str, layout_pattern: str) -> int:
+    try:
+        return ITEM_LIMITS[size][layout_pattern]
+    except KeyError as error:
+        raise SettingsError("ブロックの表示形式が正しくありません") from error
 
 
 def default_layout_pattern(size: str) -> str:
@@ -68,14 +83,14 @@ class SettingsRepository:
     def __init__(self, path: Path) -> None:
         self.path = path
 
-    def load_or_create(self, available_groups: dict[str, str], defaults: list[DisplayBlock]) -> DashboardSettings:
+    def load_or_create(self, available_groups: dict[str, str], defaults: list[DisplayBlock], item_migrations: dict[str, str] | None = None) -> DashboardSettings:
         if not self.path.exists():
             settings = DashboardSettings(tuple(defaults))
             self.save(settings, available_groups)
             return settings
         try:
             payload = json.loads(self.path.read_text(encoding="utf-8"))
-            settings, migrated = self._parse(payload, available_groups, allow_missing=True)
+            settings, migrated = self._parse(payload, available_groups, allow_missing=True, item_migrations=item_migrations)
             if migrated:
                 self.save(settings, available_groups)
             os.chmod(self.path, 0o644)
@@ -85,8 +100,8 @@ class SettingsRepository:
             # Dashboard into an empty layout merely because migration failed.
             return DashboardSettings(tuple(defaults))
 
-    def save_payload(self, payload: object, available_groups: dict[str, str]) -> DashboardSettings:
-        settings, migrated = self._parse(payload, available_groups, allow_missing=False)
+    def save_payload(self, payload: object, available_groups: dict[str, str], item_migrations: dict[str, str] | None = None) -> DashboardSettings:
+        settings, migrated = self._parse(payload, available_groups, allow_missing=False, item_migrations=item_migrations)
         if migrated and isinstance(payload, dict) and payload.get("version") == 1:
             raise SettingsError("旧形式の設定は保存できません")
         self.save(settings, available_groups)
@@ -110,11 +125,11 @@ class SettingsRepository:
                 temporary_path.unlink(missing_ok=True)
             raise
 
-    def _parse(self, payload: object, available_groups: dict[str, str], *, allow_missing: bool) -> tuple[DashboardSettings, bool]:
+    def _parse(self, payload: object, available_groups: dict[str, str], *, allow_missing: bool, item_migrations: dict[str, str] | None = None) -> tuple[DashboardSettings, bool]:
         if not isinstance(payload, dict) or payload.get("default_preset") != "standard":
             raise SettingsError("設定形式が正しくありません")
         if payload.get("version") == 1:
-            return self._migrate_v1(payload, available_groups), True
+            return self._migrate_v1(payload, available_groups, item_migrations), True
         if payload.get("version") != 2:
             raise SettingsError("設定形式が正しくありません")
         try:
@@ -129,24 +144,25 @@ class SettingsRepository:
             if not isinstance(block, dict) or not isinstance(block.get("item_ids"), list):
                 raise SettingsError("表示ブロックの形式が正しくありません")
             layout_pattern = block.get("layout_pattern", default_layout_pattern(block.get("size")))
-            item_ids = tuple(block["item_ids"])
+            item_ids, primary_item_id, item_migrated = _migrate_item_ids(tuple(block["item_ids"]), block.get("primary_item_id"), item_migrations)
+            migrated |= item_migrated
             if "layout_pattern" not in block:
                 # Pre-pattern V2 settings may contain every discovered value
                 # from one source.  Keep the primary and the first values that
                 # fit the sensible default rather than making the dashboard
                 # unusable after the migration.
-                item_ids = _limited_item_ids(item_ids, block.get("primary_item_id"), layout_pattern)
+                item_ids = _limited_item_ids(item_ids, primary_item_id, block.get("size"), layout_pattern)
                 migrated = True
             blocks.append(DisplayBlock(
                 block_id=block.get("block_id"), group=block.get("group"), title=block.get("title"),
-                size=block.get("size"), primary_item_id=block.get("primary_item_id"),
+                size=block.get("size"), primary_item_id=primary_item_id,
                 item_ids=item_ids, layout_pattern=layout_pattern,
             ))
         settings = DashboardSettings(tuple(blocks))
         self._validate(settings, available_groups, allow_missing=allow_missing)
         return settings, migrated
 
-    def _migrate_v1(self, payload: dict, available_groups: dict[str, str]) -> DashboardSettings:
+    def _migrate_v1(self, payload: dict, available_groups: dict[str, str], item_migrations: dict[str, str] | None) -> DashboardSettings:
         try:
             raw_items = payload["presets"]["standard"]["items"]
         except (KeyError, TypeError) as error:
@@ -157,7 +173,7 @@ class SettingsRepository:
         for item in raw_items:
             if not isinstance(item, dict) or not isinstance(item.get("item_id"), str) or item.get("size") not in SIZES:
                 raise SettingsError("表示項目の形式が正しくありません")
-            item_id = item["item_id"]
+            item_id = (item_migrations or {}).get(item["item_id"], item["item_id"])
             grouped.setdefault(available_groups.get(item_id, "保存済み設定"), []).append(DisplaySelection(item_id, item["size"]))
         blocks = []
         for index, (group, selections) in enumerate(grouped.items(), start=1):
@@ -165,7 +181,7 @@ class SettingsRepository:
             blocks.append(DisplayBlock(
                 block_id=f"block_{index}", group=group, title=group, size=size,
                 primary_item_id=selections[0].item_id,
-                item_ids=_limited_item_ids(tuple(selection.item_id for selection in selections), selections[0].item_id, default_layout_pattern(size)),
+                item_ids=_limited_item_ids(tuple(dict.fromkeys(selection.item_id for selection in selections)), selections[0].item_id, size, default_layout_pattern(size)),
                 layout_pattern=default_layout_pattern(size),
             ))
         settings = DashboardSettings(tuple(blocks))
@@ -183,7 +199,7 @@ class SettingsRepository:
                 raise SettingsError("ブロック名が正しくありません")
             if block.size not in SIZES or block.layout_pattern not in LAYOUT_PATTERNS or not block.item_ids or block.primary_item_id not in block.item_ids:
                 raise SettingsError("ブロックの表示項目が正しくありません")
-            if len(block.item_ids) > LAYOUT_PATTERNS[block.layout_pattern]:
+            if len(block.item_ids) > item_limit(block.size, block.layout_pattern):
                 raise SettingsError("この表示形式に設定できる項目数を超えています")
             if len(block.item_ids) != len(set(block.item_ids)) or any(not isinstance(item_id, str) for item_id in block.item_ids):
                 raise SettingsError("同じ表示項目を重複して選択できません")
@@ -199,7 +215,14 @@ class SettingsRepository:
             raise SettingsError("表示領域がいっぱいです")
 
 
-def _limited_item_ids(item_ids: tuple[str, ...], primary_item_id: object, layout_pattern: str) -> tuple[str, ...]:
+def _limited_item_ids(item_ids: tuple[str, ...], primary_item_id: object, size: object, layout_pattern: str) -> tuple[str, ...]:
     if not isinstance(primary_item_id, str) or primary_item_id not in item_ids:
         return item_ids
-    return tuple([primary_item_id, *(item_id for item_id in item_ids if item_id != primary_item_id)][:LAYOUT_PATTERNS[layout_pattern]])
+    return tuple([primary_item_id, *(item_id for item_id in item_ids if item_id != primary_item_id)][:item_limit(str(size), layout_pattern)])
+
+
+def _migrate_item_ids(item_ids: tuple[str, ...], primary_item_id: object, item_migrations: dict[str, str] | None) -> tuple[tuple[str, ...], object, bool]:
+    migrations = item_migrations or {}
+    migrated_ids = tuple(dict.fromkeys(migrations.get(item_id, item_id) for item_id in item_ids))
+    migrated_primary = migrations.get(primary_item_id, primary_item_id) if isinstance(primary_item_id, str) else primary_item_id
+    return migrated_ids, migrated_primary, migrated_ids != item_ids or migrated_primary != primary_item_id

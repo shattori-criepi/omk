@@ -17,7 +17,7 @@ from app.data.latest_repository import LatestRepository
 from app.data.parquet_repository import LatestPower, ParquetRepository
 from app.data.display_repository import DisplayRepository
 from app.data.settings_repository import DisplayBlock, DisplaySelection, SettingsError, SettingsRepository
-from app.display_items import candidate_for, catalog_items_with_latest, selected_blocks, selected_items
+from app.display_items import candidate_for, catalog_items_with_latest, display_candidates, display_item_migrations, selected_blocks, selected_items
 from app.metric_definitions import definition_for, format_value
 from app.main import app
 from app.view_models import (
@@ -597,6 +597,59 @@ def test_v2_layout_pattern_is_saved_and_existing_v2_defaults_by_size(tmp_path: P
     assert repository._parse(old_v2, groups, allow_missing=False)[0].blocks[0].layout_pattern == "hero"
 
 
+def test_item_limits_depend_on_size_and_pattern(tmp_path: Path) -> None:
+    repository = SettingsRepository(tmp_path / "dashboard" / "settings.json")
+    ids = [f"item_{index}" for index in range(6)]
+    groups = {item_id: "SEN66" for item_id in ids}
+    medium = repository.save_payload(_block_payload({
+        "block_id": "sen", "group": "SEN66", "title": "SEN66", "size": "medium",
+        "layout_pattern": "compact", "primary_item_id": ids[0], "item_ids": ids[:5],
+    }), groups)
+    assert len(medium.blocks[0].item_ids) == 5
+    with pytest.raises(SettingsError, match="項目数"):
+        repository.save_payload(_block_payload({
+            "block_id": "small", "group": "SEN66", "title": "SEN66", "size": "small",
+            "layout_pattern": "compact", "primary_item_id": ids[0], "item_ids": ids[:4],
+        }), groups)
+
+
+@pytest.mark.parametrize("sizes", [("large", "small", "small", "small"), ("large", "medium"), ("medium", "medium", "medium"), ("medium", "medium", "small", "small")])
+def test_capacity_valid_grid_combinations_fit_the_block_budget(tmp_path: Path, sizes: tuple[str, ...]) -> None:
+    repository = SettingsRepository(tmp_path / "dashboard" / "settings.json")
+    groups = {f"item_{index}": f"source_{index}" for index in range(len(sizes))}
+    blocks = [
+        {"block_id": f"block_{index}", "group": groups[f"item_{index}"], "title": f"Block {index}", "size": size,
+         "layout_pattern": "hero" if size == "large" else "compact", "primary_item_id": f"item_{index}", "item_ids": [f"item_{index}"]}
+        for index, size in enumerate(sizes)
+    ]
+    assert len(repository.save_payload(_block_payload(*blocks), groups).blocks) == len(sizes)
+
+
+def test_battery_virtual_item_replaces_raw_candidates_and_migrates_settings(tmp_path: Path) -> None:
+    charge = _write_generic_item(tmp_path, "b", topic="omk/ichijo/power-flow", device_id="ichijo", field="battery_charge_power_w", value=520, received_at=NOW)
+    discharge = _write_generic_item(tmp_path, "c", topic="omk/ichijo/power-flow", device_id="ichijo", field="battery_discharge_power_w", value=0, received_at=NOW)
+    candidates = display_candidates(DisplayRepository(tmp_path), NOW)
+    battery = next(item for item in candidates if item.semantic_role == "battery_power_bidirectional")
+
+    assert battery.id == "virtual:battery_power_bidirectional:ichijo"
+    assert battery.label.endswith("蓄電池充放電")
+    assert battery.short_label == "蓄電池 充電"
+    assert {item.id for item in candidates}.isdisjoint({charge, discharge})
+
+    path = tmp_path / "dashboard" / "settings.json"
+    path.parent.mkdir()
+    path.write_text(json.dumps(_block_payload({
+        "block_id": "ichijo", "group": "太陽光・蓄電池", "title": "一条パワコン", "size": "small",
+        "layout_pattern": "compact", "primary_item_id": charge, "item_ids": [charge, discharge],
+    })), encoding="utf-8")
+    settings = SettingsRepository(path).load_or_create(
+        {battery.id: battery.group}, [], display_item_migrations(candidates),
+    )
+    assert settings.blocks[0].primary_item_id == battery.id
+    assert settings.blocks[0].item_ids == (battery.id,)
+    assert json.loads(path.read_text(encoding="utf-8"))["presets"]["standard"]["blocks"][0]["item_ids"] == [battery.id]
+
+
 def test_v1_settings_migrate_to_grouped_blocks(tmp_path: Path) -> None:
     path = tmp_path / "dashboard" / "settings.json"
     path.parent.mkdir(parents=True)
@@ -648,8 +701,10 @@ def test_ichijo_charge_and_discharge_are_one_dashboard_only_battery_row(tmp_path
     charge = _write_generic_item(tmp_path, "c", topic="omk/ichijo/power-flow", device_id="ichijo", field="battery_charge_power_w", value=0, received_at=NOW)
     discharge = _write_generic_item(tmp_path, "d", topic="omk/ichijo/power-flow", device_id="ichijo", field="battery_discharge_power_w", value=590, received_at=NOW)
     grid = _write_generic_item(tmp_path, "e", topic="omk/ichijo/power-flow", device_id="ichijo", field="grid_import_power_w", value=0, received_at=NOW)
-    block = DisplayBlock("ichijo", "太陽光・蓄電池", "一条パワコン", "large", load, (load, pv, charge, discharge, grid), "hero")
-    rendered = selected_blocks(DisplayRepository(tmp_path), (block,), NOW)[0]
+    repository = DisplayRepository(tmp_path)
+    battery_id = next(item.id for item in display_candidates(repository, NOW) if item.semantic_role == "battery_power_bidirectional")
+    block = DisplayBlock("ichijo", "太陽光・蓄電池", "一条パワコン", "large", load, (load, pv, battery_id, grid), "hero")
+    rendered = selected_blocks(repository, (block,), NOW)[0]
 
     assert rendered.layout_pattern == "hero"
     assert rendered.primary.short_label == "家庭消費電力"
@@ -710,6 +765,22 @@ def test_admin_display_css_allows_vertical_scroll_without_changing_kiosk_overflo
     assert 'href="/display">ダッシュボードを確認</a>' in admin_template
     assert '<body class="admin-body">' not in display_template
     assert "overflow: hidden;" in stylesheet
+
+
+def test_display_pattern_css_keeps_only_hero_primary_large_and_fits_the_viewport() -> None:
+    stylesheet = (Path(__file__).parents[1] / "app" / "static" / "display.css").read_text(encoding="utf-8")
+    template = (Path(__file__).parents[1] / "app" / "templates" / "display.html").read_text(encoding="utf-8")
+
+    assert ".standard-dashboard { height: 100vh; height: 100dvh; min-height: 0;" in stylesheet
+    assert ".standard-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); grid-auto-rows: minmax(0, 1fr);" in stylesheet
+    assert ".display-card--large { grid-column: span 6;" in stylesheet
+    assert ".display-card--medium { grid-column: span 3;" in stylesheet
+    assert ".display-card--small { grid-column: span 2;" in stylesheet
+    assert ".display-card--hero .display-card-primary .display-card-reading strong" in stylesheet
+    assert ".display-card--compact { grid-template-rows: auto minmax(0, 1fr) auto;" in stylesheet
+    assert ".display-card-compact-items { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));" in stylesheet
+    assert "{% elif block.layout_pattern == 'compact' %}" in template
+    assert 'class="display-card-compact-items"' in template
 
 
 def test_dynamic_display_api_uses_selected_order_and_keeps_unavailable_slot(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -857,12 +928,35 @@ setImmediate(() => {
     assert "一条パワコン PV発電" in result["selected"]
     assert "sen66 CO₂" in result["selected"]
     assert "表示形式" in result["selected"]
-    assert "横長一覧" in result["selected"]
+    assert "均等に並べる" in result["selected"]
     assert "このブロックに表示する値（3 / 3）" in result["selected"]
     assert "plug-001 消費電力" in result["selected"]
     assert "th-001 温度" in result["availableAtCapacity"]
     assert "表示領域がいっぱいです" in result["availableAtCapacity"]
     assert result["status"] == ""
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is required for admin UI tests")
+def test_display_settings_ui_recalculates_size_pattern_item_limits() -> None:
+    javascript_path = Path(__file__).parents[1] / "app" / "static" / "admin_display.js"
+    harness = r'''
+const fs = require("fs"), vm = require("vm");
+function element() { return {innerHTML: "", textContent: "", disabled: false, listeners: {}, addEventListener(type, handler) { this.listeners[type] = handler; }, closest() { return null; }}; }
+const elements = Object.fromEntries(["#selected-items", "#available-items", "#capacity-status", "#settings-status", "#save-settings"].map(key => [key, element()]));
+global.document = {querySelector: selector => elements[selector]};
+global.fetch = async url => ({ok: true, json: async () => url.endsWith("display-items") ? {capacity: 6, groups: [{name: "SEN66", items: ["temp", "humidity", "co2", "pm25", "voc"].map(id => ({id, label: `sen66 ${id}`, group: "SEN66", selectable: true}))}]} : {presets: {standard: {blocks: [{block_id: "sen", group: "SEN66", title: "SEN66", size: "small", layout_pattern: "compact", primary_item_id: "temp", item_ids: ["temp", "humidity", "co2"]}]}}}});
+vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8"));
+setImmediate(() => {
+  elements["#selected-items"].listeners.change({target: {dataset: {size: "sen"}, value: "medium"}});
+  elements["#selected-items"].listeners.change({target: {dataset: {membership: "sen:pm25"}, checked: true}});
+  elements["#selected-items"].listeners.change({target: {dataset: {membership: "sen:voc"}, checked: true}});
+  console.log(elements["#selected-items"].innerHTML);
+});
+'''
+    completed = subprocess.run(["node", "-e", harness, str(javascript_path)], check=True, capture_output=True, text=True)
+
+    assert "このブロックに表示する値（5 / 5）" in completed.stdout
+    assert "最大5項目" in completed.stdout
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is required for admin UI tests")
