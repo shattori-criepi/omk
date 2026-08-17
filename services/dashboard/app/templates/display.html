@@ -20,15 +20,22 @@
       </header>
       <section id="display-blocks" class="standard-grid" aria-label="選択した表示ブロック">
         {% for block in dashboard.blocks %}
-        <article class="display-card display-card--{{ block.size }} display-card--{{ block.freshness }}" data-block-id="{{ block.id }}">
+        <article class="display-card display-card--{{ block.size }} display-card--{{ block.layout_pattern }} display-card--{{ block.freshness }}" data-block-id="{{ block.id }}">
           <p class="display-card-label">{{ block.title }}</p>
+          {% if block.layout_pattern == 'strip' %}
+          <div class="display-card-strip-items">
+            <div class="display-secondary-item" data-item-id="{{ block.primary.id }}"><span data-role="label">{{ block.primary.short_label or block.primary.label }}</span><strong data-role="value">{{ block.primary.value }}</strong>{% if block.primary.unit and block.primary.freshness != 'unavailable' %}<small data-role="unit">{{ block.primary.unit }}</small>{% endif %}</div>
+            {% for item in block.secondary %}<div class="display-secondary-item" data-item-id="{{ item.id }}"><span data-role="label">{{ item.short_label or item.label }}</span><strong data-role="value">{{ item.value }}</strong>{% if item.unit and item.freshness != 'unavailable' %}<small data-role="unit">{{ item.unit }}</small>{% endif %}</div>{% endfor %}
+          </div>
+          {% else %}
           <div class="display-card-primary" data-item-id="{{ block.primary.id }}">
-            <p data-role="label">{{ block.primary.label }}</p>
+            <p data-role="label">{{ block.primary.short_label or block.primary.label }}</p>
             <div class="display-card-reading"><strong data-role="value">{{ block.primary.value }}</strong>{% if block.primary.unit and block.primary.freshness != 'unavailable' %}<span data-role="unit">{{ block.primary.unit }}</span>{% endif %}</div>
           </div>
           {% if block.secondary %}<div class="display-card-secondary">
-            {% for item in block.secondary %}<div class="display-secondary-item" data-item-id="{{ item.id }}"><span data-role="label">{{ item.label }}</span><strong data-role="value">{{ item.value }}</strong>{% if item.unit and item.freshness != 'unavailable' %}<small data-role="unit">{{ item.unit }}</small>{% endif %}</div>{% endfor %}
+            {% for item in block.secondary %}<div class="display-secondary-item" data-item-id="{{ item.id }}"><span data-role="label">{{ item.short_label or item.label }}</span><strong data-role="value">{{ item.value }}</strong>{% if item.unit and item.freshness != 'unavailable' %}<small data-role="unit">{{ item.unit }}</small>{% endif %}</div>{% endfor %}
           </div>{% endif %}
+          {% endif %}
           <small data-role="freshness">{% if block.freshness == 'delayed' %}遅延{% elif block.freshness == 'unavailable' %}取得不可{% endif %}</small>
         </article>
         {% else %}<p class="dashboard-empty">表示ブロックがありません。管理画面の「表示設定」で選択してください。</p>{% endfor %}

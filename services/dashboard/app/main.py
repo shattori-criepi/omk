@@ -15,7 +15,7 @@ from fastapi.templating import Jinja2Templates
 from app.data.latest_repository import LatestRepository
 from app.data.parquet_repository import ParquetRepository
 from app.data.display_repository import DisplayRepository
-from app.data.settings_repository import DisplayBlock, SettingsError, SettingsRepository
+from app.data.settings_repository import DisplayBlock, LAYOUT_PATTERNS, SettingsError, SettingsRepository, default_layout_pattern
 from app.display_items import candidate_for, catalog_items_with_latest, selected_blocks
 from app.view_models import FreshnessStatus, worst_freshness
 from app.view_models import get_display_view_model
@@ -73,9 +73,11 @@ def _default_blocks(candidates: list) -> list[DisplayBlock]:
         cost = 3 if size == "large" else 1
         if capacity + cost > 6:
             break
+        layout_pattern = default_layout_pattern(size)
         blocks.append(DisplayBlock(
             block_id=f"block_{index + 1}", group=item.group, title=item.group, size=size,
-            primary_item_id=item.id, item_ids=tuple(candidate.id for candidate in items),
+            primary_item_id=item.id, item_ids=tuple(candidate.id for candidate in items[:LAYOUT_PATTERNS[layout_pattern]]),
+            layout_pattern=layout_pattern,
         ))
         capacity += cost
     return blocks
