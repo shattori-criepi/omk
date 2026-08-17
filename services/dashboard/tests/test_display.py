@@ -543,10 +543,22 @@ def test_catalog_candidates_include_the_same_latest_value_and_freshness_as_displ
 
 def test_display_items_api_lists_multiple_values_from_one_source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     latest_root = tmp_path / "latest"
-    fields = ("net_power_w", "cumulative_energy_import_kwh", "cumulative_energy_export_kwh")
-    for suffix, field in zip(("m", "n", "o"), fields, strict=True):
+    broute_fields = ("net_power_w", "cumulative_energy_import_kwh", "cumulative_energy_export_kwh")
+    for suffix, field in zip(("m", "n", "o"), broute_fields, strict=True):
         _write_generic_item(
             latest_root, suffix, topic="omk/broute-001/power", device_id="broute-001",
+            field=field, value=10, received_at=datetime.now(JST),
+        )
+    ichijo_fields = ("pv_power_w", "load_power_w", "battery_soc_percent")
+    for suffix, field in zip(("p", "q", "r"), ichijo_fields, strict=True):
+        _write_generic_item(
+            latest_root, suffix, topic="omk/ichijo-001/power-flow", device_id="ichijo-001",
+            field=field, value=10, received_at=datetime.now(JST),
+        )
+    sen66_fields = ("temperature_c", "relative_humidity_percent", "co2_ppm")
+    for suffix, field in zip(("s", "t", "u"), sen66_fields, strict=True):
+        _write_generic_item(
+            latest_root, suffix, topic="omk/sen66-001/environment", device_id="sen66-001",
             field=field, value=10, received_at=datetime.now(JST),
         )
     monkeypatch.setenv("OMK_LATEST_DATA_ROOT", str(latest_root))
@@ -556,8 +568,10 @@ def test_display_items_api_lists_multiple_values_from_one_source(tmp_path: Path,
     assert response.status_code == 200
     groups = {group["name"]: group["items"] for group in response.json()["groups"]}
     broute = groups["電力メーター（Bルート）"]
-    assert {item["field"] for item in broute} == set(fields)
+    assert {item["field"] for item in broute} == set(broute_fields)
     assert all(item["selectable"] for item in broute)
+    assert {item["field"] for item in groups["太陽光・蓄電池"]} == set(ichijo_fields)
+    assert {item["field"] for item in groups["sen66-001"]} == set(sen66_fields)
 
 
 def test_admin_display_css_allows_vertical_scroll_without_changing_kiosk_overflow() -> None:
@@ -565,9 +579,14 @@ def test_admin_display_css_allows_vertical_scroll_without_changing_kiosk_overflo
     admin_template = (Path(__file__).parents[1] / "app" / "templates" / "admin_display.html").read_text(encoding="utf-8")
     display_template = (Path(__file__).parents[1] / "app" / "templates" / "display.html").read_text(encoding="utf-8")
 
-    assert "body.admin-body { overflow-x: hidden; overflow-y: auto; }" in stylesheet
-    assert ".display-settings-page { width: min(100%, 1180px);" in stylesheet
+    assert "html.admin-document { height: auto; min-height: 100%; overflow-x: hidden; overflow-y: scroll;" in stylesheet
+    assert "html.admin-document body.admin-body { min-height: 100vh; min-height: 100dvh; height: auto; overflow: visible; }" in stylesheet
+    assert "html.admin-document::-webkit-scrollbar { width: 12px; }" in stylesheet
+    assert ".display-settings-page { width: min(100%, 1180px); height: auto; min-height: 100dvh; max-height: none;" in stylesheet
     assert ".display-settings-page { padding: 14px; }" in stylesheet
+    assert ".display-settings-intro { display: grid; grid-template-columns: minmax(0, 1fr) auto;" in stylesheet
+    assert "min-height: 46px;" in stylesheet
+    assert '<html lang="ja" class="admin-document">' in admin_template
     assert '<body class="admin-body">' in admin_template
     assert '<body class="admin-body">' not in display_template
     assert "overflow: hidden;" in stylesheet
@@ -656,30 +675,57 @@ def test_display_settings_ui_shows_all_source_items_and_marks_selected() -> None
     javascript_path = Path(__file__).parents[1] / "app" / "static" / "admin_display.js"
     harness = r'''
 const fs = require("fs"), vm = require("vm");
-function element() { return {innerHTML: "", textContent: "", disabled: false, addEventListener() {}, closest() { return null; }}; }
+function element() { return {innerHTML: "", textContent: "", disabled: false, listeners: {}, addEventListener(type, handler) { this.listeners[type] = handler; }, closest() { return null; }}; }
 const elements = Object.fromEntries(["#selected-items", "#available-items", "#capacity-status", "#settings-status", "#save-settings"].map(key => [key, element()]));
 global.document = {querySelector: selector => elements[selector]};
 global.fetch = async url => ({ok: true, json: async () => url.endsWith("display-items") ? {
   capacity: 6,
-  groups: [{name: "SEN66", items: [
-    {id: "temperature", label: "sen66 温度", group: "SEN66", category: "室内環境", last_received_at: "now", selectable: true},
-    {id: "humidity", label: "sen66 湿度", group: "SEN66", category: "室内環境", last_received_at: "now", selectable: true},
-    {id: "co2", label: "sen66 CO₂", group: "SEN66", category: "室内環境", last_received_at: "now", selectable: true},
-  ]}],
-} : {presets: {standard: {items: [{item_id: "temperature", size: "small"}]}}}});
+  groups: [
+    {name: "電力メーター（Bルート）", items: [
+      {id: "grid", label: "Bルート 系統電力", group: "電力メーター（Bルート）", selectable: true},
+      {id: "import-total", label: "Bルート 買電積算", group: "電力メーター（Bルート）", selectable: true},
+      {id: "export-total", label: "Bルート 売電積算", group: "電力メーター（Bルート）", selectable: true},
+    ]},
+    {name: "太陽光・蓄電池", items: [
+      {id: "load", label: "一条パワコン 家庭消費電力", group: "太陽光・蓄電池", selectable: true},
+      {id: "pv", label: "一条パワコン PV発電", group: "太陽光・蓄電池", selectable: true},
+      {id: "soc", label: "一条パワコン 蓄電池残量", group: "太陽光・蓄電池", selectable: true},
+    ]},
+    {name: "SEN66", items: [
+      {id: "temperature", label: "sen66 温度", group: "SEN66", selectable: true},
+      {id: "humidity", label: "sen66 湿度", group: "SEN66", selectable: true},
+      {id: "co2", label: "sen66 CO₂", group: "SEN66", selectable: true},
+    ]},
+  ],
+} : {presets: {standard: {items: [{item_id: "grid", size: "large"}, {item_id: "load", size: "small"}, {item_id: "temperature", size: "small"}]}}}});
 vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8"));
-setImmediate(() => console.log(JSON.stringify({selected: elements["#selected-items"].innerHTML, available: elements["#available-items"].innerHTML})));
+setImmediate(() => {
+  const availableWithSpace = elements["#available-items"].innerHTML;
+  const click = id => elements["#available-items"].listeners.click({target: {closest() { return {dataset: {add: id}}; }}});
+  click("pv");
+  const availableAtCapacity = elements["#available-items"].innerHTML;
+  click("co2");
+  console.log(JSON.stringify({selected: elements["#selected-items"].innerHTML, availableWithSpace, availableAtCapacity, status: elements["#settings-status"].textContent}));
+});
 '''
     completed = subprocess.run(
         ["node", "-e", harness, str(javascript_path)], check=True, capture_output=True, text=True,
     )
     result = json.loads(completed.stdout)
 
-    assert "sen66 温度" in result["selected"]
-    assert all(label in result["available"] for label in ("sen66 温度", "sen66 湿度", "sen66 CO₂"))
-    assert "display-candidate is-selected" in result["available"]
-    assert "表示中" in result["available"]
-    assert result["available"].count("追加する") == 2
+    assert all(group in result["availableWithSpace"] for group in ("電力メーター（Bルート）", "太陽光・蓄電池", "SEN66"))
+    assert all(label in result["availableWithSpace"] for label in (
+        "Bルート 系統電力", "Bルート 買電積算", "Bルート 売電積算",
+        "一条パワコン 家庭消費電力", "一条パワコン PV発電", "一条パワコン 蓄電池残量",
+        "sen66 温度", "sen66 湿度", "sen66 CO₂",
+    ))
+    assert result["availableWithSpace"].count("display-candidate is-selected") == 3
+    assert "追加する" in result["availableWithSpace"]
+    assert "一条パワコン PV発電" in result["selected"]
+    assert "sen66 CO₂" not in result["selected"]
+    assert "sen66 CO₂" in result["availableAtCapacity"]
+    assert "表示領域がいっぱいです" in result["availableAtCapacity"]
+    assert result["status"] == "表示領域がいっぱいです。"
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is required for admin UI tests")
