@@ -7,6 +7,7 @@
 #include "esp_timer.h"
 
 #include "mqtt_registration.h"
+#include "node_identity.h"
 
 static const char *TAG = "switchbot_relay";
 
@@ -27,6 +28,7 @@ static const char *TARGET_SENSOR_ID = "switchbot-meter-001";
 #define SWITCHBOT_ENVIRONMENT_PUBLISH_INTERVAL_US (10LL * 1000LL * 1000LL)
 
 static int64_t last_publish_attempt_us;
+static bool node_identity_error_logged;
 
 static bool decode_target_meter(const uint8_t *data, size_t length,
                                 float *temperature_c, uint8_t *humidity_percent) {
@@ -71,8 +73,19 @@ void switchbot_relay_handle_manufacturer_data(const uint8_t *data, size_t length
     }
     last_publish_attempt_us = now_us;
 
-    esp_err_t err = mqtt_registration_publish_environment(
-        TARGET_SENSOR_ID, temperature_c, humidity_percent);
+    char relay_node_id[OMK_NODE_ID_HEX_LENGTH + 1];
+    esp_err_t err = node_identity_get_id_hex(relay_node_id, sizeof(relay_node_id));
+    if (err != ESP_OK) {
+        if (!node_identity_error_logged) {
+            ESP_LOGW(TAG, "Could not get relay Node ID: %s", esp_err_to_name(err));
+            node_identity_error_logged = true;
+        }
+        return;
+    }
+    node_identity_error_logged = false;
+
+    err = mqtt_registration_publish_relay_environment(
+        TARGET_SENSOR_ID, temperature_c, humidity_percent, relay_node_id);
     if (err == ESP_OK) {
         ESP_LOGI(TAG, "Published Meter environment temperature=%.1f humidity=%u",
                  (double)temperature_c, humidity_percent);
