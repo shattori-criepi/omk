@@ -11,5 +11,5 @@
 #define OMK_NODE_CAPABILITY_BLE_SCAN (1U << 0)
 #define OMK_NODE_CAPABILITY_SEN66 (1U << 1)
 
-/* This common Node build currently identifies itself as a BLE scan relay. */
-#define OMK_NODE_CAPABILITIES OMK_NODE_CAPABILITY_BLE_SCAN
+/* Advertises firmware support, not whether a supported sensor is attached. */
+#define OMK_NODE_CAPABILITIES (OMK_NODE_CAPABILITY_BLE_SCAN | OMK_NODE_CAPABILITY_SEN66)

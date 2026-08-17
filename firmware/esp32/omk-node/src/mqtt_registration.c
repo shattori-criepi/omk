@@ -1,8 +1,10 @@
 #include "mqtt_registration.h"
 
 #include <inttypes.h>
+#include <math.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdarg.h>
 #include <string.h>
 
 #include "cJSON.h"
@@ -11,11 +13,15 @@
 #include "esp_wifi.h"
 #include "mqtt_client.h"
 #include "node_registration.h"
+#include "node_identity.h"
 #include "node_protocol.h"
+#include "sen66_sensor.h"
 
 #define OMK_MQTT_BROKER_URI "mqtt://192.168.50.1:1883"
 #define OMK_MQTT_TOPIC_SIZE 80
 #define OMK_MQTT_PAYLOAD_SIZE 128
+#define OMK_MQTT_RELAY_ENVIRONMENT_PAYLOAD_SIZE 256
+#define OMK_MQTT_SEN66_PAYLOAD_SIZE 768
 #define OMK_MQTT_CLIENT_ID_SIZE 32
 static const char *TAG = "omk-mqtt";
 static esp_mqtt_client_handle_t client;
@@ -190,9 +196,15 @@ static void ip_event_handler(void *arg, esp_event_base_t event_base,
     start_or_reconnect_mqtt();
 }
 
-esp_err_t mqtt_registration_start(uint64_t node_id) {
+esp_err_t mqtt_registration_start(void) {
     if (ip_handler_registered) {
         return ESP_ERR_INVALID_STATE;
+    }
+
+    uint64_t node_id;
+    esp_err_t err = node_identity_get_id(&node_id);
+    if (err != ESP_OK) {
+        return err;
     }
 
     int written = snprintf(registration_topic, sizeof(registration_topic),
@@ -226,8 +238,8 @@ esp_err_t mqtt_registration_start(uint64_t node_id) {
         return ESP_ERR_NO_MEM;
     }
 
-    esp_err_t err = esp_mqtt_client_register_event(client, MQTT_EVENT_ANY,
-                                                    mqtt_event_handler, NULL);
+    err = esp_mqtt_client_register_event(client, MQTT_EVENT_ANY,
+                                         mqtt_event_handler, NULL);
     if (err != ESP_OK) {
         return err;
     }
@@ -276,6 +288,111 @@ esp_err_t mqtt_registration_publish_environment(const char *sensor_id,
 
     /* This may be called from the Bluedroid callback task. Enqueueing hands
      * the message to ESP-MQTT's own task without blocking BLE scanning. */
+    int message_id = esp_mqtt_client_enqueue(client, topic, payload, 0, 0, 0, true);
+    return message_id < 0 ? ESP_FAIL : ESP_OK;
+}
+
+esp_err_t mqtt_registration_publish_relay_environment(const char *sensor_id,
+                                                       float temperature_c,
+                                                       uint8_t relative_humidity_percent,
+                                                       const char *relay_node_id) {
+    if (sensor_id == NULL || sensor_id[0] == '\0' || relay_node_id == NULL ||
+        strlen(relay_node_id) != OMK_NODE_ID_HEX_LENGTH ||
+        relative_humidity_percent > 100 || temperature_c < -20.0f ||
+        temperature_c > 60.0f) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (client == NULL || !client_connected) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    char topic[OMK_MQTT_TOPIC_SIZE];
+    char payload[OMK_MQTT_RELAY_ENVIRONMENT_PAYLOAD_SIZE];
+    int written = snprintf(topic, sizeof(topic), "omk/%s/environment", sensor_id);
+    if (written < 0 || written >= (int)sizeof(topic)) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+    written = snprintf(payload, sizeof(payload),
+                       "{\"device_id\":\"%s\",\"quality\":\"normal\","
+                       "\"temperature_c\":%.1f,\"relative_humidity_percent\":%u,"
+                       "\"source\":\"relay\",\"relay_node_id\":\"%s\"}",
+                       sensor_id, (double)temperature_c,
+                       relative_humidity_percent, relay_node_id);
+    if (written < 0 || written >= (int)sizeof(payload)) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    int message_id = esp_mqtt_client_enqueue(client, topic, payload, 0, 0, 0, true);
+    return message_id < 0 ? ESP_FAIL : ESP_OK;
+}
+
+static bool append_text(char *buffer, size_t size, size_t *offset, const char *format, ...) {
+    va_list arguments;
+    va_start(arguments, format);
+    int written = vsnprintf(buffer + *offset, size - *offset, format, arguments);
+    va_end(arguments);
+    if (written < 0 || (size_t)written >= size - *offset) {
+        return false;
+    }
+    *offset += (size_t)written;
+    return true;
+}
+
+static bool append_json_float(char *buffer, size_t size, size_t *offset,
+                              const char *name, float value, bool trailing_comma) {
+    if (!append_text(buffer, size, offset, "\"%s\":", name)) {
+        return false;
+    }
+    if (!isfinite(value)) {
+        return append_text(buffer, size, offset, "%s", trailing_comma ? "null," : "null");
+    }
+    return append_text(buffer, size, offset, trailing_comma ? "%.2f," : "%.2f", (double)value);
+}
+
+esp_err_t mqtt_registration_publish_sen66(const char *sensor_id,
+                                          const sen66_measurement_t *measurement) {
+    if (sensor_id == NULL || sensor_id[0] == '\0' || measurement == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (client == NULL || !client_connected) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    char topic[OMK_MQTT_TOPIC_SIZE];
+    char payload[OMK_MQTT_SEN66_PAYLOAD_SIZE];
+    int written = snprintf(topic, sizeof(topic), "omk/%s/sen66", sensor_id);
+    if (written < 0 || written >= (int)sizeof(topic)) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    size_t offset = 0;
+    bool complete =
+        append_text(payload, sizeof(payload), &offset,
+                    "{\"device_id\":\"%s\",\"uptime_ms\":%" PRIu32 ",",
+                    sensor_id, measurement->uptime_ms) &&
+        append_json_float(payload, sizeof(payload), &offset, "pm1_0_ug_m3",
+                          measurement->pm1_0_ug_m3, true) &&
+        append_json_float(payload, sizeof(payload), &offset, "pm2_5_ug_m3",
+                          measurement->pm2_5_ug_m3, true) &&
+        append_json_float(payload, sizeof(payload), &offset, "pm4_0_ug_m3",
+                          measurement->pm4_0_ug_m3, true) &&
+        append_json_float(payload, sizeof(payload), &offset, "pm10_0_ug_m3",
+                          measurement->pm10_0_ug_m3, true) &&
+        append_json_float(payload, sizeof(payload), &offset, "relative_humidity_percent",
+                          measurement->relative_humidity_percent, true) &&
+        append_json_float(payload, sizeof(payload), &offset, "temperature_celsius",
+                          measurement->temperature_celsius, true) &&
+        append_json_float(payload, sizeof(payload), &offset, "voc_index",
+                          measurement->voc_index, true) &&
+        append_json_float(payload, sizeof(payload), &offset, "nox_index",
+                          measurement->nox_index, true) &&
+        append_json_float(payload, sizeof(payload), &offset, "co2_ppm",
+                          measurement->co2_ppm, false) &&
+        append_text(payload, sizeof(payload), &offset, "}");
+    if (!complete) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+
     int message_id = esp_mqtt_client_enqueue(client, topic, payload, 0, 0, 0, true);
     return message_id < 0 ? ESP_FAIL : ESP_OK;
 }
