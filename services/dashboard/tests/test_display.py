@@ -448,6 +448,8 @@ def test_dynamic_display_html_and_javascript_expose_polling_targets(tmp_path: Pa
     for item_id in item_ids:
         assert f'data-item-id="{item_id}"' in response.text
     assert "display-card--large" in response.text
+    assert "display-card--hero" in response.text
+    assert "display-card-strip-items" in response.text
     assert 'fetch("/api/display", { cache: "no-store" })' in javascript
     assert "DISPLAY_POLL_INTERVAL_MS = 10_000" in javascript
     assert "headerWeekday.textContent" in javascript
@@ -455,10 +457,14 @@ def test_dynamic_display_html_and_javascript_expose_polling_targets(tmp_path: Pa
     assert 'data.mode === "standard"' in javascript
     assert "Array.isArray(data.blocks)" in javascript
     assert "data-item-id" in javascript
+    assert "item.short_label || item.label" in javascript
     assert ".standard-grid" in stylesheet
     assert ".display-card--large" in stylesheet
     assert ".display-card--medium" in stylesheet
     assert ".display-card--small" in stylesheet
+    assert ".display-card--hero" in stylesheet
+    assert ".display-card--strip" in stylesheet
+    assert "grid-template-columns: minmax(0, 1.1fr) minmax(260px, .9fr);" in stylesheet
     assert ".admin-link svg { width: clamp(28px, 3vw, 36px);" in stylesheet
     assert "font-variant-numeric: tabular-nums" in stylesheet
 
@@ -517,6 +523,7 @@ def test_settings_validate_capacity_duplicates_and_persist_atomically(tmp_path: 
     groups = {"item_a": "source_a", "item_b": "source_a", "item_c": "source_b"}
     settings = repository.save_payload(_block_payload({"block_id": "a", "group": "source_a", "title": "A", "size": "large", "primary_item_id": "item_a", "item_ids": ["item_a", "item_b"]}), groups)
     assert settings.blocks[0].item_ids == ("item_a", "item_b")
+    assert settings.blocks[0].layout_pattern == "hero"
     assert repository.load_or_create(groups, []).blocks == settings.blocks
     assert stat.S_IMODE((tmp_path / "dashboard" / "settings.json").stat().st_mode) == 0o644
     assert not list((tmp_path / "dashboard").glob("*.tmp"))
@@ -528,6 +535,8 @@ def test_settings_validate_capacity_duplicates_and_persist_atomically(tmp_path: 
         repository.save_payload(_block_payload({"block_id": "a", "group": "source_a", "title": "A", "size": "large", "primary_item_id": "item_a", "item_ids": ["item_a"]}, {"block_id": "b", "group": "source_b", "title": "B", "size": "large", "primary_item_id": "item_c", "item_ids": ["item_c"]}, {"block_id": "c", "group": "source_a", "title": "C", "size": "small", "primary_item_id": "item_b", "item_ids": ["item_b"]}), groups)
     with pytest.raises(SettingsError):
         repository.save_payload(_block_payload({"block_id": "a", "group": "source_a", "title": "A", "size": "huge", "primary_item_id": "item_a", "item_ids": ["item_a"]}), groups)
+    with pytest.raises(SettingsError, match="項目数"):
+        repository.save_payload(_block_payload({"block_id": "a", "group": "source_a", "title": "A", "size": "small", "layout_pattern": "compact", "primary_item_id": "item_a", "item_ids": ["item_a", "item_b", "item_c", "item_d"]}), {"item_a": "source_a", "item_b": "source_a", "item_c": "source_a", "item_d": "source_a"})
 
 
 def test_catalog_candidates_include_the_same_latest_value_and_freshness_as_display(tmp_path: Path) -> None:
@@ -540,6 +549,20 @@ def test_catalog_candidates_include_the_same_latest_value_and_freshness_as_displ
     assert candidates[item_id].freshness == "normal"
     assert selected[0].value == candidates[item_id].value
     assert selected[0].freshness == candidates[item_id].freshness
+
+
+def test_v2_layout_pattern_is_saved_and_existing_v2_defaults_by_size(tmp_path: Path) -> None:
+    repository = SettingsRepository(tmp_path / "dashboard" / "settings.json")
+    groups = {"temp": "SEN66", "humidity": "SEN66"}
+    settings = repository.save_payload(_block_payload({
+        "block_id": "sen", "group": "SEN66", "title": "SEN66", "size": "medium",
+        "layout_pattern": "strip", "primary_item_id": "temp", "item_ids": ["temp", "humidity"],
+    }), groups)
+    assert settings.blocks[0].layout_pattern == "strip"
+    assert json.loads((tmp_path / "dashboard" / "settings.json").read_text(encoding="utf-8"))["presets"]["standard"]["blocks"][0]["layout_pattern"] == "strip"
+
+    old_v2 = _block_payload({"block_id": "old", "group": "SEN66", "title": "SEN66", "size": "large", "primary_item_id": "temp", "item_ids": ["temp"]})
+    assert repository._parse(old_v2, groups, allow_missing=False)[0].blocks[0].layout_pattern == "hero"
 
 
 def test_v1_settings_migrate_to_grouped_blocks(tmp_path: Path) -> None:
@@ -562,12 +585,14 @@ def test_display_block_resolves_primary_and_multiple_secondary_values(tmp_path: 
         _write_generic_item(tmp_path, "w", topic="omk/sen66/environment", device_id="sen66", field="relative_humidity_percent", value=40, received_at=NOW),
         _write_generic_item(tmp_path, "x", topic="omk/sen66/environment", device_id="sen66", field="co2_ppm", value=520, received_at=NOW),
     ]
-    block = DisplayBlock("sen66", "sen66", "SEN66", "small", item_ids[0], tuple(item_ids))
+    block = DisplayBlock("sen66", "sen66", "SEN66", "medium", item_ids[0], tuple(item_ids), "strip")
     rendered = selected_blocks(DisplayRepository(tmp_path), (block,), NOW)
 
     assert rendered[0].primary.value == "26.8"
     assert [item.value for item in rendered[0].secondary] == ["40", "520"]
-    assert rendered[0].as_dict()["size"] == "small"
+    assert [item.short_label for item in (rendered[0].primary, *rendered[0].secondary)] == ["温度", "湿度", "CO₂"]
+    assert rendered[0].as_dict()["size"] == "medium"
+    assert rendered[0].as_dict()["layout_pattern"] == "strip"
 
 
 def test_energy_blocks_keep_multiple_broute_and_ichijo_values(tmp_path: Path) -> None:
@@ -583,6 +608,24 @@ def test_energy_blocks_keep_multiple_broute_and_ichijo_values(tmp_path: Path) ->
 
     assert blocks[0].primary.unit == "kW" and blocks[0].secondary[0].unit == "kWh"
     assert (blocks[1].primary.value, blocks[1].secondary[0].value) == ("1.10", "1.21")
+
+
+def test_ichijo_charge_and_discharge_are_one_dashboard_only_battery_row(tmp_path: Path) -> None:
+    load = _write_generic_item(tmp_path, "a", topic="omk/ichijo/power-flow", device_id="ichijo", field="load_power_w", value=1103, received_at=NOW)
+    pv = _write_generic_item(tmp_path, "b", topic="omk/ichijo/power-flow", device_id="ichijo", field="pv_power_w", value=520, received_at=NOW)
+    charge = _write_generic_item(tmp_path, "c", topic="omk/ichijo/power-flow", device_id="ichijo", field="battery_charge_power_w", value=0, received_at=NOW)
+    discharge = _write_generic_item(tmp_path, "d", topic="omk/ichijo/power-flow", device_id="ichijo", field="battery_discharge_power_w", value=590, received_at=NOW)
+    grid = _write_generic_item(tmp_path, "e", topic="omk/ichijo/power-flow", device_id="ichijo", field="grid_import_power_w", value=0, received_at=NOW)
+    block = DisplayBlock("ichijo", "太陽光・蓄電池", "一条パワコン", "large", load, (load, pv, charge, discharge, grid), "hero")
+    rendered = selected_blocks(DisplayRepository(tmp_path), (block,), NOW)[0]
+
+    assert rendered.layout_pattern == "hero"
+    assert rendered.primary.short_label == "家庭消費電力"
+    assert [(item.semantic_role, item.short_label, item.value) for item in rendered.secondary] == [
+        ("pv_power", "PV発電", "0.52"),
+        ("battery_power_bidirectional", "蓄電池 放電", "0.59"),
+        ("grid_import", "買電電力", "0.00"),
+    ]
 
 
 def test_display_items_api_lists_multiple_values_from_one_source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -781,6 +824,9 @@ setImmediate(() => {
     assert "このデータでブロックを追加" in result["availableWithSpace"]
     assert "一条パワコン PV発電" in result["selected"]
     assert "sen66 CO₂" in result["selected"]
+    assert "表示形式" in result["selected"]
+    assert "横長一覧" in result["selected"]
+    assert "このブロックに表示する値（3 / 3）" in result["selected"]
     assert "plug-001 消費電力" in result["selected"]
     assert "th-001 温度" in result["availableAtCapacity"]
     assert "表示領域がいっぱいです" in result["availableAtCapacity"]

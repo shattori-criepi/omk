@@ -10,6 +10,12 @@ from pathlib import Path
 
 SIZES = {"large": 3, "medium": 2, "small": 1}
 STANDARD_CAPACITY = 6
+LAYOUT_PATTERNS = {"hero": 6, "strip": 5, "compact": 3}
+
+
+def default_layout_pattern(size: str) -> str:
+    """Choose a practical layout for settings created before patterns existed."""
+    return {"large": "hero", "medium": "strip", "small": "compact"}.get(size, "compact")
 
 
 class SettingsError(ValueError):
@@ -32,6 +38,7 @@ class DisplayBlock:
     size: str
     primary_item_id: str
     item_ids: tuple[str, ...]
+    layout_pattern: str = "compact"
 
     def as_dict(self) -> dict:
         return {
@@ -41,6 +48,7 @@ class DisplayBlock:
             "size": self.size,
             "primary_item_id": self.primary_item_id,
             "item_ids": list(self.item_ids),
+            "layout_pattern": self.layout_pattern,
         }
 
 
@@ -79,7 +87,7 @@ class SettingsRepository:
 
     def save_payload(self, payload: object, available_groups: dict[str, str]) -> DashboardSettings:
         settings, migrated = self._parse(payload, available_groups, allow_missing=False)
-        if migrated:
+        if migrated and isinstance(payload, dict) and payload.get("version") == 1:
             raise SettingsError("旧形式の設定は保存できません")
         self.save(settings, available_groups)
         return settings
@@ -116,17 +124,27 @@ class SettingsRepository:
         if not isinstance(raw_blocks, list):
             raise SettingsError("表示ブロックは配列で指定してください")
         blocks: list[DisplayBlock] = []
+        migrated = False
         for block in raw_blocks:
             if not isinstance(block, dict) or not isinstance(block.get("item_ids"), list):
                 raise SettingsError("表示ブロックの形式が正しくありません")
+            layout_pattern = block.get("layout_pattern", default_layout_pattern(block.get("size")))
+            item_ids = tuple(block["item_ids"])
+            if "layout_pattern" not in block:
+                # Pre-pattern V2 settings may contain every discovered value
+                # from one source.  Keep the primary and the first values that
+                # fit the sensible default rather than making the dashboard
+                # unusable after the migration.
+                item_ids = _limited_item_ids(item_ids, block.get("primary_item_id"), layout_pattern)
+                migrated = True
             blocks.append(DisplayBlock(
                 block_id=block.get("block_id"), group=block.get("group"), title=block.get("title"),
                 size=block.get("size"), primary_item_id=block.get("primary_item_id"),
-                item_ids=tuple(block["item_ids"]),
+                item_ids=item_ids, layout_pattern=layout_pattern,
             ))
         settings = DashboardSettings(tuple(blocks))
         self._validate(settings, available_groups, allow_missing=allow_missing)
-        return settings, False
+        return settings, migrated
 
     def _migrate_v1(self, payload: dict, available_groups: dict[str, str]) -> DashboardSettings:
         try:
@@ -147,7 +165,8 @@ class SettingsRepository:
             blocks.append(DisplayBlock(
                 block_id=f"block_{index}", group=group, title=group, size=size,
                 primary_item_id=selections[0].item_id,
-                item_ids=tuple(selection.item_id for selection in selections),
+                item_ids=_limited_item_ids(tuple(selection.item_id for selection in selections), selections[0].item_id, default_layout_pattern(size)),
+                layout_pattern=default_layout_pattern(size),
             ))
         settings = DashboardSettings(tuple(blocks))
         self._validate(settings, available_groups, allow_missing=True)
@@ -162,8 +181,10 @@ class SettingsRepository:
         for block in settings.blocks:
             if not isinstance(block.group, str) or not block.group or not isinstance(block.title, str) or not block.title.strip():
                 raise SettingsError("ブロック名が正しくありません")
-            if block.size not in SIZES or not block.item_ids or block.primary_item_id not in block.item_ids:
+            if block.size not in SIZES or block.layout_pattern not in LAYOUT_PATTERNS or not block.item_ids or block.primary_item_id not in block.item_ids:
                 raise SettingsError("ブロックの表示項目が正しくありません")
+            if len(block.item_ids) > LAYOUT_PATTERNS[block.layout_pattern]:
+                raise SettingsError("この表示形式に設定できる項目数を超えています")
             if len(block.item_ids) != len(set(block.item_ids)) or any(not isinstance(item_id, str) for item_id in block.item_ids):
                 raise SettingsError("同じ表示項目を重複して選択できません")
             if not allow_missing:
@@ -176,3 +197,9 @@ class SettingsRepository:
             raise SettingsError("同じ表示項目を複数ブロックに配置できません")
         if sum(SIZES[block.size] for block in settings.blocks) > STANDARD_CAPACITY:
             raise SettingsError("表示領域がいっぱいです")
+
+
+def _limited_item_ids(item_ids: tuple[str, ...], primary_item_id: object, layout_pattern: str) -> tuple[str, ...]:
+    if not isinstance(primary_item_id, str) or primary_item_id not in item_ids:
+        return item_ids
+    return tuple([primary_item_id, *(item_id for item_id in item_ids if item_id != primary_item_id)][:LAYOUT_PATTERNS[layout_pattern]])

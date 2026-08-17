@@ -69,16 +69,18 @@ function updateDisplay(data) {
       if (!card) return;
       const items = [block.primary, ...(block.secondary || [])];
       items.forEach((item) => {
-      const card = document.querySelector(`[data-item-id="${CSS.escape(item.id)}"]`);
-      if (!card) return;
-      const value = card.querySelector('[data-role="value"]');
-      const unit = card.querySelector('[data-role="unit"]');
-      const freshness = card.querySelector('[data-role="freshness"]');
-      if (value) value.textContent = item.value;
-      if (unit) { unit.textContent = item.unit; unit.hidden = item.freshness === "unavailable" || !item.unit; }
-      if (freshness) freshness.textContent = sourceBadgeText(item.freshness);
-      card.classList.remove("display-card--normal", "display-card--delayed", "display-card--unavailable");
-      card.classList.add(`display-card--${item.freshness}`);
+        const itemCard = document.querySelector(`[data-item-id="${CSS.escape(item.id)}"]`);
+        if (!itemCard) return;
+        const label = itemCard.querySelector('[data-role="label"]');
+        const value = itemCard.querySelector('[data-role="value"]');
+        const unit = itemCard.querySelector('[data-role="unit"]');
+        const freshness = itemCard.querySelector('[data-role="freshness"]');
+        if (label) label.textContent = item.short_label || item.label;
+        if (value) value.textContent = item.value;
+        if (unit) { unit.textContent = item.unit; unit.hidden = item.freshness === "unavailable" || !item.unit; }
+        if (freshness) freshness.textContent = sourceBadgeText(item.freshness);
+        itemCard.classList.remove("display-card--normal", "display-card--delayed", "display-card--unavailable");
+        itemCard.classList.add(`display-card--${item.freshness}`);
       });
       card.classList.remove("display-card--normal", "display-card--delayed", "display-card--unavailable");
       card.classList.add(`display-card--${block.freshness}`);

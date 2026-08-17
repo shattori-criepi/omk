@@ -28,6 +28,7 @@ class DisplayItem:
     value: str = "--"
     freshness: str = FreshnessStatus.UNAVAILABLE.value
     size: str = "small"
+    short_label: str = ""
 
     def as_dict(self) -> dict[str, str | bool | None]:
         return self.__dict__.copy()
@@ -39,6 +40,7 @@ class DisplayBlockView:
     title: str
     group: str
     size: str
+    layout_pattern: str
     primary: DisplayItem
     secondary: tuple[DisplayItem, ...]
     freshness: str
@@ -50,6 +52,7 @@ class DisplayBlockView:
             "title": self.title,
             "group": self.group,
             "size": self.size,
+            "layout_pattern": self.layout_pattern,
             "primary": self.primary.as_dict(),
             "secondary": [item.as_dict() for item in self.secondary],
             "freshness": self.freshness,
@@ -124,7 +127,8 @@ def selected_blocks(
                 values.append(DisplayItem(item_id, "利用できない表示項目", block.group, "", "", "", "unknown", "", "その他", None, False, ""))
             else:
                 values.append(_display_item(catalog_item, definition_for(catalog_item.field), repository.item(item_id), now))
-        primary = next((item for item in values if item.id == block.primary_item_id), values[0])
+        values, primary_id = _merge_bidirectional_battery(values, block.primary_item_id)
+        primary = next((item for item in values if item.id == primary_id), values[0])
         secondary = tuple(item for item in values if item.id != primary.id)
         statuses = [item.freshness for item in values]
         freshness = FreshnessStatus.UNAVAILABLE.value
@@ -135,6 +139,7 @@ def selected_blocks(
         last_received_at = max((item.last_received_at for item in values if item.last_received_at), default="")
         rendered.append(DisplayBlockView(
             id=block.block_id, title=block.title, group=block.group, size=block.size,
+            layout_pattern=block.layout_pattern,
             primary=primary, secondary=secondary, freshness=freshness, last_received_at=last_received_at,
         ))
     return rendered
@@ -161,8 +166,69 @@ def _display_item(
         unit=definition.unit, category=definition.category,
         semantic_role=definition.semantic_role, selectable=definition.selectable,
         last_received_at=item.last_received_at, value=value, freshness=freshness.value,
-        size=size,
+        size=size, short_label=definition.label,
     )
+
+
+def _merge_bidirectional_battery(
+    values: list[DisplayItem], primary_item_id: str,
+) -> tuple[list[DisplayItem], str]:
+    """Represent charge/discharge as one Dashboard-only battery power row.
+
+    The collector keeps both raw fields.  Combining them here affects only a
+    configured block that contains both fields and never changes persistence.
+    """
+    charge = next((item for item in values if item.semantic_role == "battery_charge"), None)
+    discharge = next((item for item in values if item.semantic_role == "battery_discharge"), None)
+    if charge is None or discharge is None:
+        return values, primary_item_id
+
+    charge_value = _numeric_value(charge.value)
+    discharge_value = _numeric_value(discharge.value)
+    if discharge_value is not None and discharge_value > 0.005:
+        direction, value = "放電", discharge_value
+    elif charge_value is not None and charge_value > 0.005:
+        direction, value = "充電", charge_value
+    elif charge_value is not None or discharge_value is not None:
+        direction, value = "待機", 0.0
+    else:
+        direction, value = "蓄電池", None
+
+    representative = discharge if discharge_value is not None else charge
+    freshness = _combined_freshness(charge.freshness, discharge.freshness)
+    merged_id = f"battery_power_bidirectional:{charge.id}:{discharge.id}"
+    merged = DisplayItem(
+        id=merged_id, label=f"{representative.group} 蓄電池", short_label=f"蓄電池 {direction}",
+        group=representative.group, topic=representative.topic, device_id=representative.device_id,
+        field="battery_power_bidirectional", value_type="number", unit="kW",
+        category=representative.category, semantic_role="battery_power_bidirectional",
+        selectable=False, last_received_at=max(charge.last_received_at, discharge.last_received_at),
+        value=f"{value:.2f}" if value is not None and freshness != FreshnessStatus.UNAVAILABLE.value else "--",
+        freshness=freshness,
+    )
+    result: list[DisplayItem] = []
+    for item in values:
+        if item is charge:
+            result.append(merged)
+        elif item is not discharge:
+            result.append(item)
+    merged_primary = merged_id if primary_item_id in {charge.id, discharge.id} else primary_item_id
+    return result, merged_primary
+
+
+def _numeric_value(value: str) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _combined_freshness(*statuses: str) -> str:
+    if FreshnessStatus.NORMAL.value in statuses:
+        return FreshnessStatus.DELAYED.value if FreshnessStatus.DELAYED.value in statuses else FreshnessStatus.NORMAL.value
+    if FreshnessStatus.DELAYED.value in statuses:
+        return FreshnessStatus.DELAYED.value
+    return FreshnessStatus.UNAVAILABLE.value
 
 
 def _parse_time(value: str) -> datetime | None:
