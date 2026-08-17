@@ -502,6 +502,52 @@ def test_updated_sensor_id_is_used_for_next_mqtt_publish_and_disabled_sensor_is_
     assert len(publisher.messages) == 1
 
 
+def test_relay_environment_resolves_switchbot_device_key_to_registered_sensor_id(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    registry = SensorRegistry(tmp_path / "sensors.json")
+    registry.register(RegisteredSensor(
+        "switchbot:cf3941c7ed79", "th-001", "environment", "switchbot",
+        "temperature_humidity_sensor", "", "温湿度計",
+    ))
+    publisher = _MqttPublisher()
+    manager = BleManager(registry, publisher)
+    monkeypatch.setattr("omk_ble.service.now_iso", lambda: "2026-08-20T10:00:00+00:00")
+
+    manager.handle_relay_mqtt(
+        "omk-relay/09dda0d5a8f2/ble/environment",
+        b'{"device_key":"switchbot:cf3941c7ed79","quality":"normal","temperature_c":24.4,'
+        b'"relative_humidity_percent":48,"source":"relay","relay_node_id":"09dda0d5a8f2"}',
+    )
+
+    assert publisher.messages == [("omk/th-001/environment", json.dumps({
+        "device_id": "th-001", "measured_at": "2026-08-20T10:00:00+00:00", "quality": "normal",
+        "temperature_c": 24.4, "relative_humidity_percent": 48,
+        "source": "relay", "relay_node_id": "09dda0d5a8f2",
+    }))]
+
+
+def test_relay_environment_does_not_publish_unregistered_or_disabled_devices(tmp_path: Path) -> None:
+    registry = SensorRegistry(tmp_path / "sensors.json")
+    registry.register(RegisteredSensor(
+        "switchbot:111111111111", "th-002", "environment", "switchbot",
+        "temperature_humidity_sensor", "", "無効", enabled=False,
+    ))
+    publisher = _MqttPublisher()
+    manager = BleManager(registry, publisher)
+
+    def relay(device_key: str) -> None:
+        manager.handle_relay_mqtt(
+            "omk-relay/09dda0d5a8f2/ble/environment",
+            json.dumps({
+                "device_key": device_key, "quality": "normal", "temperature_c": 24.4,
+                "relative_humidity_percent": 48, "source": "relay", "relay_node_id": "09dda0d5a8f2",
+            }).encode(),
+        )
+
+    relay("switchbot:cf3941c7ed79")
+    relay("switchbot:111111111111")
+    assert publisher.messages == []
+
+
 def test_environment_publish_is_rate_limited_per_device_with_latest_values(tmp_path: Path) -> None:
     registry = SensorRegistry(tmp_path / "sensors.json")
     registry.register(RegisteredSensor("switchbot:th", "th-001", "environment", "switchbot", "temperature_humidity_sensor", "", "温湿度計"))
