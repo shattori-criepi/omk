@@ -84,7 +84,7 @@ def _default_blocks(candidates: list) -> list[DisplayBlock]:
 
 
 def _default_block_title(group: str) -> str:
-    return "一条パワコン" if group == "太陽光・蓄電池" else group
+    return "一条パワコン" if group == "一条パワコン" else group
 
 
 def get_dashboard_view_model():

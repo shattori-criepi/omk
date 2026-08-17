@@ -144,6 +144,13 @@ class SettingsRepository:
             if not isinstance(block, dict) or not isinstance(block.get("item_ids"), list):
                 raise SettingsError("表示ブロックの形式が正しくありません")
             layout_pattern = block.get("layout_pattern", default_layout_pattern(block.get("size")))
+            group = block.get("group")
+            title = block.get("title")
+            if group == "太陽光・蓄電池":
+                group = "一条パワコン"
+                if title == "太陽光・蓄電池":
+                    title = "一条パワコン"
+                migrated = True
             item_ids, primary_item_id, item_migrated = _migrate_item_ids(tuple(block["item_ids"]), block.get("primary_item_id"), item_migrations)
             migrated |= item_migrated
             if "layout_pattern" not in block:
@@ -154,7 +161,7 @@ class SettingsRepository:
                 item_ids = _limited_item_ids(item_ids, primary_item_id, block.get("size"), layout_pattern)
                 migrated = True
             blocks.append(DisplayBlock(
-                block_id=block.get("block_id"), group=block.get("group"), title=block.get("title"),
+                block_id=block.get("block_id"), group=group, title=title,
                 size=block.get("size"), primary_item_id=primary_item_id,
                 item_ids=item_ids, layout_pattern=layout_pattern,
             ))

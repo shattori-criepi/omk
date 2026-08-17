@@ -546,11 +546,12 @@ def test_generic_catalog_candidates_group_and_format_values(tmp_path: Path) -> N
     assert repository.item(broute_id) is not None
     assert candidates[broute_id].group == "電力メーター（Bルート）"
     assert candidates[plug_id].group == "plug-001"
-    assert candidates[ichijo_id].group == "太陽光・蓄電池"
+    assert candidates[ichijo_id].group == "一条パワコン"
     assert candidates[status_id].selectable is False
     assert definition_for("unknown_scalar").selectable is True
     assert definition_for("net_power_w").semantic_role == "grid_power"
     assert definition_for("net_power_w").unit == "kW"
+    assert definition_for("load_power_w").label == "住宅内消費電力"
     assert format_value(1103, definition_for("load_power_w")) == "1.10"
     assert format_value(23, definition_for("net_power_w")) == "0.02"
     assert definition_for("power_w").semantic_role == "device_power"
@@ -651,7 +652,7 @@ def test_battery_virtual_item_replaces_raw_candidates_and_migrates_settings(tmp_
     path = tmp_path / "dashboard" / "settings.json"
     path.parent.mkdir()
     path.write_text(json.dumps(_block_payload({
-        "block_id": "ichijo", "group": "太陽光・蓄電池", "title": "一条パワコン", "size": "small",
+        "block_id": "ichijo", "group": "一条パワコン", "title": "一条パワコン", "size": "small",
         "layout_pattern": "compact", "primary_item_id": charge, "item_ids": [charge, discharge],
     })), encoding="utf-8")
     settings = SettingsRepository(path).load_or_create(
@@ -700,7 +701,7 @@ def test_energy_blocks_keep_multiple_broute_and_ichijo_values(tmp_path: Path) ->
     repository = DisplayRepository(tmp_path)
     blocks = selected_blocks(repository, (
         DisplayBlock("broute", "電力メーター（Bルート）", "Bルート", "small", grid, (grid, imported)),
-        DisplayBlock("ichijo", "太陽光・蓄電池", "一条パワコン", "large", load, (load, pv)),
+        DisplayBlock("ichijo", "一条パワコン", "一条パワコン", "large", load, (load, pv)),
     ), NOW)
 
     assert blocks[0].primary.unit == "kW" and blocks[0].secondary[0].unit == "kWh"
@@ -709,7 +710,7 @@ def test_energy_blocks_keep_multiple_broute_and_ichijo_values(tmp_path: Path) ->
 
 def test_power_flow_default_group_title_is_rendered_as_ichijo_power_conditioner(tmp_path: Path) -> None:
     load = _write_generic_item(tmp_path, "t", topic="omk/ichijo/power-flow", device_id="ichijo", field="load_power_w", value=1103, received_at=NOW)
-    block = DisplayBlock("ichijo", "太陽光・蓄電池", "太陽光・蓄電池", "large", load, (load,), "hero")
+    block = DisplayBlock("ichijo", "一条パワコン", "一条パワコン", "large", load, (load,), "hero")
 
     assert selected_blocks(DisplayRepository(tmp_path), (block,), NOW)[0].title == "一条パワコン"
 
@@ -722,11 +723,11 @@ def test_ichijo_charge_and_discharge_are_one_dashboard_only_battery_row(tmp_path
     grid = _write_generic_item(tmp_path, "e", topic="omk/ichijo/power-flow", device_id="ichijo", field="grid_import_power_w", value=0, received_at=NOW)
     repository = DisplayRepository(tmp_path)
     battery_id = next(item.id for item in display_candidates(repository, NOW) if item.semantic_role == "battery_power_bidirectional")
-    block = DisplayBlock("ichijo", "太陽光・蓄電池", "一条パワコン", "large", load, (load, pv, battery_id, grid), "hero")
+    block = DisplayBlock("ichijo", "一条パワコン", "一条パワコン", "large", load, (load, pv, battery_id, grid), "hero")
     rendered = selected_blocks(repository, (block,), NOW)[0]
 
     assert rendered.layout_pattern == "hero"
-    assert rendered.primary.short_label == "家庭消費電力"
+    assert rendered.primary.short_label == "住宅内消費電力"
     assert [(item.semantic_role, item.short_label, item.value) for item in rendered.secondary] == [
         ("pv_power", "PV発電", "0.52"),
         ("battery_power_bidirectional", "蓄電池 放電", "0.59"),
@@ -763,7 +764,7 @@ def test_display_items_api_lists_multiple_values_from_one_source(tmp_path: Path,
     broute = groups["電力メーター（Bルート）"]
     assert {item["field"] for item in broute} == set(broute_fields)
     assert all(item["selectable"] for item in broute)
-    assert {item["field"] for item in groups["太陽光・蓄電池"]} == set(ichijo_fields)
+    assert {item["field"] for item in groups["一条パワコン"]} == set(ichijo_fields)
     assert {item["field"] for item in groups["sen66-001"]} == set(sen66_fields)
 
 
