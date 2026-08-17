@@ -62,6 +62,14 @@ environment payload は `device_id`、`measured_at`、`quality`、利用可能�
 `relative_humidity_percent`、`co2_ppm`、`battery_percent` を含む。collector
 は従来通り型を解釈せず JSONL に保存する。
 
+Gateway direct BLEとESP32 Node relayを併用するenvironment sensorでは、Nodeは論理
+`sensor_id`ではなく`switchbot:<12桁lowercase hex>`の物理`device_key`を
+`omk-relay/<relay_node_id>/ble/environment`へpublishする。この内部topicは
+`sensor-collector`と`harvest-uploader`の`omk/#`購読対象外である。BLE Sensor Managerが
+registryで解決した後だけ、通常の`omk/<sensor_id>/environment`へcanonical messageをpublishする。
+direct/relayの経路選択仕様とpayload例は
+[BLE direct / ESP32 Node relayの経路選択](decisions/ble-direct-relay-route-selection.md)を参照する。
+
 BLE advertisement は常時受信し、runtimeのlatest値、RSSI、受信時刻は広告ごとに
 更新する。environmentは初回の正常値を即時publishし、以後は`device_key`ごとに
 最短10秒間隔でpublishする。Motion Sensorは状態変化時に即時publishし、同一状態も

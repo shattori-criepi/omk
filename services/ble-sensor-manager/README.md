@@ -26,6 +26,24 @@ OMKの論理的な識別子です。registryには`device_key`、`sensor_id`、`
 model、location、`display_name`、`enabled`だけを保存します。最新の測定値、RSSI、受信時刻、
 生のBLE広告はruntime stateとして保持し、registryへは書き込みません。
 
+## ESP32 Node relay入力
+
+ESP32 NodeはGatewayの`sensor_id`を持たず、SwitchBot Meter形式のBLE advertisementから得た
+`switchbot:<12桁lowercase hex>`の`device_key`を次の内部MQTT topicへpublishします。
+
+```text
+omk-relay/<relay_node_id>/ble/environment
+```
+
+このサービスはこのtopicを購読し、既存registryで`device_key`を解決します。登録済みかつ
+`enabled=true`のenvironment sensorだけを、Gateway受信時刻を`measured_at`として
+`omk/<sensor_id>/environment`へ`source: "relay"`と`relay_node_id`を保ったまま再publishします。
+未登録・disabledのdevice_keyは通常sensor topicへpublishせず、自動登録もしません。
+
+direct BLEも同じcanonical topicへ`source: "direct"`でpublishします。経路の冗長化、30秒の
+direct優先fallback、JSONL/Harvestでの重複排除は
+[`docs/decisions/ble-direct-relay-route-selection.md`](../../docs/decisions/ble-direct-relay-route-selection.md)を参照してください。
+
 Dashboardのセンサ管理セットアップフローでは、未登録のBLE広告を発見・分類し、IDを提案した後、
 選択した表示名とlocationで登録します。`temperature_humidity_sensor`と`waterproof_sensor`には
 未使用で最小の`th-xxx`、`co2_sensor`には`co2-xxx`、状態センサには対応する

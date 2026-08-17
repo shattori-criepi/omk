@@ -172,26 +172,31 @@ discoveryで見つけます。これはWi-Fi設定済みNodeの再Provisioning�
 応答、固定長4のFreeRTOS event queueへの投入だけを担当し、NVS操作、再起動、BLE
 停止、Provisioning開始は行いません。`node_state_task`だけがeventを解釈します。
 
-## SwitchBot Meter BLE relay（初期E2E）
+## SwitchBot Meter BLE relay
 
-通常bootのNodeはOMK Discovery advertisingと並行してpassive scanを行います。
-最初の実機E2Eとして、SwitchBot Company ID `0x0969`のうち物理MAC
-`cf:39:41:c7:ed:79`だけを対象に、既存Gateway decoderと同じMeter manufacturer
-layoutを検証・復号します。これは汎用SwitchBot relayではありません。
+通常bootのNodeはOMK Discovery advertisingと並行してpassive scanを行います。対応する
+SwitchBot Company ID `0x0969`のMeter manufacturer layoutを復号し、advertisement内の
+6-byte物理識別子を`switchbot:<12桁lowercase hex>`の`device_key`へ変換します。Nodeは
+`th-001`のようなGatewayの論理sensor IDを持たず、特定の物理IDへ固定しません。
 
-対象広告を受信すると、最短10秒間隔で次をpublishします。
+Nodeは最短10秒間隔でdeviceごとに次のGateway入力topicへQoS 0、retain falseでpublishします。
 
 ```text
-omk/switchbot-meter-001/environment
+omk-relay/<relay_node_id>/ble/environment
 ```
 
 ```json
-{"device_id":"switchbot-meter-001","quality":"normal","temperature_c":25.0,"relative_humidity_percent":49}
+{"device_key":"switchbot:cf3941c7ed79","quality":"normal","temperature_c":25.0,"relative_humidity_percent":49,"source":"relay","relay_node_id":"09dda0d5a8f2"}
 ```
 
-QoSは0、retainはfalseです。ESP側は時刻同期を行わないため`measured_at`は含めず、
-Gatewayの`sensor-collector`が受信時刻を付けてJSONLへ保存します。将来はDashboard
-登録情報を用いて、固定MACと固定`sensor_id`を置き換える予定です。
+Gateway BLE Sensor Managerが既存registryで`device_key`を論理sensor IDへ解決し、登録済みかつ
+enabledのenvironment sensorだけを通常の`omk/<sensor_id>/environment`へ再publishします。
+Nodeの`logical_id`（SEN66等に使うNode自身のID）とrelay対象BLE sensorのIDは別概念です。
+
+rate-limit状態はメモリ上だけに保持し、同時追跡は固定8台までです。対応範囲は現在のMeter
+manufacturer layoutだけであり、全SwitchBotモデルのrelayを意味しません。Gateway direct BLEとの
+冗長化・canonical化・30秒fallback選択の理由と実機確認は
+[`docs/decisions/ble-direct-relay-route-selection.md`](../../../docs/decisions/ble-direct-relay-route-selection.md)を参照してください。
 
 ## 旧BLE Provisioning（廃止済み・履歴）
 
@@ -314,8 +319,8 @@ APでも使える設計を維持します。ランダムなWi-Fi passwordは公�
 
 電波が弱いフロアでは、`ble_scan` capabilityを持つWi-Fi接続ESP32をBLE scanner / relay
 として配置できます。logical IDの例は`ble-relay-001`です。将来このNodeは接続不要の
-SwitchBot advertisementを受信し、Wi-Fi/MQTTでGatewayへ中継します。MQTT topicと
-payload schema、relay本体機能は未実装です。
+SwitchBot advertisementを受信し、Wi-Fi/MQTTでGatewayへ中継します。現行のMeter relayは
+物理`device_key`をGateway registryで解決する方式で実装済みです。詳細は上記relay節を参照してください。
 
 ## Build
 

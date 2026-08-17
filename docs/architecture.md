@@ -84,6 +84,15 @@ credential storage、network backendは分離しており、将来ESP-Mesh-Lite�
 Discovery BLEとSwitchBot relayは通常機能として維持する。詳細は
 [`firmware/esp32/omk-node/README.md`](../firmware/esp32/omk-node/README.md)を正とする。
 
+### 3.3.1 BLE direct / Node relayの冗長化
+
+BLE environment sensorはGateway direct BLEを主系、ESP32 Node relayをfallbackとして扱う。
+NodeはGatewayの論理sensor IDを持たず、物理`device_key`を`omk-relay/...`の内部topicへrelayする。
+GatewayのBLE registryがこれを論理sensor IDへ解決してから通常の`omk/<sensor_id>/environment`へ
+canonical化する。JSONL保存とHarvest集約はそれぞれdirect優先・30秒freshnessの経路選択を行う。
+設計理由、topic/payload、実機E2E確認と制約は
+[BLE direct / ESP32 Node relayの経路選択](decisions/ble-direct-relay-route-selection.md)を参照する。
+
 ### 3.4 Windows開発PCの役割
 
 Windowsは、実機に依存しない部分を高速に開発する標準環境です。Bルート対応USBドングルを使う経路は、利用できる開発者が開発中にスマートメータ実機を確認するための任意検証環境としてだけ扱います。
