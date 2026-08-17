@@ -411,7 +411,7 @@ def test_display_api_returns_ichijo_and_broute_fallback_snapshots(tmp_path: Path
     assert fallback["power_direction"] == "買電"
 
 
-def test_dynamic_display_html_and_javascript_expose_polling_targets(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_hero_display_html_and_javascript_expose_polling_targets(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     latest_root = tmp_path / "latest"
     item_ids = [
         _write_generic_item(
@@ -430,7 +430,7 @@ def test_dynamic_display_html_and_javascript_expose_polling_targets(tmp_path: Pa
     settings_path = tmp_path / "dashboard" / "settings.json"
     settings_path.parent.mkdir(parents=True)
     settings_path.write_text(json.dumps(_block_payload({
-        "block_id": "block_sen66", "group": "living", "title": "SEN66", "size": "large",
+        "block_id": "block_sen66", "group": "living", "title": "SEN66", "size": "large", "layout_pattern": "hero",
         "primary_item_id": item_ids[0], "item_ids": item_ids,
     })), encoding="utf-8")
     monkeypatch.setenv("OMK_LATEST_DATA_ROOT", str(latest_root))
@@ -449,7 +449,8 @@ def test_dynamic_display_html_and_javascript_expose_polling_targets(tmp_path: Pa
         assert f'data-item-id="{item_id}"' in response.text
     assert "display-card--large" in response.text
     assert "display-card--hero" in response.text
-    assert "display-card-strip-items" in response.text
+    assert 'class="display-card-primary"' in response.text
+    assert 'class="display-card-secondary"' in response.text
     assert 'fetch("/api/display", { cache: "no-store" })' in javascript
     assert "DISPLAY_POLL_INTERVAL_MS = 10_000" in javascript
     assert "headerWeekday.textContent" in javascript
@@ -467,6 +468,37 @@ def test_dynamic_display_html_and_javascript_expose_polling_targets(tmp_path: Pa
     assert "grid-template-columns: minmax(0, 1.1fr) minmax(260px, .9fr);" in stylesheet
     assert ".admin-link svg { width: clamp(28px, 3vw, 36px);" in stylesheet
     assert "font-variant-numeric: tabular-nums" in stylesheet
+
+
+def test_strip_and_compact_display_html_use_their_own_dom_contracts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    latest_root = tmp_path / "latest"
+    strip_ids = [
+        _write_generic_item(latest_root, suffix, topic="omk/sen66/environment", device_id="sen66", field=field, value=value, received_at=datetime.now(JST))
+        for suffix, field, value in (("k", "temperature_c", 25.4), ("l", "relative_humidity_percent", 48.0), ("m", "co2_ppm", 650))
+    ]
+    compact_id = _write_generic_item(latest_root, "n", topic="omk/plug-001/power", device_id="plug-001", field="power_w", value=12.3, received_at=datetime.now(JST))
+    settings_path = tmp_path / "dashboard" / "settings.json"
+    settings_path.parent.mkdir(parents=True)
+    settings_path.write_text(json.dumps(_block_payload(
+        {"block_id": "strip_sen66", "group": "sen66", "title": "SEN66", "size": "medium", "layout_pattern": "strip", "primary_item_id": strip_ids[0], "item_ids": strip_ids},
+        {"block_id": "compact_plug", "group": "plug-001", "title": "Plug", "size": "small", "layout_pattern": "compact", "primary_item_id": compact_id, "item_ids": [compact_id]},
+    )), encoding="utf-8")
+    monkeypatch.setenv("OMK_LATEST_DATA_ROOT", str(latest_root))
+    monkeypatch.setenv("OMK_DASHBOARD_SETTINGS_PATH", str(settings_path))
+
+    response = client.get("/display")
+
+    assert response.status_code == 200
+    assert 'data-block-id="strip_sen66"' in response.text
+    assert "display-card--medium" in response.text
+    assert "display-card--strip" in response.text
+    assert 'class="display-card-strip-items"' in response.text
+    for item_id in strip_ids:
+        assert f'data-item-id="{item_id}"' in response.text
+    assert 'data-block-id="compact_plug"' in response.text
+    assert "display-card--small" in response.text
+    assert "display-card--compact" in response.text
+    assert f'data-item-id="{compact_id}"' in response.text
 
 
 def test_power_direction_rules() -> None:
