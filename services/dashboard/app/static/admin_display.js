@@ -21,7 +21,7 @@ function render() {
     const isSelected = selectedIds.has(item.id);
     const disabled = isSelected || total >= capacity;
     const state = isSelected ? "表示中" : total >= capacity ? "表示領域がいっぱいです" : "追加する";
-    return `<button class="display-candidate${isSelected ? " is-selected" : ""}" data-add="${esc(item.id)}" ${disabled ? "disabled" : ""}><span>${esc(item.label)}</span><small>${esc(item.category)} · 最終受信 ${esc(item.last_received_at || "未受信")}</small><em>${state}</em></button>`;
+    return `<button class="display-candidate${isSelected ? " is-selected" : ""}" data-add="${esc(item.id)}" ${disabled ? "disabled" : ""}><span>${esc(item.label)}</span><em>${state}</em></button>`;
   }).join("")}</section>`).join("") || "<p>選択できる表示項目がありません。</p>"}`;
 }
 async function request(path, options = {}) { const response = await fetch(path, {headers: {"Content-Type":"application/json"}, ...options}); const payload = await response.json().catch(() => ({})); if (!response.ok) throw Error(payload.detail || "通信エラー"); return payload; }
