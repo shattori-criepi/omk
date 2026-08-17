@@ -111,8 +111,6 @@ esp_err_t wifi_station_start_prepared(void) {
     ESP_LOGI(TAG, "Starting Wi-Fi STA connection using saved credentials");
     return ESP_OK;
 }
-
-
 esp_err_t wifi_station_save_credentials(
     const uint8_t *ssid, size_t ssid_length,
     const uint8_t *password, size_t password_length) {

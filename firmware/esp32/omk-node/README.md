@@ -123,20 +123,6 @@ Dashboard登録フローを再試験する場合だけ、次を明示的に実�
 全消去、Wi-Fi credentials、`prov_pop`、`factory_secret` partitionへの操作はしません。
 通常firmwareにはこの操作へ到達するruntime経路はありません。
 
-### 開発時だけのWi-Fi Provisioning reset
-
-Gateway APIによる初回Wi-Fi Provisioningを再試験する場合だけ、次を明示的に実行します。
-
-```bash
-./scripts/reset-omk-node-wifi-provisioning.sh atom-s3-lite /dev/ttyACM0 --confirm
-```
-
-一時imageは、最初に`omk/prov_pop`を32 bytesでread-backし、ESP-IDF Wi-Fi APIで
-Flash保存のSTA configを空にしてread-backします。続いて既存helperで`registered`と
-`logical_id`だけを消去し、最後に`omk/prov_pop`を再度read-backします。NVS partition全消去、
-factory secret、factory credential、PoPへの書込みは行いません。完了後は通常firmwareを自動で
-戻すため、次bootはWi-Fiへ接続せず、直接Provisioning BLEへ入ります。
-
 ### 開発時だけのWi-Fi credential投入
 
 Wi-Fi Provisioningを介さずBLE relayなどを検証する場合だけ、次を実行します。
@@ -159,8 +145,8 @@ Provisioning、MQTT APIから到達する経路はありません。
 
 保存済みWi-Fi credentialを持つ通常bootのNodeは、次のService UUIDのraw legacy
 advertisingを出します。Wi-Fi STAおよびMQTT registrationと並行して動作し、Gatewayが
-Nodeを発見・状態確認する用途に使います。Wi-Fi未設定NodeはこのDiscoveryを開始せず、
-後述のEspressif Provisioning BLEだけをadvertiseします。
+Nodeを発見・状態確認する用途に使います。Wi-Fi未設定NodeはUSB Serial/JTAG経由の初回登録を
+待ちます。
 
 - Service UUID: `7d2a4d90-7b64-4e3a-9f37-95e77d7b5101`
 - Service Data: 厳密に10 bytes
