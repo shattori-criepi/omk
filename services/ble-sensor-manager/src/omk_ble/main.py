@@ -114,15 +114,6 @@ def register_node(node_id: str, request: NodeRegistrationRequest) -> dict[str, A
     except RuntimeError as error:
         raise HTTPException(503, str(error)) from error
 
-@app.post("/api/nodes/{node_id}/provision", status_code=202)
-async def provision_node(node_id: str) -> dict[str, Any]:
-    try:
-        return await manager.request_node_provisioning(node_id)
-    except ValueError as error:
-        raise HTTPException(400, str(error)) from error
-    except RuntimeError as error:
-        raise HTTPException(503, str(error)) from error
-
 @app.post("/api/sensors", status_code=201)
 def register(request: RegisterRequest) -> dict[str, Any]:
     try:

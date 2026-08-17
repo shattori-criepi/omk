@@ -1,1 +1,1 @@
-idf_component_register(SRCS "main.c" "discovery_ble.c" "node_state.c" "node_registration.c" "provisioning.c" "wifi_station.c" "mqtt_registration.c" "switchbot_relay.c" INCLUDE_DIRS "." REQUIRES nvs_flash esp_event esp_netif esp_wifi bt mqtt esp_timer network_provisioning)
+idf_component_register(SRCS "main.c" "discovery_ble.c" "node_state.c" "node_registration.c" "usb_provisioning.c" "wifi_station.c" "mqtt_registration.c" "switchbot_relay.c" INCLUDE_DIRS "." REQUIRES nvs_flash esp_event esp_netif esp_wifi cjson bt mqtt esp_timer esp_driver_usb_serial_jtag)
