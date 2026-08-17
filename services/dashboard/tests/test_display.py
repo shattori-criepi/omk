@@ -715,6 +715,36 @@ def test_power_flow_default_group_title_is_rendered_as_ichijo_power_conditioner(
     assert selected_blocks(DisplayRepository(tmp_path), (block,), NOW)[0].title == "一条パワコン"
 
 
+def test_derived_daily_energy_candidates_reuse_legacy_totals_and_cache(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeParquet:
+        calls = 0
+        def today_energy_totals(self, _today):
+            self.calls += 1
+            return dashboard_main.EnergyTotals(1.2, 3.4)
+    fake = FakeParquet()
+    monkeypatch.setattr(dashboard_main, "_DERIVED_ENERGY_CACHE", None)
+    monkeypatch.setattr(dashboard_main, "display_candidates", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(dashboard_main, "get_display_repository", lambda: object())
+    monkeypatch.setattr(dashboard_main, "get_parquet_repository", lambda: fake)
+    candidates = dashboard_main._dashboard_candidates(NOW)
+    again = dashboard_main._dashboard_candidates(NOW + timedelta(seconds=10))
+
+    assert [(item.id, item.value, item.unit, item.group) for item in candidates] == [
+        ("derived:energy:today_import_kwh", "1.2", "kWh", "一条パワコン"),
+        ("derived:energy:today_export_kwh", "3.4", "kWh", "一条パワコン"),
+    ]
+    assert [item.id for item in again] == [item.id for item in candidates]
+    assert fake.calls == 1
+
+
+def test_new_ichijo_block_accepts_raw_virtual_and_derived_ids(tmp_path: Path) -> None:
+    repository = SettingsRepository(tmp_path / "dashboard" / "settings.json")
+    ids = ("load", "pv", "export", "soc", "virtual:battery_power_bidirectional:ichijo", "derived:energy:today_import_kwh")
+    groups = {item_id: "一条パワコン" for item_id in ids}
+    settings = repository.save_payload(_block_payload({"block_id": "ichijo-new", "group": "一条パワコン", "title": "一条パワコン", "size": "large", "layout_pattern": "hero", "primary_item_id": "load", "item_ids": list(ids)}), groups)
+    assert settings.blocks[0].item_ids == ids
+
+
 def test_ichijo_charge_and_discharge_are_one_dashboard_only_battery_row(tmp_path: Path) -> None:
     load = _write_generic_item(tmp_path, "a", topic="omk/ichijo/power-flow", device_id="ichijo", field="load_power_w", value=1103, received_at=NOW)
     pv = _write_generic_item(tmp_path, "b", topic="omk/ichijo/power-flow", device_id="ichijo", field="pv_power_w", value=520, received_at=NOW)
