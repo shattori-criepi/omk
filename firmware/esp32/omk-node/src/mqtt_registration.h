@@ -17,8 +17,8 @@ esp_err_t mqtt_registration_publish_environment(const char *sensor_id,
                                                 float temperature_c,
                                                 uint8_t relative_humidity_percent);
 
-/* Queues a relay-origin environment measurement with route metadata. */
-esp_err_t mqtt_registration_publish_relay_environment(const char *sensor_id,
+/* Queues a relay-origin BLE observation for Gateway registry resolution. */
+esp_err_t mqtt_registration_publish_relay_environment(const char *device_key,
                                                        float temperature_c,
                                                        uint8_t relative_humidity_percent,
                                                        const char *relay_node_id);

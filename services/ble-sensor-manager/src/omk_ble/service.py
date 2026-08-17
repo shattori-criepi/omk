@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import os
 from time import monotonic
 from datetime import datetime, timezone
@@ -196,6 +197,64 @@ class BleManager:
             return
         self.node_registry.update(parts[2], protocol_version=1, logical_id=logical_id,
                                   registration_state="registered", request_state="registered", ack_seen_at=now_iso())
+
+    def handle_relay_mqtt(self, topic: str, payload: bytes) -> None:
+        """Resolve a Node relay observation through the existing BLE registry."""
+        parts = topic.split("/")
+        if len(parts) != 4 or parts[0] != "omk-relay" or parts[2:] != ["ble", "environment"]:
+            return
+        relay_node_id = parts[1]
+        if not self._node_id_valid(relay_node_id):
+            LOGGER.warning("Ignoring relay MQTT with invalid Node ID topic=%s", topic)
+            return
+        try:
+            value = json.loads(payload.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            LOGGER.warning("Ignoring invalid relay MQTT JSON topic=%s", topic)
+            return
+        if not isinstance(value, dict):
+            LOGGER.warning("Ignoring non-object relay MQTT payload topic=%s", topic)
+            return
+        device_key = value.get("device_key")
+        temperature_c = value.get("temperature_c")
+        humidity = value.get("relative_humidity_percent")
+        if (not self._switchbot_device_key_valid(device_key) or
+                value.get("source") != "relay" or value.get("relay_node_id") != relay_node_id or
+                not self._environment_values_valid(temperature_c, humidity)):
+            LOGGER.warning("Ignoring invalid relay MQTT fields topic=%s", topic)
+            return
+        try:
+            sensor = next((item for item in self.registry.list() if item.device_key == device_key), None)
+        except Exception as error:
+            LOGGER.error("Ignoring relay observation because registry cannot be read: %s", error)
+            return
+        if sensor is None:
+            LOGGER.debug("Ignoring relay observation for unregistered BLE device_key=%s", device_key)
+            return
+        if not sensor.enabled or sensor.sensor_type != "environment" or not self._mqtt:
+            return
+        canonical = {
+            "device_id": sensor.sensor_id,
+            "measured_at": now_iso(),
+            "quality": "normal",
+            "temperature_c": temperature_c,
+            "relative_humidity_percent": humidity,
+            "source": "relay",
+            "relay_node_id": relay_node_id,
+        }
+        self._mqtt.publish(f"omk/{sensor.sensor_id}/environment", json.dumps(canonical), qos=0, retain=False)
+
+    @staticmethod
+    def _switchbot_device_key_valid(value: Any) -> bool:
+        prefix = "switchbot:"
+        return (isinstance(value, str) and value.startswith(prefix) and len(value) == len(prefix) + 12 and
+                all(character in "0123456789abcdef" for character in value[len(prefix):]))
+
+    @staticmethod
+    def _environment_values_valid(temperature_c: Any, humidity: Any) -> bool:
+        return (not isinstance(temperature_c, bool) and isinstance(temperature_c, (int, float)) and
+                math.isfinite(temperature_c) and -20.0 <= temperature_c <= 60.0 and
+                not isinstance(humidity, bool) and isinstance(humidity, int) and 0 <= humidity <= 100)
 
     def registered_list(self) -> list[dict[str, Any]]:
         """Join immutable registry settings with in-memory latest observations."""
