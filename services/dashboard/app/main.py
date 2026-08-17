@@ -16,7 +16,7 @@ from app.data.latest_repository import LatestRepository
 from app.data.parquet_repository import ParquetRepository
 from app.data.display_repository import DisplayRepository
 from app.data.settings_repository import DisplaySelection, SettingsError, SettingsRepository
-from app.display_items import candidate_for, selected_items
+from app.display_items import candidate_for, catalog_items_with_latest, selected_items
 from app.view_models import FreshnessStatus, worst_freshness
 from app.view_models import get_display_view_model
 
@@ -214,7 +214,7 @@ async def sensors() -> dict:
 
 @app.get("/api/admin/display-items")
 async def display_items() -> dict:
-    candidates = [candidate_for(item) for item in get_display_repository().catalog()]
+    candidates = catalog_items_with_latest(get_display_repository(), datetime.now().astimezone())
     groups: dict[str, list[dict]] = {}
     for item in candidates:
         groups.setdefault(item.group, []).append(item.as_dict())

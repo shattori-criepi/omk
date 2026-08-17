@@ -43,7 +43,12 @@ class SettingsRepository:
             self.save(settings, available_ids)
             return settings
         try:
-            return self._parse(json.loads(self.path.read_text(encoding="utf-8")), available_ids, allow_missing=True)
+            settings = self._parse(json.loads(self.path.read_text(encoding="utf-8")), available_ids, allow_missing=True)
+            # This contains display choices, not credentials. Keep it readable
+            # for the normal host user even when an earlier root container
+            # created it with the old 0640 mode.
+            os.chmod(self.path, 0o644)
+            return settings
         except (OSError, json.JSONDecodeError, TypeError, KeyError, SettingsError):
             # Preserve a malformed file for diagnosis; present an empty, safe
             # configuration rather than allowing the display request to fail.
@@ -66,7 +71,7 @@ class SettingsRepository:
                 output.flush()
                 os.fsync(output.fileno())
             os.replace(temporary_path, self.path)
-            os.chmod(self.path, 0o640)
+            os.chmod(self.path, 0o644)
         except Exception:
             if temporary_path is not None:
                 temporary_path.unlink(missing_ok=True)

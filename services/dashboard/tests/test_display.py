@@ -2,6 +2,7 @@ import asyncio
 import json
 import re
 import shutil
+import stat
 import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -16,7 +17,7 @@ from app.data.latest_repository import LatestRepository
 from app.data.parquet_repository import LatestPower, ParquetRepository
 from app.data.display_repository import DisplayRepository
 from app.data.settings_repository import DisplaySelection, SettingsError, SettingsRepository
-from app.display_items import candidate_for, selected_items
+from app.display_items import candidate_for, catalog_items_with_latest, selected_items
 from app.metric_definitions import definition_for, format_value
 from app.main import app
 from app.view_models import (
@@ -477,6 +478,7 @@ def test_settings_validate_capacity_duplicates_and_persist_atomically(tmp_path: 
     settings = repository.save_payload({"version": 1, "default_preset": "standard", "presets": {"standard": {"items": [{"item_id": "item_a", "size": "large"}, {"item_id": "item_b", "size": "small"}]}}}, ids)
     assert settings.items == (DisplaySelection("item_a", "large"), DisplaySelection("item_b", "small"))
     assert repository.load_or_create(ids, []).items == settings.items
+    assert stat.S_IMODE((tmp_path / "dashboard" / "settings.json").stat().st_mode) == 0o644
     assert not list((tmp_path / "dashboard").glob("*.tmp"))
     with pytest.raises(SettingsError, match="重複"):
         repository.save_payload({"version": 1, "default_preset": "standard", "presets": {"standard": {"items": [{"item_id": "item_a", "size": "small"}, {"item_id": "item_a", "size": "small"}]}}}, ids)
@@ -486,6 +488,18 @@ def test_settings_validate_capacity_duplicates_and_persist_atomically(tmp_path: 
         repository.save_payload({"version": 1, "default_preset": "standard", "presets": {"standard": {"items": [{"item_id": "item_a", "size": "large"}, {"item_id": "item_b", "size": "large"}, {"item_id": "item_c", "size": "small"}]}}}, ids)
     with pytest.raises(SettingsError):
         repository.save_payload({"version": 1, "default_preset": "standard", "presets": {"standard": {"items": [{"item_id": "item_a", "size": "huge"}]}}}, ids)
+
+
+def test_catalog_candidates_include_the_same_latest_value_and_freshness_as_display(tmp_path: Path) -> None:
+    item_id = _write_generic_item(tmp_path, "g", topic="omk/plug-001/power", device_id="plug-001", field="power_w", value=22.0, received_at=NOW)
+    repository = DisplayRepository(tmp_path)
+    candidates = {item.id: item for item in catalog_items_with_latest(repository, NOW)}
+    selected = selected_items(repository, (DisplaySelection(item_id, "small"),), NOW)
+
+    assert candidates[item_id].value == "22.0"
+    assert candidates[item_id].freshness == "normal"
+    assert selected[0].value == candidates[item_id].value
+    assert selected[0].freshness == candidates[item_id].freshness
 
 
 def test_dynamic_display_api_uses_selected_order_and_keeps_unavailable_slot(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

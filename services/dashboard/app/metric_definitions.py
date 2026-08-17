@@ -43,6 +43,11 @@ DEFINITIONS: dict[str, MetricDefinition] = {
     "battery_charge_power_w": MetricDefinition("蓄電池充電", "W", 0, "太陽光・蓄電池", "battery_charge"),
     "battery_discharge_power_w": MetricDefinition("蓄電池放電", "W", 0, "太陽光・蓄電池", "battery_discharge"),
     "battery_operating_state": MetricDefinition("蓄電池状態", category="太陽光・蓄電池", semantic_role="battery_state"),
+    "cumulative_energy_import_kwh": MetricDefinition("買電積算", "kWh", 1, "電力メーター（Bルート）"),
+    "cumulative_energy_export_kwh": MetricDefinition("売電積算", "kWh", 1, "電力メーター（Bルート）"),
+    "import_energy_kwh": MetricDefinition("買電量", "kWh", 1, "電力メーター（Bルート）"),
+    "export_energy_kwh": MetricDefinition("売電量", "kWh", 1, "電力メーター（Bルート）"),
+    "pcs_ac_output_power_w": MetricDefinition("PCS出力", "W", 0, "太陽光・蓄電池"),
     "status": MetricDefinition("状態", selectable=False),
 }
 

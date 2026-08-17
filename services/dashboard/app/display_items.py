@@ -37,7 +37,7 @@ def source_group(item: CatalogItem) -> str:
     data_type = item.topic.rsplit("/", 1)[-1]
     if data_type == "power-flow":
         return "太陽光・蓄電池"
-    if item.field == "net_power_w":
+    if definition_for(item.field).category == "電力メーター（Bルート）":
         return "電力メーター（Bルート）"
     return item.device_id
 
@@ -51,9 +51,18 @@ def source_prefix(item: CatalogItem) -> str:
     return item.device_id
 
 
-def candidate_for(item: CatalogItem) -> DisplayItem:
+def candidate_for(
+    item: CatalogItem,
+    latest: LatestDisplayItem | None = None,
+    now: datetime | None = None,
+) -> DisplayItem:
     definition = definition_for(item.field)
-    return _display_item(item, definition, None)
+    return _display_item(item, definition, latest, now)
+
+
+def catalog_items_with_latest(repository: DisplayRepository, now: datetime) -> list[DisplayItem]:
+    """Build candidates with their actual latest reading for the admin UI."""
+    return [candidate_for(item, repository.item(item.id), now) for item in repository.catalog()]
 
 
 def selected_items(
