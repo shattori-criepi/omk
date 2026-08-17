@@ -294,26 +294,31 @@ def test_broken_or_missing_latest_data_does_not_break_display(tmp_path: Path, mo
     latest_root = tmp_path / "latest"
     latest_root.mkdir()
     (latest_root / "broute_power.json").write_text("{broken", encoding="utf-8")
+    item_id = _write_generic_item(
+        latest_root,
+        "b",
+        topic="omk/living/environment",
+        device_id="living",
+        field="temperature_c",
+        value=25.0,
+        received_at=datetime.now(JST),
+    )
     monkeypatch.setenv("OMK_LATEST_DATA_ROOT", str(latest_root))
     monkeypatch.setenv("OMK_PROCESSED_DATA_ROOT", str(tmp_path / "processed"))
+    monkeypatch.setenv("OMK_DASHBOARD_SETTINGS_PATH", str(tmp_path / "dashboard" / "settings.json"))
+    monkeypatch.setattr(dashboard_main, "_DERIVED_ENERGY_CACHE", None)
 
     assert LatestRepository(latest_root).latest_power() is None
     response = client.get("/display")
 
     assert response.status_code == 200
-    assert re.search(r'<strong id="current-power-kw">-</strong>', response.text)
-    assert re.search(
-        r'id="power-source-badge"[^>]*source-badge--unavailable', response.text
-    )
-    assert re.search(r'<strong id="temperature-c">-</strong>', response.text)
-    assert re.search(
-        r'id="sen66-source-badge"[^>]*source-badge--unavailable', response.text
-    )
-    assert "取得不可" in response.text
-    assert "データなし" not in response.text
+    assert 'id="display-blocks"' in response.text
+    assert f'data-item-id="{item_id}"' in response.text
+    assert "display-card--" in response.text
+    assert "Traceback" not in response.text
 
 
-def test_display_api_returns_ichijo_and_broute_fallback_snapshots(tmp_path: Path, monkeypatch) -> None:
+def test_display_api_handles_legacy_latest_files_with_standard_blocks(tmp_path: Path, monkeypatch) -> None:
     latest_root = tmp_path / "latest"
     current_time = datetime.now(JST)
     _write_latest(
@@ -352,63 +357,22 @@ def test_display_api_returns_ichijo_and_broute_fallback_snapshots(tmp_path: Path
     )
     monkeypatch.setenv("OMK_LATEST_DATA_ROOT", str(latest_root))
     monkeypatch.setenv("OMK_PROCESSED_DATA_ROOT", str(tmp_path / "processed"))
+    monkeypatch.setenv("OMK_DASHBOARD_SETTINGS_PATH", str(tmp_path / "dashboard" / "settings.json"))
+    monkeypatch.setattr(dashboard_main, "_DERIVED_ENERGY_CACHE", None)
 
     response = client.get("/api/display")
 
     assert response.status_code == 200
     snapshot = response.json()
-    assert snapshot["has_ichijo_power_flow"] is True
-    assert snapshot["current_power_label"] == "現在の消費電力"
-    assert snapshot["grid_flow_label"] == "買電中"
-    assert snapshot["purchased_today_kwh"] == "0.0"
-    assert snapshot["power_freshness"] == "normal"
-    assert snapshot["sen66_freshness"] == "normal"
+    assert snapshot["mode"] == "standard"
+    assert isinstance(snapshot["blocks"], list)
+    assert snapshot["freshness"] in {"normal", "delayed", "unavailable"}
+    assert "has_ichijo_power_flow" not in snapshot
 
     normal_html = client.get("/display").text
-    assert 'source-badge--normal" hidden' in normal_html
-    assert "取得不可" not in normal_html
-    sen66_section = normal_html.index('<section id="sen66-section"')
-    sen66_section_end = normal_html.index("</section>", sen66_section)
-    purchased_today = normal_html.index('id="purchased-today-kwh"')
-    sen66_badge = normal_html.index('id="sen66-source-badge"')
-    temperature_card = normal_html.index("<p>温度</p>")
-    assert not sen66_section < purchased_today < sen66_section_end
-    assert normal_html[sen66_section:sen66_section_end].count('<article class="card">') == 5
-    assert sen66_section < sen66_badge < temperature_card
-    assert 'id="sen66-source-badge"' not in normal_html[
-        normal_html.index("<p>温度</p>") : normal_html.index("</article>", temperature_card)
-    ]
-    assert normal_html.index('id="purchased-today-kwh"') < normal_html.index('id="sold-today-kwh"')
-    assert normal_html.index('id="sold-today-kwh"') < normal_html.index('id="pv-power-kw"')
-    assert normal_html.index('id="pv-power-kw"') < normal_html.index('id="battery-soc-percent"')
-    assert normal_html.index('id="battery-soc-percent"') < normal_html.index('id="battery-power-kw"')
-    assert normal_html.count('class="power-detail-row"') == 5
-    assert normal_html.count('class="power-detail-value"') == 5
-    assert normal_html.count('class="power-detail-unit"') == 5
-    assert "today-energy-card" not in normal_html
-    assert snapshot["freshness"] in {"normal", "delayed", "unavailable"}
-
-    _write_latest(
-        latest_root,
-        "ichijo_power_flow.json",
-        {
-            "measured_at": (current_time - timedelta(seconds=601)).isoformat(),
-            "load_power_w": 1500.0,
-            "pv_power_w": 800.0,
-            "grid_import_power_w": 700.0,
-            "grid_export_power_w": 0.0,
-            "battery_soc_percent": 65.0,
-            "battery_charge_power_w": 100.0,
-            "battery_discharge_power_w": 0.0,
-            "battery_operating_state": "charging",
-        },
-        current_time,
-    )
-
-    fallback = client.get("/api/display").json()
-    assert fallback["has_ichijo_power_flow"] is False
-    assert fallback["current_power_label"] == "現在の買電"
-    assert fallback["power_direction"] == "買電"
+    assert 'id="display-blocks"' in normal_html
+    assert "Traceback" not in normal_html
+    assert 'id="current-power-kw"' not in normal_html
 
 
 def test_hero_display_html_and_javascript_expose_polling_targets(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -794,7 +758,17 @@ def test_display_items_api_lists_multiple_values_from_one_source(tmp_path: Path,
     broute = groups["電力メーター（Bルート）"]
     assert {item["field"] for item in broute} == set(broute_fields)
     assert all(item["selectable"] for item in broute)
-    assert {item["field"] for item in groups["一条パワコン"]} == set(ichijo_fields)
+    ichijo = groups["一条パワコン"]
+    assert set(ichijo_fields) <= {item["field"] for item in ichijo}
+    derived = {item["id"]: item for item in ichijo if item["id"].startswith("derived:energy:")}
+    for item_id, field in (
+        ("derived:energy:today_import_kwh", "today_import_kwh"),
+        ("derived:energy:today_export_kwh", "today_export_kwh"),
+    ):
+        assert derived[item_id]["field"] == field
+        assert derived[item_id]["group"] == "一条パワコン"
+        assert derived[item_id]["unit"] == "kWh"
+        assert derived[item_id]["selectable"] is True
     assert {item["field"] for item in groups["sen66-001"]} == set(sen66_fields)
 
 
