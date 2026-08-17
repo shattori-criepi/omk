@@ -309,7 +309,14 @@ class BleManager:
             now = self._monotonic_provider()
             if published_at is not None and now - published_at < ENVIRONMENT_PUBLISH_INTERVAL_SECONDS:
                 return
-        payload = {"device_id": sensor.sensor_id, "measured_at": advertisement.received_at, "quality": "normal", **advertisement.values}
+        payload = {
+            "device_id": sensor.sensor_id,
+            "measured_at": advertisement.received_at,
+            "quality": "normal",
+            **advertisement.values,
+        }
+        if sensor.sensor_type == "environment":
+            payload["source"] = "direct"
         self._mqtt.publish(f"omk/{sensor.sensor_id}/{sensor.sensor_type}", json.dumps(payload), qos=0, retain=False)
         if sensor.sensor_type == "environment":
             self._last_environment_publish_at[sensor.device_key] = now

@@ -4,9 +4,11 @@
 
 #include "esp_err.h"
 
+typedef struct sen66_measurement sen66_measurement_t;
+
 /* Registers an independent IP-event listener. The MQTT client is started only
  * after the station has an IP address. */
-esp_err_t mqtt_registration_start(uint64_t node_id);
+esp_err_t mqtt_registration_start(void);
 
 /* Queues one non-retained environment measurement for delivery once the
  * established MQTT client is connected. The caller owns neither the MQTT
@@ -14,3 +16,13 @@ esp_err_t mqtt_registration_start(uint64_t node_id);
 esp_err_t mqtt_registration_publish_environment(const char *sensor_id,
                                                 float temperature_c,
                                                 uint8_t relative_humidity_percent);
+
+/* Queues a relay-origin environment measurement with route metadata. */
+esp_err_t mqtt_registration_publish_relay_environment(const char *sensor_id,
+                                                       float temperature_c,
+                                                       uint8_t relative_humidity_percent,
+                                                       const char *relay_node_id);
+
+/* Queues one non-retained SEN66 measurement through the established MQTT client. */
+esp_err_t mqtt_registration_publish_sen66(const char *sensor_id,
+                                          const sen66_measurement_t *measurement);

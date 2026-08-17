@@ -1,7 +1,6 @@
 #include <string.h>
 #include "esp_log.h"
 #include "esp_partition.h"
-#include "esp_mac.h"
 #include "esp_bt.h"
 #include "nvs.h"
 #include "nvs_flash.h"
@@ -9,7 +8,9 @@
 #include "node_state.h"
 #include "mqtt_registration.h"
 #include "node_registration.h"
+#include "node_identity.h"
 #include "node_protocol.h"
+#include "sensor_manager.h"
 #include "usb_provisioning.h"
 #include "wifi_station.h"
 
@@ -22,14 +23,6 @@
 static const char *TAG = "omk-node";
 
 typedef struct __attribute__((packed)) { char magic[4]; unsigned char pop[POP_BYTES]; } factory_secret_t;
-
-static uint64_t node_id(void) {
-    uint8_t mac[6]; ESP_ERROR_CHECK(esp_efuse_mac_get_default(mac));
-    uint64_t hash = 14695981039346656037ULL;
-    for (size_t i = 0; i < sizeof(mac); ++i) { hash ^= mac[i]; hash *= 1099511628211ULL; }
-    return hash & 0x0000ffffffffffffULL;
-}
-
 
 /* Idempotent: factory data remains authoritative until an NVS read-back matches.
  * Thus a power cut before erase simply retries on the next boot. */
@@ -91,6 +84,8 @@ void app_main(void) {
     ESP_LOGI(TAG, "Factory provisioning state initialized");
 
     ESP_LOGI(TAG, "Starting normal boot");
+    uint64_t node_id;
+    ESP_ERROR_CHECK(node_identity_get_id(&node_id));
     bool has_wifi_credentials = false;
     esp_err_t wifi_err = wifi_station_prepare(&has_wifi_credentials);
     if (wifi_err != ESP_OK) {
@@ -102,7 +97,7 @@ void app_main(void) {
             ESP_LOGW(TAG, "Wi-Fi station startup failed; discovery continues: %s",
                      esp_err_to_name(wifi_err));
         } else {
-            esp_err_t mqtt_err = mqtt_registration_start(node_id());
+            esp_err_t mqtt_err = mqtt_registration_start();
             if (mqtt_err != ESP_OK) {
                 ESP_LOGW(TAG, "MQTT registration startup failed; discovery continues: %s",
                          esp_err_to_name(mqtt_err));
@@ -112,9 +107,14 @@ void app_main(void) {
     /* USB Serial/JTAG is available during the normal application lifecycle.
      * It replaces the temporary setup AP without requiring a button, a reset,
      * or a gateway wlan0 mode transition. */
-    esp_err_t usb_err = usb_provisioning_start(node_id());
+    esp_err_t usb_err = usb_provisioning_start(node_id);
     if (usb_err != ESP_OK) {
         ESP_LOGE(TAG, "USB provisioning transport failed: %s", esp_err_to_name(usb_err));
+    }
+    esp_err_t sensor_err = sensor_manager_start();
+    if (sensor_err != ESP_OK) {
+        ESP_LOGW(TAG, "Sensor manager startup failed; continuing: %s",
+                 esp_err_to_name(sensor_err));
     }
     // Safe once per boot for BLE-only operation; never repeat this in a
     // discovery lifecycle because the released Classic BT memory is permanent.
@@ -128,6 +128,6 @@ void app_main(void) {
         ESP_LOGW(TAG, "Could not read registration state; using Wi-Fi state: %s",
                  esp_err_to_name(registration_err));
     }
-    ESP_ERROR_CHECK(discovery_ble_start(node_id(), provisioning_state));
+    ESP_ERROR_CHECK(discovery_ble_start(node_id, provisioning_state));
     ESP_LOGI(TAG, "OMK Node discovery advertising started");
 }

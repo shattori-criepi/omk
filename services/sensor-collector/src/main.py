@@ -7,10 +7,13 @@ import json
 import logging
 import os
 import tempfile
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
+
+from ble_route_selector import BleRouteSelector, should_store_record
 
 try:
     import paho.mqtt.client as mqtt
@@ -143,6 +146,7 @@ class SensorCollector:
         self.topic = os.getenv("MQTT_TOPIC", "omk/#")
         self.writer = JsonlWriter(Path(os.getenv("DATA_ROOT", "/app/data/sensors")))
         self.latest_writer = LatestDataWriter(Path(os.getenv("LATEST_DATA_ROOT", "/app/data/latest")))
+        self.route_selector = BleRouteSelector()
         self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="omk-sensor-collector", clean_session=True)
         self.client.reconnect_delay_set(min_delay=1, max_delay=60)
         self.client.on_connect = self._on_connect
@@ -173,6 +177,9 @@ class SensorCollector:
             LOGGER.warning("Payload parse error topic=%s: %s", message.topic, record["payload_parse_error"])
         elif "payload_encoding" in record:
             LOGGER.warning("Non-UTF-8 payload topic=%s; storing Base64", message.topic)
+        if not should_store_record(record, self.route_selector, time.monotonic()):
+            LOGGER.debug("Discarded relay environment observation while direct BLE is fresh topic=%s", message.topic)
+            return
         if self.writer.write(record, received_at):
             self.latest_writer.write(record)
 
