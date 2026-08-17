@@ -152,3 +152,10 @@ docker compose run --rm dashboard pytest -q
 
 イメージは`PYTHONPATH=/app`を設定しているため、このコマンドはコンテナ内の`/app/tests`から
 `app` packageを一貫してimportします。
+
+Composeの認証情報mount契約はリポジトリ全体を対象とするため、Dashboard image内のpytestには
+含めません。リポジトリルートで次を実行します。
+
+```bash
+bash ./scripts/tests/test_dashboard_compose_config.sh
+```
