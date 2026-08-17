@@ -11,14 +11,10 @@ SupplementaryGroups=bluetooth
 WorkingDirectory=@OMK_ROOT@/services/ble-sensor-manager
 Environment=OMK_BLE_REGISTRY=@OMK_ROOT@/data/ble/sensors.json
 Environment=OMK_NODE_REGISTRY=@OMK_ROOT@/data/ble/nodes.json
-Environment=OMK_NODE_CREDENTIAL_DIRECTORY=@OMK_ROOT@/data/provisioning/nodes
 Environment=MQTT_HOST=192.168.50.1
 Environment=MQTT_PORT=1883
 Environment=TZ=Asia/Tokyo
 Environment=PYTHONPATH=@OMK_ROOT@/services/ble-sensor-manager/src
-# Omitted path makes a missing credential non-fatal; systemd searches its
-# encrypted credstore and provisioning alone becomes unavailable.
-LoadCredentialEncrypted=omk_ap_psk
 ExecStart=@OMK_ROOT@/services/ble-sensor-manager/.venv/bin/uvicorn omk_ble.main:app --host 0.0.0.0 --port 8787
 Restart=always
 RestartSec=5

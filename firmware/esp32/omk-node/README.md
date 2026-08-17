@@ -5,16 +5,16 @@ OMK NodeはAtomS3 Lite、オリジナルM5StickC、および将来のESP32-C3/S3
 この基盤に含めません。BLE中継ノード（`ble_scan`）と将来のSEN66ノードも同じ
 基盤を使います。
 
-この文書では、実装済みかつ実機で確認済みのDiscovery、Security 1
-Provisioning、通常起動時のWi-Fi再接続を記録します。MQTTによるBLE中継は
+この文書では、実装済みかつ実機で確認済みのDiscovery、USB Serial/JTAG
+Provisioning、通常起動時のWi-Fi再接続を記録します。USB ProvisioningはAtomS3 Liteで
+MQTT registration statusまでE2E確認済みです。MQTTによるBLE中継は
 SwitchBot Meter一台の初期E2E実装だけを確認済みです。Gateway/Dashboardからの
 汎用登録自動化、logical IDの割当は未実装です。
 
 ## 対応環境
 
 - PlatformIO: `espressif32@7.0.1`（ESP-IDF 6.0.1）に固定
-- フレームワーク: ESP-IDF。公式`espressif/network_provisioning`を
-  `src/idf_component.yml`で管理する
+- フレームワーク: ESP-IDF
 - Bluetooth: Bluedroid、BLE-only controller、BLE 4.2 legacy advertising
 - 対応確認済みボード: AtomS3 Lite、オリジナルM5StickC
 
@@ -25,6 +25,31 @@ Bluedroidのraw GAP APIを使うためです。NimBLEまたはextended advertisi
 
 `CONFIG_COMPILER_DISABLE_GCC15_WARNINGS=y`はESP-IDF 6のGCC 15互換設定です。
 ESP-IDF本体を修正したり、広範な`-Wno-error`を追加したりしません。
+
+## USB Serial/JTAG Provisioning（正式方式）
+
+AtomS3 Liteの通常firmwareはUSB Serial/JTAGをprimary consoleとして使用する。
+この同じUSB接続で、通常起動中にversioned JSON Lines protocolを処理する。
+未設定Wi-Fi時にもTemporary SoftAPを開始せずtransportは常時起動するため、物理
+ボタン、USB抜き差し、Gatewayの`wlan0`切替は不要である。
+
+Gatewayでは次を実行する。SSID/PSK/Node IDはいずれも入力しない。CLIは
+NetworkManagerの`omk-ap` profileからWi-Fi credentialを読み、`/dev/serial/by-id/*`、
+`/dev/ttyACM*`、`/dev/ttyUSB*`を列挙して`identify`応答でNodeを選別する。
+
+```bash
+python3 scripts/provision_omk_node_via_usb.py
+```
+
+`--device`は調査時だけの明示指定であり、通常運用で固定device番号には依存しない。
+Nodeは`set_wifi`受信後、既存の`wifi_station_save_credentials()`でFlash保存と
+read-back照合を行い、`accepted`応答を返してからsoftware rebootする。credentialや
+passwordはログ・応答へ含めない。再起動後は既存のSTA/MQTT registration起動経路を
+そのまま使用する。
+
+実機ログが同じstreamへ流れるため、CLIのper-command timeout既定値は10秒とする。実機判定は、CLIの`accepted`後にMQTT topic
+`omk/node/<node_id>/registration/status`で`provisioned`または`registered`を確認して
+行う。これは実機未接続のリポジトリ上では未実施である。
 
 ## Node ID
 
@@ -98,6 +123,20 @@ Dashboard登録フローを再試験する場合だけ、次を明示的に実�
 全消去、Wi-Fi credentials、`prov_pop`、`factory_secret` partitionへの操作はしません。
 通常firmwareにはこの操作へ到達するruntime経路はありません。
 
+### 開発時だけのWi-Fi Provisioning reset
+
+Gateway APIによる初回Wi-Fi Provisioningを再試験する場合だけ、次を明示的に実行します。
+
+```bash
+./scripts/reset-omk-node-wifi-provisioning.sh atom-s3-lite /dev/ttyACM0 --confirm
+```
+
+一時imageは、最初に`omk/prov_pop`を32 bytesでread-backし、ESP-IDF Wi-Fi APIで
+Flash保存のSTA configを空にしてread-backします。続いて既存helperで`registered`と
+`logical_id`だけを消去し、最後に`omk/prov_pop`を再度read-backします。NVS partition全消去、
+factory secret、factory credential、PoPへの書込みは行いません。完了後は通常firmwareを自動で
+戻すため、次bootはWi-Fiへ接続せず、直接Provisioning BLEへ入ります。
+
 ### 開発時だけのWi-Fi credential投入
 
 Wi-Fi Provisioningを介さずBLE relayなどを検証する場合だけ、次を実行します。
@@ -168,7 +207,10 @@ QoSは0、retainはfalseです。ESP側は時刻同期を行わないため`meas
 Gatewayの`sensor-collector`が受信時刻を付けてJSONLへ保存します。将来はDashboard
 登録情報を用いて、固定MACと固定`sensor_id`を置き換える予定です。
 
-## Wi-Fi credentialによるboot flow
+## 旧BLE Provisioning（廃止済み・履歴）
+
+> この節と次節は旧方式の履歴であり、現行手順ではない。BLE Security 1、Control GATT、
+> SoftAPを使った初回登録は削除済みで、初回登録はUSB Serial/JTAGのみで行う。
 
 ESP-IDF 6ではBluetooth controllerの同一boot内でのdeinit後再initを前提にしません。
 そのためDiscovery BLEとnetwork provisioning BLEを同時に動かしたり、同一boot内で
@@ -205,7 +247,7 @@ Gateway側Control retryは将来のStep 4で整理・削除予定です。
 Discoveryを使う通常bootでのClassic BT memory releaseはboot中に一度だけ行い、BLE-onlyとWi-Fi
 STAの併用には影響しません。
 
-## Security 1 BLE Provisioning
+## 旧Security 1 BLE Provisioning（廃止済み・履歴）
 
 Wi-Fi未設定bootのProvisioningは`network_prov_scheme_ble`と`NETWORK_PROV_SECURITY_1`のみを
 使用します。Security 0 / Security 2へfallbackしません。`CONFIG_ESP_PROTOCOMM_SUPPORT_SECURITY_VERSION_1=y`
@@ -281,8 +323,8 @@ sudo btmon
 Raspberry PiはOMK専用APを提供し、NodeはそのWi-Fiへ接続します。SSIDは将来
 `omk-`とsite UUIDの短縮値で構成する案がありますが、OSSは任意の識別子・非中央管理
 APでも使える設計を維持します。ランダムなWi-Fi passwordは公開識別子ではありません。
-将来は管理画面からSecurity 1 Provisioningを操作し、タブレット向けにはQR導線を
-追加します。APのLAN client側をSORACOM外部通信へ転送する機能は対象外です。
+初回登録はUSB Serial/JTAGを維持し、将来のESP-Mesh-Lite等のnetwork backend変更と
+独立させます。APのLAN client側をSORACOM外部通信へ転送する機能は対象外です。
 
 電波が弱いフロアでは、`ble_scan` capabilityを持つWi-Fi接続ESP32をBLE scanner / relay
 として配置できます。logical IDの例は`ble-relay-001`です。将来このNodeは接続不要の

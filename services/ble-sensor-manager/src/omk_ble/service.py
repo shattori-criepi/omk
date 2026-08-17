@@ -6,14 +6,11 @@ import logging
 import os
 from time import monotonic
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any, Callable
 
 import paho.mqtt.client as mqtt
 
 from .models import DecodedAdvertisement, RegisteredSensor, now_iso
-from .node_credentials import NodeCredentialStore
-from .node_provisioning import NodeProvisioner
 from .node_registry import NodeRegistry
 from .omk_node import decode as decode_omk_node
 from .registry import SensorRegistry
@@ -24,11 +21,6 @@ ENVIRONMENT_PUBLISH_INTERVAL_SECONDS = 10.0
 STATE_PUBLISH_INTERVAL_SECONDS = 10.0
 POWER_PUBLISH_INTERVAL_SECONDS = 10.0
 NODE_CAPABILITY_NAMES = ((1 << 0, "ble_scan"), (1 << 1, "sen66"))
-DISCOVERY_CONTROL_START_UUID = "c1347091-4268-2fb1-884a-7d019a432155"
-CONTROL_CONNECT_MAX_ATTEMPTS = 8
-CONTROL_CONNECT_TIMEOUT_SECONDS = 4.0
-CONTROL_REDISCOVERY_TIMEOUT_SECONDS = 2.0
-CONTROL_CONNECT_RETRY_SECONDS = 0.25
 
 
 class BleManager:
@@ -47,10 +39,6 @@ class BleManager:
         # updates never affect position during a session.
         self.observations: dict[str, DecodedAdvertisement] = {}
         self.node_observations: dict[str, DecodedAdvertisement] = {}
-        # BLEDevice is deliberately runtime-only. It avoids BleakClient's
-        # address-string implicit discovery when a provisioning job pauses the
-        # passive scanner before opening the Control GATT connection.
-        self._node_devices: dict[str, Any] = {}
         self._previous_motion_state: dict[str, int] = {}
         self._previous_contact_state: dict[str, int] = {}
         self._last_environment_publish_at: dict[str, float] = {}
@@ -66,11 +54,6 @@ class BleManager:
         self.offline_seconds = int(os.getenv("OMK_BLE_OFFLINE_SECONDS", "900"))
         self._now_provider = now_provider or (lambda: datetime.now(timezone.utc))
         self._monotonic_provider = monotonic_provider or monotonic
-        credential_directory = Path(os.getenv("OMK_NODE_CREDENTIAL_DIRECTORY", "data/provisioning/nodes"))
-        self._node_provisioner = NodeProvisioner(
-            self.pause_collection, self.start_collection, self._node_effective_state,
-            NodeCredentialStore(credential_directory), self._send_start_provisioning,
-        )
 
     async def start_scan(self, timeout_seconds: int = 60) -> None:
         await self.start_collection()
@@ -101,99 +84,6 @@ class BleManager:
         finally:
             self._scanner = None
 
-    async def _send_start_provisioning(self, node_id: str) -> None:
-        seen = self.node_observations.get(node_id)
-        address = seen.raw.get("ble_address") if seen else None
-        if not isinstance(address, str) or not address:
-            raise RuntimeError("node is no longer visible over BLE")
-
-        LOGGER.info("Starting OMK Node provisioning node_id=%s", node_id)
-        # A cached device is valid for the first attempt only. A failed BlueZ
-        # connection may leave it stale, so every later attempt explicitly
-        # rediscovers the peripheral before creating a new client.
-        ble_device = self._node_devices.get(node_id)
-        last_error: Exception | None = None
-        for attempt in range(1, CONTROL_CONNECT_MAX_ATTEMPTS + 1):
-            client: Any | None = None
-            if attempt > 1 or ble_device is None:
-                try:
-                    from bleak import BleakScanner
-                    LOGGER.info(
-                        "Rediscovering OMK Node control device node_id=%s attempt=%d/%d phase=rediscovery",
-                        node_id,
-                        attempt,
-                        CONTROL_CONNECT_MAX_ATTEMPTS,
-                    )
-                    ble_device = await BleakScanner.find_device_by_address(
-                        address,
-                        timeout=CONTROL_REDISCOVERY_TIMEOUT_SECONDS,
-                    )
-                    if ble_device is None:
-                        raise RuntimeError("node was not found during rediscovery")
-                    self._node_devices[node_id] = ble_device
-                except Exception as error:
-                    last_error = error
-                    LOGGER.warning(
-                        "OMK Node control retry failed node_id=%s attempt=%d/%d phase=rediscovery",
-                        node_id,
-                        attempt,
-                        CONTROL_CONNECT_MAX_ATTEMPTS,
-                    )
-                    if attempt < CONTROL_CONNECT_MAX_ATTEMPTS:
-                        await asyncio.sleep(CONTROL_CONNECT_RETRY_SECONDS)
-                    continue
-            try:
-                from bleak import BleakClient
-                client = BleakClient(ble_device)
-                LOGGER.info(
-                    "Connecting to OMK Node control service node_id=%s attempt=%d/%d phase=connect",
-                    node_id,
-                    attempt,
-                    CONTROL_CONNECT_MAX_ATTEMPTS,
-                )
-                await asyncio.wait_for(client.connect(), timeout=CONTROL_CONNECT_TIMEOUT_SECONDS)
-                break
-            except Exception as error:
-                last_error = error
-                LOGGER.warning(
-                    "OMK Node control retry failed node_id=%s attempt=%d/%d phase=connect",
-                    node_id,
-                    attempt,
-                    CONTROL_CONNECT_MAX_ATTEMPTS,
-                )
-                if client is not None:
-                    try:
-                        await client.disconnect()
-                    except Exception:
-                        pass
-                if attempt < CONTROL_CONNECT_MAX_ATTEMPTS:
-                    await asyncio.sleep(CONTROL_CONNECT_RETRY_SECONDS)
-        else:
-            # No START request could have reached the Node without a control
-            # connection, so this remains a definite failure.
-            raise RuntimeError("could not connect to node control service") from last_error
-
-        try:
-            # Keep a write request here: it is the characteristic's supported
-            # operation, and lets the Node acknowledge START when it has time.
-            # The Node may reboot immediately after accepting it, however, so a
-            # missing response is not evidence that START was not delivered.
-            LOGGER.info("Control START write attempted node_id=%s", node_id)
-            try:
-                await client.write_gatt_char(DISCOVERY_CONTROL_START_UUID, b"\x01", response=True)
-            except Exception:
-                LOGGER.info(
-                    "Control connection ended after START; continuing to provisioning service node_id=%s",
-                    node_id,
-                )
-        finally:
-            try:
-                await client.disconnect()
-            except Exception:
-                # A rebooted Node has already closed the link. Disconnect is
-                # best-effort cleanup and must not change the START outcome.
-                LOGGER.debug("Control disconnect completed after Node link closed node_id=%s", node_id)
-
     async def _stop_after(self, seconds: int) -> None:
         await asyncio.sleep(seconds)
         await self.stop_scan()
@@ -215,8 +105,6 @@ class BleManager:
             if decoded is None:
                 decoded = decode(device.address, advertisement.rssi, advertisement.manufacturer_data, advertisement.service_data, received_at)
             if decoded:
-                if decoded.model == "omk_node":
-                    self._node_devices[decoded.values["node_id"]] = device
                 self.record_advertisement(decoded)
         except Exception:
             # A malformed packet must not prevent later BlueZ callbacks.
@@ -245,25 +133,13 @@ class BleManager:
             seen = self.node_observations.get(node_id)
             if seen:
                 item.update({"capabilities": seen.values["capabilities"], "ble_state": seen.values["provisioning_state"],
-                             "last_seen": seen.received_at, "ble_address": seen.raw.get("ble_address")})
+                             "last_seen": seen.received_at, "ble_address": seen.raw.get("ble_address"),
+                             "source": "omk_discovery"})
             elif isinstance(item.get("capabilities"), int):
                 item["capabilities"] = [name for bit, name in NODE_CAPABILITY_NAMES if item["capabilities"] & bit]
             item["registration_state"] = item.get("registration_state", item.get("ble_state", "unregistered"))
-            job = self._node_provisioner.job(node_id)
-            if job:
-                item.update(job.as_dict())
             result.append(item)
         return result
-
-    def _node_effective_state(self, node_id: str) -> str | None:
-        item = next((item for item in self.node_list() if item["node_id"] == node_id), None)
-        return item.get("registration_state") if item else None
-
-    async def request_node_provisioning(self, node_id: str) -> dict[str, str]:
-        if not self._node_id_valid(node_id):
-            raise ValueError("invalid node_id")
-        job = await self._node_provisioner.start(node_id)
-        return {"node_id": node_id, **job.as_dict()}
 
     @staticmethod
     def _node_id_valid(value: Any) -> bool:

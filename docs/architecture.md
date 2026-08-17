@@ -74,29 +74,15 @@ ESP32側へ、表示、長期保存、クラウド固有ロジック、複雑な
 
 ### 3.3 ESP32 NodeのDiscoveryとProvisioning
 
-ESP32 NodeはAtomS3 Lite、オリジナルM5StickC、将来のESP32-C3/S3で共用する
-ESP-IDF基盤である。factory secretをNVSへ安全に移送した後、保存済みWi-Fi credentialの
-有無でboot flowを分ける。credentialがないNodeは起動直後からEspressif標準
-`network_provisioning`のBLE serviceを開始し、Security 1とNode固有PoPでWi-Fi設定を受ける。
-設定・接続成功後はProvisioning serviceの終了を待ち、callback外のtaskからrebootする。
-再起動後、credentialがあるNodeだけがWi-Fi STA、MQTT registration、秘密情報を含まないBLE
-Discovery v1を開始する。同一boot内でDiscovery BLEとProvisioning BLEの所有権を切り替えない
-ことで、ESP-IDF 6のBluetooth controller再初期化制約を回避する。
+ESP32 Nodeは通常firmware中のUSB Serial/JTAG transportで初回Wi-Fi設定を受ける。Gatewayは
+USB serial候補を自動検出してNode IDを取得し、OMK AP credentialを送信する。Nodeは既存の
+credential storageへ保存・read-back照合後にsoftware rebootし、通常のWi-Fi STAとMQTT
+registration statusで完了を確認する。SSID、PSK、Node ID、物理ボタンの入力は不要である。
 
-Security 1のPoPはNodeごとのfactory secretから得る。共通secretを使わず、secretは
-advertising・ログ・リポジトリへ出さない。Node IDは識別子であって認証情報ではなく、所有確認は
-Security 1とNode固有PoP handshakeで行う。Gatewayはfactory flash時に作るNode credential storeを
-使用する。Wi-Fi未設定bootではOMK Discovery BLEを開始せず、network provisioning managerが
-BLEおよびcredentials apply後のWi-Fi接続を所有する。netif/event loop/Wi-Fi driverの初期化と
-保存済みcredential確認はNodeの`wifi_station_prepare()`が一度だけ行う。旧Control GATTは設定済みNodeを明示的に
-再Provisioningする移行互換経路であり、初回設定には不要で、将来削除する予定である。詳細な
-プロトコル、factory flash、実機確認済み事項と未実装範囲は
+USB接続は初回登録時だけで、reset手段としてUSB抜き差しを前提にしない。Provisioning transport、
+credential storage、network backendは分離しており、将来ESP-Mesh-Lite等へbackendを変更できる。
+Discovery BLEとSwitchBot relayは通常機能として維持する。詳細は
 [`firmware/esp32/omk-node/README.md`](../firmware/esp32/omk-node/README.md)を正とする。
-
-Gateway側の直接Provisioning candidate検出は次段階の実装対象である。候補はProvisioning
-advertisementのcustom Service UUIDと`OMK_<12桁node_id>`というservice nameから識別する計画で、
-OMK Discovery Service Dataには依存しない。候補の識別だけは認証を意味せず、Wi-Fi設定の最終的な
-Node所有確認はSecurity 1 + Node固有PoP handshakeで行う。
 
 ### 3.4 Windows開発PCの役割
 
