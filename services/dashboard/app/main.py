@@ -75,12 +75,16 @@ def _default_blocks(candidates: list) -> list[DisplayBlock]:
             break
         layout_pattern = default_layout_pattern(size)
         blocks.append(DisplayBlock(
-            block_id=f"block_{index + 1}", group=item.group, title=item.group, size=size,
+            block_id=f"block_{index + 1}", group=item.group, title=_default_block_title(item.group), size=size,
             primary_item_id=item.id, item_ids=tuple(candidate.id for candidate in items[:item_limit(size, layout_pattern)]),
             layout_pattern=layout_pattern,
         ))
         capacity += cost
     return blocks
+
+
+def _default_block_title(group: str) -> str:
+    return "一条パワコン" if group == "太陽光・蓄電池" else group
 
 
 def get_dashboard_view_model():

@@ -451,6 +451,9 @@ def test_hero_display_html_and_javascript_expose_polling_targets(tmp_path: Path,
     assert "display-card--hero" in response.text
     assert 'class="display-card-primary"' in response.text
     assert 'class="display-card-secondary"' in response.text
+    assert 'class="display-secondary-label"' in response.text
+    assert 'class="display-secondary-value"' in response.text
+    assert 'class="display-secondary-unit"' in response.text
     assert 'fetch("/api/display", { cache: "no-store" })' in javascript
     assert "DISPLAY_POLL_INTERVAL_MS = 10_000" in javascript
     assert "headerWeekday.textContent" in javascript
@@ -697,6 +700,13 @@ def test_energy_blocks_keep_multiple_broute_and_ichijo_values(tmp_path: Path) ->
     assert (blocks[1].primary.value, blocks[1].secondary[0].value) == ("1.10", "1.21")
 
 
+def test_power_flow_default_group_title_is_rendered_as_ichijo_power_conditioner(tmp_path: Path) -> None:
+    load = _write_generic_item(tmp_path, "t", topic="omk/ichijo/power-flow", device_id="ichijo", field="load_power_w", value=1103, received_at=NOW)
+    block = DisplayBlock("ichijo", "太陽光・蓄電池", "太陽光・蓄電池", "large", load, (load,), "hero")
+
+    assert selected_blocks(DisplayRepository(tmp_path), (block,), NOW)[0].title == "一条パワコン"
+
+
 def test_ichijo_charge_and_discharge_are_one_dashboard_only_battery_row(tmp_path: Path) -> None:
     load = _write_generic_item(tmp_path, "a", topic="omk/ichijo/power-flow", device_id="ichijo", field="load_power_w", value=1103, received_at=NOW)
     pv = _write_generic_item(tmp_path, "b", topic="omk/ichijo/power-flow", device_id="ichijo", field="pv_power_w", value=520, received_at=NOW)
@@ -774,13 +784,15 @@ def test_display_pattern_css_keeps_only_hero_primary_large_and_fits_the_viewport
     template = (Path(__file__).parents[1] / "app" / "templates" / "display.html").read_text(encoding="utf-8")
 
     assert ".standard-dashboard { height: 100vh; height: 100dvh; min-height: 0;" in stylesheet
-    assert ".standard-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); grid-auto-rows: minmax(0, 1fr);" in stylesheet
-    assert ".display-card--large { grid-column: span 6;" in stylesheet
-    assert ".display-card--medium { grid-column: span 3;" in stylesheet
-    assert ".display-card--small { grid-column: span 2;" in stylesheet
+    assert ".standard-grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); grid-auto-rows: minmax(0, 1fr);" in stylesheet
+    assert ".display-card--large { grid-column: span 12;" in stylesheet
+    assert ".display-card--medium { grid-column: span 8;" in stylesheet
+    assert ".display-card--small { grid-column: span 4;" in stylesheet
     assert ".display-card--hero .display-card-primary .display-card-reading strong" in stylesheet
     assert ".display-card--compact { grid-template-rows: auto minmax(0, 1fr) auto;" in stylesheet
     assert ".display-card-compact-items { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));" in stylesheet
+    assert ".display-secondary-value { justify-self: end;" in stylesheet
+    assert ".display-secondary-unit { min-height: 0;" in stylesheet
     assert "{% elif block.layout_pattern == 'compact' %}" in template
     assert 'class="display-card-compact-items"' in template
 

@@ -166,11 +166,16 @@ def selected_blocks(
             freshness = FreshnessStatus.DELAYED.value
         last_received_at = max((item.last_received_at for item in values if item.last_received_at), default="")
         rendered.append(DisplayBlockView(
-            id=block.block_id, title=block.title, group=block.group, size=block.size,
+            id=block.block_id, title=_display_block_title(block.title, block.group), group=block.group, size=block.size,
             layout_pattern=block.layout_pattern,
             primary=primary, secondary=secondary, freshness=freshness, last_received_at=last_received_at,
         ))
     return rendered
+
+
+def _display_block_title(title: str, group: str) -> str:
+    """Keep the energy-system block compact without overriding custom titles."""
+    return "一条パワコン" if group == "太陽光・蓄電池" and title == group else title
 
 
 def _display_item(
