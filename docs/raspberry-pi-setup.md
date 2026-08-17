@@ -289,7 +289,8 @@ docker compose restart mosquitto sensor-collector dashboard harvest-uploader
 Dashboard Phase 2以降では、`data/dashboard/settings.json`が表示設定の保存先です。Compose更新後は
 `mkdir -p data/dashboard`を確認し、管理メニューの「表示設定」から標準プリセットの項目・順序・
 サイズを保存できます。`data/latest`は引き続きDashboardから読み取り専用で、`data/dashboard`だけが
-Dashboardコンテナへの書込みmountです。
+Dashboardコンテナへの書込みmountです。`settings.json`は秘密情報を含まない表示設定のため`0644`で
+保存され、通常の運用ユーザーで`cat`やバックアップができます。
 
 ### トラブルシューティング
 

@@ -123,7 +123,8 @@ Raspberry Pi自身またはLAN内から利用する場合は、`localhost`をPi�
 配置座標は指定しません。標準プリセットは容量6で、large=3、medium=2、small=1を消費します。
 
 設定はホストの`data/dashboard/settings.json`へatomic replaceで保存し、Dashboardコンテナだけが
-このディレクトリを読み書きします。generic catalogが存在する初回起動時は、Bルートまたは電力値を
+このディレクトリを読み書きします。設定ファイルは秘密情報を含まないため`0644`で保存し、通常の
+ホスト運用ユーザーも読取り・バックアップできます。generic catalogが存在する初回起動時は、Bルートまたは電力値を
 large、続く環境値をsmallとして容量内で初期選択します。catalogは通信断で消えないため、選択済み
 カードも消えず、遅延時は最後の値、取得不可時は`--`を表示します。
 
@@ -148,3 +149,6 @@ Docker Composeを使う場合:
 ```bash
 docker compose run --rm dashboard pytest -q
 ```
+
+イメージは`PYTHONPATH=/app`を設定しているため、このコマンドはコンテナ内の`/app/tests`から
+`app` packageを一貫してimportします。
