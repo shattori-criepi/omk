@@ -14,6 +14,7 @@ from typing import Any, Callable, Protocol
 from zoneinfo import ZoneInfo
 
 from .aggregation import JST, MinuteAggregator
+from .ble_route_selector import BleRouteSelector, should_aggregate_observation
 from .http_client import HarvestClient
 from .queue import RetryQueue
 
@@ -36,24 +37,33 @@ class ReceivedMqttMessage:
     topic: str
     payload: bytes
     received_at: datetime
+    received_monotonic: float
 
 
 class Uploader:
     """Application service; its clock and sender are injectable for deterministic tests."""
 
-    def __init__(self, queue: RetryQueue, sender: Sender, *, clock: Callable[[], datetime] | None = None, max_age_seconds: int = 3600) -> None:
+    def __init__(self, queue: RetryQueue, sender: Sender, *, clock: Callable[[], datetime] | None = None,
+                 monotonic_provider: Callable[[], float] | None = None, max_age_seconds: int = 3600) -> None:
         self.aggregator = MinuteAggregator()
         self.queue, self.sender = queue, sender
         self.clock = clock or (lambda: datetime.now(JST))
+        self.monotonic_provider = monotonic_provider or time.monotonic
+        self.route_selector = BleRouteSelector()
         self.max_age_seconds = max_age_seconds
 
-    def receive(self, topic: str, payload_bytes: bytes, received_at: datetime | None = None) -> None:
+    def receive(self, topic: str, payload_bytes: bytes, received_at: datetime | None = None,
+                received_monotonic: float | None = None) -> None:
         try:
             payload = json.loads(payload_bytes.decode("utf-8"), parse_constant=lambda value: (_ for _ in ()).throw(ValueError(value)))
             if not isinstance(payload, dict):
                 raise ValueError("payload is not an object")
         except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
             LOGGER.warning("Ignoring invalid MQTT payload topic=%s", topic)
+            return
+        if not should_aggregate_observation(topic, payload, self.route_selector,
+                                            received_monotonic if received_monotonic is not None else self.monotonic_provider()):
+            LOGGER.debug("Discarded relay environment observation while direct BLE is fresh topic=%s", topic)
             return
         completed = self.aggregator.ingest(topic, payload, received_at or self.clock())
         if completed is not None:
@@ -99,6 +109,7 @@ class MqttRuntime:
         topic: str = "omk/#",
         client_factory: Callable[..., Any] | None = None,
         clock: Callable[[], datetime] | None = None,
+        monotonic_provider: Callable[[], float] | None = None,
     ) -> None:
         if client_factory is None:
             if mqtt is None:
@@ -109,6 +120,7 @@ class MqttRuntime:
             kwargs["callback_api_version"] = mqtt.CallbackAPIVersion.VERSION2
         self.host, self.port, self.topic, self.uploader = host, port, topic, uploader
         self._clock = clock or (lambda: datetime.now(JST))
+        self._monotonic_provider = monotonic_provider or time.monotonic
         # paho invokes callbacks on its network thread. Only this Queue crosses
         # into the application thread; aggregation, SQLite, and HTTP delivery
         # remain exclusively owned by run().
@@ -149,6 +161,7 @@ class MqttRuntime:
             topic=message.topic,
             payload=bytes(message.payload),
             received_at=self._clock().astimezone(JST),
+            received_monotonic=self._monotonic_provider(),
         ))
 
     def _drain_inbox(self) -> None:
@@ -159,7 +172,7 @@ class MqttRuntime:
                 message = self.inbox.get_nowait()
             except thread_queue.Empty:
                 return
-            self.uploader.receive(message.topic, message.payload, message.received_at)
+            self.uploader.receive(message.topic, message.payload, message.received_at, message.received_monotonic)
 
 
 def run_from_environment() -> None:

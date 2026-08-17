@@ -7,6 +7,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from harvest_uploader.aggregation import MinuteAggregator
+from harvest_uploader.ble_route_selector import BleRouteSelector, should_aggregate_observation
 from harvest_uploader.queue import RetryQueue
 from harvest_uploader.service import MqttRuntime, Uploader
 
@@ -80,6 +81,56 @@ def test_environment_ignores_missing_none_nonfinite_invalid_and_excluded_topics(
     aggregator.ingest("omk/th-001/status", {"temperature_c": 99}, at(30))
     assert aggregator.flush_due(at(0, 35)) == {
         "time": "2026-08-05T10:34:00+09:00", "th-001_temperature_c": 25,
+    }
+
+
+def test_ble_route_selection_prefers_direct_and_limits_relay_fallback():
+    selector = BleRouteSelector()
+
+    def environment(device_id: str, source: str | None) -> tuple[str, dict]:
+        payload = {"device_id": device_id, "temperature_c": 24.4}
+        if source is not None:
+            payload["source"] = source
+        return f"omk/{device_id}/environment", payload
+
+    topic, payload = environment("meter-001", "direct")
+    assert should_aggregate_observation(topic, payload, selector, 0.0)
+    topic, payload = environment("meter-001", "relay")
+    assert not should_aggregate_observation(topic, payload, selector, 0.0)
+    assert not should_aggregate_observation(topic, payload, selector, 29.999)
+    assert should_aggregate_observation(topic, payload, selector, 30.0)
+    topic, payload = environment("meter-001", "direct")
+    assert should_aggregate_observation(topic, payload, selector, 31.0)
+    topic, payload = environment("meter-001", "relay")
+    assert not should_aggregate_observation(topic, payload, selector, 31.001)
+    topic, payload = environment("meter-002", "relay")
+    assert should_aggregate_observation(topic, payload, selector, 31.001)
+    topic, payload = environment("meter-003", None)
+    assert should_aggregate_observation(topic, payload, selector, 31.001)
+    assert should_aggregate_observation(
+        "omk/meter-004/sen66", {"device_id": "meter-004", "source": "direct"}, selector, 31.001,
+    )
+    topic, payload = environment("meter-004", "relay")
+    assert should_aggregate_observation(topic, payload, selector, 31.001)
+
+
+def test_uploader_discards_fresh_relay_environment_observation(tmp_path: Path):
+    queue = RetryQueue(tmp_path / "queue.sqlite3")
+    uploader = Uploader(queue, Sender(), clock=lambda: at(5))
+    uploader.receive(
+        "omk/th-001/environment",
+        b'{"device_id":"th-001","source":"direct","temperature_c":20}',
+        at(5),
+        0.0,
+    )
+    uploader.receive(
+        "omk/th-001/environment",
+        b'{"device_id":"th-001","source":"relay","relay_node_id":"09dda0d5a8f2","temperature_c":30}',
+        at(10),
+        1.0,
+    )
+    assert uploader.aggregator.flush_due(at(0, 35)) == {
+        "time": "2026-08-05T10:34:00+09:00", "th-001_temperature_c": 20,
     }
 
 
