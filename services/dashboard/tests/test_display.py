@@ -443,6 +443,8 @@ def test_dynamic_display_html_and_javascript_expose_polling_targets(tmp_path: Pa
     assert response.status_code == 200
     for element_id in ("header-date-main", "header-weekday", "header-time", "updated-at", "freshness", "display-items"):
         assert f'id="{element_id}"' in response.text
+    assert 'class="admin-link"' in response.text
+    assert '<svg viewBox="0 0 24 24"' in response.text
     for item_id, size in zip(item_ids, ("large", "medium", "small"), strict=True):
         assert f'data-item-id="{item_id}"' in response.text
         assert f"display-card--{size}" in response.text
@@ -456,6 +458,7 @@ def test_dynamic_display_html_and_javascript_expose_polling_targets(tmp_path: Pa
     assert ".display-card--large" in stylesheet
     assert ".display-card--medium" in stylesheet
     assert ".display-card--small" in stylesheet
+    assert ".admin-link svg { width: clamp(28px, 3vw, 36px);" in stylesheet
     assert "font-variant-numeric: tabular-nums" in stylesheet
 
 
@@ -495,7 +498,17 @@ def test_generic_catalog_candidates_group_and_format_values(tmp_path: Path) -> N
     assert candidates[ichijo_id].group == "太陽光・蓄電池"
     assert candidates[status_id].selectable is False
     assert definition_for("unknown_scalar").selectable is True
+    assert definition_for("net_power_w").semantic_role == "grid_power"
+    assert definition_for("net_power_w").unit == "kW"
+    assert format_value(1103, definition_for("load_power_w")) == "1.10"
+    assert format_value(23, definition_for("net_power_w")) == "0.02"
+    assert definition_for("power_w").semantic_role == "device_power"
+    assert definition_for("power_w").unit == "W"
+    assert format_value(4.1, definition_for("power_w")) == "4.1"
     assert format_value(True, definition_for("switch_state")) == "ON"
+    display_candidates = {item.id: item for item in catalog_items_with_latest(repository, NOW)}
+    assert (display_candidates[broute_id].value, display_candidates[broute_id].unit) == ("1.23", "kW")
+    assert (display_candidates[plug_id].value, display_candidates[plug_id].unit) == ("12.3", "W")
 
 
 def test_settings_validate_capacity_duplicates_and_persist_atomically(tmp_path: Path) -> None:
@@ -526,6 +539,38 @@ def test_catalog_candidates_include_the_same_latest_value_and_freshness_as_displ
     assert candidates[item_id].freshness == "normal"
     assert selected[0].value == candidates[item_id].value
     assert selected[0].freshness == candidates[item_id].freshness
+
+
+def test_display_items_api_lists_multiple_values_from_one_source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    latest_root = tmp_path / "latest"
+    fields = ("net_power_w", "cumulative_energy_import_kwh", "cumulative_energy_export_kwh")
+    for suffix, field in zip(("m", "n", "o"), fields, strict=True):
+        _write_generic_item(
+            latest_root, suffix, topic="omk/broute-001/power", device_id="broute-001",
+            field=field, value=10, received_at=datetime.now(JST),
+        )
+    monkeypatch.setenv("OMK_LATEST_DATA_ROOT", str(latest_root))
+
+    response = client.get("/api/admin/display-items")
+
+    assert response.status_code == 200
+    groups = {group["name"]: group["items"] for group in response.json()["groups"]}
+    broute = groups["電力メーター（Bルート）"]
+    assert {item["field"] for item in broute} == set(fields)
+    assert all(item["selectable"] for item in broute)
+
+
+def test_admin_display_css_allows_vertical_scroll_without_changing_kiosk_overflow() -> None:
+    stylesheet = (Path(__file__).parents[1] / "app" / "static" / "display.css").read_text(encoding="utf-8")
+    admin_template = (Path(__file__).parents[1] / "app" / "templates" / "admin_display.html").read_text(encoding="utf-8")
+    display_template = (Path(__file__).parents[1] / "app" / "templates" / "display.html").read_text(encoding="utf-8")
+
+    assert "body.admin-body { overflow-x: hidden; overflow-y: auto; }" in stylesheet
+    assert ".display-settings-page { width: min(100%, 1180px);" in stylesheet
+    assert ".display-settings-page { padding: 14px; }" in stylesheet
+    assert '<body class="admin-body">' in admin_template
+    assert '<body class="admin-body">' not in display_template
+    assert "overflow: hidden;" in stylesheet
 
 
 def test_dynamic_display_api_uses_selected_order_and_keeps_unavailable_slot(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -604,6 +649,37 @@ def test_ble_proxy_preserves_status_and_safely_formats_backend_errors(
         asyncio.run(dashboard_main._ble_request("POST", "/api/nodes/x/register", {"logical_id": "bad"}))
     assert error.value.status_code == status
     assert error.value.detail == expected
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is required for admin UI tests")
+def test_display_settings_ui_shows_all_source_items_and_marks_selected() -> None:
+    javascript_path = Path(__file__).parents[1] / "app" / "static" / "admin_display.js"
+    harness = r'''
+const fs = require("fs"), vm = require("vm");
+function element() { return {innerHTML: "", textContent: "", disabled: false, addEventListener() {}, closest() { return null; }}; }
+const elements = Object.fromEntries(["#selected-items", "#available-items", "#capacity-status", "#settings-status", "#save-settings"].map(key => [key, element()]));
+global.document = {querySelector: selector => elements[selector]};
+global.fetch = async url => ({ok: true, json: async () => url.endsWith("display-items") ? {
+  capacity: 6,
+  groups: [{name: "SEN66", items: [
+    {id: "temperature", label: "sen66 温度", group: "SEN66", category: "室内環境", last_received_at: "now", selectable: true},
+    {id: "humidity", label: "sen66 湿度", group: "SEN66", category: "室内環境", last_received_at: "now", selectable: true},
+    {id: "co2", label: "sen66 CO₂", group: "SEN66", category: "室内環境", last_received_at: "now", selectable: true},
+  ]}],
+} : {presets: {standard: {items: [{item_id: "temperature", size: "small"}]}}}});
+vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8"));
+setImmediate(() => console.log(JSON.stringify({selected: elements["#selected-items"].innerHTML, available: elements["#available-items"].innerHTML})));
+'''
+    completed = subprocess.run(
+        ["node", "-e", harness, str(javascript_path)], check=True, capture_output=True, text=True,
+    )
+    result = json.loads(completed.stdout)
+
+    assert "sen66 温度" in result["selected"]
+    assert all(label in result["available"] for label in ("sen66 温度", "sen66 湿度", "sen66 CO₂"))
+    assert "display-candidate is-selected" in result["available"]
+    assert "表示中" in result["available"]
+    assert result["available"].count("追加する") == 2
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is required for admin UI tests")
