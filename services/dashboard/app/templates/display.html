@@ -4,10 +4,10 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <title>OMK ダッシュボード</title>
-    <link rel="stylesheet" href="{{ url_for('static', path='/display.css') }}?v=20260812-topbar">
+    <link rel="stylesheet" href="{{ url_for('static', path='/display.css') }}?v=20260817-display-blocks">
   </head>
   <body>
-    {% if dashboard.items is defined %}
+    {% if dashboard.blocks is defined %}
     <main class="dashboard standard-dashboard" aria-label="OMK ダッシュボード">
       <header class="topbar">
         <time id="current-datetime" class="current-datetime" aria-label="現在日時">
@@ -18,14 +18,20 @@
           <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M19.14 12.94c.04-.31.06-.63.06-.94s-.02-.63-.07-.94l2.03-1.58-1.92-3.32-2.39.96a7.32 7.32 0 0 0-1.63-.94L14.86 3h-3.84l-.36 2.24c-.58.24-1.13.55-1.63.94l-2.39-.96-1.92 3.32 2.03 1.58A7.1 7.1 0 0 0 6.68 12c0 .32.02.63.07.94l-2.03 1.58 1.92 3.32 2.39-.96c.5.39 1.05.71 1.63.94L11.02 21h3.84l.36-2.24c.58-.24 1.13-.55 1.63-.94l2.39.96 1.92-3.32-2.03-1.58ZM12.94 16a4 4 0 1 1 0-8 4 4 0 0 1 0 8Z"/></svg>
         </a>
       </header>
-      <section id="display-items" class="standard-grid" aria-label="選択した表示項目">
-        {% for item in dashboard.items %}
-        <article class="display-card display-card--{{ item.size }} display-card--{{ item.freshness }}" data-item-id="{{ item.id }}">
-          <p class="display-card-label">{{ item.label }}</p>
-          <div class="display-card-reading"><strong data-role="value">{{ item.value }}</strong>{% if item.unit and item.freshness != 'unavailable' %}<span data-role="unit">{{ item.unit }}</span>{% endif %}</div>
-          <small data-role="freshness">{% if item.freshness == 'delayed' %}遅延{% elif item.freshness == 'unavailable' %}取得不可{% endif %}</small>
+      <section id="display-blocks" class="standard-grid" aria-label="選択した表示ブロック">
+        {% for block in dashboard.blocks %}
+        <article class="display-card display-card--{{ block.size }} display-card--{{ block.freshness }}" data-block-id="{{ block.id }}">
+          <p class="display-card-label">{{ block.title }}</p>
+          <div class="display-card-primary" data-item-id="{{ block.primary.id }}">
+            <p data-role="label">{{ block.primary.label }}</p>
+            <div class="display-card-reading"><strong data-role="value">{{ block.primary.value }}</strong>{% if block.primary.unit and block.primary.freshness != 'unavailable' %}<span data-role="unit">{{ block.primary.unit }}</span>{% endif %}</div>
+          </div>
+          {% if block.secondary %}<div class="display-card-secondary">
+            {% for item in block.secondary %}<div class="display-secondary-item" data-item-id="{{ item.id }}"><span data-role="label">{{ item.label }}</span><strong data-role="value">{{ item.value }}</strong>{% if item.unit and item.freshness != 'unavailable' %}<small data-role="unit">{{ item.unit }}</small>{% endif %}</div>{% endfor %}
+          </div>{% endif %}
+          <small data-role="freshness">{% if block.freshness == 'delayed' %}遅延{% elif block.freshness == 'unavailable' %}取得不可{% endif %}</small>
         </article>
-        {% else %}<p class="dashboard-empty">表示項目がありません。管理画面の「表示設定」で選択してください。</p>{% endfor %}
+        {% else %}<p class="dashboard-empty">表示ブロックがありません。管理画面の「表示設定」で選択してください。</p>{% endfor %}
       </section>
     </main>
     {% else %}
@@ -148,6 +154,6 @@
     </main>
     {% endif %}
 
-    <script src="{{ url_for('static', path='/display.js') }}?v=20260805-1" defer></script>
+    <script src="{{ url_for('static', path='/display.js') }}?v=20260817-blocks" defer></script>
   </body>
 </html>

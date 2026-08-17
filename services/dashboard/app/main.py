@@ -15,8 +15,8 @@ from fastapi.templating import Jinja2Templates
 from app.data.latest_repository import LatestRepository
 from app.data.parquet_repository import ParquetRepository
 from app.data.display_repository import DisplayRepository
-from app.data.settings_repository import DisplaySelection, SettingsError, SettingsRepository
-from app.display_items import candidate_for, catalog_items_with_latest, selected_items
+from app.data.settings_repository import DisplayBlock, SettingsError, SettingsRepository
+from app.display_items import candidate_for, catalog_items_with_latest, selected_blocks
 from app.view_models import FreshnessStatus, worst_freshness
 from app.view_models import get_display_view_model
 
@@ -50,28 +50,35 @@ def get_settings_repository() -> SettingsRepository:
 
 @dataclass(frozen=True)
 class StandardDashboard:
-    items: list
+    blocks: list
     updated_at: str
     updated_at_iso: str
     freshness: FreshnessStatus
 
     def as_dict(self) -> dict:
-        return {"mode": "standard", "items": [item.as_dict() for item in self.items], "updated_at": self.updated_at, "updated_at_iso": self.updated_at_iso, "freshness": self.freshness.value}
+        return {"mode": "standard", "blocks": [block.as_dict() for block in self.blocks], "updated_at": self.updated_at, "updated_at_iso": self.updated_at_iso, "freshness": self.freshness.value}
 
 
-def _default_selections(candidates: list) -> list[DisplaySelection]:
+def _default_blocks(candidates: list) -> list[DisplayBlock]:
     priority = {"net_power_w": 0, "load_power_w": 1, "power_w": 2, "temperature_c": 3, "temperature_celsius": 3, "relative_humidity_percent": 4, "co2_ppm": 5}
-    ordered = sorted(candidates, key=lambda item: (priority.get(item.field, 100), item.id))
-    selections: list[DisplaySelection] = []
+    grouped: dict[str, list] = {}
+    for item in sorted(candidates, key=lambda item: (priority.get(item.field, 100), item.id)):
+        grouped.setdefault(item.group, []).append(item)
+    ordered_groups = sorted(grouped.values(), key=lambda items: (priority.get(items[0].field, 100), items[0].group))
+    blocks: list[DisplayBlock] = []
     capacity = 0
-    for index, item in enumerate(ordered):
+    for index, items in enumerate(ordered_groups):
+        item = items[0]
         size = "large" if index == 0 else "small"
         cost = 3 if size == "large" else 1
         if capacity + cost > 6:
             break
-        selections.append(DisplaySelection(item.id, size))
+        blocks.append(DisplayBlock(
+            block_id=f"block_{index + 1}", group=item.group, title=item.group, size=size,
+            primary_item_id=item.id, item_ids=tuple(candidate.id for candidate in items),
+        ))
         capacity += cost
-    return selections
+    return blocks
 
 
 def get_dashboard_view_model():
@@ -80,15 +87,14 @@ def get_dashboard_view_model():
     candidates = [candidate_for(item) for item in display_repository.catalog()]
     selectable = [item for item in candidates if item.selectable]
     if selectable:
-        settings = get_settings_repository().load_or_create(
-            {item.id for item in candidates}, _default_selections(selectable)
-        )
+        groups = {item.id: item.group for item in candidates}
+        settings = get_settings_repository().load_or_create(groups, _default_blocks(selectable))
         now = datetime.now().astimezone()
-        items = selected_items(display_repository, settings.items, now)
-        statuses = [FreshnessStatus(item.freshness) for item in items] or [FreshnessStatus.UNAVAILABLE]
-        updated = max((item.last_received_at for item in items if item.last_received_at), default="")
+        blocks = selected_blocks(display_repository, settings.blocks, now)
+        statuses = [FreshnessStatus(block.freshness) for block in blocks] or [FreshnessStatus.UNAVAILABLE]
+        updated = max((block.last_received_at for block in blocks if block.last_received_at), default="")
         return StandardDashboard(
-            items=items, updated_at=updated.replace("T", " ") if updated else "--",
+            blocks=blocks, updated_at=updated.replace("T", " ") if updated else "--",
             updated_at_iso=updated, freshness=worst_freshness(*statuses),
         )
     return get_display_view_model(get_latest_repository(), get_parquet_repository())
@@ -224,7 +230,8 @@ async def display_items() -> dict:
 @app.get("/api/admin/dashboard-settings")
 async def dashboard_settings() -> dict:
     candidates = [candidate_for(item) for item in get_display_repository().catalog()]
-    settings = get_settings_repository().load_or_create({item.id for item in candidates}, _default_selections([item for item in candidates if item.selectable]))
+    groups = {item.id: item.group for item in candidates}
+    settings = get_settings_repository().load_or_create(groups, _default_blocks([item for item in candidates if item.selectable]))
     return {**settings.as_dict(), "capacity": 6}
 
 
@@ -232,7 +239,7 @@ async def dashboard_settings() -> dict:
 async def update_dashboard_settings(request: Request) -> dict:
     candidates = [candidate_for(item) for item in get_display_repository().catalog()]
     try:
-        settings = get_settings_repository().save_payload(await request.json(), {item.id for item in candidates if item.selectable})
+        settings = get_settings_repository().save_payload(await request.json(), {item.id: item.group for item in candidates if item.selectable})
     except SettingsError as error:
         raise HTTPException(400, str(error)) from error
     except (OSError, ValueError) as error:

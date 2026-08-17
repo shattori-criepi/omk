@@ -16,8 +16,8 @@ import app.main as dashboard_main
 from app.data.latest_repository import LatestRepository
 from app.data.parquet_repository import LatestPower, ParquetRepository
 from app.data.display_repository import DisplayRepository
-from app.data.settings_repository import DisplaySelection, SettingsError, SettingsRepository
-from app.display_items import candidate_for, catalog_items_with_latest, selected_items
+from app.data.settings_repository import DisplayBlock, DisplaySelection, SettingsError, SettingsRepository
+from app.display_items import candidate_for, catalog_items_with_latest, selected_blocks, selected_items
 from app.metric_definitions import definition_for, format_value
 from app.main import app
 from app.view_models import (
@@ -81,6 +81,10 @@ def _write_generic_item(root: Path, suffix: str, *, topic: str, device_id: str, 
     catalog["items"].append({key: item[key] for key in ("id", "topic", "device_id", "field", "value_type")} | {"last_received_at": item["received_at"]})
     catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
     return item_id
+
+
+def _block_payload(*blocks: dict) -> dict:
+    return {"version": 2, "default_preset": "standard", "presets": {"standard": {"blocks": list(blocks)}}}
 
 
 def _write_instantaneous_data(
@@ -425,15 +429,10 @@ def test_dynamic_display_html_and_javascript_expose_polling_targets(tmp_path: Pa
     ]
     settings_path = tmp_path / "dashboard" / "settings.json"
     settings_path.parent.mkdir(parents=True)
-    settings_path.write_text(json.dumps({
-        "version": 1,
-        "default_preset": "standard",
-        "presets": {"standard": {"items": [
-            {"item_id": item_ids[0], "size": "large"},
-            {"item_id": item_ids[1], "size": "medium"},
-            {"item_id": item_ids[2], "size": "small"},
-        ]}},
-    }), encoding="utf-8")
+    settings_path.write_text(json.dumps(_block_payload({
+        "block_id": "block_sen66", "group": "living", "title": "SEN66", "size": "large",
+        "primary_item_id": item_ids[0], "item_ids": item_ids,
+    })), encoding="utf-8")
     monkeypatch.setenv("OMK_LATEST_DATA_ROOT", str(latest_root))
     monkeypatch.setenv("OMK_DASHBOARD_SETTINGS_PATH", str(settings_path))
     response = client.get("/display")
@@ -441,18 +440,20 @@ def test_dynamic_display_html_and_javascript_expose_polling_targets(tmp_path: Pa
     stylesheet = (Path(__file__).parents[1] / "app" / "static" / "display.css").read_text(encoding="utf-8")
 
     assert response.status_code == 200
-    for element_id in ("header-date-main", "header-weekday", "header-time", "updated-at", "freshness", "display-items"):
+    for element_id in ("header-date-main", "header-weekday", "header-time", "updated-at", "freshness", "display-blocks"):
         assert f'id="{element_id}"' in response.text
     assert 'class="admin-link"' in response.text
     assert '<svg viewBox="0 0 24 24"' in response.text
-    for item_id, size in zip(item_ids, ("large", "medium", "small"), strict=True):
+    assert 'data-block-id="block_sen66"' in response.text
+    for item_id in item_ids:
         assert f'data-item-id="{item_id}"' in response.text
-        assert f"display-card--{size}" in response.text
+    assert "display-card--large" in response.text
     assert 'fetch("/api/display", { cache: "no-store" })' in javascript
     assert "DISPLAY_POLL_INTERVAL_MS = 10_000" in javascript
     assert "headerWeekday.textContent" in javascript
     assert 'WEEKDAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]' in javascript
     assert 'data.mode === "standard"' in javascript
+    assert "Array.isArray(data.blocks)" in javascript
     assert "data-item-id" in javascript
     assert ".standard-grid" in stylesheet
     assert ".display-card--large" in stylesheet
@@ -513,20 +514,20 @@ def test_generic_catalog_candidates_group_and_format_values(tmp_path: Path) -> N
 
 def test_settings_validate_capacity_duplicates_and_persist_atomically(tmp_path: Path) -> None:
     repository = SettingsRepository(tmp_path / "dashboard" / "settings.json")
-    ids = {"item_a", "item_b", "item_c"}
-    settings = repository.save_payload({"version": 1, "default_preset": "standard", "presets": {"standard": {"items": [{"item_id": "item_a", "size": "large"}, {"item_id": "item_b", "size": "small"}]}}}, ids)
-    assert settings.items == (DisplaySelection("item_a", "large"), DisplaySelection("item_b", "small"))
-    assert repository.load_or_create(ids, []).items == settings.items
+    groups = {"item_a": "source_a", "item_b": "source_a", "item_c": "source_b"}
+    settings = repository.save_payload(_block_payload({"block_id": "a", "group": "source_a", "title": "A", "size": "large", "primary_item_id": "item_a", "item_ids": ["item_a", "item_b"]}), groups)
+    assert settings.blocks[0].item_ids == ("item_a", "item_b")
+    assert repository.load_or_create(groups, []).blocks == settings.blocks
     assert stat.S_IMODE((tmp_path / "dashboard" / "settings.json").stat().st_mode) == 0o644
     assert not list((tmp_path / "dashboard").glob("*.tmp"))
-    with pytest.raises(SettingsError, match="重複"):
-        repository.save_payload({"version": 1, "default_preset": "standard", "presets": {"standard": {"items": [{"item_id": "item_a", "size": "small"}, {"item_id": "item_a", "size": "small"}]}}}, ids)
+    with pytest.raises(SettingsError, match="複数ブロック"):
+        repository.save_payload(_block_payload({"block_id": "a", "group": "source_a", "title": "A", "size": "small", "primary_item_id": "item_a", "item_ids": ["item_a"]}, {"block_id": "b", "group": "source_a", "title": "B", "size": "small", "primary_item_id": "item_a", "item_ids": ["item_a"]}), groups)
     with pytest.raises(SettingsError, match="存在しない"):
-        repository.save_payload({"version": 1, "default_preset": "standard", "presets": {"standard": {"items": [{"item_id": "missing", "size": "small"}]}}}, ids)
+        repository.save_payload(_block_payload({"block_id": "a", "group": "source_a", "title": "A", "size": "small", "primary_item_id": "missing", "item_ids": ["missing"]}), groups)
     with pytest.raises(SettingsError, match="表示領域"):
-        repository.save_payload({"version": 1, "default_preset": "standard", "presets": {"standard": {"items": [{"item_id": "item_a", "size": "large"}, {"item_id": "item_b", "size": "large"}, {"item_id": "item_c", "size": "small"}]}}}, ids)
+        repository.save_payload(_block_payload({"block_id": "a", "group": "source_a", "title": "A", "size": "large", "primary_item_id": "item_a", "item_ids": ["item_a"]}, {"block_id": "b", "group": "source_b", "title": "B", "size": "large", "primary_item_id": "item_c", "item_ids": ["item_c"]}, {"block_id": "c", "group": "source_a", "title": "C", "size": "small", "primary_item_id": "item_b", "item_ids": ["item_b"]}), groups)
     with pytest.raises(SettingsError):
-        repository.save_payload({"version": 1, "default_preset": "standard", "presets": {"standard": {"items": [{"item_id": "item_a", "size": "huge"}]}}}, ids)
+        repository.save_payload(_block_payload({"block_id": "a", "group": "source_a", "title": "A", "size": "huge", "primary_item_id": "item_a", "item_ids": ["item_a"]}), groups)
 
 
 def test_catalog_candidates_include_the_same_latest_value_and_freshness_as_display(tmp_path: Path) -> None:
@@ -539,6 +540,49 @@ def test_catalog_candidates_include_the_same_latest_value_and_freshness_as_displ
     assert candidates[item_id].freshness == "normal"
     assert selected[0].value == candidates[item_id].value
     assert selected[0].freshness == candidates[item_id].freshness
+
+
+def test_v1_settings_migrate_to_grouped_blocks(tmp_path: Path) -> None:
+    path = tmp_path / "dashboard" / "settings.json"
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps({"version": 1, "default_preset": "standard", "presets": {"standard": {"items": [
+        {"item_id": "temp", "size": "small"}, {"item_id": "humidity", "size": "small"}, {"item_id": "grid", "size": "large"},
+    ]}}}), encoding="utf-8")
+    settings = SettingsRepository(path).load_or_create({"temp": "SEN66", "humidity": "SEN66", "grid": "電力メーター（Bルート）"}, [])
+
+    assert [(block.group, block.item_ids, block.primary_item_id) for block in settings.blocks] == [
+        ("SEN66", ("temp", "humidity"), "temp"), ("電力メーター（Bルート）", ("grid",), "grid"),
+    ]
+    assert json.loads(path.read_text(encoding="utf-8"))["version"] == 2
+
+
+def test_display_block_resolves_primary_and_multiple_secondary_values(tmp_path: Path) -> None:
+    item_ids = [
+        _write_generic_item(tmp_path, "v", topic="omk/sen66/environment", device_id="sen66", field="temperature_c", value=26.8, received_at=NOW),
+        _write_generic_item(tmp_path, "w", topic="omk/sen66/environment", device_id="sen66", field="relative_humidity_percent", value=40, received_at=NOW),
+        _write_generic_item(tmp_path, "x", topic="omk/sen66/environment", device_id="sen66", field="co2_ppm", value=520, received_at=NOW),
+    ]
+    block = DisplayBlock("sen66", "sen66", "SEN66", "small", item_ids[0], tuple(item_ids))
+    rendered = selected_blocks(DisplayRepository(tmp_path), (block,), NOW)
+
+    assert rendered[0].primary.value == "26.8"
+    assert [item.value for item in rendered[0].secondary] == ["40", "520"]
+    assert rendered[0].as_dict()["size"] == "small"
+
+
+def test_energy_blocks_keep_multiple_broute_and_ichijo_values(tmp_path: Path) -> None:
+    grid = _write_generic_item(tmp_path, "y", topic="omk/broute/power", device_id="broute", field="net_power_w", value=770, received_at=NOW)
+    imported = _write_generic_item(tmp_path, "z", topic="omk/broute/energy", device_id="broute", field="import_energy_kwh", value=2.5, received_at=NOW)
+    load = _write_generic_item(tmp_path, "0", topic="omk/ichijo/power-flow", device_id="ichijo", field="load_power_w", value=1103, received_at=NOW)
+    pv = _write_generic_item(tmp_path, "1", topic="omk/ichijo/power-flow", device_id="ichijo", field="pv_power_w", value=1210, received_at=NOW)
+    repository = DisplayRepository(tmp_path)
+    blocks = selected_blocks(repository, (
+        DisplayBlock("broute", "電力メーター（Bルート）", "Bルート", "small", grid, (grid, imported)),
+        DisplayBlock("ichijo", "太陽光・蓄電池", "一条パワコン", "large", load, (load, pv)),
+    ), NOW)
+
+    assert blocks[0].primary.unit == "kW" and blocks[0].secondary[0].unit == "kWh"
+    assert (blocks[1].primary.value, blocks[1].secondary[0].value) == ("1.10", "1.21")
 
 
 def test_display_items_api_lists_multiple_values_from_one_source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -588,6 +632,7 @@ def test_admin_display_css_allows_vertical_scroll_without_changing_kiosk_overflo
     assert "min-height: 46px;" in stylesheet
     assert '<html lang="ja" class="admin-document">' in admin_template
     assert '<body class="admin-body">' in admin_template
+    assert 'href="/display">ダッシュボードを確認</a>' in admin_template
     assert '<body class="admin-body">' not in display_template
     assert "overflow: hidden;" in stylesheet
 
@@ -598,14 +643,17 @@ def test_dynamic_display_api_uses_selected_order_and_keeps_unavailable_slot(tmp_
     old_id = _write_generic_item(latest_root, "f", topic="omk/bedroom/environment", device_id="bedroom", field="temperature_c", value=23.0, received_at=datetime.now(JST) - timedelta(seconds=601))
     monkeypatch.setenv("OMK_LATEST_DATA_ROOT", str(latest_root))
     monkeypatch.setenv("OMK_DASHBOARD_SETTINGS_PATH", str(tmp_path / "dashboard" / "settings.json"))
-    put = client.put("/api/admin/dashboard-settings", json={"version": 1, "default_preset": "standard", "presets": {"standard": {"items": [{"item_id": old_id, "size": "small"}, {"item_id": fresh_id, "size": "large"}]}}})
+    put = client.put("/api/admin/dashboard-settings", json=_block_payload(
+        {"block_id": "old", "group": "bedroom", "title": "寝室", "size": "small", "primary_item_id": old_id, "item_ids": [old_id]},
+        {"block_id": "fresh", "group": "living", "title": "SEN66", "size": "large", "primary_item_id": fresh_id, "item_ids": [fresh_id]},
+    ))
     assert put.status_code == 200
     snapshot = client.get("/api/display").json()
     assert snapshot["mode"] == "standard"
-    assert [item["id"] for item in snapshot["items"]] == [old_id, fresh_id]
-    assert snapshot["items"][0]["value"] == "--"
-    assert snapshot["items"][0]["freshness"] == "unavailable"
-    assert snapshot["items"][1]["size"] == "large"
+    assert [block["id"] for block in snapshot["blocks"]] == ["old", "fresh"]
+    assert snapshot["blocks"][0]["primary"]["value"] == "--"
+    assert snapshot["blocks"][0]["primary"]["freshness"] == "unavailable"
+    assert snapshot["blocks"][1]["size"] == "large"
 
 
 def test_delete_sensor_proxy_forwards_device_key_and_propagates_not_found(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -696,15 +744,26 @@ global.fetch = async url => ({ok: true, json: async () => url.endsWith("display-
       {id: "humidity", label: "sen66 湿度", group: "SEN66", selectable: true},
       {id: "co2", label: "sen66 CO₂", group: "SEN66", selectable: true},
     ]},
+    {name: "plug-001", items: [
+      {id: "plug-power", label: "plug-001 消費電力", group: "plug-001", selectable: true},
+      {id: "plug-state", label: "plug-001 状態", group: "plug-001", selectable: true},
+    ]},
+    {name: "th-001", items: [{id: "th-temperature", label: "th-001 温度", group: "th-001", selectable: true}]},
   ],
-} : {presets: {standard: {items: [{item_id: "grid", size: "large"}, {item_id: "load", size: "small"}, {item_id: "temperature", size: "small"}]}}}});
+} : {presets: {standard: {blocks: [
+  {block_id: "b", group: "電力メーター（Bルート）", title: "Bルート", size: "large", primary_item_id: "grid", item_ids: ["grid"]},
+  {block_id: "p", group: "太陽光・蓄電池", title: "一条パワコン", size: "small", primary_item_id: "load", item_ids: ["load"]},
+  {block_id: "s", group: "SEN66", title: "SEN66", size: "small", primary_item_id: "temperature", item_ids: ["temperature"]},
+]}}}});
 vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8"));
 setImmediate(() => {
+  const changeMembership = (blockId, itemId, checked) => elements["#selected-items"].listeners.change({target: {dataset: {membership: `${blockId}:${itemId}`}, checked}});
+  changeMembership("p", "pv", true);
+  changeMembership("s", "humidity", true);
+  changeMembership("s", "co2", true);
   const availableWithSpace = elements["#available-items"].innerHTML;
-  const click = id => elements["#available-items"].listeners.click({target: {closest() { return {dataset: {add: id}}; }}});
-  click("pv");
+  elements["#available-items"].listeners.click({target: {closest() { return {dataset: {addBlock: "plug-001"}}; }}});
   const availableAtCapacity = elements["#available-items"].innerHTML;
-  click("co2");
   console.log(JSON.stringify({selected: elements["#selected-items"].innerHTML, availableWithSpace, availableAtCapacity, status: elements["#settings-status"].textContent}));
 });
 '''
@@ -719,13 +778,13 @@ setImmediate(() => {
         "一条パワコン 家庭消費電力", "一条パワコン PV発電", "一条パワコン 蓄電池残量",
         "sen66 温度", "sen66 湿度", "sen66 CO₂",
     ))
-    assert result["availableWithSpace"].count("display-candidate is-selected") == 3
-    assert "追加する" in result["availableWithSpace"]
+    assert "このデータでブロックを追加" in result["availableWithSpace"]
     assert "一条パワコン PV発電" in result["selected"]
-    assert "sen66 CO₂" not in result["selected"]
-    assert "sen66 CO₂" in result["availableAtCapacity"]
+    assert "sen66 CO₂" in result["selected"]
+    assert "plug-001 消費電力" in result["selected"]
+    assert "th-001 温度" in result["availableAtCapacity"]
     assert "表示領域がいっぱいです" in result["availableAtCapacity"]
-    assert result["status"] == "表示領域がいっぱいです。"
+    assert result["status"] == ""
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is required for admin UI tests")

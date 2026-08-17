@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from app.data.display_repository import CatalogItem, DisplayRepository, LatestDisplayItem
-from app.data.settings_repository import DisplaySelection
+from app.data.settings_repository import DisplayBlock, DisplaySelection
 from app.metric_definitions import MetricDefinition, definition_for, format_value
 from app.view_models import FreshnessStatus, freshness_for
 
@@ -31,6 +31,30 @@ class DisplayItem:
 
     def as_dict(self) -> dict[str, str | bool | None]:
         return self.__dict__.copy()
+
+
+@dataclass(frozen=True)
+class DisplayBlockView:
+    id: str
+    title: str
+    group: str
+    size: str
+    primary: DisplayItem
+    secondary: tuple[DisplayItem, ...]
+    freshness: str
+    last_received_at: str
+
+    def as_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "title": self.title,
+            "group": self.group,
+            "size": self.size,
+            "primary": self.primary.as_dict(),
+            "secondary": [item.as_dict() for item in self.secondary],
+            "freshness": self.freshness,
+            "last_received_at": self.last_received_at,
+        }
 
 
 def source_group(item: CatalogItem) -> str:
@@ -82,6 +106,38 @@ def selected_items(
         latest = repository.item(selection.item_id)
         displayed.append(_display_item(catalog_item, definition_for(catalog_item.field), latest, now, selection.size))
     return displayed
+
+
+def selected_blocks(
+    repository: DisplayRepository,
+    blocks: tuple[DisplayBlock, ...],
+    now: datetime,
+) -> list[DisplayBlockView]:
+    """Resolve persisted block membership into one display-ready snapshot."""
+    catalog = {item.id: item for item in repository.catalog()}
+    rendered: list[DisplayBlockView] = []
+    for block in blocks:
+        values: list[DisplayItem] = []
+        for item_id in block.item_ids:
+            catalog_item = catalog.get(item_id)
+            if catalog_item is None:
+                values.append(DisplayItem(item_id, "利用できない表示項目", block.group, "", "", "", "unknown", "", "その他", None, False, ""))
+            else:
+                values.append(_display_item(catalog_item, definition_for(catalog_item.field), repository.item(item_id), now))
+        primary = next((item for item in values if item.id == block.primary_item_id), values[0])
+        secondary = tuple(item for item in values if item.id != primary.id)
+        statuses = [item.freshness for item in values]
+        freshness = FreshnessStatus.UNAVAILABLE.value
+        if FreshnessStatus.UNAVAILABLE.value not in statuses:
+            freshness = FreshnessStatus.DELAYED.value if FreshnessStatus.DELAYED.value in statuses else FreshnessStatus.NORMAL.value
+        elif FreshnessStatus.NORMAL.value in statuses or FreshnessStatus.DELAYED.value in statuses:
+            freshness = FreshnessStatus.DELAYED.value
+        last_received_at = max((item.last_received_at for item in values if item.last_received_at), default="")
+        rendered.append(DisplayBlockView(
+            id=block.block_id, title=block.title, group=block.group, size=block.size,
+            primary=primary, secondary=secondary, freshness=freshness, last_received_at=last_received_at,
+        ))
+    return rendered
 
 
 def _display_item(
