@@ -1,33 +1,32 @@
 const selectedRoot = document.querySelector("#selected-items"), availableRoot = document.querySelector("#available-items"), capacityStatus = document.querySelector("#capacity-status"), statusLine = document.querySelector("#settings-status"), saveButton = document.querySelector("#save-settings");
-let candidates = new Map(), selected = [], capacity = 6;
+let candidates = new Map(), blocks = [], capacity = 6;
 const costs = {large: 3, medium: 2, small: 1};
-const esc = (value) => String(value ?? "").replace(/[&<>"]/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"})[char]);
-const used = () => selected.reduce((total, item) => total + costs[item.size], 0);
+const esc = (value) => String(value ?? "").replace(/[&<>\"]/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"})[char]);
+const used = () => blocks.reduce((total, block) => total + costs[block.size], 0);
+const sourceItems = group => [...candidates.values()].filter(item => item.selectable && item.group === group);
+const blockFor = id => blocks.find(block => block.block_id === id);
+
+function itemCheckbox(block, item) {
+  const checked = block.item_ids.includes(item.id);
+  return `<label class="block-item-choice"><input type="checkbox" data-membership="${esc(block.block_id)}:${esc(item.id)}" ${checked ? "checked" : ""}><span>${esc(item.label)}</span></label>`;
+}
+
 function render() {
   const total = used();
   capacityStatus.textContent = `使用中 ${total} / ${capacity}${total >= capacity ? " — 表示領域がいっぱいです" : ""}`;
-  selectedRoot.innerHTML = `<h2>表示中</h2>${selected.length ? selected.map((entry, index) => {
-    const item = candidates.get(entry.item_id);
-    return `<article class="display-setting-card"><div><strong>${esc(item?.label || "利用できない項目")}</strong><small>${esc(item?.group || "")}</small></div><label>サイズ<select data-size="${esc(entry.item_id)}"><option value="large" ${entry.size === "large" ? "selected" : ""}>大</option><option value="medium" ${entry.size === "medium" ? "selected" : ""}>中</option><option value="small" ${entry.size === "small" ? "selected" : ""}>小</option></select></label><div class="display-setting-buttons"><button data-up="${esc(entry.item_id)}" ${index === 0 ? "disabled" : ""}>上へ</button><button data-down="${esc(entry.item_id)}" ${index === selected.length - 1 ? "disabled" : ""}>下へ</button><button data-remove="${esc(entry.item_id)}">外す</button></div></article>`;
-  }).join("") : "<p>表示項目がありません。</p>"}`;
-
-  const selectedIds = new Set(selected.map(item => item.item_id));
-  const groups = new Map();
-  [...candidates.values()].filter(item => item.selectable).forEach(item => {
-    if (!groups.has(item.group)) groups.set(item.group, []);
-    groups.get(item.group).push(item);
-  });
-  availableRoot.innerHTML = `<h2>表示可能なデータ</h2>${[...groups].map(([group, items]) => `<section class="display-source-group"><h3>${esc(group)}</h3>${items.map(item => {
-    const isSelected = selectedIds.has(item.id);
-    const disabled = isSelected || total >= capacity;
-    const state = isSelected ? "表示中" : total >= capacity ? "表示領域がいっぱいです" : "追加する";
-    return `<button class="display-candidate${isSelected ? " is-selected" : ""}" data-add="${esc(item.id)}" ${disabled ? "disabled" : ""}><span>${esc(item.label)}</span><em>${state}</em></button>`;
-  }).join("")}</section>`).join("") || "<p>選択できる表示項目がありません。</p>"}`;
+  selectedRoot.innerHTML = `<h2>表示中ブロック</h2>${blocks.length ? blocks.map((block, index) => {
+    const items = sourceItems(block.group);
+    return `<article class="display-block-editor" data-block-id="${esc(block.block_id)}"><header><input class="block-title-input" data-title="${esc(block.block_id)}" value="${esc(block.title)}" aria-label="ブロック名"><span>${esc(block.group)}</span></header><div class="block-controls"><label>サイズ<select data-size="${esc(block.block_id)}"><option value="large" ${block.size === "large" ? "selected" : ""}>大</option><option value="medium" ${block.size === "medium" ? "selected" : ""}>中</option><option value="small" ${block.size === "small" ? "selected" : ""}>小</option></select></label><label>主表示<select data-primary="${esc(block.block_id)}">${block.item_ids.map(itemId => { const item = candidates.get(itemId); return `<option value="${esc(itemId)}" ${itemId === block.primary_item_id ? "selected" : ""}>${esc(item?.label || "利用できない項目")}</option>`; }).join("")}</select></label><div class="display-setting-buttons"><button data-up="${esc(block.block_id)}" ${index === 0 ? "disabled" : ""}>上へ</button><button data-down="${esc(block.block_id)}" ${index === blocks.length - 1 ? "disabled" : ""}>下へ</button><button data-remove="${esc(block.block_id)}">削除</button></div></div><fieldset class="block-items"><legend>このブロックに表示する値</legend>${items.map(item => itemCheckbox(block, item)).join("") || "<p>表示可能な値がありません。</p>"}</fieldset></article>`;
+  }).join("") : "<p>表示ブロックがありません。</p>"}`;
+  const groups = [...new Set([...candidates.values()].filter(item => item.selectable).map(item => item.group))];
+  availableRoot.innerHTML = `<h2>表示可能なデータ</h2>${groups.map(group => { const items = sourceItems(group); const alreadyAdded = blocks.some(block => block.group === group); const disabled = alreadyAdded || total >= capacity || !items.length; const state = alreadyAdded ? "追加済み" : total >= capacity ? "表示領域がいっぱいです" : "このデータでブロックを追加"; return `<section class="display-source-group"><h3>${esc(group)}</h3><div class="display-source-items">${items.map(item => `<span>${esc(item.label)}</span>`).join("")}</div><button class="add-block" data-add-block="${esc(group)}" ${disabled ? "disabled" : ""}>${state}</button></section>`; }).join("") || "<p>選択できる表示項目がありません。</p>"}`;
 }
+
 async function request(path, options = {}) { const response = await fetch(path, {headers: {"Content-Type":"application/json"}, ...options}); const payload = await response.json().catch(() => ({})); if (!response.ok) throw Error(payload.detail || "通信エラー"); return payload; }
-async function load() { const [items, settings] = await Promise.all([request("/api/admin/display-items"), request("/api/admin/dashboard-settings")]); capacity = items.capacity; items.groups.forEach(group => group.items.forEach(item => candidates.set(item.id, item))); selected = settings.presets.standard.items; render(); }
-selectedRoot.addEventListener("click", event => { const button = event.target.closest("button"); if (!button) return; const id = button.dataset.remove || button.dataset.up || button.dataset.down; const index = selected.findIndex(item => item.item_id === id); if (button.dataset.remove) selected.splice(index, 1); if (button.dataset.up && index > 0) [selected[index - 1], selected[index]] = [selected[index], selected[index - 1]]; if (button.dataset.down && index >= 0 && index < selected.length - 1) [selected[index + 1], selected[index]] = [selected[index], selected[index + 1]]; render(); });
-selectedRoot.addEventListener("change", event => { const id = event.target.dataset.size; if (!id) return; const entry = selected.find(item => item.item_id === id), old = entry.size; entry.size = event.target.value; if (used() > capacity) { entry.size = old; statusLine.textContent = "表示領域がいっぱいです。別の項目を外すか表示サイズを小さくしてください。"; } render(); });
-availableRoot.addEventListener("click", event => { const button = event.target.closest("[data-add]"); if (!button) return; if (selected.some(item => item.item_id === button.dataset.add) || used() + 1 > capacity) { statusLine.textContent = "表示領域がいっぱいです。"; return; } selected.push({item_id: button.dataset.add, size: "small"}); render(); });
-saveButton.addEventListener("click", async () => { saveButton.disabled = true; try { await request("/api/admin/dashboard-settings", {method:"PUT", body:JSON.stringify({version:1, default_preset:"standard", presets:{standard:{items:selected}}})}); statusLine.textContent = "保存しました。"; } catch (error) { statusLine.textContent = error.message; } finally { saveButton.disabled = false; } });
+async function load() { const [items, settings] = await Promise.all([request("/api/admin/display-items"), request("/api/admin/dashboard-settings")]); capacity = items.capacity; items.groups.forEach(group => group.items.forEach(item => candidates.set(item.id, item))); blocks = settings.presets.standard.blocks; render(); }
+
+selectedRoot.addEventListener("click", event => { const button = event.target.closest("button"); if (!button) return; const id = button.dataset.remove || button.dataset.up || button.dataset.down, index = blocks.findIndex(block => block.block_id === id); if (button.dataset.remove) blocks.splice(index, 1); if (button.dataset.up && index > 0) [blocks[index - 1], blocks[index]] = [blocks[index], blocks[index - 1]]; if (button.dataset.down && index >= 0 && index < blocks.length - 1) [blocks[index + 1], blocks[index]] = [blocks[index], blocks[index + 1]]; render(); });
+selectedRoot.addEventListener("change", event => { const input = event.target, [blockId, itemId] = (input.dataset.membership || ":").split(":"), block = blockFor(blockId); if (input.dataset.title) { blockFor(input.dataset.title).title = input.value.trim() || blockFor(input.dataset.title).group; } if (input.dataset.size) { const block = blockFor(input.dataset.size), old = block.size; block.size = input.value; if (used() > capacity) { block.size = old; statusLine.textContent = "表示領域がいっぱいです。"; } } if (input.dataset.primary) blockFor(input.dataset.primary).primary_item_id = input.value; if (block && itemId) { if (input.checked) block.item_ids.push(itemId); else if (block.item_ids.length > 1) { block.item_ids = block.item_ids.filter(id => id !== itemId); if (block.primary_item_id === itemId) block.primary_item_id = block.item_ids[0]; } } render(); });
+availableRoot.addEventListener("click", event => { const button = event.target.closest("[data-add-block]"); if (!button || used() + 1 > capacity) return; const group = button.dataset.addBlock, items = sourceItems(group); if (!items.length || blocks.some(block => block.group === group)) return; const item = items[0]; blocks.push({block_id: `block_${Date.now()}_${blocks.length + 1}`, group, title: group, size: "small", primary_item_id: item.id, item_ids: [item.id]}); render(); });
+saveButton.addEventListener("click", async () => { saveButton.disabled = true; try { await request("/api/admin/dashboard-settings", {method: "PUT", body: JSON.stringify({version: 2, default_preset: "standard", presets: {standard: {blocks}}})}); statusLine.innerHTML = '保存しました。 <a href="/display">ダッシュボードを確認</a>'; } catch (error) { statusLine.textContent = error.message; } finally { saveButton.disabled = false; } });
 load().catch(error => { statusLine.textContent = error.message; });

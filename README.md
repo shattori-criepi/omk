@@ -65,9 +65,9 @@ OMKは、次の処理を一つの製品・開発基盤として扱います。
 
 OMKのデータは、原則としてMQTTでRaspberry Piへ集約し、汎用`sensor-collector`がJSON Lines（JSONL）で一次保存します。collectorは`omk/#`を購読し、センサ機種や測定項目を解釈せずに、受信時刻・トピック・MQTTメタデータとpayloadを保存します。保存先は`data/sensors/YYYY/MM/DD.jsonl`です。測定値とstatusメッセージの両方が対象です。
 
-JSONL保存に成功した計測値は、`topic + device_id + field`ごとの汎用latest item storeと候補catalogにもatomic置換で記録します。これは後続の可変Dashboard向け基盤であり、表示名・単位・プリセットはここでは解釈しません。現行の固定Dashboardとの互換のため、Bルート`power`、SEN66`sen66`、一条`power-flow`は表示用の固定最新状態JSON（`data/latest/broute_power.json`、`sen66.json`、`ichijo_power_flow.json`）も維持します。Dashboardは現在この固定latest JSONから瞬時値を読み、`/api/display`を10秒ごとに取得して画面を更新します。今日の買電量・売電量と履歴用途は、JSONLから変換したParquetを使用します。
+JSONL保存に成功した計測値は、`topic + device_id + field`ごとの汎用latest item storeと候補catalogにもatomic置換で記録します。これは後続の可変Dashboard向け基盤であり、表示名・単位・プリセットはここでは解釈しません。現行の固定Dashboardとの互換のため、Bルート`power`、SEN66`sen66`、一条`power-flow`は表示用の固定最新状態JSON（`data/latest/broute_power.json`、`sen66.json`、`ichijo_power_flow.json`）も維持します。Dashboardはgeneric catalogがある場合はDisplay Block設定から瞬時値を読み、catalogがない環境だけ固定latest JSONへフォールバックします。`/api/display`は10秒ごとに画面を更新し、今日の買電量・売電量と履歴用途はJSONLから変換したParquetを使用します。
 
-Dashboard Phase 2ではgeneric latest storeを使う標準プリセットを提供します。管理画面でDisplay Item、順序、large/medium/smallのサイズを選び、`data/dashboard/settings.json`へ保存します。時計・詳細・電力専用プリセット、自由配置、複数ページは未実装です。
+Dashboard Phase 2ではgeneric latest storeを使う標準プリセットを提供します。管理画面で同一sourceのDisplay Itemを1つのDisplay Blockへまとめ、blockの順序、主表示、large/medium/smallのサイズを`data/dashboard/settings.json`へ保存します。時計・詳細・電力専用プリセット、自由配置、複数ページは未実装です。
 
 ```text
 各データ取得処理 → MQTT → sensor-collector → JSONL一次保存 → Parquet（日計・履歴）

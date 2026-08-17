@@ -119,14 +119,16 @@ Raspberry Pi自身またはLAN内から利用する場合は、`localhost`をPi�
 ## 表示設定（Phase 2）
 
 管理メニューの「表示設定」では、Phase 1の`catalog.json`と`items/`から検出したDisplay Itemを、
-標準プリセットへ選択できます。選択順と`large`、`medium`、`small`の三段階サイズを指定し、
-配置座標は指定しません。標準プリセットは容量6で、large=3、medium=2、small=1を消費します。
+同一sourceのDisplay Blockへまとめて標準プリセットへ選択できます。blockごとに主表示、補助表示、
+選択順と`large`、`medium`、`small`の三段階サイズを指定し、配置座標は指定しません。標準プリセットは
+容量6で、large=3、medium=2、small=1をblock単位で消費します。既存のitem単位version 1設定は
+初回読込み時にsourceごとのversion 2 block設定へ自動移行します。
 
 設定はホストの`data/dashboard/settings.json`へatomic replaceで保存し、Dashboardコンテナだけが
 このディレクトリを読み書きします。設定ファイルは秘密情報を含まないため`0644`で保存し、通常の
 ホスト運用ユーザーも読取り・バックアップできます。generic catalogが存在する初回起動時は、Bルートまたは電力値を
 large、続く環境値をsmallとして容量内で初期選択します。catalogは通信断で消えないため、選択済み
-カードも消えず、遅延時は最後の値、取得不可時は`--`を表示します。
+blockも消えず、遅延時は最後の値、取得不可時は`--`を表示します。
 
 `status`などの低価値な内部項目はcollectorに残したまま、Dashboardのmetric definitionで通常の
 選択候補から隠します。時計、詳細、電力専用プリセット、複数ページ、自由配置、グラフは未実装です。

@@ -1,4 +1,4 @@
-"""Atomic persistence and validation for Dashboard-only display settings."""
+"""Atomic persistence, migration, and validation for Dashboard display blocks."""
 
 from __future__ import annotations
 
@@ -18,49 +18,74 @@ class SettingsError(ValueError):
 
 @dataclass(frozen=True)
 class DisplaySelection:
+    """Legacy version-1 selection, retained for migration callers/tests."""
+
     item_id: str
     size: str
 
-    def as_dict(self) -> dict[str, str]:
-        return {"item_id": self.item_id, "size": self.size}
+
+@dataclass(frozen=True)
+class DisplayBlock:
+    block_id: str
+    group: str
+    title: str
+    size: str
+    primary_item_id: str
+    item_ids: tuple[str, ...]
+
+    def as_dict(self) -> dict:
+        return {
+            "block_id": self.block_id,
+            "group": self.group,
+            "title": self.title,
+            "size": self.size,
+            "primary_item_id": self.primary_item_id,
+            "item_ids": list(self.item_ids),
+        }
 
 
 @dataclass(frozen=True)
 class DashboardSettings:
-    items: tuple[DisplaySelection, ...]
+    blocks: tuple[DisplayBlock, ...]
 
     def as_dict(self) -> dict:
-        return {"version": 1, "default_preset": "standard", "presets": {"standard": {"items": [item.as_dict() for item in self.items]}}}
+        return {
+            "version": 2,
+            "default_preset": "standard",
+            "presets": {"standard": {"blocks": [block.as_dict() for block in self.blocks]}},
+        }
 
 
 class SettingsRepository:
     def __init__(self, path: Path) -> None:
         self.path = path
 
-    def load_or_create(self, available_ids: set[str], defaults: list[DisplaySelection]) -> DashboardSettings:
+    def load_or_create(self, available_groups: dict[str, str], defaults: list[DisplayBlock]) -> DashboardSettings:
         if not self.path.exists():
             settings = DashboardSettings(tuple(defaults))
-            self.save(settings, available_ids)
+            self.save(settings, available_groups)
             return settings
         try:
-            settings = self._parse(json.loads(self.path.read_text(encoding="utf-8")), available_ids, allow_missing=True)
-            # This contains display choices, not credentials. Keep it readable
-            # for the normal host user even when an earlier root container
-            # created it with the old 0640 mode.
+            payload = json.loads(self.path.read_text(encoding="utf-8"))
+            settings, migrated = self._parse(payload, available_groups, allow_missing=True)
+            if migrated:
+                self.save(settings, available_groups)
             os.chmod(self.path, 0o644)
             return settings
         except (OSError, json.JSONDecodeError, TypeError, KeyError, SettingsError):
-            # Preserve a malformed file for diagnosis; present an empty, safe
-            # configuration rather than allowing the display request to fail.
-            return DashboardSettings(())
+            # Keep a malformed file for diagnosis, but do not turn a usable
+            # Dashboard into an empty layout merely because migration failed.
+            return DashboardSettings(tuple(defaults))
 
-    def save_payload(self, payload: object, available_ids: set[str]) -> DashboardSettings:
-        settings = self._parse(payload, available_ids, allow_missing=False)
-        self.save(settings, available_ids)
+    def save_payload(self, payload: object, available_groups: dict[str, str]) -> DashboardSettings:
+        settings, migrated = self._parse(payload, available_groups, allow_missing=False)
+        if migrated:
+            raise SettingsError("旧形式の設定は保存できません")
+        self.save(settings, available_groups)
         return settings
 
-    def save(self, settings: DashboardSettings, available_ids: set[str]) -> None:
-        self._validate(settings, available_ids, allow_missing=True)
+    def save(self, settings: DashboardSettings, available_groups: dict[str, str]) -> None:
+        self._validate(settings, available_groups, allow_missing=True)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         temporary_path: Path | None = None
         try:
@@ -77,30 +102,77 @@ class SettingsRepository:
                 temporary_path.unlink(missing_ok=True)
             raise
 
-    def _parse(self, payload: object, available_ids: set[str], *, allow_missing: bool) -> DashboardSettings:
-        if not isinstance(payload, dict) or payload.get("version") != 1 or payload.get("default_preset") != "standard":
+    def _parse(self, payload: object, available_groups: dict[str, str], *, allow_missing: bool) -> tuple[DashboardSettings, bool]:
+        if not isinstance(payload, dict) or payload.get("default_preset") != "standard":
             raise SettingsError("設定形式が正しくありません")
+        if payload.get("version") == 1:
+            return self._migrate_v1(payload, available_groups), True
+        if payload.get("version") != 2:
+            raise SettingsError("設定形式が正しくありません")
+        try:
+            raw_blocks = payload["presets"]["standard"]["blocks"]
+        except (KeyError, TypeError) as error:
+            raise SettingsError("標準プリセット設定がありません") from error
+        if not isinstance(raw_blocks, list):
+            raise SettingsError("表示ブロックは配列で指定してください")
+        blocks: list[DisplayBlock] = []
+        for block in raw_blocks:
+            if not isinstance(block, dict) or not isinstance(block.get("item_ids"), list):
+                raise SettingsError("表示ブロックの形式が正しくありません")
+            blocks.append(DisplayBlock(
+                block_id=block.get("block_id"), group=block.get("group"), title=block.get("title"),
+                size=block.get("size"), primary_item_id=block.get("primary_item_id"),
+                item_ids=tuple(block["item_ids"]),
+            ))
+        settings = DashboardSettings(tuple(blocks))
+        self._validate(settings, available_groups, allow_missing=allow_missing)
+        return settings, False
+
+    def _migrate_v1(self, payload: dict, available_groups: dict[str, str]) -> DashboardSettings:
         try:
             raw_items = payload["presets"]["standard"]["items"]
         except (KeyError, TypeError) as error:
             raise SettingsError("標準プリセット設定がありません") from error
         if not isinstance(raw_items, list):
             raise SettingsError("表示項目は配列で指定してください")
-        selections = tuple(DisplaySelection(item_id=item.get("item_id"), size=item.get("size")) for item in raw_items if isinstance(item, dict))
-        if len(selections) != len(raw_items):
-            raise SettingsError("表示項目の形式が正しくありません")
-        settings = DashboardSettings(selections)
-        self._validate(settings, available_ids, allow_missing=allow_missing)
+        grouped: dict[str, list[DisplaySelection]] = {}
+        for item in raw_items:
+            if not isinstance(item, dict) or not isinstance(item.get("item_id"), str) or item.get("size") not in SIZES:
+                raise SettingsError("表示項目の形式が正しくありません")
+            item_id = item["item_id"]
+            grouped.setdefault(available_groups.get(item_id, "保存済み設定"), []).append(DisplaySelection(item_id, item["size"]))
+        blocks = []
+        for index, (group, selections) in enumerate(grouped.items(), start=1):
+            size = max(selections, key=lambda selection: SIZES[selection.size]).size
+            blocks.append(DisplayBlock(
+                block_id=f"block_{index}", group=group, title=group, size=size,
+                primary_item_id=selections[0].item_id,
+                item_ids=tuple(selection.item_id for selection in selections),
+            ))
+        settings = DashboardSettings(tuple(blocks))
+        self._validate(settings, available_groups, allow_missing=True)
         return settings
 
     @staticmethod
-    def _validate(settings: DashboardSettings, available_ids: set[str], *, allow_missing: bool) -> None:
-        ids = [item.item_id for item in settings.items]
-        if len(ids) != len(set(ids)):
-            raise SettingsError("同じ表示項目を重複して選択できません")
-        if any(not isinstance(item.item_id, str) or item.size not in SIZES for item in settings.items):
-            raise SettingsError("表示項目または表示サイズが正しくありません")
-        if not allow_missing and any(item_id not in available_ids for item_id in ids):
-            raise SettingsError("存在しない表示項目が含まれています")
-        if sum(SIZES[item.size] for item in settings.items) > STANDARD_CAPACITY:
+    def _validate(settings: DashboardSettings, available_groups: dict[str, str], *, allow_missing: bool) -> None:
+        block_ids = [block.block_id for block in settings.blocks]
+        if len(block_ids) != len(set(block_ids)) or any(not isinstance(block_id, str) or not block_id for block_id in block_ids):
+            raise SettingsError("ブロックIDが正しくありません")
+        item_ids: list[str] = []
+        for block in settings.blocks:
+            if not isinstance(block.group, str) or not block.group or not isinstance(block.title, str) or not block.title.strip():
+                raise SettingsError("ブロック名が正しくありません")
+            if block.size not in SIZES or not block.item_ids or block.primary_item_id not in block.item_ids:
+                raise SettingsError("ブロックの表示項目が正しくありません")
+            if len(block.item_ids) != len(set(block.item_ids)) or any(not isinstance(item_id, str) for item_id in block.item_ids):
+                raise SettingsError("同じ表示項目を重複して選択できません")
+            if not allow_missing:
+                if any(item_id not in available_groups for item_id in block.item_ids):
+                    raise SettingsError("存在しない表示項目が含まれています")
+                if any(available_groups[item_id] != block.group for item_id in block.item_ids):
+                    raise SettingsError("同じsourceの項目だけをブロックにできます")
+            item_ids.extend(block.item_ids)
+        if len(item_ids) != len(set(item_ids)):
+            raise SettingsError("同じ表示項目を複数ブロックに配置できません")
+        if sum(SIZES[block.size] for block in settings.blocks) > STANDARD_CAPACITY:
             raise SettingsError("表示領域がいっぱいです")

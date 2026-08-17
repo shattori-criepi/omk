@@ -413,7 +413,9 @@ JSONL保存、Harvest 1分集約、SORACOM Harvest Data送信までの経路を�
 互換フォールバックとして維持する。
 
 Phase 2ではDashboardがgeneric latest catalogとitemを読取り、Dashboard専用設定
-`data/dashboard/settings.json`へ標準プリセットのDisplay Item、順序、三段階サイズを保存する。
+`data/dashboard/settings.json`へ標準プリセットのDisplay Block（同一sourceの複数Display Item）、
+順序、主表示、三段階サイズを保存する。容量はblock単位で計算し、version 1のitem設定は読取り時に
+version 2のsource単位blockへ移行する。
 collectorは表示上の意味を持たず、Dashboard側のmetric definitionが表示名、単位、候補可否、
 カテゴリ、semantic roleを解釈する。標準プリセットは自由配置ではなく容量制のCSS Gridである。
 時計、詳細、電力専用プリセットは後続Phaseとする。

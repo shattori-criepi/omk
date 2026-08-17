@@ -63,8 +63,12 @@ function updateSourceStatus(sectionId, badgeId, freshness) {
 }
 
 function updateDisplay(data) {
-  if (data.mode === "standard" && Array.isArray(data.items)) {
-    data.items.forEach((item) => {
+  if (data.mode === "standard" && Array.isArray(data.blocks)) {
+    data.blocks.forEach((block) => {
+      const card = document.querySelector(`[data-block-id="${CSS.escape(block.id)}"]`);
+      if (!card) return;
+      const items = [block.primary, ...(block.secondary || [])];
+      items.forEach((item) => {
       const card = document.querySelector(`[data-item-id="${CSS.escape(item.id)}"]`);
       if (!card) return;
       const value = card.querySelector('[data-role="value"]');
@@ -75,6 +79,9 @@ function updateDisplay(data) {
       if (freshness) freshness.textContent = sourceBadgeText(item.freshness);
       card.classList.remove("display-card--normal", "display-card--delayed", "display-card--unavailable");
       card.classList.add(`display-card--${item.freshness}`);
+      });
+      card.classList.remove("display-card--normal", "display-card--delayed", "display-card--unavailable");
+      card.classList.add(`display-card--${block.freshness}`);
     });
     const updatedAt = document.querySelector("#updated-at");
     if (updatedAt) { updatedAt.textContent = data.updated_at; updatedAt.dateTime = data.updated_at_iso; }
