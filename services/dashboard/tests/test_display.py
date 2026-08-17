@@ -465,7 +465,9 @@ def test_hero_display_html_and_javascript_expose_polling_targets(tmp_path: Path,
     assert ".display-card--small" in stylesheet
     assert ".display-card--hero" in stylesheet
     assert ".display-card--strip" in stylesheet
-    assert "grid-template-columns: minmax(0, 1.1fr) minmax(260px, .9fr);" in stylesheet
+    assert re.search(r"\.display-card--hero \{[^}]*grid-template-columns:", stylesheet)
+    assert ".display-card--hero .display-card-primary { grid-column: 1; grid-row: 2;" in stylesheet
+    assert ".display-card--hero .display-card-secondary { grid-column: 2; grid-row: 2;" in stylesheet
     assert ".admin-link svg { width: clamp(28px, 3vw, 36px);" in stylesheet
     assert "font-variant-numeric: tabular-nums" in stylesheet
 
