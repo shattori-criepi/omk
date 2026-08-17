@@ -14,6 +14,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from ble_route_selector import BleRouteSelector, should_store_record
+from latest_store import GenericLatestStore
 
 try:
     import paho.mqtt.client as mqtt
@@ -62,12 +63,15 @@ class JsonlWriter:
 
 
 class LatestDataWriter:
-    """Atomically replace dashboard-oriented latest MQTT records."""
+    """Write generic latest values and retain the legacy dashboard cache."""
 
     def __init__(self, data_root: Path) -> None:
         self.data_root = data_root
+        self.generic_store = GenericLatestStore(data_root)
 
     def write(self, record: dict[str, Any]) -> None:
+        self.generic_store.write(record)
+
         filename = self._filename_for(record)
         if filename is None:
             return
@@ -102,7 +106,8 @@ class LatestDataWriter:
 
     @staticmethod
     def _filename_for(record: dict[str, Any]) -> str | None:
-        if "payload" not in record:
+        payload = record.get("payload")
+        if not isinstance(payload, dict):
             return None
         topic = record.get("topic")
         if not isinstance(topic, str):
@@ -110,7 +115,16 @@ class LatestDataWriter:
         parts = topic.split("/")
         if len(parts) != 3 or parts[0] != "omk" or not parts[1]:
             return None
-        return LATEST_FILES.get(parts[2])
+        # The old cache has no device component.  Retain only the record shapes
+        # consumed by the fixed Dashboard so a BLE Plug's ``power`` payload can
+        # no longer overwrite B-route's legacy cache.
+        if parts[2] == "power" and "net_power_w" in payload:
+            return LATEST_FILES["power"]
+        if parts[2] == "sen66":
+            return LATEST_FILES["sen66"]
+        if parts[2] == "power-flow":
+            return LATEST_FILES["power-flow"]
+        return None
 
 
 def build_record(message: mqtt.MQTTMessage, received_at: datetime | None = None) -> dict[str, Any]:
