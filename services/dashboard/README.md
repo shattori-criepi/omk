@@ -106,7 +106,10 @@ Raspberry Pi自身またはLAN内から利用する場合は、`localhost`をPi�
 ## データ
 
 `OMK_LATEST_DATA_ROOT`（既定: `data/latest`）はcollectorが原子的に置換する瞬時値JSONの
-ルートです。対象は`broute_power.json`、`sen66.json`、`ichijo_power_flow.json`です。
+ルートです。現行の固定画面は`broute_power.json`、`sen66.json`、`ichijo_power_flow.json`を
+使用します。collectorは将来の可変Dashboard用に、汎用latest item store
+（`items/<stable-item-id>.json`）と候補一覧（`catalog.json`）も保存しますが、Display Item選択、
+プリセット、可変カード表示はまだ実装していません。
 `OMK_PROCESSED_DATA_ROOT`は日計電力量用の処理済みParquetのルートです。一条`power-flow`が
 10分を超えて古い場合、画面はBルート電力へフォールバックします。
 

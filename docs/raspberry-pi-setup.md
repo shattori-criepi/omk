@@ -284,7 +284,7 @@ docker compose restart mosquitto sensor-collector dashboard harvest-uploader
 データです。キューを含め削除せず、バックアップと保持方針に従って管理してください。
 スクリプトは既存ディレクトリを再帰的にchownしません。
 
-`data/latest`はcollectorが書き込み、dashboardは読み取り専用で参照します。初回の計測後に`ls -l data/latest/`で`broute_power.json`、`sen66.json`、`ichijo_power_flow.json`の生成状況と読取り権限を確認してください。未生成でもdashboardは起動し、欠損値として表示します。
+`data/latest`はcollectorが書き込み、dashboardは読み取り専用で参照します。初回の計測後に`ls -l data/latest/`と`ls -l data/latest/items/`で、互換用の`broute_power.json`、`sen66.json`、`ichijo_power_flow.json`と、汎用latest item／`catalog.json`の生成状況・読取り権限を確認してください。現行Dashboardは前者だけを使用し、汎用storeを使う可変表示は後続Phaseです。未生成でもdashboardは起動し、欠損値として表示します。
 
 ### トラブルシューティング
 

@@ -51,7 +51,9 @@ JSONとして解析できないUTF-8 payloadは`payload_raw`と`payload_parse_er
 
 ## latest状態キャッシュ
 
-JSONL保存に成功した正常JSON payloadのうち、`omk/<device_id>/power`、`sen66`、`power-flow`は、それぞれ`data/latest/broute_power.json`、`sen66.json`、`ichijo_power_flow.json`へ更新される。collectorは同一ディレクトリの一時ファイルをatomic置換するため、dashboardは読取り途中のJSONを参照しない。latest更新が失敗してもJSONL収集は継続する。詳細な保存条件と権限は[sensor-collector README](../services/sensor-collector/README.md)を参照する。
+JSONL保存に成功した正常JSON payloadは、payloadの`device_id`、MQTT topic、payload fieldを組み合わせた汎用latest storeにも記録される。`data/latest/items/<stable-item-id>.json`は各scalar値の最新レコード、`data/latest/catalog.json`は検出済みsource/value候補の一覧である。IDは`SHA-256(topic + NUL + device_id + NUL + field)`由来のため、BルートとBLE Plugが同じ`power` data typeを使っても衝突しない。catalogは通信断で候補を削除しない。候補から除くメタデータと保存形式は[sensor-collector README](../services/sensor-collector/README.md)を参照する。
+
+現行の固定Dashboardとの互換のため、Bルート`power`（`net_power_w`を持つpayload）、SEN66`sen66`、一条`power-flow`は、それぞれ`data/latest/broute_power.json`、`sen66.json`、`ichijo_power_flow.json`にも更新する。Plugの`power`はこの旧Bルートcacheを更新しない。collectorは同一ディレクトリの一時ファイルをatomic置換するため、Dashboardは読取り途中のJSONを参照しない。Display Item選択・プリセット・可変画面は後続Phaseの責務である。
 
 ## BLEセンサ
 

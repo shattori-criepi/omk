@@ -402,10 +402,15 @@ JSONL保存、Harvest 1分集約、SORACOM Harvest Data送信までの経路を�
 1. 各データ取得処理がJSON payloadをMQTTへpublishする
 2. `sensor-collector`が`omk/#`を受信する
 3. collectorがRaspberry Pi受信時刻とMQTTメタデータを付与してJSONLへ追記する
-4. collectorは対象計測値をlatest JSONへatomic置換し、dashboardはこれを瞬時値として読む
+4. collectorは`topic + device_id + field`ごとの汎用latest itemと永続catalogをatomic置換し、移行中は現行Dashboard用の固定latest JSONも併行して更新する
 5. `data-transformer`が対応トピックを正規化し、日付パーティション済みParquetを生成する
 6. dashboardはParquetを今日の買電量・売電量と履歴用途に使い、`/api/display`を10秒ごとに更新する。一条`power-flow`が10分超で古い場合はBルート値へフォールバックする
 7. CSV変換、分析、外部送信がJSONLまたはParquetを後段入力として利用する
+
+汎用latest catalogは、受信済みscalar sourceを将来のDisplay Item候補として列挙するための
+基盤である。collectorは値の表示名、単位、カテゴリ、画面上の意味を持たず、Dashboard側が後続
+Phaseで解釈する。通信断やcollector再起動でcatalog候補は削除しない。現行Dashboardの画面は
+固定latest JSONを利用しており、Display Item選択・プリセット・可変レイアウトは未実装である。
 
 `power`、`cumulative-energy`、`interval-energy`、`sen66`は計測データとして、それぞれ`broute_power`、`broute_cumulative_energy`、`broute_interval_energy`、`sen66`へ変換する。`omk/<device_id>/status`は現時点では管理情報として意図的に除外し、未知・不正トピックだけを変換エラーとして記録する。
 
@@ -434,7 +439,7 @@ JSONL保存、Harvest 1分集約、SORACOM Harvest Data送信までの経路を�
 | サービス | 主な責務 | 言語／実装 |
 |---|---|---|
 | `mosquitto` | LAN内のMQTTメッセージ中継 | MQTT broker |
-| `sensor-collector` | `omk/#`の汎用受信と日次JSONL一次保存、対象計測値のlatest JSON更新 | Python / Docker Compose |
+| `sensor-collector` | `omk/#`の汎用受信と日次JSONL一次保存、汎用latest item/catalogおよび互換latest JSON更新 | Python / Docker Compose |
 | `data-transformer` | JSONLの検証・トピック別正規化・Parquet出力。`status`は管理情報として除外 | Python / PyArrow |
 | `dashboard` | latest JSONによる瞬時値、Parquetによる日計・履歴の表示 | Python / Docker Compose |
 | `omk-dashboard-kiosk.service` | Wayland GUIセッション内でChromiumキオスクを起動・監視し、labwcのカーソル非表示操作を実行 | user systemd / wtype |

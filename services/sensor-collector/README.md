@@ -18,7 +18,40 @@ Mosquittoの`omk/#`を購読し、payloadの機種別仕様を解釈せず日次
 
 各行には、Raspberry Pi側で付与した`received_at`、`topic`、`qos`、`retain`、および受信payloadを入れます。通常のJSON payloadは`payload`にそのままネストします。不正JSONは`payload_raw`と解析エラーを、UTF-8でないデータはBase64を保存します。
 
-JSONLへの保存成功後、正常なJSON payloadの`omk/<device_id>/power`、`sen66`、`power-flow`は、それぞれ`broute_power.json`、`sen66.json`、`ichijo_power_flow.json`として`LATEST_DATA_ROOT`へ保存します。値はJSONLと同じレコード全体で、同一ディレクトリ内の一時ファイルから原子的に置換します。不正JSON、Base64 payload、`status`および対象外トピックは最新状態を更新しません。最新状態の保存に失敗しても、JSONL収集は継続します。
+## 汎用latest store（Dashboard可変化の基盤）
+
+JSONLへの保存成功後、正常なJSON payloadのうち、`omk/<topic-device-id>/<data-type>`かつ
+payloadに文字列`device_id`を持つレコードから、表示候補になり得るscalar値を
+`LATEST_DATA_ROOT/items/<stable-item-id>.json`へ保存します。同時に
+`LATEST_DATA_ROOT/catalog.json`を更新するため、Dashboardは全候補をディレクトリ走査なしで
+列挙できます。これは将来の可変Dashboard向けのデータ基盤であり、現行Dashboardの画面は
+まだこのstoreを使用しません。
+
+stable item IDは`SHA-256(topic + NUL + device_id + NUL + field)`のhexに
+`item_v1_`を付けたものです。したがって同じ`power` topic typeや`temperature_c` fieldでも、
+topicまたはdevice_idが異なれば衝突しません。itemファイルには最新のraw scalar値、型、
+`measured_at`（payloadにある場合）、`received_at`、MQTT QoS/retainを、catalogにはID、source、
+型、最終受信時刻を保存します。catalogは検出済み候補を自動削除しないため、受信停止や
+collector再起動後も候補は残ります。
+
+候補は有限のnumber、boolean、64文字以下の制御文字を含まないstringです。`device_id`、
+`*_at`、`*_id`、`*_raw`、quality、errors、source、firmware、uptime等の時刻・識別子・
+診断メタデータは除外します。表示名、単位、精度、カテゴリ、意味上の電力スロットはcollectorでは
+解釈せず、後続Dashboard Phaseの責務です。
+
+各JSONは同一ディレクトリの一時ファイルからatomic replaceで更新し、`0644`で公開します。
+10秒程度の更新頻度では、対象scalarごとのitem置換と1回の小さなcatalog置換だけを行います。
+
+### 既存Dashboardとの互換性
+
+移行中は固定latestも併行して維持します。Bルート`power`で`net_power_w`を持つものは
+`broute_power.json`、`sen66`は`sen66.json`、`power-flow`は
+`ichijo_power_flow.json`へ従来どおり保存します。BLE Plugの`power_w`/`switch_state`は
+generic storeには保存されますが、`broute_power.json`を上書きしません。後続Phaseで現行Dashboardが
+generic storeへ移行できた時点で、この固定latest互換出力を削除できます。
+
+不正JSON、Base64 payload、topic形式または`device_id`が不正なpayloadはgeneric latestを更新しません。
+最新状態の保存に失敗しても、JSONL収集は継続します。
 
 latest JSONは置換後に`0644`へ設定するため、ホストユーザーおよび読み取り専用でマウントしたdashboardから読み取れます。
 
