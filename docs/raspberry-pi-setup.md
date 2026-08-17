@@ -284,7 +284,12 @@ docker compose restart mosquitto sensor-collector dashboard harvest-uploader
 データです。キューを含め削除せず、バックアップと保持方針に従って管理してください。
 スクリプトは既存ディレクトリを再帰的にchownしません。
 
-`data/latest`はcollectorが書き込み、dashboardは読み取り専用で参照します。初回の計測後に`ls -l data/latest/`と`ls -l data/latest/items/`で、互換用の`broute_power.json`、`sen66.json`、`ichijo_power_flow.json`と、汎用latest item／`catalog.json`の生成状況・読取り権限を確認してください。現行Dashboardは前者だけを使用し、汎用storeを使う可変表示は後続Phaseです。未生成でもdashboardは起動し、欠損値として表示します。
+`data/latest`はcollectorが書き込み、dashboardは読み取り専用で参照します。初回の計測後に`ls -l data/latest/`と`ls -l data/latest/items/`で、互換用の`broute_power.json`、`sen66.json`、`ichijo_power_flow.json`と、汎用latest item／`catalog.json`の生成状況・読取り権限を確認してください。Phase 2の標準Dashboardは汎用storeを読み、旧ファイルは互換フォールバックとして残ります。未生成でもdashboardは起動し、欠損値として表示します。
+
+Dashboard Phase 2以降では、`data/dashboard/settings.json`が表示設定の保存先です。Compose更新後は
+`mkdir -p data/dashboard`を確認し、管理メニューの「表示設定」から標準プリセットの項目・順序・
+サイズを保存できます。`data/latest`は引き続きDashboardから読み取り専用で、`data/dashboard`だけが
+Dashboardコンテナへの書込みmountです。
 
 ### トラブルシューティング
 

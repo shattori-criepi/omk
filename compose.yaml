@@ -20,6 +20,7 @@ services:
       TZ: Asia/Tokyo
       OMK_PROCESSED_DATA_ROOT: /app/data/processed
       OMK_LATEST_DATA_ROOT: /app/data/latest
+      OMK_DASHBOARD_SETTINGS_PATH: /app/data/dashboard/settings.json
       OMK_BLE_MANAGER_URL: http://host.docker.internal:8787
       OMK_SYSTEM_MANAGER_URL: http://host.docker.internal:8788
     env_file:
@@ -29,6 +30,7 @@ services:
     volumes:
       - ./data/processed:/app/data/processed:ro
       - ./data/latest:/app/data/latest:ro
+      - ./data/dashboard:/app/data/dashboard
 
   sensor-collector:
     build:

@@ -7,6 +7,26 @@
     <link rel="stylesheet" href="{{ url_for('static', path='/display.css') }}?v=20260812-topbar">
   </head>
   <body>
+    {% if dashboard.items is defined %}
+    <main class="dashboard standard-dashboard" aria-label="OMK ダッシュボード">
+      <header class="topbar">
+        <time id="current-datetime" class="current-datetime" aria-label="現在日時">
+          <span id="header-date-main" class="header-date-main"></span><span id="header-weekday" class="header-weekday"></span><span id="header-time" class="header-time"></span>
+        </time>
+        <div class="status-area"><p class="updated">最終更新 <time id="updated-at" datetime="{{ dashboard.updated_at_iso }}">{{ dashboard.updated_at }}</time></p><p id="freshness" class="freshness freshness--{{ dashboard.freshness }}">{{ dashboard.freshness }}</p></div>
+        <a class="admin-link" href="/admin" aria-label="管理画面" title="管理画面">⚙</a>
+      </header>
+      <section id="display-items" class="standard-grid" aria-label="選択した表示項目">
+        {% for item in dashboard.items %}
+        <article class="display-card display-card--{{ item.size }} display-card--{{ item.freshness }}" data-item-id="{{ item.id }}">
+          <p class="display-card-label">{{ item.label }}</p>
+          <div class="display-card-reading"><strong data-role="value">{{ item.value }}</strong>{% if item.unit and item.freshness != 'unavailable' %}<span data-role="unit">{{ item.unit }}</span>{% endif %}</div>
+          <small data-role="freshness">{% if item.freshness == 'delayed' %}遅延{% elif item.freshness == 'unavailable' %}取得不可{% endif %}</small>
+        </article>
+        {% else %}<p class="dashboard-empty">表示項目がありません。管理画面の「表示設定」で選択してください。</p>{% endfor %}
+      </section>
+    </main>
+    {% else %}
     <main class="dashboard" aria-label="OMK ダッシュボード">
       <header class="topbar">
         <time id="current-datetime" class="current-datetime" aria-label="現在日時">
@@ -124,6 +144,7 @@
         </section>
       </section>
     </main>
+    {% endif %}
 
     <script src="{{ url_for('static', path='/display.js') }}?v=20260805-1" defer></script>
   </body>

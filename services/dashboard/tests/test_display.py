@@ -14,6 +14,10 @@ from fastapi.testclient import TestClient
 import app.main as dashboard_main
 from app.data.latest_repository import LatestRepository
 from app.data.parquet_repository import LatestPower, ParquetRepository
+from app.data.display_repository import DisplayRepository
+from app.data.settings_repository import DisplaySelection, SettingsError, SettingsRepository
+from app.display_items import candidate_for, selected_items
+from app.metric_definitions import definition_for, format_value
 from app.main import app
 from app.view_models import (
     FreshnessStatus,
@@ -64,6 +68,18 @@ def _write_latest(root: Path, filename: str, payload: dict, received_at: datetim
         "payload": payload,
     }
     (root / filename).write_text(json.dumps(record), encoding="utf-8")
+
+
+def _write_generic_item(root: Path, suffix: str, *, topic: str, device_id: str, field: str, value: object, value_type: str = "number", received_at: datetime = NOW) -> str:
+    item_id = f"item_v1_{suffix * 64}"
+    item = {"version": 1, "id": item_id, "topic": topic, "device_id": device_id, "field": field, "value_type": value_type, "value": value, "measured_at": None, "received_at": received_at.isoformat(), "source": {"qos": 0, "retain": False}}
+    (root / "items").mkdir(parents=True, exist_ok=True)
+    (root / "items" / f"{item_id}.json").write_text(json.dumps(item), encoding="utf-8")
+    catalog_path = root / "catalog.json"
+    catalog = json.loads(catalog_path.read_text()) if catalog_path.exists() else {"version": 1, "items": []}
+    catalog["items"].append({key: item[key] for key in ("id", "topic", "device_id", "field", "value_type")} | {"last_received_at": item["received_at"]})
+    catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+    return item_id
 
 
 def _write_instantaneous_data(
@@ -436,6 +452,56 @@ def test_health_returns_ok() -> None:
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+def test_generic_catalog_candidates_group_and_format_values(tmp_path: Path) -> None:
+    broute_id = _write_generic_item(tmp_path, "a", topic="omk/broute-001/power", device_id="broute-001", field="net_power_w", value=1234)
+    plug_id = _write_generic_item(tmp_path, "b", topic="omk/plug-001/power", device_id="plug-001", field="power_w", value=12.3)
+    ichijo_id = _write_generic_item(tmp_path, "c", topic="omk/ichijo-001/power-flow", device_id="ichijo-001", field="pv_power_w", value=800)
+    status_id = _write_generic_item(tmp_path, "d", topic="omk/broute-001/status", device_id="broute-001", field="status", value="online", value_type="string")
+    repository = DisplayRepository(tmp_path)
+    candidates = {item.id: candidate_for(item) for item in repository.catalog()}
+
+    assert repository.item(broute_id) is not None
+    assert candidates[broute_id].group == "電力メーター（Bルート）"
+    assert candidates[plug_id].group == "plug-001"
+    assert candidates[ichijo_id].group == "太陽光・蓄電池"
+    assert candidates[status_id].selectable is False
+    assert definition_for("unknown_scalar").selectable is True
+    assert format_value(True, definition_for("switch_state")) == "ON"
+
+
+def test_settings_validate_capacity_duplicates_and_persist_atomically(tmp_path: Path) -> None:
+    repository = SettingsRepository(tmp_path / "dashboard" / "settings.json")
+    ids = {"item_a", "item_b", "item_c"}
+    settings = repository.save_payload({"version": 1, "default_preset": "standard", "presets": {"standard": {"items": [{"item_id": "item_a", "size": "large"}, {"item_id": "item_b", "size": "small"}]}}}, ids)
+    assert settings.items == (DisplaySelection("item_a", "large"), DisplaySelection("item_b", "small"))
+    assert repository.load_or_create(ids, []).items == settings.items
+    assert not list((tmp_path / "dashboard").glob("*.tmp"))
+    with pytest.raises(SettingsError, match="重複"):
+        repository.save_payload({"version": 1, "default_preset": "standard", "presets": {"standard": {"items": [{"item_id": "item_a", "size": "small"}, {"item_id": "item_a", "size": "small"}]}}}, ids)
+    with pytest.raises(SettingsError, match="存在しない"):
+        repository.save_payload({"version": 1, "default_preset": "standard", "presets": {"standard": {"items": [{"item_id": "missing", "size": "small"}]}}}, ids)
+    with pytest.raises(SettingsError, match="表示領域"):
+        repository.save_payload({"version": 1, "default_preset": "standard", "presets": {"standard": {"items": [{"item_id": "item_a", "size": "large"}, {"item_id": "item_b", "size": "large"}, {"item_id": "item_c", "size": "small"}]}}}, ids)
+    with pytest.raises(SettingsError):
+        repository.save_payload({"version": 1, "default_preset": "standard", "presets": {"standard": {"items": [{"item_id": "item_a", "size": "huge"}]}}}, ids)
+
+
+def test_dynamic_display_api_uses_selected_order_and_keeps_unavailable_slot(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    latest_root = tmp_path / "latest"
+    fresh_id = _write_generic_item(latest_root, "e", topic="omk/living/environment", device_id="living", field="temperature_c", value=25.4, received_at=datetime.now(JST))
+    old_id = _write_generic_item(latest_root, "f", topic="omk/bedroom/environment", device_id="bedroom", field="temperature_c", value=23.0, received_at=datetime.now(JST) - timedelta(seconds=601))
+    monkeypatch.setenv("OMK_LATEST_DATA_ROOT", str(latest_root))
+    monkeypatch.setenv("OMK_DASHBOARD_SETTINGS_PATH", str(tmp_path / "dashboard" / "settings.json"))
+    put = client.put("/api/admin/dashboard-settings", json={"version": 1, "default_preset": "standard", "presets": {"standard": {"items": [{"item_id": old_id, "size": "small"}, {"item_id": fresh_id, "size": "large"}]}}})
+    assert put.status_code == 200
+    snapshot = client.get("/api/display").json()
+    assert snapshot["mode"] == "standard"
+    assert [item["id"] for item in snapshot["items"]] == [old_id, fresh_id]
+    assert snapshot["items"][0]["value"] == "--"
+    assert snapshot["items"][0]["freshness"] == "unavailable"
+    assert snapshot["items"][1]["size"] == "large"
 
 
 def test_delete_sensor_proxy_forwards_device_key_and_propagates_not_found(monkeypatch: pytest.MonkeyPatch) -> None:

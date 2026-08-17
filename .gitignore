@@ -20,6 +20,9 @@ data/sensors/*
 !data/latest/
 data/latest/*
 !data/latest/.gitkeep
+!data/dashboard/
+data/dashboard/*
+!data/dashboard/.gitkeep
 !data/processed/
 data/processed/*
 !data/processed/.gitkeep

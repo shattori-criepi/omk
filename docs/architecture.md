@@ -408,9 +408,15 @@ JSONL保存、Harvest 1分集約、SORACOM Harvest Data送信までの経路を�
 7. CSV変換、分析、外部送信がJSONLまたはParquetを後段入力として利用する
 
 汎用latest catalogは、受信済みscalar sourceを将来のDisplay Item候補として列挙するための
-基盤である。collectorは値の表示名、単位、カテゴリ、画面上の意味を持たず、Dashboard側が後続
-Phaseで解釈する。通信断やcollector再起動でcatalog候補は削除しない。現行Dashboardの画面は
-固定latest JSONを利用しており、Display Item選択・プリセット・可変レイアウトは未実装である。
+基盤である。collectorは値の表示名、単位、カテゴリ、画面上の意味を持たず、Dashboard側が
+解釈する。通信断やcollector再起動でcatalog候補は削除しない。固定latest JSONは旧環境との
+互換フォールバックとして維持する。
+
+Phase 2ではDashboardがgeneric latest catalogとitemを読取り、Dashboard専用設定
+`data/dashboard/settings.json`へ標準プリセットのDisplay Item、順序、三段階サイズを保存する。
+collectorは表示上の意味を持たず、Dashboard側のmetric definitionが表示名、単位、候補可否、
+カテゴリ、semantic roleを解釈する。標準プリセットは自由配置ではなく容量制のCSS Gridである。
+時計、詳細、電力専用プリセットは後続Phaseとする。
 
 `power`、`cumulative-energy`、`interval-energy`、`sen66`は計測データとして、それぞれ`broute_power`、`broute_cumulative_energy`、`broute_interval_energy`、`sen66`へ変換する。`omk/<device_id>/status`は現時点では管理情報として意図的に除外し、未知・不正トピックだけを変換エラーとして記録する。
 

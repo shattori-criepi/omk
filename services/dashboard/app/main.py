@@ -1,6 +1,8 @@
 """HTTP entry point for the OMK touch display dashboard."""
 
 import os
+from dataclasses import dataclass
+from datetime import datetime
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -12,6 +14,10 @@ from fastapi.templating import Jinja2Templates
 
 from app.data.latest_repository import LatestRepository
 from app.data.parquet_repository import ParquetRepository
+from app.data.display_repository import DisplayRepository
+from app.data.settings_repository import DisplaySelection, SettingsError, SettingsRepository
+from app.display_items import candidate_for, selected_items
+from app.view_models import FreshnessStatus, worst_freshness
 from app.view_models import get_display_view_model
 
 APP_DIR = Path(__file__).parent
@@ -34,8 +40,57 @@ def get_latest_repository() -> LatestRepository:
     return LatestRepository(Path(os.environ.get("OMK_LATEST_DATA_ROOT", "data/latest")))
 
 
+def get_display_repository() -> DisplayRepository:
+    return DisplayRepository(Path(os.environ.get("OMK_LATEST_DATA_ROOT", "data/latest")))
+
+
+def get_settings_repository() -> SettingsRepository:
+    return SettingsRepository(Path(os.environ.get("OMK_DASHBOARD_SETTINGS_PATH", "data/dashboard/settings.json")))
+
+
+@dataclass(frozen=True)
+class StandardDashboard:
+    items: list
+    updated_at: str
+    updated_at_iso: str
+    freshness: FreshnessStatus
+
+    def as_dict(self) -> dict:
+        return {"mode": "standard", "items": [item.as_dict() for item in self.items], "updated_at": self.updated_at, "updated_at_iso": self.updated_at_iso, "freshness": self.freshness.value}
+
+
+def _default_selections(candidates: list) -> list[DisplaySelection]:
+    priority = {"net_power_w": 0, "load_power_w": 1, "power_w": 2, "temperature_c": 3, "temperature_celsius": 3, "relative_humidity_percent": 4, "co2_ppm": 5}
+    ordered = sorted(candidates, key=lambda item: (priority.get(item.field, 100), item.id))
+    selections: list[DisplaySelection] = []
+    capacity = 0
+    for index, item in enumerate(ordered):
+        size = "large" if index == 0 else "small"
+        cost = 3 if size == "large" else 1
+        if capacity + cost > 6:
+            break
+        selections.append(DisplaySelection(item.id, size))
+        capacity += cost
+    return selections
+
+
 def get_dashboard_view_model():
     """Build one consistent snapshot for both HTML and polling API responses."""
+    display_repository = get_display_repository()
+    candidates = [candidate_for(item) for item in display_repository.catalog()]
+    selectable = [item for item in candidates if item.selectable]
+    if selectable:
+        settings = get_settings_repository().load_or_create(
+            {item.id for item in candidates}, _default_selections(selectable)
+        )
+        now = datetime.now().astimezone()
+        items = selected_items(display_repository, settings.items, now)
+        statuses = [FreshnessStatus(item.freshness) for item in items] or [FreshnessStatus.UNAVAILABLE]
+        updated = max((item.last_received_at for item in items if item.last_received_at), default="")
+        return StandardDashboard(
+            items=items, updated_at=updated.replace("T", " ") if updated else "--",
+            updated_at_iso=updated, freshness=worst_freshness(*statuses),
+        )
     return get_display_view_model(get_latest_repository(), get_parquet_repository())
 
 
@@ -52,6 +107,11 @@ async def display(request: Request) -> HTMLResponse:
 @app.get("/admin", response_class=HTMLResponse)
 async def admin(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(request=request, name="admin.html", context={})
+
+
+@app.get("/admin/display", response_class=HTMLResponse)
+async def admin_display(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse(request=request, name="admin_display.html", context={})
 
 
 @app.get("/admin/sensors", response_class=HTMLResponse)
@@ -151,6 +211,34 @@ async def _system_manager_request(method: str, path: str, body: dict | None = No
 async def sensors() -> dict:
     return await _ble_request("GET", "/api/sensors")
 
+
+@app.get("/api/admin/display-items")
+async def display_items() -> dict:
+    candidates = [candidate_for(item) for item in get_display_repository().catalog()]
+    groups: dict[str, list[dict]] = {}
+    for item in candidates:
+        groups.setdefault(item.group, []).append(item.as_dict())
+    return {"groups": [{"name": name, "items": sorted(items, key=lambda item: item["label"])} for name, items in sorted(groups.items())], "capacity": 6}
+
+
+@app.get("/api/admin/dashboard-settings")
+async def dashboard_settings() -> dict:
+    candidates = [candidate_for(item) for item in get_display_repository().catalog()]
+    settings = get_settings_repository().load_or_create({item.id for item in candidates}, _default_selections([item for item in candidates if item.selectable]))
+    return {**settings.as_dict(), "capacity": 6}
+
+
+@app.put("/api/admin/dashboard-settings")
+async def update_dashboard_settings(request: Request) -> dict:
+    candidates = [candidate_for(item) for item in get_display_repository().catalog()]
+    try:
+        settings = get_settings_repository().save_payload(await request.json(), {item.id for item in candidates if item.selectable})
+    except SettingsError as error:
+        raise HTTPException(400, str(error)) from error
+    except (OSError, ValueError) as error:
+        raise HTTPException(500, "表示設定を保存できません") from error
+    return {**settings.as_dict(), "capacity": 6}
+
 @app.get("/api/admin/nodes")
 async def nodes() -> dict:
     return await _ble_request("GET", "/api/nodes")
@@ -221,7 +309,7 @@ async def shutdown_system() -> dict:
 
 
 @app.get("/api/display")
-async def display_api() -> dict[str, str | bool]:
+async def display_api() -> dict:
     """Return the current dashboard snapshot for in-page refreshes."""
     return get_dashboard_view_model().as_dict()
 
