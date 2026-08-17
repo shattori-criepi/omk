@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <title>OMK ダッシュボード</title>
-    <link rel="stylesheet" href="{{ url_for('static', path='/display.css') }}?v=20260817-display-blocks">
+    <link rel="stylesheet" href="{{ url_for('static', path='/display.css') }}?v=20260817-block-typography">
   </head>
   <body>
     {% if dashboard.blocks is defined %}
@@ -20,7 +20,8 @@
       </header>
       <section id="display-blocks" class="standard-grid" aria-label="選択した表示ブロック">
         {% for block in dashboard.blocks %}
-        <article class="display-card display-card--{{ block.size }} display-card--{{ block.layout_pattern }} display-card--{{ block.freshness }}" data-block-id="{{ block.id }}">
+        {% set item_count = 1 + (block.secondary | length) %}
+        <article class="display-card display-card--{{ block.size }} display-card--{{ block.layout_pattern }} display-card--items-{{ item_count }} display-card--{{ block.freshness }}" data-block-id="{{ block.id }}" data-item-count="{{ item_count }}">
           <p class="display-card-label">{{ block.title }}</p>
           {% if block.layout_pattern == 'strip' %}
           <div class="display-card-strip-items">
@@ -29,8 +30,8 @@
           </div>
           {% elif block.layout_pattern == 'compact' %}
           <div class="display-card-compact-items">
-            <div class="display-secondary-item" data-item-id="{{ block.primary.id }}"><span class="display-secondary-label" data-role="label">{{ block.primary.short_label or block.primary.label }}</span><strong class="display-secondary-value" data-role="value">{{ block.primary.value }}</strong>{% if block.primary.unit and block.primary.freshness != 'unavailable' %}<small class="display-secondary-unit" data-role="unit">{{ block.primary.unit }}</small>{% endif %}</div>
-            {% for item in block.secondary %}<div class="display-secondary-item" data-item-id="{{ item.id }}"><span class="display-secondary-label" data-role="label">{{ item.short_label or item.label }}</span><strong class="display-secondary-value" data-role="value">{{ item.value }}</strong>{% if item.unit and item.freshness != 'unavailable' %}<small class="display-secondary-unit" data-role="unit">{{ item.unit }}</small>{% endif %}</div>{% endfor %}
+            <div class="display-secondary-item" data-item-id="{{ block.primary.id }}"><span class="display-secondary-label" data-role="label">{{ block.primary.short_label or block.primary.label }}</span><span class="display-compact-reading"><strong class="display-secondary-value" data-role="value">{{ block.primary.value }}</strong>{% if block.primary.unit and block.primary.freshness != 'unavailable' %}<small class="display-secondary-unit" data-role="unit">{{ block.primary.unit }}</small>{% endif %}</span></div>
+            {% for item in block.secondary %}<div class="display-secondary-item" data-item-id="{{ item.id }}"><span class="display-secondary-label" data-role="label">{{ item.short_label or item.label }}</span><span class="display-compact-reading"><strong class="display-secondary-value" data-role="value">{{ item.value }}</strong>{% if item.unit and item.freshness != 'unavailable' %}<small class="display-secondary-unit" data-role="unit">{{ item.unit }}</small>{% endif %}</span></div>{% endfor %}
           </div>
           {% else %}
           <div class="display-card-primary" data-item-id="{{ block.primary.id }}">
