@@ -44,7 +44,7 @@ DEFINITIONS: dict[str, MetricDefinition] = {
     "motion_state": MetricDefinition("人感", category="状態", states={0: "不在", 1: "検知", False: "不在", True: "検知"}),
     "contact_state": MetricDefinition("開閉", category="状態", states={0: "閉", 1: "開", False: "閉", True: "開"}),
     "pv_power_w": MetricDefinition("PV発電", "kW", 2, "太陽光・蓄電池", "pv_power"),
-    "load_power_w": MetricDefinition("家庭消費電力", "kW", 2, "太陽光・蓄電池", "load_power"),
+    "load_power_w": MetricDefinition("住宅内消費電力", "kW", 2, "太陽光・蓄電池", "load_power"),
     "grid_import_power_w": MetricDefinition("買電電力", "kW", 2, "太陽光・蓄電池", "grid_import"),
     "grid_export_power_w": MetricDefinition("売電電力", "kW", 2, "太陽光・蓄電池", "grid_export"),
     "battery_soc_percent": MetricDefinition("蓄電池残量", "%", 0, "太陽光・蓄電池", "battery_soc"),

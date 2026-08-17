@@ -64,7 +64,7 @@ class DisplayBlockView:
 def source_group(item: CatalogItem) -> str:
     data_type = item.topic.rsplit("/", 1)[-1]
     if data_type == "power-flow":
-        return "太陽光・蓄電池"
+        return "一条パワコン"
     if definition_for(item.field).category == "電力メーター（Bルート）":
         return "電力メーター（Bルート）"
     return item.device_id
@@ -175,7 +175,7 @@ def selected_blocks(
 
 def _display_block_title(title: str, group: str) -> str:
     """Keep the energy-system block compact without overriding custom titles."""
-    return "一条パワコン" if group == "太陽光・蓄電池" and title == group else title
+    return "一条パワコン" if group == "一条パワコン" and title in {group, "太陽光・蓄電池"} else title
 
 
 def _display_item(
