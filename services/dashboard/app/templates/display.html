@@ -27,6 +27,11 @@
             <div class="display-secondary-item" data-item-id="{{ block.primary.id }}"><span data-role="label">{{ block.primary.short_label or block.primary.label }}</span><strong data-role="value">{{ block.primary.value }}</strong>{% if block.primary.unit and block.primary.freshness != 'unavailable' %}<small data-role="unit">{{ block.primary.unit }}</small>{% endif %}</div>
             {% for item in block.secondary %}<div class="display-secondary-item" data-item-id="{{ item.id }}"><span data-role="label">{{ item.short_label or item.label }}</span><strong data-role="value">{{ item.value }}</strong>{% if item.unit and item.freshness != 'unavailable' %}<small data-role="unit">{{ item.unit }}</small>{% endif %}</div>{% endfor %}
           </div>
+          {% elif block.layout_pattern == 'compact' %}
+          <div class="display-card-compact-items">
+            <div class="display-secondary-item" data-item-id="{{ block.primary.id }}"><span data-role="label">{{ block.primary.short_label or block.primary.label }}</span><strong data-role="value">{{ block.primary.value }}</strong>{% if block.primary.unit and block.primary.freshness != 'unavailable' %}<small data-role="unit">{{ block.primary.unit }}</small>{% endif %}</div>
+            {% for item in block.secondary %}<div class="display-secondary-item" data-item-id="{{ item.id }}"><span data-role="label">{{ item.short_label or item.label }}</span><strong data-role="value">{{ item.value }}</strong>{% if item.unit and item.freshness != 'unavailable' %}<small data-role="unit">{{ item.unit }}</small>{% endif %}</div>{% endfor %}
+          </div>
           {% else %}
           <div class="display-card-primary" data-item-id="{{ block.primary.id }}">
             <p data-role="label">{{ block.primary.short_label or block.primary.label }}</p>

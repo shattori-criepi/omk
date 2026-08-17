@@ -15,8 +15,8 @@ from fastapi.templating import Jinja2Templates
 from app.data.latest_repository import LatestRepository
 from app.data.parquet_repository import ParquetRepository
 from app.data.display_repository import DisplayRepository
-from app.data.settings_repository import DisplayBlock, LAYOUT_PATTERNS, SettingsError, SettingsRepository, default_layout_pattern
-from app.display_items import candidate_for, catalog_items_with_latest, selected_blocks
+from app.data.settings_repository import DisplayBlock, SettingsError, SettingsRepository, default_layout_pattern, item_limit
+from app.display_items import catalog_items_with_latest, display_candidates, display_item_migrations, selected_blocks
 from app.view_models import FreshnessStatus, worst_freshness
 from app.view_models import get_display_view_model
 
@@ -76,7 +76,7 @@ def _default_blocks(candidates: list) -> list[DisplayBlock]:
         layout_pattern = default_layout_pattern(size)
         blocks.append(DisplayBlock(
             block_id=f"block_{index + 1}", group=item.group, title=item.group, size=size,
-            primary_item_id=item.id, item_ids=tuple(candidate.id for candidate in items[:LAYOUT_PATTERNS[layout_pattern]]),
+            primary_item_id=item.id, item_ids=tuple(candidate.id for candidate in items[:item_limit(size, layout_pattern)]),
             layout_pattern=layout_pattern,
         ))
         capacity += cost
@@ -86,11 +86,11 @@ def _default_blocks(candidates: list) -> list[DisplayBlock]:
 def get_dashboard_view_model():
     """Build one consistent snapshot for both HTML and polling API responses."""
     display_repository = get_display_repository()
-    candidates = [candidate_for(item) for item in display_repository.catalog()]
+    candidates = display_candidates(display_repository)
     selectable = [item for item in candidates if item.selectable]
     if selectable:
         groups = {item.id: item.group for item in candidates}
-        settings = get_settings_repository().load_or_create(groups, _default_blocks(selectable))
+        settings = get_settings_repository().load_or_create(groups, _default_blocks(selectable), display_item_migrations(candidates))
         now = datetime.now().astimezone()
         blocks = selected_blocks(display_repository, settings.blocks, now)
         statuses = [FreshnessStatus(block.freshness) for block in blocks] or [FreshnessStatus.UNAVAILABLE]
@@ -231,17 +231,19 @@ async def display_items() -> dict:
 
 @app.get("/api/admin/dashboard-settings")
 async def dashboard_settings() -> dict:
-    candidates = [candidate_for(item) for item in get_display_repository().catalog()]
+    candidates = display_candidates(get_display_repository())
     groups = {item.id: item.group for item in candidates}
-    settings = get_settings_repository().load_or_create(groups, _default_blocks([item for item in candidates if item.selectable]))
+    settings = get_settings_repository().load_or_create(groups, _default_blocks([item for item in candidates if item.selectable]), display_item_migrations(candidates))
     return {**settings.as_dict(), "capacity": 6}
 
 
 @app.put("/api/admin/dashboard-settings")
 async def update_dashboard_settings(request: Request) -> dict:
-    candidates = [candidate_for(item) for item in get_display_repository().catalog()]
+    candidates = display_candidates(get_display_repository())
     try:
-        settings = get_settings_repository().save_payload(await request.json(), {item.id: item.group for item in candidates if item.selectable})
+        settings = get_settings_repository().save_payload(
+            await request.json(), {item.id: item.group for item in candidates if item.selectable}, display_item_migrations(candidates),
+        )
     except SettingsError as error:
         raise HTTPException(400, str(error)) from error
     except (OSError, ValueError) as error:
