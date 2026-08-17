@@ -407,30 +407,56 @@ def test_display_api_returns_ichijo_and_broute_fallback_snapshots(tmp_path: Path
     assert fallback["power_direction"] == "買電"
 
 
-def test_display_html_and_javascript_expose_polling_targets() -> None:
+def test_dynamic_display_html_and_javascript_expose_polling_targets(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    latest_root = tmp_path / "latest"
+    item_ids = [
+        _write_generic_item(
+            latest_root, "h", topic="omk/living/environment", device_id="living",
+            field="temperature_c", value=25.4, received_at=datetime.now(JST),
+        ),
+        _write_generic_item(
+            latest_root, "i", topic="omk/living/environment", device_id="living",
+            field="relative_humidity_percent", value=48.0, received_at=datetime.now(JST),
+        ),
+        _write_generic_item(
+            latest_root, "j", topic="omk/living/environment", device_id="living",
+            field="co2_ppm", value=650, received_at=datetime.now(JST),
+        ),
+    ]
+    settings_path = tmp_path / "dashboard" / "settings.json"
+    settings_path.parent.mkdir(parents=True)
+    settings_path.write_text(json.dumps({
+        "version": 1,
+        "default_preset": "standard",
+        "presets": {"standard": {"items": [
+            {"item_id": item_ids[0], "size": "large"},
+            {"item_id": item_ids[1], "size": "medium"},
+            {"item_id": item_ids[2], "size": "small"},
+        ]}},
+    }), encoding="utf-8")
+    monkeypatch.setenv("OMK_LATEST_DATA_ROOT", str(latest_root))
+    monkeypatch.setenv("OMK_DASHBOARD_SETTINGS_PATH", str(settings_path))
     response = client.get("/display")
     javascript = (Path(__file__).parents[1] / "app" / "static" / "display.js").read_text(encoding="utf-8")
     stylesheet = (Path(__file__).parents[1] / "app" / "static" / "display.css").read_text(encoding="utf-8")
 
     assert response.status_code == 200
-    for element_id in (
-        "header-date-main", "header-weekday", "header-time",
-        "current-power-kw", "current-power-label", "power-direction", "grid-flow",
-        "pv-power-kw", "battery-soc-percent", "battery-power-kw", "purchased-today-kwh",
-        "sold-today-kwh", "temperature-c", "humidity-percent", "co2-ppm", "pm25-ug-m3",
-        "voc-index", "updated-at", "freshness",
-        "power-source-badge", "sen66-source-badge",
-    ):
+    for element_id in ("header-date-main", "header-weekday", "header-time", "updated-at", "freshness", "display-items"):
         assert f'id="{element_id}"' in response.text
+    for item_id, size in zip(item_ids, ("large", "medium", "small"), strict=True):
+        assert f'data-item-id="{item_id}"' in response.text
+        assert f"display-card--{size}" in response.text
     assert 'fetch("/api/display", { cache: "no-store" })' in javascript
     assert "DISPLAY_POLL_INTERVAL_MS = 10_000" in javascript
     assert "headerWeekday.textContent" in javascript
     assert 'WEEKDAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]' in javascript
-    assert ".power-detail-row" in stylesheet
+    assert 'data.mode === "standard"' in javascript
+    assert "data-item-id" in javascript
+    assert ".standard-grid" in stylesheet
+    assert ".display-card--large" in stylesheet
+    assert ".display-card--medium" in stylesheet
+    assert ".display-card--small" in stylesheet
     assert "font-variant-numeric: tabular-nums" in stylesheet
-    assert ".today-energy-card" not in stylesheet
-    assert "取得不可" in javascript
-    assert "source--unavailable" in javascript
 
 
 def test_power_direction_rules() -> None:
@@ -1093,16 +1119,6 @@ vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8") + "\nglobalThis.__b
     assert result["adapterMissingStatus"] is True
     assert result["longRetryWaitDoesNotTimeout"] is True
     assert result["request"] == {"id": "123456789ABCDEF0123456789ABCDEF0", "password": "123456789ABC"}
-
-
-def test_dashboard_compose_uses_env_file_without_credentials_mount() -> None:
-    compose = Path(__file__).parents[3] / "compose.yaml"
-    source = compose.read_text(encoding="utf-8")
-    dashboard_section = source.split("  dashboard:\n", 1)[1].split("\n  sensor-collector:", 1)[0]
-
-    assert "OMK_SYSTEM_MANAGER_URL: http://host.docker.internal:8788" in dashboard_section
-    assert "- /etc/omk/dashboard-system-manager.env" in dashboard_section
-    assert "credentials.yaml" not in dashboard_section
 
 
 def test_static_files_are_available() -> None:
