@@ -13,14 +13,15 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from app.data.latest_repository import LatestRepository
-from app.data.parquet_repository import ParquetRepository
+from app.data.parquet_repository import EnergyTotals, ParquetRepository
 from app.data.display_repository import DisplayRepository
 from app.data.settings_repository import DisplayBlock, SettingsError, SettingsRepository, default_layout_pattern, item_limit
-from app.display_items import catalog_items_with_latest, display_candidates, display_item_migrations, selected_blocks
+from app.display_items import DisplayItem, catalog_items_with_latest, display_candidates, display_item_migrations, selected_blocks
 from app.view_models import FreshnessStatus, worst_freshness
 from app.view_models import get_display_view_model
 
 APP_DIR = Path(__file__).parent
+_DERIVED_ENERGY_CACHE: tuple[datetime, list[DisplayItem]] | None = None
 
 app = FastAPI(title="OMK Dashboard")
 app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
@@ -87,16 +88,35 @@ def _default_block_title(group: str) -> str:
     return "一条パワコン" if group == "一条パワコン" else group
 
 
+def _dashboard_candidates(now: datetime | None = None) -> list[DisplayItem]:
+    """Reuse the legacy JST daily-total repository for derived Block values."""
+    now = now or datetime.now().astimezone()
+    global _DERIVED_ENERGY_CACHE
+    candidates = display_candidates(get_display_repository(), now)
+    if _DERIVED_ENERGY_CACHE is not None and (now - _DERIVED_ENERGY_CACHE[0]).total_seconds() < 60:
+        return candidates + _DERIVED_ENERGY_CACHE[1]
+    try:
+        totals = get_parquet_repository().today_energy_totals(now.date())
+        derived = [
+            DisplayItem("derived:energy:today_import_kwh", "一条パワコン 今日の買電量", "一条パワコン", "derived:broute_interval_energy", "broute-derived", "today_import_kwh", "number", "kWh", "電力", "today_import_energy", True, now.isoformat(), f"{totals.import_energy_kwh:.1f}", "normal", short_label="今日の買電量"),
+            DisplayItem("derived:energy:today_export_kwh", "一条パワコン 今日の売電量", "一条パワコン", "derived:broute_interval_energy", "broute-derived", "today_export_kwh", "number", "kWh", "電力", "today_export_energy", True, now.isoformat(), f"{totals.export_energy_kwh:.1f}", "normal", short_label="今日の売電量"),
+        ]
+    except (OSError, ValueError):
+        derived = [DisplayItem(item_id, label, "一条パワコン", "derived:broute_interval_energy", "broute-derived", item_id.rsplit(":", 1)[-1], "number", "kWh", "電力", None, True, "", "--", "unavailable", short_label=short) for item_id, label, short in (("derived:energy:today_import_kwh", "一条パワコン 今日の買電量", "今日の買電量"), ("derived:energy:today_export_kwh", "一条パワコン 今日の売電量", "今日の売電量"))]
+    _DERIVED_ENERGY_CACHE = (now, derived)
+    return candidates + derived
+
+
 def get_dashboard_view_model():
     """Build one consistent snapshot for both HTML and polling API responses."""
     display_repository = get_display_repository()
-    candidates = display_candidates(display_repository)
+    candidates = _dashboard_candidates()
     selectable = [item for item in candidates if item.selectable]
     if selectable:
         groups = {item.id: item.group for item in candidates}
         settings = get_settings_repository().load_or_create(groups, _default_blocks(selectable), display_item_migrations(candidates))
         now = datetime.now().astimezone()
-        blocks = selected_blocks(display_repository, settings.blocks, now)
+        blocks = selected_blocks(display_repository, settings.blocks, now, _dashboard_candidates(now))
         statuses = [FreshnessStatus(block.freshness) for block in blocks] or [FreshnessStatus.UNAVAILABLE]
         updated = max((block.last_received_at for block in blocks if block.last_received_at), default="")
         return StandardDashboard(
@@ -226,7 +246,7 @@ async def sensors() -> dict:
 
 @app.get("/api/admin/display-items")
 async def display_items() -> dict:
-    candidates = catalog_items_with_latest(get_display_repository(), datetime.now().astimezone())
+    candidates = _dashboard_candidates(datetime.now().astimezone())
     groups: dict[str, list[dict]] = {}
     for item in candidates:
         groups.setdefault(item.group, []).append(item.as_dict())
@@ -235,7 +255,7 @@ async def display_items() -> dict:
 
 @app.get("/api/admin/dashboard-settings")
 async def dashboard_settings() -> dict:
-    candidates = display_candidates(get_display_repository())
+    candidates = _dashboard_candidates()
     groups = {item.id: item.group for item in candidates}
     settings = get_settings_repository().load_or_create(groups, _default_blocks([item for item in candidates if item.selectable]), display_item_migrations(candidates))
     return {**settings.as_dict(), "capacity": 6}
@@ -243,7 +263,7 @@ async def dashboard_settings() -> dict:
 
 @app.put("/api/admin/dashboard-settings")
 async def update_dashboard_settings(request: Request) -> dict:
-    candidates = display_candidates(get_display_repository())
+    candidates = _dashboard_candidates()
     try:
         settings = get_settings_repository().save_payload(
             await request.json(), {item.id: item.group for item in candidates if item.selectable}, display_item_migrations(candidates),

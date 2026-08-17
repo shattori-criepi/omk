@@ -88,9 +88,9 @@ def candidate_for(
     return _display_item(item, definition, latest, now)
 
 
-def catalog_items_with_latest(repository: DisplayRepository, now: datetime) -> list[DisplayItem]:
+def catalog_items_with_latest(repository: DisplayRepository, now: datetime, derived: list[DisplayItem] | None = None) -> list[DisplayItem]:
     """Build candidates with their actual latest reading for the admin UI."""
-    return display_candidates(repository, now)
+    return display_candidates(repository, now) + (derived or [])
 
 
 def display_candidates(repository: DisplayRepository, now: datetime | None = None) -> list[DisplayItem]:
@@ -143,9 +143,10 @@ def selected_blocks(
     repository: DisplayRepository,
     blocks: tuple[DisplayBlock, ...],
     now: datetime,
+    candidates: list[DisplayItem] | None = None,
 ) -> list[DisplayBlockView]:
     """Resolve persisted block membership into one display-ready snapshot."""
-    catalog = {item.id: item for item in display_candidates(repository, now)}
+    catalog = {item.id: item for item in (candidates if candidates is not None else display_candidates(repository, now))}
     rendered: list[DisplayBlockView] = []
     for block in blocks:
         values: list[DisplayItem] = []
