@@ -1052,7 +1052,7 @@ def test_small_plug_block_uses_full_consumption_label_without_ellipsis(tmp_path:
     assert ".display-card--small.display-card--compact.display-card--items-1 .display-compact-reading { width: 100%; min-width: 0; }" in stylesheet
     assert ".display-card--small.display-card--compact.display-card--items-1 .display-secondary-item { grid-column: 1 / -1; }" in stylesheet
     assert ".display-card--small.display-card--compact.display-card--items-2 .display-card-compact-items" not in stylesheet
-    assert re.search(r"display\.css'\) }}\?v=20260819-clock-priority-\d+", template)
+    assert re.search(r"display\.css'\) }}\?v=20260819-clock-center-\d+", template)
     assert ".display-card--small.display-card--compact.display-card--items-1 .display-secondary-label { overflow: visible; text-overflow: clip; white-space: nowrap; }" in stylesheet
 
 
@@ -1206,11 +1206,11 @@ def test_admin_display_css_allows_vertical_scroll_without_changing_kiosk_overflo
     assert '<html lang="ja" class="admin-document">' in admin_template
     assert '<body class="admin-body">' in admin_template
     assert 'href="/display">ダッシュボードを確認</a>' in admin_template
-    assert re.search(r"admin_display\.js'\) }}\?v=20260819-clock-priority-\d+", admin_template)
-    assert re.search(r"display\.css'\) }}\?v=20260819-clock-priority-\d+", admin_template)
+    assert re.search(r"admin_display\.js'\) }}\?v=20260819-clock-center-\d+", admin_template)
+    assert re.search(r"display\.css'\) }}\?v=20260819-clock-center-\d+", admin_template)
     assert '<body class="admin-body">' not in display_template
-    assert re.search(r"display\.js'\) }}\?v=20260819-clock-priority-\d+", display_template)
-    assert re.search(r"display\.css'\) }}\?v=20260819-clock-priority-\d+", display_template)
+    assert re.search(r"display\.js'\) }}\?v=20260819-clock-center-\d+", display_template)
+    assert re.search(r"display\.css'\) }}\?v=20260819-clock-center-\d+", display_template)
     assert 'data-mode="clock"' in admin_template
     assert 'id="clock-summary"' in admin_template
     assert "mode !== \"clock\"" in (Path(__file__).parents[1] / "app" / "static" / "admin_display.js").read_text(encoding="utf-8")
@@ -1224,6 +1224,8 @@ def test_admin_display_css_allows_vertical_scroll_without_changing_kiosk_overflo
     assert ".clock-reading + .clock-reading { border-left:" in stylesheet
     assert 'class="clock-reading-value"' in display_template
     assert ".clock-reading-value { display: inline-flex;" in stylesheet
+    assert ".clock-reading { display: grid; grid-template-columns: minmax(0, 1fr); align-items: baseline; justify-items: center;" in stylesheet
+    assert ".clock-reading-value { display: inline-flex; align-items: baseline; justify-self: center;" in stylesheet
     assert 'data-role="unit"' in display_template
     assert "overflow: hidden;" in stylesheet
 
