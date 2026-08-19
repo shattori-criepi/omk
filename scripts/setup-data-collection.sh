@@ -18,7 +18,7 @@ BUILD_SERVICES=(
   harvest-uploader
 )
 EXCLUDED_SERVICES=(broute-meter-mock broute-meter-tests)
-REQUIRED_DIRECTORIES=(data/sensors data/latest data/processed data/harvest-uploader services/mosquitto/data logs/setup)
+REQUIRED_DIRECTORIES=(data/sensors data/latest data/processed data/dashboard data/harvest-uploader services/mosquitto/data logs/setup)
 MOSQUITTO_BIND_ADDRESS="192.168.50.1"
 MQTT_PORT="1883"
 DASHBOARD_PORT="8000"
@@ -93,9 +93,9 @@ check_directory() {
   ownership="$(stat -c 'owner=%U:%G uid=%u gid=%g mode=%a' "${path}")"
   log "Directory state: ${path} (${ownership})"
   case "${relative}" in
-    data/sensors|data/latest|data/harvest-uploader|logs/setup)
+    data/sensors|data/latest|data/dashboard|data/harvest-uploader|logs/setup)
       target_can_write "${path}" || fail "${TARGET_USER} cannot write required directory: ${path}. Review ownership and permissions without using chown -R."
-      if [[ "${relative}" == "data/sensors" || "${relative}" == "data/latest" || "${relative}" == "data/harvest-uploader" ]]; then
+      if [[ "${relative}" == "data/sensors" || "${relative}" == "data/latest" || "${relative}" == "data/dashboard" || "${relative}" == "data/harvest-uploader" ]]; then
         target_can_read_directory "${path}" || fail "${TARGET_USER} cannot read/manage required directory: ${path}. Review ownership and permissions without using chown -R."
       fi
       log "PASS: ${TARGET_USER} can write ${path}"

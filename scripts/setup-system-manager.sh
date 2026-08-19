@@ -15,7 +15,8 @@ DASHBOARD_ENV_FILE="${ENV_DIR}/dashboard-system-manager.env"
 SUDOERS_DEST="/etc/sudoers.d/omk-system-manager"
 VENV_PATH="${OMK_ROOT}/services/system-manager/.venv"
 SYSTEMCTL_PATH="$(command -v systemctl || true)"
-SUDO=(sudo)
+SUDO=()
+AS_TARGET=()
 
 log() { printf '[omk-system-manager-setup] %s\n' "$*"; }
 fail() { log "ERROR: $*" >&2; exit 1; }
@@ -26,8 +27,31 @@ fail() { log "ERROR: $*" >&2; exit 1; }
 [[ -f "${OMK_ROOT}/services/system-manager/requirements.txt" ]] || fail 'Missing system-manager requirements.'
 [[ -d "${OMK_ROOT}/broute-meter/config" ]] || fail 'Missing broute-meter config directory.'
 [[ -d "${OMK_ROOT}/data" ]] || fail 'Missing persistent data directory.'
-for command_name in python3 sudo install sed visudo mktemp openssl nmcli; do command -v "${command_name}" >/dev/null 2>&1 || fail "Required command is unavailable: ${command_name}"; done
+if ((EUID != 0)); then
+  command -v sudo >/dev/null 2>&1 || fail 'sudo is required when not run as root.'
+  SUDO=(sudo)
+  "${SUDO[@]}" -v
+fi
+command -v apt-get >/dev/null 2>&1 || fail 'apt-get is required to install direct dependencies.'
+missing_packages=()
+for package in python3 python3-venv python3-pip network-manager; do
+  dpkg-query -W -f='${db:Status-Abbrev}' "${package}" 2>/dev/null | grep -q '^ii' || missing_packages+=("${package}")
+done
+if ((${#missing_packages[@]})); then
+  log "Installing direct system-manager dependencies: ${missing_packages[*]}"
+  "${SUDO[@]}" apt-get update
+  "${SUDO[@]}" apt-get install -y "${missing_packages[@]}"
+else
+  log 'Direct system-manager dependencies are already installed.'
+fi
+for command_name in python3 install sed visudo mktemp openssl nmcli; do command -v "${command_name}" >/dev/null 2>&1 || fail "Required command is unavailable: ${command_name}"; done
 id "${TARGET_USER}" >/dev/null 2>&1 || fail "Target user does not exist: ${TARGET_USER}"
+if ((EUID == 0)); then
+  command -v runuser >/dev/null 2>&1 || fail 'runuser is required when setup is run as root.'
+  AS_TARGET=(runuser -u "${TARGET_USER}" --)
+else
+  AS_TARGET=(sudo -u "${TARGET_USER}")
+fi
 render_unit() {
   sed -e "s|@OMK_ROOT@|${OMK_ROOT}|g" \
       -e "s|@OMK_USER@|${TARGET_USER}|g" \
@@ -76,10 +100,10 @@ sync_dashboard_token_file() {
 "${SUDO[@]}" install -d -o root -g root -m 0755 "${ENV_DIR}"
 "${SUDO[@]}" install -d -o "${TARGET_USER}" -g "${TARGET_GROUP}" -m 0755 "${OMK_ROOT}/data/site"
 log 'Creating or reusing Python virtual environment.'
-"${SUDO[@]}" -u "${TARGET_USER}" python3 -m venv "${VENV_PATH}"
+"${AS_TARGET[@]}" python3 -m venv "${VENV_PATH}"
 log 'Installing system-manager requirements.'
-"${SUDO[@]}" -u "${TARGET_USER}" "${VENV_PATH}/bin/pip" install --upgrade pip
-"${SUDO[@]}" -u "${TARGET_USER}" "${VENV_PATH}/bin/pip" install -r "${OMK_ROOT}/services/system-manager/requirements.txt"
+"${AS_TARGET[@]}" "${VENV_PATH}/bin/pip" install --upgrade pip
+"${AS_TARGET[@]}" "${VENV_PATH}/bin/pip" install -r "${OMK_ROOT}/services/system-manager/requirements.txt"
 ensure_token_file
 sync_dashboard_token_file
 

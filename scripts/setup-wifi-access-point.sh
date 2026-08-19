@@ -223,6 +223,21 @@ network_manager_ready() {
   nmcli device show "${INTERFACE}" >/dev/null 2>&1 || fail "Wi-Fi interface ${INTERFACE} was not found by NetworkManager."
 }
 
+ensure_direct_dependencies() {
+  local package
+  local -a missing=()
+  for package in nftables network-manager iw; do
+    dpkg-query -W -f='${db:Status-Abbrev}' "${package}" 2>/dev/null | grep -q '^ii' || missing+=("${package}")
+  done
+  if ((${#missing[@]})); then
+    log "Installing direct AP dependencies: ${missing[*]}"
+    "${SUDO[@]}" apt-get update
+    "${SUDO[@]}" apt-get install -y "${missing[@]}"
+  else
+    log "Direct AP dependencies are already installed."
+  fi
+}
+
 check_ap_support() {
   local ap_capability=""
   ap_capability="$(nmcli -g WIFI-PROPERTIES.AP device show "${INTERFACE}" 2>/dev/null | head -n 1 || true)"
@@ -316,6 +331,8 @@ if [[ "${DRY_RUN}" != yes ]]; then
     command -v sudo >/dev/null 2>&1 || fail "sudo is required when this script is not run as root."
     SUDO=(sudo)
   fi
+  command -v apt-get >/dev/null 2>&1 || fail "apt-get is required to install NetworkManager, nftables, and iw."
+  ensure_direct_dependencies
   network_manager_ready
   if nmcli connection show "${CONNECTION_NAME}" >/dev/null 2>&1; then
     EXISTING=yes

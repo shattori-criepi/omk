@@ -10,7 +10,8 @@ TARGET_GROUP=""
 SERVICE='omk-broute-meter.service'
 UNIT_TEMPLATE="${OMK_ROOT}/systemd/omk-broute-meter.service.in"
 HELPER_SOURCE="${OMK_ROOT}/scripts/reset-rs-wsuha-p-usb.sh"
-VENV_PYTHON="${OMK_ROOT}/broute-meter/.venv/bin/python"
+VENV_PATH="${OMK_ROOT}/broute-meter/.venv"
+VENV_PYTHON="${VENV_PATH}/bin/python"
 HELPER_DEST='/usr/local/lib/omk/reset-rs-wsuha-p-usb'
 SUDOERS_DEST='/etc/sudoers.d/omk-rs-wsuha-p-reset'
 UNIT_DEST="/etc/systemd/system/${SERVICE}"
@@ -70,8 +71,8 @@ preflight() {
   require_file "${HELPER_SOURCE}" 'USB reset helper'
   [[ -x "${HELPER_SOURCE}" ]] || PREFLIGHT_FAILURES+=("USB reset helper is not executable: ${HELPER_SOURCE}")
   [[ -d "${OMK_ROOT}/broute-meter" ]] || PREFLIGHT_FAILURES+=("B-route working directory is missing: ${OMK_ROOT}/broute-meter")
-  [[ -x "${VENV_PYTHON}" ]] || PREFLIGHT_FAILURES+=("B-route venv Python is missing or not executable: ${VENV_PYTHON}")
-  for command_name in install stat mktemp sed systemctl visudo cmp tee; do require_command "${command_name}"; done
+  for command_name in apt-get python3 install stat mktemp sed systemctl visudo cmp tee; do require_command "${command_name}"; done
+  ((EUID != 0)) || require_command runuser
   if ((EUID != 0)); then
     require_command sudo
   fi
@@ -82,6 +83,36 @@ preflight() {
     if "${DRY_RUN}"; then warn "A normal run would fail: ${issue}"; else fail "${issue}"; fi
   done
   return 0
+}
+
+ensure_python_runtime() {
+  local package
+  local -a missing=()
+  for package in python3 python3-venv python3-pip; do
+    dpkg-query -W -f='${db:Status-Abbrev}' "${package}" 2>/dev/null | grep -q '^ii' || missing+=("${package}")
+  done
+  if ((${#missing[@]})); then
+    log "Installing direct B-route dependencies: ${missing[*]}"
+    "${SUDO[@]}" apt-get update
+    "${SUDO[@]}" apt-get install -y "${missing[@]}"
+  else
+    log "Direct B-route dependencies are already installed."
+  fi
+  if [[ ! -d "${VENV_PATH}" ]]; then
+    log "Creating B-route virtual environment: ${VENV_PATH}"
+    if ((EUID == 0)); then runuser -u "${TARGET_USER}" -- python3 -m venv "${VENV_PATH}"; else "${SUDO[@]}" -u "${TARGET_USER}" python3 -m venv "${VENV_PATH}"; fi
+  else
+    log "B-route virtual environment exists; preserving it: ${VENV_PATH}"
+  fi
+  [[ -x "${VENV_PYTHON}" ]] || fail "B-route venv Python is unavailable: ${VENV_PYTHON}"
+  log "Installing B-route runtime dependencies from pyproject.toml."
+  if ((EUID == 0)); then
+    runuser -u "${TARGET_USER}" -- "${VENV_PYTHON}" -m pip install --upgrade pip
+    runuser -u "${TARGET_USER}" -- "${VENV_PYTHON}" -m pip install "${OMK_ROOT}/broute-meter"
+  else
+    "${SUDO[@]}" -u "${TARGET_USER}" "${VENV_PYTHON}" -m pip install --upgrade pip
+    "${SUDO[@]}" -u "${TARGET_USER}" "${VENV_PYTHON}" -m pip install "${OMK_ROOT}/broute-meter"
+  fi
 }
 
 directory_state() {
@@ -329,6 +360,7 @@ if "${DRY_RUN}"; then
   log "Repository root: ${OMK_ROOT}"
   log "Target user/group: ${TARGET_USER}:${TARGET_GROUP}"
   log "Service: ${SERVICE}"
+  log "Would install missing python3, python3-venv, and python3-pip packages; create ${VENV_PATH} only if absent; and install runtime dependencies from broute-meter/pyproject.toml."
   if command -v stat >/dev/null 2>&1; then
     ensure_runtime_directory "${OMK_ROOT}/data/broute-meter"
     ensure_runtime_directory "${OMK_ROOT}/logs/broute-meter"
@@ -389,6 +421,7 @@ ensure_log_directory
 LOG_FILE="${LOG_DIR}/broute-meter-setup-$(date '+%Y%m%d-%H%M%S').log"
 exec > >(tee -a "${LOG_FILE}") 2>&1
 log "B-route meter setup started. Log file: ${LOG_FILE}"
+ensure_python_runtime
 ensure_runtime_directory "${OMK_ROOT}/data/broute-meter"
 ensure_runtime_directory "${OMK_ROOT}/logs/broute-meter"
 ensure_credentials_permissions
