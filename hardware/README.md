@@ -13,7 +13,7 @@
 ## ディレクトリ
 
 - `pcb/`: 回路図、PCB、部品・footprint・配置監査
-- `enclosures/sen66-node/`: SEN66 Node試作筐体。STL追加後の正本
+- [`enclosures/sen66-node/`](enclosures/sen66-node/README.md): SEN66 Node試作筐体の格納済みSTLと使用上の注意
 - `interconnect-review.md`など: 接続方式・部品選定の監査記録
 
 PCB Rev.A中止の採否理由は[設計判断](../docs/decisions/esp32-c3-integrated-pcb-cancellation.md)を参照してください。既存SEN66専用Nodeは維持しますが、新規開発は共通Nodeを基本とします。

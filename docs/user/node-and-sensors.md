@@ -18,6 +18,6 @@ Node間中継でWi-Fi通信範囲を広げる方針がありますが、具体�
 
 ## 筐体
 
-AtomS3 LiteとSEN66を主な対象とする試作筐体の成果物は[sen66-node筐体README](../../hardware/enclosures/sen66-node/README.md)に置きます。
+AtomS3 LiteとSEN66を主な対象とする試作筐体のSTLが公開されています。ファイル一覧と使用上の注意は[sen66-node筐体README](../../hardware/enclosures/sen66-node/README.md)を参照してください。
 
 旧SEN66専用firmwareは既存機器向けに残っています。新規開発は原則として共通Nodeを使用してください。
