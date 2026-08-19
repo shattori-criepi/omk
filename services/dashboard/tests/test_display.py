@@ -744,13 +744,16 @@ def test_ichijo_load_hero_exposes_legacy_grid_flow_as_auxiliary_status(tmp_path:
     neutral = render(tmp_path / "neutral", imported=0, exported=0)
     non_hero = render(tmp_path / "compact", imported=420, exported=0, layout="compact")
 
-    assert (imported.auxiliary_supported, imported.auxiliary_label, imported.auxiliary_value, imported.auxiliary_unit) == (True, "買電中", "0.42", "kW")
-    assert (exported.auxiliary_label, exported.auxiliary_value) == ("売電中", "3.15")
+    assert (imported.auxiliary_supported, imported.auxiliary_label, imported.auxiliary_value, imported.auxiliary_unit, imported.auxiliary_flow) == (True, "買電中", "0.42", "kW", "purchase")
+    assert (exported.auxiliary_label, exported.auxiliary_value, exported.auxiliary_flow) == ("売電中", "3.15", "sale")
     assert (neutral.auxiliary_label, neutral.auxiliary_value) == ("", "")
     assert len(imported.secondary) == 1
     assert non_hero.auxiliary_supported is False
     template = (Path(__file__).parents[1] / "app" / "templates" / "display.html").read_text(encoding="utf-8")
-    assert 'class="display-card-auxiliary" data-role="auxiliary"' in template
+    assert 'class="display-card-auxiliary display-card-auxiliary--{{ block.auxiliary_flow }}" data-role="auxiliary"' in template
+    stylesheet = (Path(__file__).parents[1] / "app" / "static" / "display.css").read_text(encoding="utf-8")
+    assert ".display-card-auxiliary--purchase" in stylesheet
+    assert ".display-card-auxiliary--sale" in stylesheet
 
 
 def test_display_items_api_lists_multiple_values_from_one_source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -784,6 +787,9 @@ def test_display_items_api_lists_multiple_values_from_one_source(tmp_path: Path,
     assert all(item["selectable"] for item in broute)
     ichijo = groups["一条パワコン"]
     assert set(ichijo_fields) <= {item["field"] for item in ichijo}
+    assert {item["field"]: item["short_label"] for item in ichijo if item["field"] in ichijo_fields} == {
+        "pv_power_w": "PV発電", "load_power_w": "住宅内消費電力", "battery_soc_percent": "蓄電池残量",
+    }
     derived = {item["id"]: item for item in ichijo if item["id"].startswith("derived:energy:")}
     for item_id, field in (
         ("derived:energy:today_import_kwh", "today_import_kwh"),
@@ -811,7 +817,10 @@ def test_admin_display_css_allows_vertical_scroll_without_changing_kiosk_overflo
     assert '<html lang="ja" class="admin-document">' in admin_template
     assert '<body class="admin-body">' in admin_template
     assert 'href="/display">ダッシュボードを確認</a>' in admin_template
+    assert "admin_display.js') }}?v=20260819-5" in admin_template
+    assert "display.css') }}?v=20260819-admin-5" in admin_template
     assert '<body class="admin-body">' not in display_template
+    assert "display.js') }}?v=20260819-block-flow" in display_template
     assert "overflow: hidden;" in stylesheet
 
 
@@ -1024,6 +1033,7 @@ setImmediate(async () => {
     assert block["primary_item_id"] == "load"
     assert block["item_ids"] == ["load"]
     assert "住宅内消費電力" in result["selected"]
+    assert 'option value="load" selected' in result["selected"]
     assert result["status"] == "保存しました"
     assert "ダッシュボードを確認" not in result["status"]
     assert 'class="dashboard-check-link" href="/display">ダッシュボードを確認</a>' in template_path.read_text(encoding="utf-8")
