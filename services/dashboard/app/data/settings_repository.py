@@ -99,7 +99,7 @@ class SettingsRepository:
     def __init__(self, path: Path) -> None:
         self.path = path
 
-    def load_or_create(self, available_groups: dict[str, str], defaults: list[DisplayBlock], item_migrations: dict[str, str] | None = None, recommended_defaults: list[DisplayBlock] | None = None) -> DashboardSettings:
+    def load_or_create(self, available_groups: dict[str, str | frozenset[str]], defaults: list[DisplayBlock], item_migrations: dict[str, str] | None = None, recommended_defaults: list[DisplayBlock] | None = None) -> DashboardSettings:
         if not self.path.exists():
             settings = DashboardSettings("recommended", tuple(defaults), tuple(recommended_defaults or []))
             self.save(settings, available_groups)
@@ -116,14 +116,14 @@ class SettingsRepository:
             # Dashboard into an empty layout merely because migration failed.
             return DashboardSettings("recommended", tuple(defaults), tuple(recommended_defaults or []))
 
-    def save_payload(self, payload: object, available_groups: dict[str, str], item_migrations: dict[str, str] | None = None) -> DashboardSettings:
+    def save_payload(self, payload: object, available_groups: dict[str, str | frozenset[str]], item_migrations: dict[str, str] | None = None) -> DashboardSettings:
         settings, migrated = self._parse(payload, available_groups, allow_missing=False, item_migrations=item_migrations)
         if migrated and isinstance(payload, dict) and payload.get("version") == 1:
             raise SettingsError("旧形式の設定は保存できません")
         self.save(settings, available_groups)
         return settings
 
-    def save(self, settings: DashboardSettings, available_groups: dict[str, str]) -> None:
+    def save(self, settings: DashboardSettings, available_groups: dict[str, str | frozenset[str]]) -> None:
         self._validate(settings, available_groups, allow_missing=True)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         temporary_path: Path | None = None
@@ -141,7 +141,7 @@ class SettingsRepository:
                 temporary_path.unlink(missing_ok=True)
             raise
 
-    def _parse(self, payload: object, available_groups: dict[str, str], *, allow_missing: bool, item_migrations: dict[str, str] | None = None) -> tuple[DashboardSettings, bool]:
+    def _parse(self, payload: object, available_groups: dict[str, str | frozenset[str]], *, allow_missing: bool, item_migrations: dict[str, str] | None = None) -> tuple[DashboardSettings, bool]:
         if not isinstance(payload, dict) or payload.get("default_preset") != "standard":
             raise SettingsError("設定形式が正しくありません")
         if payload.get("version") == 1:
@@ -169,7 +169,7 @@ class SettingsRepository:
         self._validate(settings, available_groups, allow_missing=allow_missing)
         return settings, migrated or recommended_migrated
 
-    def _parse_blocks(self, raw_blocks: list, available_groups: dict[str, str], allow_missing: bool, item_migrations: dict[str, str] | None) -> tuple[list[DisplayBlock], bool]:
+    def _parse_blocks(self, raw_blocks: list, available_groups: dict[str, str | frozenset[str]], allow_missing: bool, item_migrations: dict[str, str] | None) -> tuple[list[DisplayBlock], bool]:
         blocks: list[DisplayBlock] = []
         migrated = False
         for block in raw_blocks:
@@ -200,7 +200,7 @@ class SettingsRepository:
         self._validate_blocks(tuple(blocks), available_groups, allow_missing=allow_missing)
         return blocks, migrated
 
-    def _migrate_v1(self, payload: dict, available_groups: dict[str, str], item_migrations: dict[str, str] | None) -> DashboardSettings:
+    def _migrate_v1(self, payload: dict, available_groups: dict[str, str | frozenset[str]], item_migrations: dict[str, str] | None) -> DashboardSettings:
         try:
             raw_items = payload["presets"]["standard"]["items"]
         except (KeyError, TypeError) as error:
@@ -212,7 +212,8 @@ class SettingsRepository:
             if not isinstance(item, dict) or not isinstance(item.get("item_id"), str) or item.get("size") not in SIZES:
                 raise SettingsError("表示項目の形式が正しくありません")
             item_id = (item_migrations or {}).get(item["item_id"], item["item_id"])
-            grouped.setdefault(available_groups.get(item_id, "保存済み設定"), []).append(DisplaySelection(item_id, item["size"]))
+            group = available_groups.get(item_id, "保存済み設定")
+            grouped.setdefault(_primary_group(group), []).append(DisplaySelection(item_id, item["size"]))
         blocks = []
         for index, (group, selections) in enumerate(grouped.items(), start=1):
             size = max(selections, key=lambda selection: SIZES[selection.size]).size
@@ -227,14 +228,14 @@ class SettingsRepository:
         return settings
 
     @staticmethod
-    def _validate(settings: DashboardSettings, available_groups: dict[str, str], *, allow_missing: bool) -> None:
+    def _validate(settings: DashboardSettings, available_groups: dict[str, str | frozenset[str]], *, allow_missing: bool) -> None:
         if settings.mode not in {"recommended", "custom", "clock"}:
             raise SettingsError("表示モードが正しくありません")
         SettingsRepository._validate_blocks(settings.custom_blocks, available_groups, allow_missing=allow_missing)
         SettingsRepository._validate_blocks(settings.recommended_blocks, available_groups, allow_missing=allow_missing)
 
     @staticmethod
-    def _validate_blocks(blocks: tuple[DisplayBlock, ...], available_groups: dict[str, str], *, allow_missing: bool) -> None:
+    def _validate_blocks(blocks: tuple[DisplayBlock, ...], available_groups: dict[str, str | frozenset[str]], *, allow_missing: bool) -> None:
         block_ids = [block.block_id for block in blocks]
         if len(block_ids) != len(set(block_ids)) or any(not isinstance(block_id, str) or not block_id for block_id in block_ids):
             raise SettingsError("ブロックIDが正しくありません")
@@ -251,7 +252,7 @@ class SettingsRepository:
             if not allow_missing:
                 if any(item_id not in available_groups for item_id in block.item_ids):
                     raise SettingsError("存在しない表示項目が含まれています")
-                if any(available_groups[item_id] != block.group for item_id in block.item_ids):
+                if any(block.group not in _groups_for(available_groups[item_id]) for item_id in block.item_ids):
                     raise SettingsError("同じsourceの項目だけをブロックにできます")
             item_ids.extend(block.item_ids)
         if len(item_ids) != len(set(item_ids)):
@@ -264,6 +265,14 @@ def _limited_item_ids(item_ids: tuple[str, ...], primary_item_id: object, size: 
     if not isinstance(primary_item_id, str) or primary_item_id not in item_ids:
         return item_ids
     return tuple([primary_item_id, *(item_id for item_id in item_ids if item_id != primary_item_id)][:item_limit(str(size), layout_pattern)])
+
+
+def _groups_for(value: str | frozenset[str]) -> frozenset[str]:
+    return frozenset({value}) if isinstance(value, str) else value
+
+
+def _primary_group(value: str | frozenset[str]) -> str:
+    return value if isinstance(value, str) else sorted(value)[0]
 
 
 def _migrate_item_ids(item_ids: tuple[str, ...], primary_item_id: object, item_migrations: dict[str, str] | None) -> tuple[tuple[str, ...], object, bool]:
