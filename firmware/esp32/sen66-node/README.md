@@ -1,5 +1,7 @@
 # OMK SEN66 node
 
+> **既存SEN66専用系統**: このfirmwareは既存機器向けに維持します。新規開発は、SEN66計測とBLE relayを扱える[共通OMK Node](../omk-node/README.md)を基本としてください。以下の固定SSID・device ID例はこの既存系統の例であり、新規Gatewayの推奨設定ではありません。
+
 M5Stack AtomS3 LiteとSEN66を接続し、10秒ごとの測定値をUSBシリアルのJSON Linesと、Raspberry Pi上のMosquittoへ送信するPlatformIOプロジェクトです。SEN66の計測とシリアル出力はWi-Fi/MQTTの接続状態に関係なく継続します。
 
 ## ハードウェア
@@ -43,7 +45,7 @@ PubSubClient `2.8`を使用します。Brokerへの接続と測定値の送信�
 {"device_id":"sen66-001","uptime_ms":123456,"pm1_0_ug_m3":4.1,"pm2_5_ug_m3":6.8,"pm4_0_ug_m3":8.2,"pm10_0_ug_m3":10.5,"relative_humidity_percent":48.2,"temperature_celsius":25.3,"voc_index":92.0,"nox_index":null,"co2_ppm":612.0}
 ```
 
-詳細は[リポジトリのMQTT仕様](../../../docs/mqtt.md)を参照してください。現在の匿名・平文MQTTはOMK専用LANでの初期確認用です。運用前に認証、ACL、TLSを導入する予定です。
+詳細は[リポジトリのMQTT仕様](../../../docs/developer/data-and-mqtt.md)を参照してください。現在の匿名・平文MQTTはOMK専用LANでの初期確認用です。運用前に認証、ACL、TLSを導入する予定です。
 
 このノードは取得とMQTT publishだけを担当します。Raspberry Pi上の汎用`sensor-collector`が`omk/#`を購読してJSONLへ一次保存するため、SEN66固有の保存処理やクラウド接続はこのファームウェアへ追加しません。
 

@@ -270,10 +270,10 @@ Codex等の生成AIにコード変更を任せる場合、文脈を会話だけ�
 ### 文書
 
 - `README.md`は入口と全体像
-- `docs/architecture.md`は境界と依存規則
+- `docs/developer/architecture.md`は境界と依存規則
 - `docs/hardware.md`は実機差分
-- `docs/development.md`は作業手順
-- `docs/roadmap.md`は未決定事項と移行順序
+- `docs/developer/development.md`は作業手順
+- `docs/history/roadmap.md`は過去の未決定事項と移行順序
 - 重要判断はADRまたは文書の判断表へ残す
 
 ### コード

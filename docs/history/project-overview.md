@@ -1,14 +1,16 @@
 # おうちモニタキット（OMK）再開発
 
+> **履歴資料**: この文書はOMK再開発過程の計画・構想資料であり、現行仕様の正本ではありません。現在の利用手順は[利用者向け文書](../user/getting-started.md)、実装・設計は[開発者向け文書](../developer/architecture.md)を参照してください。
+
 ## 計画・方針・システム設計の概要
 
 本書は、OMK再開発の背景、目的、基本方針、全体構成、開発の進め方を共有するための概要文書です。
 
 詳細仕様の正本は、次の文書とします。
 
-- 共通データ形式、モジュール境界、依存方向、MQTT案: [`architecture.md`](architecture.md)
-- ハードウェア、ネットワーク、実行環境: [`hardware.md`](hardware.md)
-- 実装、テスト、開発手順: [`development.md`](development.md)
+- 共通データ形式、モジュール境界、依存方向、MQTT案: [`architecture.md`](../developer/architecture.md)
+- ハードウェア、ネットワーク、実行環境: [`hardware/README.md`](../../hardware/README.md)
+- 実装、テスト、開発手順: [`development.md`](../developer/development.md)
 - 段階移行と未決定事項: [`roadmap.md`](roadmap.md)
 
 本書と詳細文書が食い違う場合は、どちらかを黙って優先せず、設計判断を確認して両方を更新します。
@@ -237,7 +239,7 @@ Windowsの任意検証経路とRaspberry Pi 4／5の正式運用で利用するB
 
 内部時刻はUTCで扱い、画面表示または研究用出力の段階で必要なローカル時刻へ変換します。
 
-共通形式の正式な型、必須項目、metric、unit、qualityの規則は[`architecture.md`](architecture.md)を正とします。設置場所、アダプタ版、校正情報を各`Measurement`へ直接含めるか、機器台帳や設置・校正履歴から参照するかは現時点では保留とします。上の概念例には、判断済みの必須項目だけを示しています。
+共通形式の正式な型、必須項目、metric、unit、qualityの規則は[`architecture.md`](../developer/architecture.md)を正とします。設置場所、アダプタ版、校正情報を各`Measurement`へ直接含めるか、機器台帳や設置・校正履歴から参照するかは現時点では保留とします。上の概念例には、判断済みの必須項目だけを示しています。
 
 ---
 
@@ -258,7 +260,7 @@ Adapters         # Bルート、BLE、MQTT、DB、外部API等
 Bootstrap        # 設定読込、依存性注入、起動・停止
 ```
 
-実際の物理ディレクトリはトップレベルの[`README.md`](../README.md)を正とし、`apps/core/src/`以下へ上記の責務を配置します。
+実際の物理ディレクトリはトップレベルの[`README.md`](../../README.md)を正とし、`apps/core/src/`以下へ上記の責務を配置します。
 
 モジュール間の呼び出し方向を明確にし、センサ固有処理がシステム全体へ広がらないようにします。
 

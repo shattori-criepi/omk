@@ -100,7 +100,7 @@ DashboardサーバーはDocker Compose、表示用Chromiumは別のuser systemd�
 このサービスはDashboardのhealth応答を待ってからChromiumを起動し、Chromium終了時は5秒後に
 自動再起動します。セットアップは`wtype`を確認・導入し、labwcの`HideCursor`/`WarpCursor`
 キーバインドを既存のタッチ設定を残して`~/.config/labwc/rc.xml`へ追加します。詳細は
-[Raspberry Pi初期セットアップ](../../docs/raspberry-pi-setup.md#dashboard-chromiumキオスク)
+[Gatewayセットアップ](../../docs/user/gateway-setup.md#dashboard-chromiumキオスク)
 を参照してください。
 
 ## URL

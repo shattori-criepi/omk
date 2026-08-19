@@ -9,7 +9,7 @@ SORACOM Onyx を、NetworkManager と ModemManager で使用するためのも�
 `/dev/ttyUSB0`～`/dev/ttyUSB3`です。EC25/EG25 系や同様の構成も診断対象にしますが、
 USB ID だけでは判定しません。
 
-先に [Raspberry Pi 初期セットアップ](raspberry-pi-setup.md)を完了し、インターネットへ
+先に [Gatewayセットアップ](user/gateway-setup.md)を完了し、インターネットへ
 接続できること、実行ユーザーが `sudo` を使えることを確認してください。LTE 設定は基本
 セットアップとは別であり、Onyx を使わない環境には不要です。
 

@@ -1,6 +1,8 @@
-# MQTT仕様
+# データ経路とMQTT仕様
 
 MQTTは、各データ取得処理をRaspberry Piへ集約するLAN内の内部データバスである。ESP32などのセンサノードはOMK専用Wi-Fi経由でRaspberry Pi上のMosquittoへ送信し、クラウドへ直接接続しない。Brokerは初期構成では`192.168.50.1:1883`で待ち受け、Composeのポート公開もこのAP側IPに限定する。
+
+現行の主経路は、センサ・Bルート・パワコン・BLEからMQTT、`sensor-collector`、JSONL、`data-transformer`、processed Parquet、Dashboardです。`harvest-uploader`は別clientとしてMQTTを直接購読し、JSONLやParquetを読まずに1分集約してSORACOM Harvestへ送信します。
 
 ## トピックとdevice_id
 
@@ -51,9 +53,9 @@ JSONとして解析できないUTF-8 payloadは`payload_raw`と`payload_parse_er
 
 ## latest状態キャッシュ
 
-JSONL保存に成功した正常JSON payloadは、payloadの`device_id`、MQTT topic、payload fieldを組み合わせた汎用latest storeにも記録される。`data/latest/items/<stable-item-id>.json`は各scalar値の最新レコード、`data/latest/catalog.json`は検出済みsource/value候補の一覧である。IDは`SHA-256(topic + NUL + device_id + NUL + field)`由来のため、BルートとBLE Plugが同じ`power` data typeを使っても衝突しない。catalogは通信断で候補を削除しない。候補から除くメタデータと保存形式は[sensor-collector README](../services/sensor-collector/README.md)を参照する。
+JSONL保存に成功した正常JSON payloadは、payloadの`device_id`、MQTT topic、payload fieldを組み合わせた汎用latest storeにも記録される。`data/latest/items/<stable-item-id>.json`は各scalar値の最新レコード、`data/latest/catalog.json`は検出済みsource/value候補の一覧である。IDは`SHA-256(topic + NUL + device_id + NUL + field)`由来のため、BルートとBLE Plugが同じ`power` data typeを使っても衝突しない。catalogは通信断で候補を削除しない。候補から除くメタデータと保存形式は[sensor-collector README](../../services/sensor-collector/README.md)を参照する。
 
-現行の固定Dashboardとの互換のため、Bルート`power`（`net_power_w`を持つpayload）、SEN66`sen66`、一条`power-flow`は、それぞれ`data/latest/broute_power.json`、`sen66.json`、`ichijo_power_flow.json`にも更新する。Plugの`power`はこの旧Bルートcacheを更新しない。collectorは同一ディレクトリの一時ファイルをatomic置換するため、Dashboardは読取り途中のJSONを参照しない。Display Item選択・プリセット・可変画面は後続Phaseの責務である。
+現行Dashboardとの互換のため、Bルート`power`（`net_power_w`を持つpayload）、SEN66`sen66`、一条`power-flow`は、それぞれ`data/latest/broute_power.json`、`sen66.json`、`ichijo_power_flow.json`にも更新する。Plugの`power`はこの旧Bルートcacheを更新しない。collectorは同一ディレクトリの一時ファイルをatomic置換するため、Dashboardは読取り途中のJSONを参照しない。Display Item選択、推奨表示、custom表示と設定保存は現在のDashboardに実装され、設定は`data/dashboard/settings.json`へ保存される。
 
 ## BLEセンサ
 
@@ -70,7 +72,7 @@ Gateway direct BLEとESP32 Node relayを併用するenvironment sensorでは、N
 `sensor-collector`と`harvest-uploader`の`omk/#`購読対象外である。BLE Sensor Managerが
 registryで解決した後だけ、通常の`omk/<sensor_id>/environment`へcanonical messageをpublishする。
 direct/relayの経路選択仕様とpayload例は
-[BLE direct / ESP32 Node relayの経路選択](decisions/ble-direct-relay-route-selection.md)を参照する。
+[BLE direct / ESP32 Node relayの経路選択](../decisions/ble-direct-relay-route-selection.md)を参照する。
 
 BLE advertisement は常時受信し、runtimeのlatest値、RSSI、受信時刻は広告ごとに
 更新する。environmentは初回の正常値を即時publishし、以後は`device_key`ごとに

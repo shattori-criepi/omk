@@ -1,4 +1,4 @@
-# Raspberry Pi初期セットアップ
+# Gatewayセットアップ
 
 ## 0. この文書の範囲
 
@@ -6,7 +6,7 @@
 ためのDockerホストを準備するまでの手順です。初めて作業する人は、上から順に進めて
 ください。
 
-新規Gatewayの標準入口は`setup-omk-gateway.sh`です。これは個別setup scriptを統合・複製せず、正しい順で呼び出します。初期OS準備だけを行う場合は`setup-raspberry-pi.sh`を直接実行できます。
+新規Gatewayの標準入口は`setup-omk-gateway.sh --with-base`です。これは個別setup scriptを統合・複製せず、正しい順で呼び出します。既存Gatewayで再実行する場合は`--with-base`を付けず、base setupをskipします。初期OS準備だけを行う場合は`setup-raspberry-pi.sh`を直接実行できます。
 
 | 段階 | この文書で行うこと | 後続で行うこと |
 |---|---|---|
@@ -125,8 +125,7 @@ OS書き込み、ユーザー・パスワード作成、SSH、ネットワーク
 - Chromiumキオスク、公式7インチディスプレイ、アクセスポイント、VNCの設定
 - 自動アップデート、自動再起動
 
-これらの後続作業は[ロードマップ](roadmap.md)で管理します。SORACOM Onyx を使う場合は、
-基本セットアップの完了後に [SORACOM Onyx セットアップ](soracom-onyx-setup.md)を実行します。
+SORACOM Onyx を使う場合は、基本セットアップの完了後に [SORACOM Onyx セットアップ](../soracom-onyx-setup.md)を実行します。
 
 ## 8. 再ログインまたは再起動
 
@@ -359,23 +358,14 @@ systemctl --user cat omk-dashboard-kiosk.service
 ```
 
 SSH経由でlabwc設定の即時再読込が必要な場合は、GUIセッションのlabwc PIDを指定して`LABWC_PID=<pid> ./scripts/setup-dashboard-kiosk.sh`を実行します。再読込できなくても、次のGUIセッションまたは再起動で設定が反映されます。
-後続タスクの一覧は[ロードマップ](roadmap.md)も参照してください。
+SORACOM Onyxを使う場合は、[SORACOM Onyx セットアップ](../soracom-onyx-setup.md)を参照してください。
 
 ## 14. Wi-Fiアクセスポイント（NetworkManager）
 
 `scripts/setup-wifi-access-point.sh`は、Raspberry Pi OS/DebianのNetworkManagerへOMK用の
 Wi-Fiアクセスポイント接続プロファイルを安全に作成または更新するためのスクリプトです。
 Docker、Bルート、表示、kioskなどは設定しません。既定の接続名は`omk-ap`、インター
-フェースは`wlan0`、IPv4は`192.168.50.1/24`です。プロファイルはDHCP/DNSのため
-`ipv4.method shared`とWPA2-PSKを使用します。ただし、この共有モードが作るNAT/forwardに
-依存してInternet接続を提供しないよう、同じスクリプトが`omk-ap-isolation.service`を導入します。
-このnftablesルールは`wlan0`から他のすべてのインターフェースへのforwardをdropするため、
-`wwan0`、Ethernet、将来追加するWANのいずれにもAPクライアントは到達できません。一方でDockerが
-Gatewayの公開ポートをcontainerへDNATした通信（MQTT `192.168.50.1:1883`、Dashboard等）だけは、
-bridge名に依存せずconntrackのDNAT状態で許可します。Gateway自身の外部通信およびAPクライアントから
-Gateway上のローカルサービスへの通信は維持されます。
-APプロファイルでは`ipv6.method disabled`も設定します。さらにNetworkManager shared用dnsmasqの
-上流DNS解決を無効にするため、DNS問い合わせをGateway経由の外部通信に使うこともできません。
+フェースは`wlan0`、IPv4は`192.168.50.1/24`です。AP clientはMQTT、Dashboard、Gatewayのローカルサービスへ接続できますが、Internetへは接続できません。AP側IPv6も無効です。これはセンサ用ローカルネットワークを分離する仕様です。内部のNetworkManager、dnsmasq、nftables設計は[ネットワーク設計](../developer/networking.md)を参照してください。
 
 まず、変更を行わないdry-runで解決済みの値を確認します。
 
@@ -432,9 +422,7 @@ ip -6 addr show dev wlan0                           # global IPv6がないこと
 ping -I wwan0 -c 3 8.8.8.8                          # Gateway自身は成功すること
 ```
 
-出力にはDocker公開ポート用の`ct status dnat ... accept`がdropルールより先に1件だけあり、
-`iifname "wlan0" oifname != "wlan0" ... drop`が続くことを確認します。セットアップは専用tableを
-再作成してから適用するため、実機調査時に追加したbridge名指定の一時ルールは残りません。
+内部nftablesルールの順序とDocker bridge名へ依存しない理由は[ネットワーク設計](../developer/networking.md)を参照してください。
 
 ```bash
 sudo nft -a list chain inet omk_ap_isolation forward
