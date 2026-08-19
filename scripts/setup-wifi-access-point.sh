@@ -25,6 +25,7 @@ PRINT_CONFIG=no
 ASSUME_YES="${OMK_AP_CONFIRM:-no}"
 EXISTING=no
 NEEDS_PSK=no
+NEEDS_KEY_MGMT=no
 LOG_FILE=""
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
@@ -55,7 +56,7 @@ Configuration can be supplied through environment variables:
   OMK_AP_ACTIVATE=yes     (same as --activate)
   OMK_AP_CONFIRM=yes      (same as --yes)
 
-When a PSK is needed and OMK_AP_PSK is unset, it is requested with hidden input.
+When a PSK is needed and OMK_AP_PSK is unset, a random WPA2-PSK is generated.
 EOF
 }
 
@@ -163,6 +164,13 @@ nm_value() {
   nmcli -g "$1" connection show "${CONNECTION_NAME}" 2>/dev/null | head -n 1 || true
 }
 
+nm_secret_value() {
+  # NetworkManager only returns saved secrets when explicitly requested. Keep
+  # its output in memory so an existing PSK can be preserved without exposing
+  # it through this script's log or command line.
+  "${SUDO[@]}" nmcli --show-secrets -g "$1" connection show "${CONNECTION_NAME}" 2>/dev/null | head -n 1 || true
+}
+
 generate_ssid() {
   local source digest
   if [[ -r /etc/machine-id ]]; then
@@ -179,7 +187,7 @@ generate_ssid() {
 print_config() {
   printf 'Connection profile: %s\nSSID: %s\nInterface: %s\nIPv4 address: %s\nAutoconnect: yes\nActivate AP: %s\nPSK: %s\n' \
     "${CONNECTION_NAME}" "${SSID}" "${INTERFACE}" "${IPV4_ADDRESS}" "${ACTIVATE}" \
-    "$([[ -n "${PSK}" ]] && printf '[MASKED]' || printf '[UNSET]')"
+    '[MASKED]'
 }
 
 confirm() {
@@ -192,12 +200,11 @@ confirm() {
   [[ "${answer}" =~ ^[Yy]([Ee][Ss])?$ ]]
 }
 
-read_psk() {
-  [[ -n "${PSK}" ]] && return 0
-  [[ -t 0 ]] || fail "A WPA2-PSK is required. Set OMK_AP_PSK securely or run from an interactive terminal."
-  read -r -s -p 'WPA2-PSK (input is hidden): ' PSK
-  printf '\n'
-  [[ -n "${PSK}" ]] || fail "WPA2-PSK must not be empty."
+generate_psk() {
+  # /dev/urandom is the OS CSPRNG. Keep only base64's alphanumeric output to
+  # produce a 24-character WPA2-PSK without deriving it from host identifiers.
+  PSK="$(head -c 48 /dev/urandom | base64 | LC_ALL=C tr -dc 'A-Za-z0-9' | cut -c 1-24)"
+  [[ "${#PSK}" -eq 24 ]] || fail "Could not generate a WPA2-PSK from the OS random source."
 }
 
 configure_wpa2_psk() {
@@ -310,6 +317,7 @@ mkdir -p "${OMK_ROOT}/logs/setup"
 LOG_FILE="${OMK_ROOT}/logs/setup/wifi-ap-$(date '+%Y%m%d-%H%M%S').log"
 umask 077
 exec > >(tee -a "${LOG_FILE}") 2>&1
+trap 'unset PSK CURRENT_PSK' EXIT
 log "Wi-Fi AP setup started (repository root: ${OMK_ROOT}; target user: ${RUN_USER})."
 log "Log file: ${LOG_FILE}"
 
@@ -366,6 +374,7 @@ CURRENT_AUTOCONNECT="$(nm_value connection.autoconnect)"
 CURRENT_MODE="$(nm_value 802-11-wireless.mode)"
 CURRENT_SSID="$(nm_value 802-11-wireless.ssid)"
 CURRENT_KEY_MGMT="$(nm_value 802-11-wireless-security.key-mgmt)"
+CURRENT_PSK="$(nm_secret_value 802-11-wireless-security.psk)"
 CURRENT_IPV4_METHOD="$(nm_value ipv4.method)"
 CURRENT_IPV4_ADDRESS="$(nm_value ipv4.addresses)"
 CURRENT_IPV6_METHOD="$(nm_value ipv6.method)"
@@ -380,7 +389,14 @@ else
   [[ "${CURRENT_AUTOCONNECT}" == yes ]] || CHANGES+=("connection.autoconnect: ${CURRENT_AUTOCONNECT:-unset} -> yes")
   [[ "${CURRENT_MODE}" == ap ]] || CHANGES+=("802-11-wireless.mode: ${CURRENT_MODE:-unset} -> ap")
   [[ "${CURRENT_SSID}" == "${SSID}" ]] || CHANGES+=("802-11-wireless.ssid: ${CURRENT_SSID:-unset} -> ${SSID}")
-  if [[ "${CURRENT_KEY_MGMT}" != wpa-psk ]]; then CHANGES+=("802-11-wireless-security.key-mgmt: ${CURRENT_KEY_MGMT:-unset} -> wpa-psk"); NEEDS_PSK=yes; fi
+  if [[ "${CURRENT_KEY_MGMT}" != wpa-psk ]]; then
+    CHANGES+=("802-11-wireless-security.key-mgmt: ${CURRENT_KEY_MGMT:-unset} -> wpa-psk")
+    NEEDS_KEY_MGMT=yes
+  fi
+  if [[ -z "${CURRENT_PSK}" ]]; then
+    CHANGES+=("802-11-wireless-security.psk: missing -> set")
+    NEEDS_PSK=yes
+  fi
   [[ "${CURRENT_IPV4_METHOD}" == shared ]] || CHANGES+=("ipv4.method: ${CURRENT_IPV4_METHOD:-unset} -> shared")
   [[ "${CURRENT_IPV4_ADDRESS}" == "${IPV4_ADDRESS}" ]] || CHANGES+=("ipv4.addresses: ${CURRENT_IPV4_ADDRESS:-unset} -> ${IPV4_ADDRESS}")
   [[ "${CURRENT_IPV6_METHOD}" == disabled ]] || CHANGES+=("ipv6.method: ${CURRENT_IPV6_METHOD:-unset} -> disabled")
@@ -391,19 +407,28 @@ if ((${#CHANGES[@]} > 0)); then
   printf '  - %s\n' "${CHANGES[@]}"
   confirm "Apply these NetworkManager profile changes?" || { log "No changes applied."; exit 0; }
   [[ "${EXISTING}" == no ]] || snapshot_existing
-  [[ "${NEEDS_PSK}" == yes ]] && read_psk
+  if [[ "${NEEDS_PSK}" == yes ]]; then
+    if [[ -z "${PSK}" ]]; then generate_psk; fi
+    if [[ "${EXISTING}" == yes && -z "${CURRENT_PSK}" ]]; then
+      log "Existing profile PSK was missing; setting one without displaying it."
+    fi
+  fi
   if [[ "${EXISTING}" == no ]]; then
     run_privileged nmcli connection add type wifi ifname "${INTERFACE}" con-name "${CONNECTION_NAME}" autoconnect yes ssid "${SSID}"
   fi
   run_privileged nmcli connection modify "${CONNECTION_NAME}" connection.interface-name "${INTERFACE}" connection.autoconnect yes 802-11-wireless.mode ap 802-11-wireless.ssid "${SSID}" 802-11-wireless.band bg ipv4.method shared ipv4.addresses "${IPV4_ADDRESS}" ipv6.method disabled
-  if [[ "${NEEDS_PSK}" == yes ]]; then
+  if [[ "${NEEDS_KEY_MGMT}" == yes || "${NEEDS_PSK}" == yes ]]; then
     run_privileged nmcli connection modify "${CONNECTION_NAME}" 802-11-wireless-security.key-mgmt wpa-psk
+  fi
+  if [[ "${NEEDS_PSK}" == yes ]]; then
     configure_wpa2_psk
   fi
   if [[ "${EXISTING}" == yes ]]; then log "NetworkManager profile was updated; AP-side IPv6 is disabled."; else log "NetworkManager profile was created; AP-side IPv6 is disabled."; fi
 else
   log "Existing profile already matches the requested AP settings; no profile change was made."
 fi
+
+unset PSK CURRENT_PSK
 
 install_ap_isolation_firewall
 install_ap_dns_isolation

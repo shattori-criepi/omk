@@ -28,3 +28,9 @@ Dockerの公開ポートへの接続は、host側でDNATされた後にDocker br
 ## 現行実装と長期方針
 
 現在のAP既定SSIDは`OMK-XXXXXX`、接続名は`omk-ap`です。これは現行実装のデフォルトであり、中央組織によるOMK ID発行や固定prefixへの長期依存を意味しません。公開版でも第三者が任意の識別子・SSIDで構築できる設計を維持します。
+
+SSIDの`XXXXXX`は`/etc/machine-id`のSHA-256先頭6桁を大文字16進数にしたものです。machine-idを読めない場合はWi-Fi MAC addressを同じ方法でハッシュします。
+
+PSKは初回プロファイル作成時だけ、OSのCSPRNG（`/dev/urandom`）から生成する24文字の英数字です。machine-id、MAC address、SSIDなどのGateway固有値からPSKを導出してはいけません。既存プロファイルの保存済みPSKは最優先で維持し、`OMK_AP_PSK`が指定されていても暗黙に上書きしません。既存PSKが欠落している場合だけ、`OMK_AP_PSK`または新規乱数を設定します。
+
+PSKは`nmcli connection edit`の標準入力で設定し、argvやセットアップログへ出力しません。`--print-config`もPSK本文ではなく`[MASKED]`だけを表示します。
