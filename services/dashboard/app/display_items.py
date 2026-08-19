@@ -8,7 +8,7 @@ from datetime import datetime
 from app.data.display_repository import CatalogItem, DisplayRepository, LatestDisplayItem
 from app.data.settings_repository import DisplayBlock, DisplaySelection
 from app.metric_definitions import MetricDefinition, definition_for, format_value
-from app.view_models import FreshnessStatus, freshness_for
+from app.view_models import FreshnessStatus, format_grid_flow_values, freshness_for
 
 
 @dataclass(frozen=True)
@@ -46,6 +46,10 @@ class DisplayBlockView:
     secondary: tuple[DisplayItem, ...]
     freshness: str
     last_received_at: str
+    auxiliary_label: str = ""
+    auxiliary_value: str = ""
+    auxiliary_unit: str = ""
+    auxiliary_supported: bool = False
 
     def as_dict(self) -> dict:
         return {
@@ -58,6 +62,10 @@ class DisplayBlockView:
             "secondary": [item.as_dict() for item in self.secondary],
             "freshness": self.freshness,
             "last_received_at": self.last_received_at,
+            "auxiliary_label": self.auxiliary_label,
+            "auxiliary_value": self.auxiliary_value,
+            "auxiliary_unit": self.auxiliary_unit,
+            "auxiliary_supported": self.auxiliary_supported,
         }
 
 
@@ -159,6 +167,12 @@ def selected_blocks(
         primary_id = block.primary_item_id
         primary = next((item for item in values if item.id == primary_id), values[0])
         secondary = tuple(item for item in values if item.id != primary.id)
+        auxiliary_supported = (
+            block.group == "一条パワコン"
+            and block.layout_pattern == "hero"
+            and primary.semantic_role == "load_power"
+        )
+        auxiliary_label, auxiliary_value = _grid_flow_auxiliary(repository, catalog.values()) if auxiliary_supported else ("", "")
         statuses = [item.freshness for item in values]
         freshness = FreshnessStatus.UNAVAILABLE.value
         if FreshnessStatus.UNAVAILABLE.value not in statuses:
@@ -170,6 +184,8 @@ def selected_blocks(
             id=block.block_id, title=_display_block_title(block.title, block.group), group=block.group, size=block.size,
             layout_pattern=block.layout_pattern,
             primary=primary, secondary=secondary, freshness=freshness, last_received_at=last_received_at,
+            auxiliary_label=auxiliary_label, auxiliary_value=auxiliary_value,
+            auxiliary_unit="kW" if auxiliary_label else "", auxiliary_supported=auxiliary_supported,
         ))
     return rendered
 
@@ -177,6 +193,21 @@ def selected_blocks(
 def _display_block_title(title: str, group: str) -> str:
     """Keep the energy-system block compact without overriding custom titles."""
     return "一条パワコン" if group == "一条パワコン" and title in {group, "太陽光・蓄電池"} else title
+
+
+def _grid_flow_auxiliary(repository: DisplayRepository, items) -> tuple[str, str]:
+    """Reuse the legacy grid-flow order and zero handling for hero blocks."""
+    by_role = {item.semantic_role: item for item in items if item.group == "一条パワコン"}
+    import_item, export_item = by_role.get("grid_import"), by_role.get("grid_export")
+    import_latest = repository.item(import_item.id) if import_item and import_item.freshness != FreshnessStatus.UNAVAILABLE.value else None
+    export_latest = repository.item(export_item.id) if export_item and export_item.freshness != FreshnessStatus.UNAVAILABLE.value else None
+    label, value, _ = format_grid_flow_values(
+        _numeric_value(import_latest.value) if import_latest is not None else None,
+        _numeric_value(export_latest.value) if export_latest is not None else None,
+    )
+    if label in {"買電中", "売電中"}:
+        return label, value
+    return "", ""
 
 
 def _display_item(

@@ -217,17 +217,28 @@ def format_grid_flow(
     if ichijo is None:
         return "", "--", PowerDirection.UNAVAILABLE
 
-    if ichijo.grid_export_power_w > 0:
+    return format_grid_flow_values(
+        ichijo.grid_import_power_w,
+        ichijo.grid_export_power_w,
+    )
+
+
+def format_grid_flow_values(
+    grid_import_power_w: float | None,
+    grid_export_power_w: float | None,
+) -> tuple[str, str, PowerDirection]:
+    """Format grid flow consistently for legacy and Display Block views."""
+    if grid_export_power_w is not None and grid_export_power_w > 0:
         return (
             "売電中",
-            f"{ichijo.grid_export_power_w / 1000:.2f}",
+            f"{grid_export_power_w / 1000:.2f}",
             PowerDirection.SALE,
         )
 
-    if ichijo.grid_import_power_w > 0:
+    if grid_import_power_w is not None and grid_import_power_w > 0:
         return (
             "買電中",
-            f"{ichijo.grid_import_power_w / 1000:.2f}",
+            f"{grid_import_power_w / 1000:.2f}",
             PowerDirection.PURCHASE,
         )
 

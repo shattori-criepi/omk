@@ -82,6 +82,16 @@ function updateDisplay(data) {
         itemCard.classList.remove("display-card--normal", "display-card--delayed", "display-card--unavailable");
         itemCard.classList.add(`display-card--${item.freshness}`);
       });
+      const auxiliary = card.querySelector('[data-role="auxiliary"]');
+      if (auxiliary) {
+        const hasAuxiliary = Boolean(block.auxiliary_label);
+        auxiliary.hidden = !hasAuxiliary;
+        if (hasAuxiliary) {
+          auxiliary.querySelector('[data-role="auxiliary-label"]').textContent = block.auxiliary_label;
+          auxiliary.querySelector('[data-role="auxiliary-value"]').textContent = block.auxiliary_value;
+          auxiliary.querySelector('[data-role="auxiliary-unit"]').textContent = block.auxiliary_unit;
+        }
+      }
       card.classList.remove("display-card--normal", "display-card--delayed", "display-card--unavailable");
       card.classList.add(`display-card--${block.freshness}`);
     });

@@ -37,6 +37,7 @@
           <div class="display-card-primary" data-item-id="{{ block.primary.id }}">
             <p data-role="label">{{ block.primary.short_label or block.primary.label }}</p>
             <div class="display-card-reading"><strong class="display-card-value" data-role="value">{{ block.primary.value }}</strong>{% if block.primary.unit and block.primary.freshness != 'unavailable' %}<span class="display-card-unit" data-role="unit">{{ block.primary.unit }}</span>{% endif %}</div>
+            {% if block.auxiliary_supported %}<p class="display-card-auxiliary" data-role="auxiliary"{% if not block.auxiliary_label %} hidden{% endif %}><span data-role="auxiliary-label">{{ block.auxiliary_label }}</span> <strong data-role="auxiliary-value">{{ block.auxiliary_value }}</strong> <small data-role="auxiliary-unit">{{ block.auxiliary_unit }}</small></p>{% endif %}
           </div>
           {% if block.secondary %}<div class="display-card-secondary">
             {% for item in block.secondary %}<div class="display-secondary-item" data-item-id="{{ item.id }}"><span class="display-secondary-label" data-role="label">{{ item.short_label or item.label }}</span><strong class="display-secondary-value" data-role="value">{{ item.value }}</strong><small class="display-secondary-unit" data-role="unit">{{ item.unit if item.unit and item.freshness != 'unavailable' else ' ' }}</small></div>{% endfor %}
