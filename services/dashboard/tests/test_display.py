@@ -350,6 +350,66 @@ console.log(JSON.stringify({date: date.textContent, time: time.textContent, upda
     assert result["ids"] == ["temperature", "grid"]
 
 
+@pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is required for display polling tests")
+def test_legacy_polling_restores_delayed_power_and_sen66_status_to_normal() -> None:
+    javascript_path = Path(__file__).parents[1] / "app" / "static" / "display.js"
+    harness = r'''
+const fs = require("fs"), vm = require("vm");
+function classList() { const values = new Set(); return {add: (...names) => names.forEach(name => values.add(name)), remove: (...names) => names.forEach(name => values.delete(name)), values: () => [...values].sort()}; }
+function section() { return {classList: classList(), querySelectorAll() { return []; }}; }
+const power = section(), sen66 = section();
+const powerBadge = {textContent: "遅延", hidden: false, className: "source-badge source-badge--delayed"};
+const sen66Badge = {textContent: "遅延", hidden: false, className: "source-badge source-badge--delayed"};
+global.document = {documentElement: {classList: classList()}, querySelector(selector) {
+  return ({"#power-section": power, "#sen66-section": sen66, "#power-source-badge": powerBadge, "#sen66-source-badge": sen66Badge})[selector] || null;
+}};
+let reloads = 0;
+global.window = {setInterval() {}, location: {reload() { reloads += 1; }}};
+global.fetch = async () => ({ok: true, json: async () => ({})});
+vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8") + "\nglobalThis.__displayTest = { updateDisplay };");
+const snapshot = freshness => ({
+  current_power_label: "現在の消費電力", current_power_kw: "1.20", power_direction: "", power_flow: "neutral",
+  has_ichijo_power_flow: true, grid_flow_label: "", grid_flow_kw: "", grid_flow: "neutral", pv_power_kw: "0.80",
+  sold_today_kwh: "0.0", battery_soc_percent: "50", battery_power_label: "", battery_power_kw: "", purchased_today_kwh: "0.0",
+  temperature_c: "25.0", humidity_percent: "45", co2_ppm: "600", pm25_ug_m3: "2.0", voc_index: "10",
+  updated_at: "2026/08/19 12:00:00", updated_at_iso: "2026-08-19T12:00:00+09:00", freshness,
+  power_freshness: freshness, sen66_freshness: freshness,
+});
+__displayTest.updateDisplay(snapshot("delayed"));
+const delayed = {power: power.classList.values(), sen66: sen66.classList.values(), powerBadge: {...powerBadge}, sen66Badge: {...sen66Badge}};
+__displayTest.updateDisplay(snapshot("normal"));
+console.log(JSON.stringify({delayed, normal: {power: power.classList.values(), sen66: sen66.classList.values(), powerBadge, sen66Badge}, reloads}));
+'''
+    completed = subprocess.run(["node", "-e", harness, str(javascript_path)], check=True, capture_output=True, text=True)
+    result = json.loads(completed.stdout)
+
+    assert result["delayed"]["power"] == ["source--delayed"]
+    assert result["delayed"]["sen66"] == ["source--delayed"]
+    assert result["normal"]["power"] == ["source--normal"]
+    assert result["normal"]["sen66"] == ["source--normal"]
+    assert result["normal"]["powerBadge"] == {"textContent": "", "hidden": True, "className": "source-badge source-badge--normal"}
+    assert result["normal"]["sen66Badge"] == {"textContent": "", "hidden": True, "className": "source-badge source-badge--normal"}
+    assert result["reloads"] == 0
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is required for display polling tests")
+def test_polling_reloads_when_server_switches_from_legacy_to_block_layout() -> None:
+    javascript_path = Path(__file__).parents[1] / "app" / "static" / "display.js"
+    harness = r'''
+const fs = require("fs"), vm = require("vm");
+global.document = {documentElement: {classList: {add() {}}}, querySelector(selector) { return selector === "#power-section" ? {} : null; }};
+let reloads = 0;
+global.window = {setInterval() {}, location: {reload() { reloads += 1; }}};
+global.fetch = async () => ({ok: true, json: async () => ({})});
+vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8") + "\nglobalThis.__displayTest = { updateDisplay };");
+__displayTest.updateDisplay({mode: "recommended", blocks: []});
+console.log(JSON.stringify({reloads}));
+'''
+    completed = subprocess.run(["node", "-e", harness, str(javascript_path)], check=True, capture_output=True, text=True)
+
+    assert json.loads(completed.stdout) == {"reloads": 1}
+
+
 def _write_instantaneous_data(
     root: Path,
     *,
