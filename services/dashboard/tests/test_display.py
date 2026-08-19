@@ -6,6 +6,7 @@ import stat
 import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 import duckdb
@@ -482,6 +483,88 @@ def test_strip_and_compact_display_html_use_their_own_dom_contracts(tmp_path: Pa
         assert f'data-item-id="{item_id}"' in response.text
 
 
+def test_strip_initial_render_keeps_an_empty_unit_element_for_voc_index() -> None:
+    temperature = SimpleNamespace(id="temperature", label="温度", short_label="温度", value="25.4", unit="°C", freshness="normal")
+    voc = SimpleNamespace(id="voc", label="VOC Index", short_label="VOC Index", value="440", unit="", freshness="normal")
+    block = SimpleNamespace(id="strip_sen66", title="SEN66", size="medium", layout_pattern="strip", freshness="normal", primary=temperature, secondary=[voc])
+    dashboard = SimpleNamespace(blocks=[block], updated_at="2026-08-19 12:00:00", updated_at_iso="2026-08-19T12:00:00+09:00", freshness="normal")
+    request = SimpleNamespace(url_for=lambda _name, **params: params["path"])
+    response = dashboard_main.templates.get_template("display.html").render(request=request, dashboard=dashboard)
+
+    voc_markup = re.search(
+        r'<div class="display-secondary-item" data-item-id="voc">(.*?)</div>', response, re.DOTALL,
+    )
+    assert voc_markup is not None
+    assert '<small class="display-secondary-unit" data-role="unit">\xa0</small>' in voc_markup.group(1)
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is required for display polling tests")
+def test_strip_polling_keeps_unitless_item_unit_row_and_dom_contract() -> None:
+    """A unitless VOC item must retain its third strip row after every poll."""
+    javascript_path = Path(__file__).parents[1] / "app" / "static" / "display.js"
+    harness = r'''
+const fs = require("fs"), vm = require("vm");
+function classList() {
+  const values = new Set();
+  return { add: (...names) => names.forEach(name => values.add(name)), remove: (...names) => names.forEach(name => values.delete(name)), values: () => [...values].sort() };
+}
+function roleElement() { return {textContent: "", hidden: false}; }
+function itemCard() {
+  const roles = {label: roleElement(), value: roleElement(), unit: roleElement(), freshness: roleElement()};
+  roles.unit.textContent = "\u00a0";
+  return {classList: classList(), roles, querySelector(selector) { const match = selector.match(/data-role="([^"]+)"/); return match ? roles[match[1]] : null; }};
+}
+const cards = {temperature: itemCard(), voc: itemCard()};
+const block = {classList: classList(), querySelector() { return null; }};
+const byId = {"#current-datetime": null, "#header-date-main": null, "#header-weekday": null, "#header-time": null, "#updated-at": null, "#freshness": null};
+global.CSS = {escape: value => value};
+global.document = {documentElement: {classList: classList()}, querySelector(selector) {
+  if (selector.startsWith('[data-block-id=')) return block;
+  if (selector.startsWith('[data-item-id=')) return cards[selector.match(/"([^"]+)"/)[1]] || null;
+  return byId[selector] || null;
+}};
+global.window = {setInterval() {}};
+vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8") + "\nglobalThis.__displayTest = { updateDisplay };");
+const item = (id, label, value, unit, freshness) => ({id, short_label: label, label, value, unit, freshness});
+const snapshot = (vocValue, vocFreshness) => ({mode: "standard", blocks: [{id: "sen66", freshness: "normal", primary: item("temperature", "温度", "27.2", "°C", "normal"), secondary: [item("voc", "VOC Index", vocValue, "", vocFreshness)]}], updated_at: "", updated_at_iso: "", freshness: "normal"});
+const vocUnit = cards.voc.roles.unit;
+const states = [];
+const record = () => states.push({value: cards.voc.roles.value.textContent, unit: cards.voc.roles.unit.textContent, unitHidden: cards.voc.roles.unit.hidden, classes: cards.voc.classList.values()});
+__displayTest.updateDisplay(snapshot("452", "normal"));
+record();
+__displayTest.updateDisplay(snapshot("440", "normal"));
+record();
+__displayTest.updateDisplay(snapshot("--", "unavailable"));
+record();
+__displayTest.updateDisplay(snapshot("440", "normal"));
+record();
+console.log(JSON.stringify({
+  voc: {label: cards.voc.roles.label.textContent, value: cards.voc.roles.value.textContent, unit: cards.voc.roles.unit.textContent, unitHidden: cards.voc.roles.unit.hidden, unitRetained: vocUnit === cards.voc.roles.unit, roleNames: Object.keys(cards.voc.roles).sort(), classes: cards.voc.classList.values()},
+  temperature: {unit: cards.temperature.roles.unit.textContent, unitHidden: cards.temperature.roles.unit.hidden},
+  states,
+}));
+'''
+    completed = subprocess.run(["node", "-e", harness, str(javascript_path)], check=True, capture_output=True, text=True)
+    result = json.loads(completed.stdout)
+
+    assert result["voc"] == {
+        "label": "VOC Index",
+        "value": "440",
+        "unit": "\u00a0",
+        "unitHidden": False,
+        "unitRetained": True,
+        "roleNames": ["freshness", "label", "unit", "value"],
+        "classes": ["display-card--normal"],
+    }
+    assert result["temperature"] == {"unit": "°C", "unitHidden": False}
+    assert result["states"] == [
+        {"value": "452", "unit": "\u00a0", "unitHidden": False, "classes": ["display-card--normal"]},
+        {"value": "440", "unit": "\u00a0", "unitHidden": False, "classes": ["display-card--normal"]},
+        {"value": "--", "unit": "\u00a0", "unitHidden": False, "classes": ["display-card--unavailable"]},
+        {"value": "440", "unit": "\u00a0", "unitHidden": False, "classes": ["display-card--normal"]},
+    ]
+
+
 def test_power_direction_rules() -> None:
     assert format_power(LatestPower(NOW, 1240.0)) == ("1.24", "買電", PowerDirection.PURCHASE)
     assert format_power(LatestPower(NOW, 0.0)) == ("0.00", "収支なし", PowerDirection.NEUTRAL)
@@ -829,8 +912,8 @@ def test_admin_display_css_allows_vertical_scroll_without_changing_kiosk_overflo
     assert "admin_display.js') }}?v=20260819-5" in admin_template
     assert "display.css') }}?v=20260819-admin-5" in admin_template
     assert '<body class="admin-body">' not in display_template
-    assert "display.js') }}?v=20260819-block-flow" in display_template
-    assert "display.css') }}?v=20260819-hero-reading-spacing" in display_template
+    assert "display.js') }}?v=20260819-strip-unit-stability-1" in display_template
+    assert "display.css') }}?v=20260819-strip-unit-stability-1" in display_template
     assert "overflow: hidden;" in stylesheet
 
 
@@ -845,8 +928,9 @@ def test_display_pattern_css_keeps_only_hero_primary_large_and_fits_the_viewport
     assert ".display-card--small { grid-column: span 4;" in stylesheet
     assert ".display-card--hero .display-card-primary .display-card-reading strong" in stylesheet
     assert ".display-card--hero .display-card-label { padding-bottom:" in stylesheet
-    assert ".display-card--large.display-card--hero .display-card-primary { gap: 0;" in stylesheet
-    assert ".display-card--large.display-card--hero .display-card-primary > [data-role=\"label\"] { line-height:" in stylesheet
+    assert ".display-card--large.display-card--hero .display-card-primary { display: flex; flex-direction: column;" in stylesheet
+    assert ".display-card--large.display-card--hero .display-card-primary .display-card-reading" in stylesheet
+    assert ".display-card--large.display-card--hero .display-card-primary .display-card-auxiliary" in stylesheet
     assert ".display-card--compact { grid-template-rows: auto minmax(0, 1fr) auto;" in stylesheet
     assert ".display-card-compact-items { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));" in stylesheet
     assert ".display-secondary-value { justify-self: end;" in stylesheet
@@ -856,6 +940,7 @@ def test_display_pattern_css_keeps_only_hero_primary_large_and_fits_the_viewport
     assert ".display-card--small.display-card--hero" in stylesheet
     assert ".display-card--medium.display-card--strip.display-card--items-" in stylesheet
     assert ".display-card--small.display-card--strip.display-card--items-" in stylesheet
+    assert ".display-card--strip .display-secondary-unit { display: block; min-height: 1em;" in stylesheet
     assert ".display-compact-reading { display: flex; align-items: baseline;" in stylesheet
     assert "{% elif block.layout_pattern == 'compact' %}" in template
     assert 'class="display-card-compact-items"' in template

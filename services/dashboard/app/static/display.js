@@ -44,6 +44,12 @@ function sourceBadgeText(freshness) {
   return freshness === "delayed" ? "遅延" : freshness === "unavailable" ? "取得不可" : "";
 }
 
+function displayUnitText(item) {
+  // Keep the unit grid row present for unitless and unavailable readings.  The
+  // server-rendered strip markup uses a non-breaking space for the same reason.
+  return item.unit && item.freshness !== "unavailable" ? item.unit : "\u00a0";
+}
+
 function updateSourceStatus(sectionId, badgeId, freshness) {
   const section = document.querySelector(`#${sectionId}`);
   if (section) {
@@ -77,7 +83,10 @@ function updateDisplay(data) {
         const freshness = itemCard.querySelector('[data-role="freshness"]');
         if (label) label.textContent = item.short_label || item.label;
         if (value) value.textContent = item.value;
-        if (unit) { unit.textContent = item.unit; unit.hidden = item.freshness === "unavailable" || !item.unit; }
+        if (unit) {
+          unit.textContent = displayUnitText(item);
+          unit.hidden = false;
+        }
         if (freshness) freshness.textContent = sourceBadgeText(item.freshness);
         itemCard.classList.remove("display-card--normal", "display-card--delayed", "display-card--unavailable");
         itemCard.classList.add(`display-card--${item.freshness}`);
