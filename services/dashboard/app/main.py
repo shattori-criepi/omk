@@ -15,8 +15,9 @@ from fastapi.templating import Jinja2Templates
 from app.data.latest_repository import LatestRepository
 from app.data.parquet_repository import EnergyTotals, ParquetRepository
 from app.data.display_repository import DisplayRepository
-from app.data.settings_repository import DisplayBlock, SettingsError, SettingsRepository, default_layout_pattern, item_limit
+from app.data.settings_repository import DashboardSettings, DisplayBlock, SettingsError, SettingsRepository, default_layout_pattern, item_limit
 from app.display_items import DisplayItem, catalog_items_with_latest, display_candidates, display_item_migrations, selected_blocks
+from app.recommendations import recommended_blocks
 from app.view_models import FreshnessStatus, format_timestamp_seconds, worst_freshness
 from app.view_models import get_display_view_model
 
@@ -50,14 +51,15 @@ def get_settings_repository() -> SettingsRepository:
 
 
 @dataclass(frozen=True)
-class StandardDashboard:
+class BlockDashboard:
+    mode: str
     blocks: list
     updated_at: str
     updated_at_iso: str
     freshness: FreshnessStatus
 
     def as_dict(self) -> dict:
-        return {"mode": "standard", "blocks": [block.as_dict() for block in self.blocks], "updated_at": self.updated_at, "updated_at_iso": self.updated_at_iso, "freshness": self.freshness.value}
+        return {"mode": self.mode, "blocks": [block.as_dict() for block in self.blocks], "updated_at": self.updated_at, "updated_at_iso": self.updated_at_iso, "freshness": self.freshness.value}
 
 
 def _default_blocks(candidates: list) -> list[DisplayBlock]:
@@ -107,19 +109,26 @@ def _dashboard_candidates(now: datetime | None = None) -> list[DisplayItem]:
     return candidates + derived
 
 
+def _settings_for(candidates: list[DisplayItem]):
+    selectable = [item for item in candidates if item.selectable]
+    return get_settings_repository().load_or_create(
+        {item.id: item.group for item in candidates}, _default_blocks(selectable),
+        display_item_migrations(candidates), recommended_blocks(selectable),
+    )
+
+
 def get_dashboard_view_model():
     """Build one consistent snapshot for both HTML and polling API responses."""
     display_repository = get_display_repository()
     candidates = _dashboard_candidates()
     selectable = [item for item in candidates if item.selectable]
     if selectable:
-        groups = {item.id: item.group for item in candidates}
-        settings = get_settings_repository().load_or_create(groups, _default_blocks(selectable), display_item_migrations(candidates))
+        settings = _settings_for(candidates)
         now = datetime.now().astimezone()
-        blocks = selected_blocks(display_repository, settings.blocks, now, _dashboard_candidates(now))
+        blocks = selected_blocks(display_repository, settings.active_blocks, now, _dashboard_candidates(now))
         statuses = [FreshnessStatus(block.freshness) for block in blocks] or [FreshnessStatus.UNAVAILABLE]
         updated = max((block.last_received_at for block in blocks if block.last_received_at), default="")
-        return StandardDashboard(
+        return BlockDashboard(mode=settings.mode,
             blocks=blocks, updated_at=format_timestamp_seconds(updated) if updated else "--",
             updated_at_iso=updated, freshness=worst_freshness(*statuses),
         )
@@ -256,8 +265,7 @@ async def display_items() -> dict:
 @app.get("/api/admin/dashboard-settings")
 async def dashboard_settings() -> dict:
     candidates = _dashboard_candidates()
-    groups = {item.id: item.group for item in candidates}
-    settings = get_settings_repository().load_or_create(groups, _default_blocks([item for item in candidates if item.selectable]), display_item_migrations(candidates))
+    settings = _settings_for(candidates)
     return {**settings.as_dict(), "capacity": 6}
 
 
@@ -273,6 +281,35 @@ async def update_dashboard_settings(request: Request) -> dict:
     except (OSError, ValueError) as error:
         raise HTTPException(500, "表示設定を保存できません") from error
     return {**settings.as_dict(), "capacity": 6}
+
+
+@app.post("/api/admin/dashboard-settings/mode")
+async def update_dashboard_mode(request: Request) -> dict:
+    candidates = _dashboard_candidates()
+    try:
+        mode = (await request.json()).get("mode")
+        if mode not in {"recommended", "custom"}:
+            raise SettingsError("この表示モードはまだ利用できません")
+        settings = _settings_for(candidates)
+        # Entering recommended intentionally makes a fresh, persisted snapshot.
+        recommended = tuple(recommended_blocks([item for item in candidates if item.selectable])) if mode == "recommended" else settings.recommended_blocks
+        updated = DashboardSettings(mode, settings.custom_blocks, recommended)
+        get_settings_repository().save(updated, {item.id: item.group for item in candidates})
+    except (SettingsError, ValueError, AttributeError) as error:
+        raise HTTPException(400, str(error)) from error
+    return {**updated.as_dict(), "capacity": 6}
+
+
+@app.post("/api/admin/dashboard-settings/recommended")
+async def refresh_recommended_dashboard() -> dict:
+    candidates = _dashboard_candidates()
+    try:
+        settings = _settings_for(candidates)
+        updated = DashboardSettings("recommended", settings.custom_blocks, tuple(recommended_blocks([item for item in candidates if item.selectable])))
+        get_settings_repository().save(updated, {item.id: item.group for item in candidates})
+    except (SettingsError, OSError) as error:
+        raise HTTPException(400, str(error)) from error
+    return {**updated.as_dict(), "capacity": 6}
 
 @app.get("/api/admin/nodes")
 async def nodes() -> dict:

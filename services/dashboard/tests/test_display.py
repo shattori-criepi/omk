@@ -20,6 +20,7 @@ from app.data.display_repository import DisplayRepository
 from app.data.settings_repository import DisplayBlock, DisplaySelection, SettingsError, SettingsRepository
 from app.display_items import candidate_for, catalog_items_with_latest, display_candidates, display_item_migrations, selected_blocks, selected_items
 from app.metric_definitions import definition_for, format_value
+from app.recommendations import recommended_blocks
 from app.main import app
 from app.view_models import (
     FreshnessStatus,
@@ -87,6 +88,54 @@ def _write_generic_item(root: Path, suffix: str, *, topic: str, device_id: str, 
 
 def _block_payload(*blocks: dict) -> dict:
     return {"version": 2, "default_preset": "standard", "presets": {"standard": {"blocks": list(blocks)}}}
+
+
+def _recommended_item(item_id: str, group: str, role: str | None) -> object:
+    return SimpleNamespace(
+        id=item_id, group=group, semantic_role=role, selectable=True,
+        short_label=item_id, label=item_id,
+    )
+
+
+def test_recommended_blocks_rank_semantic_groups_and_exclude_ichijo() -> None:
+    candidates = [
+        _recommended_item("grid", "電力メーター（Bルート）", "grid_power"),
+        _recommended_item("temp", "multi", "temperature"),
+        _recommended_item("humidity", "multi", "humidity"),
+        _recommended_item("co2", "multi", "co2"),
+        _recommended_item("pm25", "multi", "pm25"),
+        _recommended_item("temp2", "simple", "temperature"),
+        _recommended_item("humidity2", "simple", "humidity"),
+        _recommended_item("plug", "plug-001", "device_power"),
+        _recommended_item("ichijo", "一条パワコン", "load_power"),
+    ]
+
+    blocks = recommended_blocks(candidates)  # type: ignore[arg-type]
+
+    assert [block.group for block in blocks] == ["電力メーター（Bルート）", "multi", "plug-001"]
+    assert [block.size for block in blocks] == ["large", "medium", "small"]
+    assert blocks[1].item_ids[:3] == ("temp", "humidity", "co2")
+    assert all(block.group != "一条パワコン" for block in blocks)
+
+
+def test_settings_v2_migrates_to_custom_and_new_settings_default_recommended(tmp_path: Path) -> None:
+    path = tmp_path / "dashboard" / "settings.json"
+    repository = SettingsRepository(path)
+    groups = {"grid": "電力メーター（Bルート）"}
+    recommended = [DisplayBlock("recommended_1", "電力メーター（Bルート）", "電力メーター（Bルート）", "large", "grid", ("grid",), "hero")]
+    created = repository.load_or_create(groups, [], recommended_defaults=recommended)
+    assert created.mode == "recommended"
+    assert created.recommended_blocks == tuple(recommended)
+
+    path.write_text(json.dumps(_block_payload({
+        "block_id": "custom", "group": "電力メーター（Bルート）", "title": "以前の設定", "size": "large",
+        "layout_pattern": "hero", "primary_item_id": "grid", "item_ids": ["grid"],
+    })), encoding="utf-8")
+    migrated = repository.load_or_create(groups, [])
+    assert migrated.mode == "custom"
+    assert migrated.custom_blocks[0].title == "以前の設定"
+    saved = json.loads(path.read_text(encoding="utf-8"))
+    assert saved["version"] == 3 and saved["mode"] == "custom"
 
 
 def _write_instantaneous_data(

@@ -69,13 +69,29 @@ class DisplayBlock:
 
 @dataclass(frozen=True)
 class DashboardSettings:
-    blocks: tuple[DisplayBlock, ...]
+    mode: str
+    custom_blocks: tuple[DisplayBlock, ...]
+    recommended_blocks: tuple[DisplayBlock, ...]
+
+    @property
+    def blocks(self) -> tuple[DisplayBlock, ...]:
+        """Compatibility alias for callers that edit the old standard preset."""
+        return self.custom_blocks
+
+    @property
+    def active_blocks(self) -> tuple[DisplayBlock, ...]:
+        return self.recommended_blocks if self.mode == "recommended" else self.custom_blocks
 
     def as_dict(self) -> dict:
         return {
-            "version": 2,
+            "version": 3,
+            "mode": self.mode,
+            # Keep the established identifier as the on-disk custom preset.
             "default_preset": "standard",
-            "presets": {"standard": {"blocks": [block.as_dict() for block in self.blocks]}},
+            "presets": {
+                "standard": {"blocks": [block.as_dict() for block in self.custom_blocks]},
+                "recommended": {"blocks": [block.as_dict() for block in self.recommended_blocks]},
+            },
         }
 
 
@@ -83,9 +99,9 @@ class SettingsRepository:
     def __init__(self, path: Path) -> None:
         self.path = path
 
-    def load_or_create(self, available_groups: dict[str, str], defaults: list[DisplayBlock], item_migrations: dict[str, str] | None = None) -> DashboardSettings:
+    def load_or_create(self, available_groups: dict[str, str], defaults: list[DisplayBlock], item_migrations: dict[str, str] | None = None, recommended_defaults: list[DisplayBlock] | None = None) -> DashboardSettings:
         if not self.path.exists():
-            settings = DashboardSettings(tuple(defaults))
+            settings = DashboardSettings("recommended", tuple(defaults), tuple(recommended_defaults or []))
             self.save(settings, available_groups)
             return settings
         try:
@@ -98,7 +114,7 @@ class SettingsRepository:
         except (OSError, json.JSONDecodeError, TypeError, KeyError, SettingsError):
             # Keep a malformed file for diagnosis, but do not turn a usable
             # Dashboard into an empty layout merely because migration failed.
-            return DashboardSettings(tuple(defaults))
+            return DashboardSettings("recommended", tuple(defaults), tuple(recommended_defaults or []))
 
     def save_payload(self, payload: object, available_groups: dict[str, str], item_migrations: dict[str, str] | None = None) -> DashboardSettings:
         settings, migrated = self._parse(payload, available_groups, allow_missing=False, item_migrations=item_migrations)
@@ -130,14 +146,30 @@ class SettingsRepository:
             raise SettingsError("設定形式が正しくありません")
         if payload.get("version") == 1:
             return self._migrate_v1(payload, available_groups, item_migrations), True
-        if payload.get("version") != 2:
+        if payload.get("version") not in {2, 3}:
             raise SettingsError("設定形式が正しくありません")
         try:
             raw_blocks = payload["presets"]["standard"]["blocks"]
         except (KeyError, TypeError) as error:
-            raise SettingsError("標準プリセット設定がありません") from error
+            raise SettingsError("カスタムプリセット設定がありません") from error
         if not isinstance(raw_blocks, list):
             raise SettingsError("表示ブロックは配列で指定してください")
+        blocks, migrated = self._parse_blocks(raw_blocks, available_groups, allow_missing, item_migrations)
+        if payload.get("version") == 2:
+            # Never change an existing dashboard's appearance during migration.
+            return DashboardSettings("custom", tuple(blocks), ()), True
+        mode = payload.get("mode")
+        if mode not in {"recommended", "custom", "clock"}:
+            raise SettingsError("表示モードが正しくありません")
+        recommended_raw = payload.get("presets", {}).get("recommended", {}).get("blocks", [])
+        if not isinstance(recommended_raw, list):
+            raise SettingsError("おすすめプリセット設定が正しくありません")
+        recommended, recommended_migrated = self._parse_blocks(recommended_raw, available_groups, allow_missing, item_migrations)
+        settings = DashboardSettings(mode, tuple(blocks), tuple(recommended))
+        self._validate(settings, available_groups, allow_missing=allow_missing)
+        return settings, migrated or recommended_migrated
+
+    def _parse_blocks(self, raw_blocks: list, available_groups: dict[str, str], allow_missing: bool, item_migrations: dict[str, str] | None) -> tuple[list[DisplayBlock], bool]:
         blocks: list[DisplayBlock] = []
         migrated = False
         for block in raw_blocks:
@@ -165,9 +197,8 @@ class SettingsRepository:
                 size=block.get("size"), primary_item_id=primary_item_id,
                 item_ids=item_ids, layout_pattern=layout_pattern,
             ))
-        settings = DashboardSettings(tuple(blocks))
-        self._validate(settings, available_groups, allow_missing=allow_missing)
-        return settings, migrated
+        self._validate_blocks(tuple(blocks), available_groups, allow_missing=allow_missing)
+        return blocks, migrated
 
     def _migrate_v1(self, payload: dict, available_groups: dict[str, str], item_migrations: dict[str, str] | None) -> DashboardSettings:
         try:
@@ -191,17 +222,24 @@ class SettingsRepository:
                 item_ids=_limited_item_ids(tuple(dict.fromkeys(selection.item_id for selection in selections)), selections[0].item_id, size, default_layout_pattern(size)),
                 layout_pattern=default_layout_pattern(size),
             ))
-        settings = DashboardSettings(tuple(blocks))
+        settings = DashboardSettings("custom", tuple(blocks), ())
         self._validate(settings, available_groups, allow_missing=True)
         return settings
 
     @staticmethod
     def _validate(settings: DashboardSettings, available_groups: dict[str, str], *, allow_missing: bool) -> None:
-        block_ids = [block.block_id for block in settings.blocks]
+        if settings.mode not in {"recommended", "custom", "clock"}:
+            raise SettingsError("表示モードが正しくありません")
+        SettingsRepository._validate_blocks(settings.custom_blocks, available_groups, allow_missing=allow_missing)
+        SettingsRepository._validate_blocks(settings.recommended_blocks, available_groups, allow_missing=allow_missing)
+
+    @staticmethod
+    def _validate_blocks(blocks: tuple[DisplayBlock, ...], available_groups: dict[str, str], *, allow_missing: bool) -> None:
+        block_ids = [block.block_id for block in blocks]
         if len(block_ids) != len(set(block_ids)) or any(not isinstance(block_id, str) or not block_id for block_id in block_ids):
             raise SettingsError("ブロックIDが正しくありません")
         item_ids: list[str] = []
-        for block in settings.blocks:
+        for block in blocks:
             if not isinstance(block.group, str) or not block.group or not isinstance(block.title, str) or not block.title.strip():
                 raise SettingsError("ブロック名が正しくありません")
             if block.size not in SIZES or block.layout_pattern not in LAYOUT_PATTERNS or not block.item_ids or block.primary_item_id not in block.item_ids:
@@ -218,7 +256,7 @@ class SettingsRepository:
             item_ids.extend(block.item_ids)
         if len(item_ids) != len(set(item_ids)):
             raise SettingsError("同じ表示項目を複数ブロックに配置できません")
-        if sum(SIZES[block.size] for block in settings.blocks) > STANDARD_CAPACITY:
+        if sum(SIZES[block.size] for block in blocks) > STANDARD_CAPACITY:
             raise SettingsError("表示領域がいっぱいです")
 
 
