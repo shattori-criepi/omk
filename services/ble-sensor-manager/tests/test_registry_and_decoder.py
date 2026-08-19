@@ -129,6 +129,8 @@ def test_pi_captured_co2_manufacturer_packets_decode_environment_measurements() 
         ("B0:E9:FE:54:96:C5", "b0e9fe5496c5b9e4059a28003f028100", {"co2_ppm": 641}),
         ("B0:E9:FE:58:15:CC", "b0e9fe5815ccf6e405982e0024020e00", {"temperature_c": 24.5, "relative_humidity_percent": 46, "co2_ppm": 526}),
         ("B0:E9:FE:58:15:CC", "b0e9fe5815ccf7e406982e0024027b00", {"temperature_c": 24.6, "relative_humidity_percent": 46, "co2_ppm": 635}),
+        ("B0:E9:FE:54:96:C5", "b0e9fe5496c50ae4029c250334022600", {"temperature_c": 28.2, "relative_humidity_percent": 37, "co2_ppm": 550}),
+        ("B0:E9:FE:58:15:CC", "b0e9fe5815cc788006992a002d027000", {"temperature_c": 25.6, "relative_humidity_percent": 42, "co2_ppm": 624}),
     )
     for address, packet, expected in fixtures:
         decoded = decode(address, -31, {SWITCHBOT_COMPANY_ID: bytes.fromhex(packet)}, {}, "now")
@@ -137,6 +139,24 @@ def test_pi_captured_co2_manufacturer_packets_decode_environment_measurements() 
         assert decoded.sensor_type == "environment"
         for key, value in expected.items():
             assert decoded.values[key] == value
+
+
+@pytest.mark.parametrize("packet", (
+    "b0e9fe5496c50ae4029c2503340226",  # len != 16
+    "b0e9fe5496c50ae40a9c250334022600",  # invalid temperature fraction
+    "b0e9fe5496c50ae4029c650334022600",  # invalid humidity
+    "b0e9fe5496c50ae4029c250334018f00",  # CO2 < 400 ppm
+    "b0e9fe5496c50ae4029c250334271100",  # CO2 > 10,000 ppm
+    "b0e9fe5496c50ae4029c250334022601",  # non-zero terminator
+))
+def test_invalid_co2_manufacturer_packets_remain_unknown(packet: str) -> None:
+    decoded = decode(
+        "B0:E9:FE:54:96:C5", -31,
+        {SWITCHBOT_COMPANY_ID: bytes.fromhex(packet)}, {}, "now",
+    )
+    assert decoded is not None
+    assert decoded.model == "unknown_switchbot"
+    assert decoded.values == {}
 
 
 def test_waterproof_sensor_decodes_its_dedicated_service_and_manufacturer_layouts() -> None:
