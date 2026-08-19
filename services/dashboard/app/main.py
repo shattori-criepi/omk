@@ -160,8 +160,7 @@ def get_dashboard_view_model():
         now = datetime.now(JST)
         current_candidates = _dashboard_candidates(now)
         if settings.mode == "clock":
-            current = {item.id: item for item in current_candidates}
-            supplemental = [current[item_id] for item_id in settings.clock_item_ids if item_id in current]
+            supplemental = _clock_supplemental(settings.clock_item_ids, current_candidates)
             return _clock_dashboard(now, supplemental)
         blocks = selected_blocks(display_repository, settings.active_blocks, now, current_candidates)
         statuses = [FreshnessStatus(block.freshness) for block in blocks] or [FreshnessStatus.UNAVAILABLE]
@@ -194,6 +193,14 @@ def _clock_dashboard(now: datetime, supplemental: list[DisplayItem]) -> ClockDas
         format_timestamp_seconds(updated) if updated else "--", updated,
         worst_freshness(*statuses),
     )
+
+
+def _clock_supplemental(item_ids: tuple[str, ...], candidates: list[DisplayItem]) -> list[DisplayItem]:
+    """Keep saved clock slots stable while applying their fixed visual order."""
+    current = {item.id: item for item in candidates}
+    priority = {"grid_power": 0, "temperature": 1, "humidity": 2, "co2": 3}
+    selected = [(index, current[item_id]) for index, item_id in enumerate(item_ids) if item_id in current]
+    return [item for _index, item in sorted(selected, key=lambda entry: (priority.get(entry[1].semantic_role, 99), entry[0]))]
 
 
 @app.get("/display", response_class=HTMLResponse)

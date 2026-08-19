@@ -125,6 +125,14 @@ def test_recommended_blocks_rank_semantic_groups_and_exclude_ichijo() -> None:
     assert all(block.group != "一条パワコン" for block in blocks)
 
 
+def test_co2_metric_uses_shared_user_facing_label_without_changing_identity() -> None:
+    definition = definition_for("co2_ppm")
+
+    assert definition.label == "CO₂濃度"
+    assert definition.semantic_role == "co2"
+    assert definition.unit == "ppm"
+
+
 def test_clock_items_reuse_environment_ranking_and_only_include_grid_power() -> None:
     candidates = [
         _recommended_item("basic-temperature", "basic", "temperature"),
@@ -140,7 +148,7 @@ def test_clock_items_reuse_environment_ranking_and_only_include_grid_power() -> 
     ]
 
     assert clock_item_ids(candidates) == (
-        "rich-temperature", "rich-humidity", "rich-co2", "grid-power",
+        "grid-power", "rich-temperature", "rich-humidity", "rich-co2",
     )  # type: ignore[arg-type]
     assert clock_item_ids(candidates[:6]) == (
         "rich-temperature", "rich-humidity", "rich-co2",
@@ -207,8 +215,22 @@ def test_clock_settings_keep_custom_and_recommended_presets(tmp_path: Path) -> N
     assert saved.recommended_blocks == (recommended,)
 
 
+def test_clock_supplemental_reorders_existing_slots_without_reselecting_them() -> None:
+    candidates = [
+        _clock_item("temperature", "living", "temperature"),
+        _clock_item("humidity", "living", "humidity"),
+        _clock_item("co2", "living", "co2"),
+        _clock_item("grid", "電力メーター（Bルート）", "grid_power"),
+    ]
+
+    supplemental = dashboard_main._clock_supplemental(("temperature", "humidity", "co2", "grid"), candidates)
+
+    assert [item.id for item in supplemental] == ["grid", "temperature", "humidity", "co2"]
+
+
 def _clock_item(item_id: str, group: str, role: str | None, *, value: str = "1.0", unit: str = "") -> DisplayItem:
-    return DisplayItem(item_id, item_id, group, "omk/test", group, item_id, "number", unit, "環境", role, True, NOW.isoformat(), value, "normal", short_label=item_id)
+    label = "CO₂濃度" if role == "co2" else item_id
+    return DisplayItem(item_id, label, group, "omk/test", group, item_id, "number", unit, "環境", role, True, NOW.isoformat(), value, "normal", short_label=label)
 
 
 def test_clock_mode_switch_preserves_custom_and_recommended_and_renders_api(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -232,7 +254,7 @@ def test_clock_mode_switch_preserves_custom_and_recommended_and_renders_api(tmp_
 
     clock = client.post("/api/admin/dashboard-settings/mode", json={"mode": "clock"})
     assert clock.status_code == 200
-    assert clock.json()["presets"]["clock"]["item_ids"] == ["temperature", "humidity", "co2", "grid"]
+    assert clock.json()["presets"]["clock"]["item_ids"] == ["grid", "temperature", "humidity", "co2"]
     assert clock.json()["presets"]["standard"]["blocks"] == original_custom
     assert clock.json()["presets"]["recommended"]["blocks"] == original_recommended
 
@@ -243,7 +265,8 @@ def test_clock_mode_switch_preserves_custom_and_recommended_and_renders_api(tmp_
     assert re.fullmatch(r"\d{2}:\d{2}", snapshot.json()["time"])
     assert snapshot.json()["freshness"] == "normal"
     assert snapshot.json()["updated_at"] != "--"
-    assert [item["id"] for item in snapshot.json()["supplemental"]] == ["temperature", "humidity", "co2", "grid"]
+    assert [item["id"] for item in snapshot.json()["supplemental"]] == ["grid", "temperature", "humidity", "co2"]
+    assert snapshot.json()["supplemental"][-1]["short_label"] == "CO₂濃度"
     assert "import" not in {item["id"] for item in snapshot.json()["supplemental"]}
     clock_html = client.get("/display").text
     for element_id in ("clock-date", "clock-time", "clock-updated-at", "clock-freshness", "clock-supplemental"):
@@ -992,7 +1015,9 @@ def test_display_block_resolves_primary_and_multiple_secondary_values(tmp_path: 
 
     assert rendered[0].primary.value == "26.8"
     assert [item.value for item in rendered[0].secondary] == ["40", "520"]
-    assert [item.short_label for item in (rendered[0].primary, *rendered[0].secondary)] == ["温度", "湿度", "CO₂"]
+    assert [item.short_label for item in (rendered[0].primary, *rendered[0].secondary)] == ["温度", "湿度", "CO₂濃度"]
+    assert rendered[0].secondary[1].label == "sen66 CO₂濃度"
+    assert (rendered[0].secondary[1].id, rendered[0].secondary[1].field, rendered[0].secondary[1].semantic_role) == (item_ids[2], "co2_ppm", "co2")
     assert rendered[0].as_dict()["size"] == "medium"
     assert rendered[0].as_dict()["layout_pattern"] == "strip"
 
@@ -1027,7 +1052,7 @@ def test_small_plug_block_uses_full_consumption_label_without_ellipsis(tmp_path:
     assert ".display-card--small.display-card--compact.display-card--items-1 .display-compact-reading { width: 100%; min-width: 0; }" in stylesheet
     assert ".display-card--small.display-card--compact.display-card--items-1 .display-secondary-item { grid-column: 1 / -1; }" in stylesheet
     assert ".display-card--small.display-card--compact.display-card--items-2 .display-card-compact-items" not in stylesheet
-    assert re.search(r"display\.css'\) }}\?v=20260819-clock-visual-\d+", template)
+    assert re.search(r"display\.css'\) }}\?v=20260819-clock-priority-\d+", template)
     assert ".display-card--small.display-card--compact.display-card--items-1 .display-secondary-label { overflow: visible; text-overflow: clip; white-space: nowrap; }" in stylesheet
 
 
@@ -1181,11 +1206,11 @@ def test_admin_display_css_allows_vertical_scroll_without_changing_kiosk_overflo
     assert '<html lang="ja" class="admin-document">' in admin_template
     assert '<body class="admin-body">' in admin_template
     assert 'href="/display">ダッシュボードを確認</a>' in admin_template
-    assert re.search(r"admin_display\.js'\) }}\?v=20260819-clock-visual-\d+", admin_template)
-    assert re.search(r"display\.css'\) }}\?v=20260819-clock-visual-\d+", admin_template)
+    assert re.search(r"admin_display\.js'\) }}\?v=20260819-clock-priority-\d+", admin_template)
+    assert re.search(r"display\.css'\) }}\?v=20260819-clock-priority-\d+", admin_template)
     assert '<body class="admin-body">' not in display_template
-    assert re.search(r"display\.js'\) }}\?v=20260819-clock-visual-\d+", display_template)
-    assert re.search(r"display\.css'\) }}\?v=20260819-clock-visual-\d+", display_template)
+    assert re.search(r"display\.js'\) }}\?v=20260819-clock-priority-\d+", display_template)
+    assert re.search(r"display\.css'\) }}\?v=20260819-clock-priority-\d+", display_template)
     assert 'data-mode="clock"' in admin_template
     assert 'id="clock-summary"' in admin_template
     assert "mode !== \"clock\"" in (Path(__file__).parents[1] / "app" / "static" / "admin_display.js").read_text(encoding="utf-8")
@@ -1197,6 +1222,8 @@ def test_admin_display_css_allows_vertical_scroll_without_changing_kiosk_overflo
     assert ".clock-status-area" in stylesheet
     assert "font-size: clamp(176px, 24vw, 360px);" in stylesheet
     assert ".clock-reading + .clock-reading { border-left:" in stylesheet
+    assert 'class="clock-reading-value"' in display_template
+    assert ".clock-reading-value { display: inline-flex;" in stylesheet
     assert 'data-role="unit"' in display_template
     assert "overflow: hidden;" in stylesheet
 
@@ -1338,7 +1365,7 @@ global.fetch = async url => ({ok: true, json: async () => url.endsWith("display-
     {name: "SEN66", items: [
       {id: "temperature", label: "sen66 温度", short_label: "温度", group: "SEN66", selectable: true},
       {id: "humidity", label: "sen66 湿度", short_label: "湿度", group: "SEN66", selectable: true},
-      {id: "co2", label: "sen66 CO₂", short_label: "CO₂", group: "SEN66", selectable: true},
+      {id: "co2", label: "sen66 CO₂濃度", short_label: "CO₂濃度", group: "SEN66", selectable: true},
     ]},
     {name: "plug-001", items: [
       {id: "plug-power", label: "plug-001 消費電力", short_label: "消費電力", group: "plug-001", selectable: true},
@@ -1371,13 +1398,13 @@ setImmediate(() => {
     assert all(group in result["availableWithSpace"] for group in ("電力メーター（Bルート）", "一条パワコン", "SEN66", "th-002"))
     assert all(label in result["availableWithSpace"] for label in (
         "系統電力", "買電積算", "売電積算", "住宅内消費電力", "PV発電", "蓄電池残量",
-        "温度", "湿度", "CO₂",
+        "温度", "湿度", "CO₂濃度",
     ))
     assert "一条パワコン PV発電" not in result["availableWithSpace"]
     assert "th-002 温度" not in result["availableAtCapacity"]
     assert "このデータでブロックを追加" in result["availableWithSpace"]
     assert "PV発電" in result["selected"]
-    assert "CO₂" in result["selected"]
+    assert "CO₂濃度" in result["selected"]
     assert "表示形式" in result["selected"]
     assert "均等に並べる" in result["selected"]
     assert "このブロックに表示する値（3 / 3）" in result["selected"]
