@@ -733,7 +733,7 @@ def test_ichijo_charge_and_discharge_are_one_dashboard_only_battery_row(tmp_path
     assert rendered.primary.short_label == "住宅内消費電力"
     assert [(item.semantic_role, item.short_label, item.value) for item in rendered.secondary] == [
         ("pv_power", "PV発電", "0.52"),
-        ("battery_power_bidirectional", "蓄電池 放電", "0.59"),
+        ("battery_power_bidirectional", "蓄電池充放電", "0.59"),
         ("grid_import", "買電電力", "0.00"),
     ]
 
