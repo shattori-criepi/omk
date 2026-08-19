@@ -256,7 +256,7 @@ def _bidirectional_battery_item(charge: DisplayItem, discharge: DisplayItem, *, 
     freshness = _combined_freshness(charge.freshness, discharge.freshness)
     virtual_id = f"virtual:battery_power_bidirectional:{representative.device_id}"
     return DisplayItem(
-        id=virtual_id, label=f"{representative.group} 蓄電池充放電", short_label=f"蓄電池 {direction}",
+        id=virtual_id, label=f"{representative.group} 蓄電池充放電", short_label="蓄電池充放電",
         group=representative.group, topic=representative.topic, device_id=representative.device_id,
         field="battery_power_bidirectional", value_type="number", unit="kW",
         category=representative.category, semantic_role="battery_power_bidirectional",

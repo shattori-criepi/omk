@@ -275,6 +275,14 @@ def format_optional(value: float | None, decimals: int) -> str:
     return "--" if value is None else f"{value:.{decimals}f}"
 
 
+def format_timestamp_seconds(value: str) -> str:
+    """Format an ISO timestamp for Dashboard text without changing its metadata."""
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).strftime("%Y-%m-%d %H:%M:%S")
+    except (TypeError, ValueError):
+        return value
+
+
 def format_for_freshness(
     value: float | None,
     decimals: int,

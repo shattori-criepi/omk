@@ -24,6 +24,7 @@ from app.view_models import (
     FreshnessStatus,
     PowerDirection,
     format_power,
+    format_timestamp_seconds,
     freshness_for,
     get_display_view_model,
 )
@@ -288,6 +289,10 @@ def test_stale_ichijo_uses_fresh_broute_for_global_status(tmp_path: Path) -> Non
     assert dashboard.updated_at == "2026/07/30 12:00:00"
     assert dashboard.updated_at_iso == "2026-07-30T12:00:00+09:00"
     assert dashboard.freshness == FreshnessStatus.NORMAL
+
+
+def test_dashboard_timestamp_display_uses_seconds_without_timezone_metadata() -> None:
+    assert format_timestamp_seconds("2026-08-17T18:48:40.315+09:00") == "2026-08-17 18:48:40"
 
 
 def test_broken_or_missing_latest_data_does_not_break_display(tmp_path: Path, monkeypatch) -> None:
@@ -603,14 +608,18 @@ def test_capacity_valid_grid_combinations_fit_the_block_budget(tmp_path: Path, s
 
 
 def test_battery_virtual_item_replaces_raw_candidates_and_migrates_settings(tmp_path: Path) -> None:
-    charge = _write_generic_item(tmp_path, "b", topic="omk/ichijo/power-flow", device_id="ichijo", field="battery_charge_power_w", value=520, received_at=NOW)
+    charge = _write_generic_item(tmp_path, "b", topic="omk/ichijo/power-flow", device_id="ichijo", field="battery_charge_power_w", value=0, received_at=NOW)
     discharge = _write_generic_item(tmp_path, "c", topic="omk/ichijo/power-flow", device_id="ichijo", field="battery_discharge_power_w", value=0, received_at=NOW)
+    state = _write_generic_item(tmp_path, "s", topic="omk/ichijo/power-flow", device_id="ichijo", field="battery_operating_state", value="standby", value_type="string", received_at=NOW)
     candidates = display_candidates(DisplayRepository(tmp_path), NOW)
     battery = next(item for item in candidates if item.semantic_role == "battery_power_bidirectional")
+    battery_state = next(item for item in candidates if item.id == state)
 
     assert battery.id == "virtual:battery_power_bidirectional:ichijo"
     assert battery.label.endswith("蓄電池充放電")
-    assert battery.short_label == "蓄電池 充電"
+    assert battery.short_label == "蓄電池充放電"
+    assert battery_state.short_label == "蓄電池状態"
+    assert all(item.short_label != "蓄電池 待機" for item in candidates)
     assert {item.id for item in candidates}.isdisjoint({charge, discharge})
 
     path = tmp_path / "dashboard" / "settings.json"
@@ -821,6 +830,7 @@ def test_admin_display_css_allows_vertical_scroll_without_changing_kiosk_overflo
     assert "display.css') }}?v=20260819-admin-5" in admin_template
     assert '<body class="admin-body">' not in display_template
     assert "display.js') }}?v=20260819-block-flow" in display_template
+    assert "display.css') }}?v=20260819-final-tuning" in display_template
     assert "overflow: hidden;" in stylesheet
 
 
@@ -834,6 +844,7 @@ def test_display_pattern_css_keeps_only_hero_primary_large_and_fits_the_viewport
     assert ".display-card--medium { grid-column: span 8;" in stylesheet
     assert ".display-card--small { grid-column: span 4;" in stylesheet
     assert ".display-card--hero .display-card-primary .display-card-reading strong" in stylesheet
+    assert ".display-card--hero .display-card-label { padding-bottom:" in stylesheet
     assert ".display-card--compact { grid-template-rows: auto minmax(0, 1fr) auto;" in stylesheet
     assert ".display-card-compact-items { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));" in stylesheet
     assert ".display-secondary-value { justify-self: end;" in stylesheet

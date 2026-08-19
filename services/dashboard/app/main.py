@@ -17,7 +17,7 @@ from app.data.parquet_repository import EnergyTotals, ParquetRepository
 from app.data.display_repository import DisplayRepository
 from app.data.settings_repository import DisplayBlock, SettingsError, SettingsRepository, default_layout_pattern, item_limit
 from app.display_items import DisplayItem, catalog_items_with_latest, display_candidates, display_item_migrations, selected_blocks
-from app.view_models import FreshnessStatus, worst_freshness
+from app.view_models import FreshnessStatus, format_timestamp_seconds, worst_freshness
 from app.view_models import get_display_view_model
 
 APP_DIR = Path(__file__).parent
@@ -120,7 +120,7 @@ def get_dashboard_view_model():
         statuses = [FreshnessStatus(block.freshness) for block in blocks] or [FreshnessStatus.UNAVAILABLE]
         updated = max((block.last_received_at for block in blocks if block.last_received_at), default="")
         return StandardDashboard(
-            blocks=blocks, updated_at=updated.replace("T", " ") if updated else "--",
+            blocks=blocks, updated_at=format_timestamp_seconds(updated) if updated else "--",
             updated_at_iso=updated, freshness=worst_freshness(*statuses),
         )
     return get_display_view_model(get_latest_repository(), get_parquet_repository())
