@@ -830,7 +830,7 @@ def test_admin_display_css_allows_vertical_scroll_without_changing_kiosk_overflo
     assert "display.css') }}?v=20260819-admin-5" in admin_template
     assert '<body class="admin-body">' not in display_template
     assert "display.js') }}?v=20260819-block-flow" in display_template
-    assert "display.css') }}?v=20260819-final-tuning" in display_template
+    assert "display.css') }}?v=20260819-hero-primary-spacing" in display_template
     assert "overflow: hidden;" in stylesheet
 
 
@@ -845,6 +845,7 @@ def test_display_pattern_css_keeps_only_hero_primary_large_and_fits_the_viewport
     assert ".display-card--small { grid-column: span 4;" in stylesheet
     assert ".display-card--hero .display-card-primary .display-card-reading strong" in stylesheet
     assert ".display-card--hero .display-card-label { padding-bottom:" in stylesheet
+    assert ".display-card--large.display-card--hero .display-card-primary { padding-top:" in stylesheet
     assert ".display-card--compact { grid-template-rows: auto minmax(0, 1fr) auto;" in stylesheet
     assert ".display-card-compact-items { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));" in stylesheet
     assert ".display-secondary-value { justify-self: end;" in stylesheet
