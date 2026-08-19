@@ -103,7 +103,7 @@ def test_recommended_blocks_rank_semantic_groups_and_exclude_ichijo() -> None:
         _recommended_item("import", "電力メーター（Bルート）", "grid_import_energy"),
         _recommended_item("import-total", "電力メーター（Bルート）", "grid_import_energy_cumulative"),
         _recommended_item("export", "電力メーター（Bルート）", "grid_export_energy"),
-        _recommended_item("derived:energy:today_import_kwh", "一条パワコン", "today_import_energy"),
+        _recommended_item("derived:energy:today_import_kwh", "パワコン", "today_import_energy"),
         _recommended_item("temp", "multi", "temperature"),
         _recommended_item("humidity", "multi", "humidity"),
         _recommended_item("co2", "multi", "co2"),
@@ -111,7 +111,7 @@ def test_recommended_blocks_rank_semantic_groups_and_exclude_ichijo() -> None:
         _recommended_item("temp2", "simple", "temperature"),
         _recommended_item("humidity2", "simple", "humidity"),
         _recommended_item("plug", "plug-001", "device_power"),
-        _recommended_item("ichijo", "一条パワコン", "load_power"),
+        _recommended_item("ichijo", "パワコン", "load_power"),
     ]
 
     blocks = recommended_blocks(candidates)  # type: ignore[arg-type]
@@ -122,7 +122,7 @@ def test_recommended_blocks_rank_semantic_groups_and_exclude_ichijo() -> None:
     assert blocks[0].item_ids == ("grid", "derived:energy:today_import_kwh")
     assert "import" not in blocks[0].item_ids and "export" not in blocks[0].item_ids
     assert blocks[1].item_ids[:3] == ("temp", "humidity", "co2")
-    assert all(block.group != "一条パワコン" for block in blocks)
+    assert all(block.group != "パワコン" for block in blocks)
 
 
 def test_co2_metric_uses_shared_user_facing_label_without_changing_identity() -> None:
@@ -143,7 +143,7 @@ def test_clock_items_reuse_environment_ranking_and_only_include_grid_power() -> 
         _recommended_item("rich-pm25", "room-a", "pm25"),
         _recommended_item("grid-power", "電力メーター（Bルート）", "grid_power"),
         _recommended_item("grid-import", "電力メーター（Bルート）", "grid_import_energy"),
-        _recommended_item("ichijo", "一条パワコン", "load_power"),
+        _recommended_item("ichijo", "パワコン", "load_power"),
         _recommended_item("plug", "plug-001", "device_power"),
     ]
 
@@ -182,7 +182,7 @@ def test_daily_broute_derived_item_can_belong_to_custom_and_recommended_blocks(t
         "version": 3, "mode": "custom", "default_preset": "standard",
         "presets": {
             "standard": {"blocks": [{
-                "block_id": "ichijo", "group": "一条パワコン", "title": "一条パワコン", "size": "small",
+                "block_id": "ichijo", "group": "パワコン", "title": "パワコン", "size": "small",
                 "layout_pattern": "compact", "primary_item_id": derived, "item_ids": [derived],
             }]},
             "recommended": {"blocks": [{
@@ -190,10 +190,25 @@ def test_daily_broute_derived_item_can_belong_to_custom_and_recommended_blocks(t
                 "layout_pattern": "hero", "primary_item_id": "grid", "item_ids": ["grid", derived],
             }]},
         },
-    }, {"grid": "電力メーター（Bルート）", derived: frozenset({"一条パワコン", "電力メーター（Bルート）"})})
+    }, {"grid": "電力メーター（Bルート）", derived: frozenset({"パワコン", "電力メーター（Bルート）"})})
 
     assert settings.custom_blocks[0].item_ids == (derived,)
     assert settings.recommended_blocks[0].item_ids == ("grid", derived)
+
+
+def test_saved_ichijo_display_group_migrates_to_generic_power_conditioner(tmp_path: Path) -> None:
+    path = tmp_path / "dashboard" / "settings.json"
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps(_block_payload({
+        "block_id": "ichijo", "group": "一条パワコン", "title": "一条パワコン", "size": "small",
+        "layout_pattern": "compact", "primary_item_id": "load", "item_ids": ["load"],
+    })), encoding="utf-8")
+
+    settings = SettingsRepository(path).load_or_create({"load": "パワコン"}, [])
+
+    assert settings.custom_blocks[0].group == "パワコン"
+    assert settings.custom_blocks[0].title == "パワコン"
+    assert "一条パワコン" not in path.read_text(encoding="utf-8")
 
 
 def test_clock_settings_keep_custom_and_recommended_presets(tmp_path: Path) -> None:
@@ -240,7 +255,7 @@ def test_clock_mode_switch_preserves_custom_and_recommended_and_renders_api(tmp_
         _clock_item("co2", "living", "co2", value="620", unit="ppm"),
         _clock_item("grid", "電力メーター（Bルート）", "grid_power", value="1.8", unit="kW"),
         _clock_item("import", "電力メーター（Bルート）", "grid_import_energy", value="0.0", unit="kWh"),
-        _clock_item("ichijo", "一条パワコン", "load_power", unit="kW"),
+        _clock_item("ichijo", "パワコン", "load_power", unit="kW"),
     ]
     monkeypatch.setenv("OMK_DASHBOARD_SETTINGS_PATH", str(tmp_path / "dashboard" / "settings.json"))
     monkeypatch.setattr(dashboard_main, "_dashboard_candidates", lambda now=None: candidates)
@@ -867,7 +882,7 @@ def test_generic_catalog_candidates_group_and_format_values(tmp_path: Path) -> N
     assert repository.item(broute_id) is not None
     assert candidates[broute_id].group == "電力メーター（Bルート）"
     assert candidates[plug_id].group == "plug-001"
-    assert candidates[ichijo_id].group == "一条パワコン"
+    assert candidates[ichijo_id].group == "パワコン"
     assert candidates[status_id].selectable is False
     assert definition_for("unknown_scalar").selectable is True
     assert definition_for("net_power_w").semantic_role == "grid_power"
@@ -977,7 +992,7 @@ def test_battery_virtual_item_replaces_raw_candidates_and_migrates_settings(tmp_
     path = tmp_path / "dashboard" / "settings.json"
     path.parent.mkdir()
     path.write_text(json.dumps(_block_payload({
-        "block_id": "ichijo", "group": "一条パワコン", "title": "一条パワコン", "size": "small",
+        "block_id": "ichijo", "group": "パワコン", "title": "パワコン", "size": "small",
         "layout_pattern": "compact", "primary_item_id": charge, "item_ids": [charge, discharge],
     })), encoding="utf-8")
     settings = SettingsRepository(path).load_or_create(
@@ -1031,7 +1046,7 @@ def test_energy_blocks_keep_multiple_broute_and_ichijo_values(tmp_path: Path) ->
     repository = DisplayRepository(tmp_path)
     blocks = selected_blocks(repository, (
         DisplayBlock("broute", "電力メーター（Bルート）", "Bルート", "small", grid, (grid, imported)),
-        DisplayBlock("ichijo", "一条パワコン", "一条パワコン", "large", load, (load, pv)),
+        DisplayBlock("ichijo", "パワコン", "パワコン", "large", load, (load, pv)),
     ), NOW)
 
     assert blocks[0].primary.unit == "kW" and blocks[0].secondary[0].unit == "kWh"
@@ -1059,9 +1074,9 @@ def test_small_plug_block_uses_full_consumption_label_without_ellipsis(tmp_path:
 
 def test_power_flow_default_group_title_is_rendered_as_ichijo_power_conditioner(tmp_path: Path) -> None:
     load = _write_generic_item(tmp_path, "t", topic="omk/ichijo/power-flow", device_id="ichijo", field="load_power_w", value=1103, received_at=NOW)
-    block = DisplayBlock("ichijo", "一条パワコン", "一条パワコン", "large", load, (load,), "hero")
+    block = DisplayBlock("ichijo", "パワコン", "パワコン", "large", load, (load,), "hero")
 
-    assert selected_blocks(DisplayRepository(tmp_path), (block,), NOW)[0].title == "一条パワコン"
+    assert selected_blocks(DisplayRepository(tmp_path), (block,), NOW)[0].title == "パワコン"
 
 
 def test_derived_daily_energy_candidates_reuse_legacy_totals_and_cache(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1079,8 +1094,8 @@ def test_derived_daily_energy_candidates_reuse_legacy_totals_and_cache(monkeypat
     again = dashboard_main._dashboard_candidates(NOW + timedelta(seconds=10))
 
     assert [(item.id, item.value, item.unit, item.group) for item in candidates] == [
-        ("derived:energy:today_import_kwh", "1.2", "kWh", "一条パワコン"),
-        ("derived:energy:today_export_kwh", "3.4", "kWh", "一条パワコン"),
+        ("derived:energy:today_import_kwh", "1.2", "kWh", "パワコン"),
+        ("derived:energy:today_export_kwh", "3.4", "kWh", "パワコン"),
     ]
     assert [(item.short_label, item.semantic_role) for item in candidates] == [
         ("本日の買電量", "today_import_energy"), ("本日の売電量", "today_export_energy"),
@@ -1092,8 +1107,8 @@ def test_derived_daily_energy_candidates_reuse_legacy_totals_and_cache(monkeypat
 def test_new_ichijo_block_accepts_raw_virtual_and_derived_ids(tmp_path: Path) -> None:
     repository = SettingsRepository(tmp_path / "dashboard" / "settings.json")
     ids = ("load", "pv", "export", "soc", "virtual:battery_power_bidirectional:ichijo", "derived:energy:today_import_kwh")
-    groups = {item_id: "一条パワコン" for item_id in ids}
-    settings = repository.save_payload(_block_payload({"block_id": "ichijo-new", "group": "一条パワコン", "title": "一条パワコン", "size": "large", "layout_pattern": "hero", "primary_item_id": "load", "item_ids": list(ids)}), groups)
+    groups = {item_id: "パワコン" for item_id in ids}
+    settings = repository.save_payload(_block_payload({"block_id": "ichijo-new", "group": "パワコン", "title": "パワコン", "size": "large", "layout_pattern": "hero", "primary_item_id": "load", "item_ids": list(ids)}), groups)
     assert settings.blocks[0].item_ids == ids
 
 
@@ -1105,7 +1120,7 @@ def test_ichijo_charge_and_discharge_are_one_dashboard_only_battery_row(tmp_path
     grid = _write_generic_item(tmp_path, "e", topic="omk/ichijo/power-flow", device_id="ichijo", field="grid_import_power_w", value=0, received_at=NOW)
     repository = DisplayRepository(tmp_path)
     battery_id = next(item.id for item in display_candidates(repository, NOW) if item.semantic_role == "battery_power_bidirectional")
-    block = DisplayBlock("ichijo", "一条パワコン", "一条パワコン", "large", load, (load, pv, battery_id, grid), "hero")
+    block = DisplayBlock("ichijo", "パワコン", "パワコン", "large", load, (load, pv, battery_id, grid), "hero")
     rendered = selected_blocks(repository, (block,), NOW)[0]
 
     assert rendered.layout_pattern == "hero"
@@ -1124,7 +1139,7 @@ def test_ichijo_load_hero_exposes_legacy_grid_flow_as_auxiliary_status(tmp_path:
         _write_generic_item(root, "e", topic="omk/ichijo/power-flow", device_id="ichijo", field="grid_export_power_w", value=exported, received_at=NOW)
         repository = DisplayRepository(root)
         candidates = display_candidates(repository, NOW)
-        block = DisplayBlock("ichijo", "一条パワコン", "一条パワコン", "large", load, (load, imported_id), layout)
+        block = DisplayBlock("ichijo", "パワコン", "パワコン", "large", load, (load, imported_id), layout)
         return selected_blocks(repository, (block,), NOW, candidates)[0]
 
     imported = render(tmp_path / "import", imported=420, exported=0)
@@ -1173,7 +1188,7 @@ def test_display_items_api_lists_multiple_values_from_one_source(tmp_path: Path,
     broute = groups["電力メーター（Bルート）"]
     assert {item["field"] for item in broute} == set(broute_fields)
     assert all(item["selectable"] for item in broute)
-    ichijo = groups["一条パワコン"]
+    ichijo = groups["パワコン"]
     assert set(ichijo_fields) <= {item["field"] for item in ichijo}
     assert {item["field"]: item["short_label"] for item in ichijo if item["field"] in ichijo_fields} == {
         "pv_power_w": "PV発電", "load_power_w": "住宅内消費電力", "battery_soc_percent": "蓄電池残量",
@@ -1184,7 +1199,7 @@ def test_display_items_api_lists_multiple_values_from_one_source(tmp_path: Path,
         ("derived:energy:today_export_kwh", "today_export_kwh"),
     ):
         assert derived[item_id]["field"] == field
-        assert derived[item_id]["group"] == "一条パワコン"
+        assert derived[item_id]["group"] == "パワコン"
         assert derived[item_id]["unit"] == "kWh"
         assert derived[item_id]["selectable"] is True
     assert derived["derived:energy:today_import_kwh"]["short_label"] == "本日の買電量"
@@ -1367,10 +1382,10 @@ global.fetch = async url => ({ok: true, json: async () => url.endsWith("display-
       {id: "import-total", label: "Bルート 買電積算", short_label: "買電積算", group: "電力メーター（Bルート）", selectable: true},
       {id: "export-total", label: "Bルート 売電積算", short_label: "売電積算", group: "電力メーター（Bルート）", selectable: true},
     ]},
-    {name: "一条パワコン", items: [
-      {id: "load", field: "load_power_w", label: "一条パワコン 住宅内消費電力", short_label: "住宅内消費電力", group: "一条パワコン", selectable: true},
-      {id: "pv", label: "一条パワコン PV発電", short_label: "PV発電", group: "一条パワコン", selectable: true},
-      {id: "soc", label: "一条パワコン 蓄電池残量", short_label: "蓄電池残量", group: "一条パワコン", selectable: true},
+    {name: "パワコン", items: [
+      {id: "load", field: "load_power_w", label: "パワコン 住宅内消費電力", short_label: "住宅内消費電力", group: "パワコン", selectable: true},
+      {id: "pv", label: "パワコン PV発電", short_label: "PV発電", group: "パワコン", selectable: true},
+      {id: "soc", label: "パワコン 蓄電池残量", short_label: "蓄電池残量", group: "パワコン", selectable: true},
     ]},
     {name: "SEN66", items: [
       {id: "temperature", label: "sen66 温度", short_label: "温度", group: "SEN66", selectable: true},
@@ -1385,7 +1400,7 @@ global.fetch = async url => ({ok: true, json: async () => url.endsWith("display-
   ],
 } : {presets: {standard: {blocks: [
   {block_id: "b", group: "電力メーター（Bルート）", title: "Bルート", size: "large", primary_item_id: "grid", item_ids: ["grid"]},
-  {block_id: "p", group: "一条パワコン", title: "一条パワコン", size: "small", primary_item_id: "load", item_ids: ["load"]},
+  {block_id: "p", group: "パワコン", title: "パワコン", size: "small", primary_item_id: "load", item_ids: ["load"]},
   {block_id: "s", group: "SEN66", title: "SEN66", size: "small", primary_item_id: "temperature", item_ids: ["temperature"]},
 ]}}}});
 vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8"));
@@ -1405,12 +1420,12 @@ setImmediate(() => {
     )
     result = json.loads(completed.stdout)
 
-    assert all(group in result["availableWithSpace"] for group in ("電力メーター（Bルート）", "一条パワコン", "SEN66", "th-002"))
+    assert all(group in result["availableWithSpace"] for group in ("電力メーター（Bルート）", "パワコン", "SEN66", "th-002"))
     assert all(label in result["availableWithSpace"] for label in (
         "系統電力", "買電積算", "売電積算", "住宅内消費電力", "PV発電", "蓄電池残量",
         "温度", "湿度", "CO₂濃度",
     ))
-    assert "一条パワコン PV発電" not in result["availableWithSpace"]
+    assert "パワコン PV発電" not in result["availableWithSpace"]
     assert "th-002 温度" not in result["availableAtCapacity"]
     assert "このデータでブロックを追加" in result["availableWithSpace"]
     assert "PV発電" in result["selected"]
@@ -1437,14 +1452,14 @@ global.document = {querySelector: selector => elements[selector]};
 global.window = {location: {assign(path) { redirect = path; }}};
 global.fetch = async (url, options = {}) => {
   if (options.method === "PUT") { savedPayload = JSON.parse(options.body); return {ok: true, json: async () => ({})}; }
-  return {ok: true, json: async () => url.endsWith("display-items") ? {capacity: 6, groups: [{name: "一条パワコン", items: [
-    {id: "pv", field: "pv_power_w", label: "一条パワコン PV発電", short_label: "PV発電", group: "一条パワコン", selectable: true},
-    {id: "load", field: "load_power_w", label: "一条パワコン 住宅内消費電力", short_label: "住宅内消費電力", group: "一条パワコン", selectable: true},
+  return {ok: true, json: async () => url.endsWith("display-items") ? {capacity: 6, groups: [{name: "パワコン", items: [
+    {id: "pv", field: "pv_power_w", label: "パワコン PV発電", short_label: "PV発電", group: "パワコン", selectable: true},
+    {id: "load", field: "load_power_w", label: "パワコン 住宅内消費電力", short_label: "住宅内消費電力", group: "パワコン", selectable: true},
   ]}]} : {version: 3, mode: "custom", presets: {standard: {blocks: []}, recommended: {blocks: []}, clock: {item_ids: []}}}};
 };
 vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8"));
 setImmediate(async () => {
-  elements["#available-items"].listeners.click({target: {closest() { return {dataset: {addBlock: "一条パワコン"}}; }}});
+  elements["#available-items"].listeners.click({target: {closest() { return {dataset: {addBlock: "パワコン"}}; }}});
   await elements["#save-settings"].listeners.click();
   console.log(JSON.stringify({selected: elements["#selected-items"].innerHTML, saved: savedPayload, status: elements["#settings-status"].textContent, redirect}));
 });
@@ -1489,10 +1504,10 @@ def test_existing_ichijo_block_primary_is_preserved(tmp_path: Path) -> None:
     repository = SettingsRepository(tmp_path / "dashboard" / "settings.json")
     settings = repository.save_payload(
         _block_payload({
-            "block_id": "ichijo", "group": "一条パワコン", "title": "一条パワコン", "size": "small",
+            "block_id": "ichijo", "group": "パワコン", "title": "パワコン", "size": "small",
             "layout_pattern": "compact", "primary_item_id": "pv", "item_ids": ["pv", "load"],
         }),
-        {"pv": "一条パワコン", "load": "一条パワコン"},
+        {"pv": "パワコン", "load": "パワコン"},
     )
 
     assert settings.blocks[0].primary_item_id == "pv"
@@ -1765,6 +1780,42 @@ def test_broute_admin_page_keeps_credentials_and_token_out_of_html() -> None:
     assert "validToken(pass, 12)" in javascript
     assert "設定を保存しました。Bルートへの接続を開始します。" in javascript
     assert "設定は保存されましたが、Bルートサービスの再起動に失敗しました。" in javascript
+
+
+def test_access_point_menu_and_page_keep_password_masked_until_revealed() -> None:
+    menu = client.get("/admin")
+    page = client.get("/admin/access-point")
+
+    assert menu.status_code == 200
+    assert 'href="/admin/access-point"' in menu.text
+    assert "OMKアクセスポイント参照" in menu.text
+    assert page.status_code == 200
+    assert "インターネット接続は提供しません" in page.text
+    assert 'id="ap-password">••••••••••••' in page.text
+
+
+def test_access_point_status_and_reveal_generate_escaped_wifi_qr(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[str, str]] = []
+
+    async def host(method: str, path: str, body: dict | None = None) -> dict:
+        calls.append((method, path))
+        if path.endswith("/status"):
+            return {"ssid": "OMK;,:\\\"", "password_configured": True}
+        return {"ssid": "OMK;,:\\\"", "password": "pa;,:\\\"ss"}
+
+    monkeypatch.setattr(dashboard_main, "_system_manager_request", host)
+    status = client.get("/api/admin/access-point")
+    revealed = client.post("/api/admin/access-point/reveal")
+
+    assert status.json() == {"ssid": "OMK;,:\\\"", "password_configured": True}
+    assert revealed.status_code == 200
+    assert revealed.json()["password"] == "pa;,:\\\"ss"
+    assert "<svg" in revealed.json()["qr_svg"]
+    assert calls == [("GET", "/api/access-point/status"), ("GET", "/api/access-point/credentials")]
+
+
+def test_wifi_qr_escape_follows_wifi_qr_escaping_rules() -> None:
+    assert dashboard_main._wifi_qr_escape('a;,:\\"b') == 'a\\;\\,\\:\\\\\\"b'
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is required for system controls tests")

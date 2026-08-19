@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="ja" class="admin-document">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title>OMKアクセスポイント参照</title>
+    <link rel="stylesheet" href="{{ url_for('static', path='/display.css') }}?v=20260819-ap-reference">
+    <script src="{{ url_for('static', path='/access_point.js') }}?v=20260819-ap-reference" defer></script>
+  </head>
+  <body class="admin-body">
+    <main class="access-point-page" aria-label="OMKアクセスポイント参照">
+      <header class="admin-page-header"><a href="/admin" class="back-link">← 管理メニュー</a><h1>OMKアクセスポイント参照</h1></header>
+      <section class="access-point-panel">
+        <p class="access-point-notice">このWi-FiはOMKのセンサ・Node・Wi-Fi中継機等を接続するためのローカルネットワークです。インターネット接続は提供しません。</p>
+        <dl class="access-point-values"><div><dt>SSID</dt><dd id="ap-ssid">確認中</dd></div><div><dt>Wi-Fiパスワード</dt><dd id="ap-password">••••••••••••</dd></div></dl>
+        <button id="ap-reveal" class="primary" type="button">表示</button>
+        <p id="ap-message" class="setup-status" role="status" aria-live="polite">パスワードとQRコードは「表示」を押すと確認できます。</p>
+        <div id="ap-qr" class="access-point-qr" hidden aria-label="Wi-Fi接続用QRコード"></div>
+      </section>
+    </main>
+  </body>
+</html>

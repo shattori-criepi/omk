@@ -183,10 +183,14 @@ class SettingsRepository:
             layout_pattern = block.get("layout_pattern", default_layout_pattern(block.get("size")))
             group = block.get("group")
             title = block.get("title")
-            if group == "太陽光・蓄電池":
-                group = "一条パワコン"
-                if title == "太陽光・蓄電池":
-                    title = "一条パワコン"
+            if group in {"太陽光・蓄電池", "一条パワコン"}:
+                # Older settings used either a generic solar-storage label or
+                # the first supported manufacturer's display name. Keep the
+                # persisted item IDs but migrate the user-facing group/title.
+                legacy_group = group
+                group = "パワコン"
+                if title in {legacy_group, "太陽光・蓄電池", "一条パワコン"}:
+                    title = "パワコン"
                 migrated = True
             item_ids, primary_item_id, item_migrated = _migrate_item_ids(tuple(block["item_ids"]), block.get("primary_item_id"), item_migrations)
             migrated |= item_migrated

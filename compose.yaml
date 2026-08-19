@@ -15,7 +15,10 @@ services:
     container_name: omk-dashboard
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      # Admin pages can reveal the AP PSK. Do not expose them through wwan0
+      # or Ethernet; the kiosk uses loopback and OMK clients use the AP IP.
+      - "127.0.0.1:8000:8000"
+      - "192.168.50.1:8000:8000"
     environment:
       TZ: Asia/Tokyo
       OMK_PROCESSED_DATA_ROOT: /app/data/processed

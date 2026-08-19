@@ -74,7 +74,7 @@ class DisplayBlockView:
 def source_group(item: CatalogItem) -> str:
     data_type = item.topic.rsplit("/", 1)[-1]
     if data_type == "power-flow":
-        return "一条パワコン"
+        return "パワコン"
     if definition_for(item.field).category == "電力メーター（Bルート）":
         return "電力メーター（Bルート）"
     return item.device_id
@@ -83,7 +83,7 @@ def source_group(item: CatalogItem) -> str:
 def source_prefix(item: CatalogItem) -> str:
     data_type = item.topic.rsplit("/", 1)[-1]
     if data_type == "power-flow":
-        return "一条パワコン"
+        return "パワコン"
     if item.field == "net_power_w":
         return "Bルート"
     return item.device_id
@@ -170,7 +170,7 @@ def selected_blocks(
         primary = next((item for item in values if item.id == primary_id), values[0])
         secondary = tuple(item for item in values if item.id != primary.id)
         auxiliary_supported = (
-            block.group == "一条パワコン"
+            block.group == "パワコン"
             and block.layout_pattern == "hero"
             and primary.semantic_role == "load_power"
         )
@@ -195,12 +195,12 @@ def selected_blocks(
 
 def _display_block_title(title: str, group: str) -> str:
     """Keep the energy-system block compact without overriding custom titles."""
-    return "一条パワコン" if group == "一条パワコン" and title in {group, "太陽光・蓄電池"} else title
+    return "パワコン" if group == "パワコン" and title in {group, "太陽光・蓄電池"} else title
 
 
 def _grid_flow_auxiliary(repository: DisplayRepository, items) -> tuple[str, str, str]:
     """Reuse the legacy grid-flow order and zero handling for hero blocks."""
-    by_role = {item.semantic_role: item for item in items if item.group == "一条パワコン"}
+    by_role = {item.semantic_role: item for item in items if item.group == "パワコン"}
     import_item, export_item = by_role.get("grid_import"), by_role.get("grid_export")
     import_latest = repository.item(import_item.id) if import_item and import_item.freshness != FreshnessStatus.UNAVAILABLE.value else None
     export_latest = repository.item(export_item.id) if export_item and export_item.freshness != FreshnessStatus.UNAVAILABLE.value else None
