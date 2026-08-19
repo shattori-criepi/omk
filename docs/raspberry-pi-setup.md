@@ -6,9 +6,7 @@
 ためのDockerホストを準備するまでの手順です。初めて作業する人は、上から順に進めて
 ください。
 
-この文書の初期セットアップ部分だけではOMKの計測サービスは起動しません。Bルート資格情報、
-センサ設定、実機用Compose構成、表示、アクセスポイント、LTEは個別の後続手順です。これらが
-未整備の状態で初期セットアップだけを実行しても、計測開始や外部送信は行われません。
+新規Gatewayの標準入口は`setup-omk-gateway.sh`です。これは個別setup scriptを統合・複製せず、正しい順で呼び出します。初期OS準備だけを行う場合は`setup-raspberry-pi.sh`を直接実行できます。
 
 | 段階 | この文書で行うこと | 後続で行うこと |
 |---|---|---|
@@ -16,15 +14,12 @@
 | 初期セットアップ | OS更新、Docker、基本ツール、`data/`作成 | — |
 | OMK運用開始 | — | 周辺機器、秘密情報、Composeサービス、表示、ネットワーク |
 
-初期セットアップ後の実装済みサービスは、`setup-data-collection.sh`、
-`setup-broute-meter.sh`、`setup-system-manager.sh`、`setup-ble-sensor-manager.sh`、
-`setup-dashboard-kiosk.sh`で個別に設定します。各手順は対象サービスのREADMEを確認してから
-実行してください。
+`setup-system-manager.sh`はBルート専用ではなく、Dashboardのシステム操作とAP資格情報表示にも必要な標準工程です。Bルート、BLE、kioskは個別に選べる任意工程です。
 
 ## 1. 目的と前提条件
 
-この手順は、Raspberry Pi OSを書き込んだ直後のRaspberry Piを、OMKのDockerホスト
-として再現可能な状態にします。初期対象はRaspberry Pi 4、64-bit Raspberry Pi OS
+この手順は、Raspberry Pi OSを書き込んだ直後のRaspberry Piを、OMK Gatewayとして
+再現可能な状態にします。正式対象はRaspberry Pi 4またはRaspberry Pi 5、64-bit Raspberry Pi OS
 （GUIあり）です。OMKの標準ユーザーは`omkdev`、標準配置先は
 `/home/omkdev/projects/omk`です。スクリプトは配置場所を動的に判定するため、
 別の通常ユーザーや配置先でも実行できますが、標準との差異はログに残ります。
@@ -86,18 +81,18 @@ cd omk
 すでに配置済みなら、既存の作業やデータを確認してから通常のGit手順で更新します。
 秘密情報を含むファイルや実測データをコミットしないでください。
 
-## 5. セットアップスクリプトを実行する
+## 5. Gatewayセットアップスクリプトを実行する
 
 リポジトリルートで次を実行します。スクリプト全体を`sudo`で起動する必要はなく、
 必要な処理だけが`sudo`を使用します。
 
 ```bash
-chmod +x scripts/setup-raspberry-pi.sh
-./scripts/setup-raspberry-pi.sh
+./scripts/setup-omk-gateway.sh
 ```
 
-OSの更新とパッケージ取得を行うため、完了まで時間がかかる場合があります。途中で
-失敗した場合はエラー終了し、同じコマンドで再実行できます。
+Onyx、BLE、Bルート、GUI kioskを使う場合は、それぞれ`--with-soracom`、`--with-ble`、
+`--with-broute`、`--with-kiosk`を追加します。実行順だけ確認する場合は`--dry-run`を使えます。
+初回のOS更新またはDocker group追加後に再起動・再ログインが必要な場合、上位スクリプトはそこで安全に停止します。再接続後に同じコマンドを再実行してください。
 
 ## 6. スクリプトが実行する処理
 
@@ -189,11 +184,11 @@ OMKの計測データ保存先は、リポジトリルート直下の`data/`で�
 `./data/...`をマウントします。`/opt/omk/data`や`/var/lib/omk`は使用しません。
 
 初期セットアップは基礎構造だけを作成します。`setup-data-collection.sh`はComposeの
-mountと`data/sensors`、`data/latest`、`data/processed`、`data/harvest-uploader`、
+mountと`data/sensors`、`data/latest`、`data/processed`、`data/dashboard`、`data/harvest-uploader`、
 `services/mosquitto/data`を確認します。`setup-data-transformer.sh`は`data/processed`と
 `data/errors/transform`、venv、systemd timerを、`setup-broute-meter.sh`は
 `data/broute-meter`と`logs/broute-meter`、Bルートsystemd設定を確認します。
-`setup-system-manager.sh`はBルート認証情報および固定ホスト操作用のhost API、token、
+`setup-system-manager.sh`はDashboardのシステム操作、AP資格情報参照、Bルート認証情報を扱うhost API、token、
 sudoersを設定し、`setup-ble-sensor-manager.sh`はBlueZを使うBLE探索・登録用host APIを設定します。
 Dashboardコンテナからこれらのhost APIへは`host.docker.internal`経由で接続します。
 
@@ -286,8 +281,8 @@ docker compose restart mosquitto sensor-collector dashboard harvest-uploader
 
 `data/latest`はcollectorが書き込み、dashboardは読み取り専用で参照します。初回の計測後に`ls -l data/latest/`と`ls -l data/latest/items/`で、互換用の`broute_power.json`、`sen66.json`、`ichijo_power_flow.json`と、汎用latest item／`catalog.json`の生成状況・読取り権限を確認してください。Phase 2の標準Dashboardは汎用storeを読み、旧ファイルは互換フォールバックとして残ります。未生成でもdashboardは起動し、欠損値として表示します。
 
-Dashboard Phase 2以降では、`data/dashboard/settings.json`が表示設定の保存先です。Compose更新後は
-`mkdir -p data/dashboard`を確認し、管理メニューの「表示設定」から標準プリセットの項目・順序・
+Dashboard Phase 2以降では、`data/dashboard/settings.json`が表示設定の保存先です。`setup-data-collection.sh`が
+必要に応じて`data/dashboard`を作成するため、管理メニューの「表示設定」から標準プリセットの項目・順序・
 サイズを保存できます。`data/latest`は引き続きDashboardから読み取り専用で、`data/dashboard`だけが
 Dashboardコンテナへの書込みmountです。`settings.json`は秘密情報を含まない表示設定のため`0644`で
 保存され、通常の運用ユーザーで`cat`やバックアップができます。

@@ -30,15 +30,12 @@ Windows PCです。初期設定はSSHで行えるため、キーボードとデ�
 1. Raspberry Pi ImagerでOS、`omkdev`ユーザー、SSH、ネットワーク、地域設定を準備する
 2. Raspberry Piを起動し、WindowsからSSH接続する
 3. `/home/omkdev/projects/omk`へこのリポジトリをcloneする
-4. `./scripts/setup-raspberry-pi.sh`を実行し、再ログイン後にDockerを確認する
-5. Onyx を使う場合は [SORACOM Onyx セットアップ](docs/soracom-onyx-setup.md)を実行する
-6. `./scripts/setup-wifi-access-point.sh --activate`でOMK用ローカルAPを設定し、`./scripts/setup-data-collection.sh`でDockerのデータ収集・Dashboardサービスを起動する
-7. Bルートを使用する場合は`./scripts/setup-broute-meter.sh`と`./scripts/setup-system-manager.sh`を実行し、管理メニューから認証情報を設定する
-8. BLEセンサを使用する場合は`./scripts/setup-ble-sensor-manager.sh`を実行し、管理メニューから探索・登録する
-9. GUI自動ログイン中に`./scripts/setup-dashboard-kiosk.sh`を実行して、表示用Chromiumとlabwcのカーソル非表示設定をuser systemdへ登録する
+4. 標準入口として`./scripts/setup-omk-gateway.sh`を実行する。Onyx、BLE、Bルート、GUI kioskが必要な場合はそれぞれ`--with-soracom`、`--with-ble`、`--with-broute`、`--with-kiosk`を付ける
+5. 初回のOS更新・Docker group追加で再ログインまたは再起動が求められた場合は、その後に同じコマンドを再実行して続行する
 
 `setup-raspberry-pi.sh`はOS更新、Docker、データ保存領域までを準備します。計測・表示・
-周辺機器の各サービスは、その後に上記の個別setup scriptで有効化します。BルートID/PASSなどの
+周辺機器の各サービスは個別setup scriptとして直接実行もできます。`setup-system-manager.sh`はDashboardの
+標準依存であり、Bルート使用の有無にかかわらず実行されます。BルートID/PASSなどの
 秘密情報はGitやセットアップログへ書かず、Bルート設定画面から設定します。
 
 ## 1. OMKが扱う範囲
