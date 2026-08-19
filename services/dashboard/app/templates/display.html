@@ -4,10 +4,22 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <title>OMK ダッシュボード</title>
-    <link rel="stylesheet" href="{{ url_for('static', path='/display.css') }}?v=20260819-display-mode-3">
+    <link rel="stylesheet" href="{{ url_for('static', path='/display.css') }}?v=20260819-clock-mode-1">
   </head>
   <body>
-    {% if dashboard.blocks is defined %}
+    {% if dashboard.mode is defined and dashboard.mode == 'clock' %}
+    <main class="dashboard clock-dashboard" aria-label="時計">
+      <section class="clock-main" aria-label="現在時刻">
+        <p id="clock-date" class="clock-date">{{ dashboard.date }}</p>
+        <time id="clock-time" class="clock-time">{{ dashboard.time }}</time>
+      </section>
+      <section id="clock-supplemental" class="clock-supplemental" aria-label="主要情報">
+        {% for item in dashboard.supplemental %}
+        <div class="clock-reading clock-reading--{{ item.freshness }}" data-item-id="{{ item.id }}"><span data-role="label">{{ item.short_label or item.label }}</span><strong data-role="value">{{ item.value }}</strong><small data-role="unit">{{ item.unit if item.unit and item.freshness != 'unavailable' else ' ' }}</small></div>
+        {% endfor %}
+      </section>
+    </main>
+    {% elif dashboard.blocks is defined %}
     <main class="dashboard standard-dashboard" aria-label="OMK ダッシュボード">
       <header class="topbar">
         <time id="current-datetime" class="current-datetime" aria-label="現在日時">
@@ -168,6 +180,6 @@
     </main>
     {% endif %}
 
-    <script src="{{ url_for('static', path='/display.js') }}?v=20260819-display-mode-3" defer></script>
+    <script src="{{ url_for('static', path='/display.js') }}?v=20260819-clock-mode-1" defer></script>
   </body>
 </html>

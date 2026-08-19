@@ -17,10 +17,10 @@ import app.main as dashboard_main
 from app.data.latest_repository import LatestRepository
 from app.data.parquet_repository import LatestPower, ParquetRepository
 from app.data.display_repository import DisplayRepository
-from app.data.settings_repository import DisplayBlock, DisplaySelection, SettingsError, SettingsRepository
-from app.display_items import candidate_for, catalog_items_with_latest, display_candidates, display_item_migrations, selected_blocks, selected_items
+from app.data.settings_repository import DashboardSettings, DisplayBlock, DisplaySelection, SettingsError, SettingsRepository
+from app.display_items import DisplayItem, candidate_for, catalog_items_with_latest, display_candidates, display_item_migrations, selected_blocks, selected_items
 from app.metric_definitions import definition_for, format_value
-from app.recommendations import recommended_blocks
+from app.recommendations import clock_item_ids, recommended_blocks
 from app.main import app
 from app.view_models import (
     FreshnessStatus,
@@ -125,6 +125,28 @@ def test_recommended_blocks_rank_semantic_groups_and_exclude_ichijo() -> None:
     assert all(block.group != "一条パワコン" for block in blocks)
 
 
+def test_clock_items_reuse_environment_ranking_and_only_include_grid_power() -> None:
+    candidates = [
+        _recommended_item("basic-temperature", "basic", "temperature"),
+        _recommended_item("basic-humidity", "basic", "humidity"),
+        _recommended_item("rich-temperature", "room-a", "temperature"),
+        _recommended_item("rich-humidity", "room-a", "humidity"),
+        _recommended_item("rich-co2", "room-a", "co2"),
+        _recommended_item("rich-pm25", "room-a", "pm25"),
+        _recommended_item("grid-power", "電力メーター（Bルート）", "grid_power"),
+        _recommended_item("grid-import", "電力メーター（Bルート）", "grid_import_energy"),
+        _recommended_item("ichijo", "一条パワコン", "load_power"),
+        _recommended_item("plug", "plug-001", "device_power"),
+    ]
+
+    assert clock_item_ids(candidates) == (
+        "rich-temperature", "rich-humidity", "rich-co2", "grid-power",
+    )  # type: ignore[arg-type]
+    assert clock_item_ids(candidates[:6]) == (
+        "rich-temperature", "rich-humidity", "rich-co2",
+    )  # type: ignore[arg-type]
+
+
 def test_settings_v2_migrates_to_custom_and_new_settings_default_recommended(tmp_path: Path) -> None:
     path = tmp_path / "dashboard" / "settings.json"
     repository = SettingsRepository(path)
@@ -164,6 +186,116 @@ def test_daily_broute_derived_item_can_belong_to_custom_and_recommended_blocks(t
 
     assert settings.custom_blocks[0].item_ids == (derived,)
     assert settings.recommended_blocks[0].item_ids == ("grid", derived)
+
+
+def test_clock_settings_keep_custom_and_recommended_presets(tmp_path: Path) -> None:
+    repository = SettingsRepository(tmp_path / "dashboard" / "settings.json")
+    custom = DisplayBlock("custom", "room", "room", "small", "temperature", ("temperature",), "compact")
+    recommended = DisplayBlock("recommended", "電力メーター（Bルート）", "電力メーター（Bルート）", "large", "grid", ("grid",), "hero")
+    saved = repository.save_payload({
+        "version": 3, "mode": "clock", "default_preset": "standard",
+        "presets": {
+            "standard": {"blocks": [custom.as_dict()]},
+            "recommended": {"blocks": [recommended.as_dict()]},
+            "clock": {"item_ids": ["temperature", "grid"]},
+        },
+    }, {"temperature": "room", "grid": "電力メーター（Bルート）"})
+
+    assert saved.mode == "clock"
+    assert saved.clock_item_ids == ("temperature", "grid")
+    assert saved.custom_blocks == (custom,)
+    assert saved.recommended_blocks == (recommended,)
+
+
+def _clock_item(item_id: str, group: str, role: str | None, *, value: str = "1.0", unit: str = "") -> DisplayItem:
+    return DisplayItem(item_id, item_id, group, "omk/test", group, item_id, "number", unit, "環境", role, True, NOW.isoformat(), value, "normal", short_label=item_id)
+
+
+def test_clock_mode_switch_preserves_custom_and_recommended_and_renders_api(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    candidates = [
+        _clock_item("temperature", "living", "temperature", value="27.1", unit="°C"),
+        _clock_item("humidity", "living", "humidity", value="45", unit="%"),
+        _clock_item("co2", "living", "co2", value="620", unit="ppm"),
+        _clock_item("grid", "電力メーター（Bルート）", "grid_power", value="1.8", unit="kW"),
+        _clock_item("import", "電力メーター（Bルート）", "grid_import_energy", value="0.0", unit="kWh"),
+        _clock_item("ichijo", "一条パワコン", "load_power", unit="kW"),
+    ]
+    monkeypatch.setenv("OMK_DASHBOARD_SETTINGS_PATH", str(tmp_path / "dashboard" / "settings.json"))
+    monkeypatch.setattr(dashboard_main, "_dashboard_candidates", lambda now=None: candidates)
+
+    recommended = client.post("/api/admin/dashboard-settings/mode", json={"mode": "recommended"})
+    assert recommended.status_code == 200
+    original_recommended = recommended.json()["presets"]["recommended"]["blocks"]
+    custom = client.post("/api/admin/dashboard-settings/mode", json={"mode": "custom"})
+    assert custom.status_code == 200
+    original_custom = custom.json()["presets"]["standard"]["blocks"]
+
+    clock = client.post("/api/admin/dashboard-settings/mode", json={"mode": "clock"})
+    assert clock.status_code == 200
+    assert clock.json()["presets"]["clock"]["item_ids"] == ["temperature", "humidity", "co2", "grid"]
+    assert clock.json()["presets"]["standard"]["blocks"] == original_custom
+    assert clock.json()["presets"]["recommended"]["blocks"] == original_recommended
+
+    snapshot = client.get("/api/display")
+    assert snapshot.status_code == 200
+    assert snapshot.json()["mode"] == "clock"
+    assert snapshot.json()["date"].endswith("曜日")
+    assert re.fullmatch(r"\d{2}:\d{2}", snapshot.json()["time"])
+    assert [item["id"] for item in snapshot.json()["supplemental"]] == ["temperature", "humidity", "co2", "grid"]
+    assert "import" not in {item["id"] for item in snapshot.json()["supplemental"]}
+
+    assert client.post("/api/admin/dashboard-settings/mode", json={"mode": "custom"}).json()["presets"]["standard"]["blocks"] == original_custom
+    assert client.post("/api/admin/dashboard-settings/mode", json={"mode": "recommended"}).json()["presets"]["recommended"]["blocks"] == original_recommended
+
+
+def test_clock_mode_without_sensors_still_returns_date_and_time(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    path = tmp_path / "dashboard" / "settings.json"
+    SettingsRepository(path).save(DashboardSettings("clock", (), (), ()), {})
+    monkeypatch.setenv("OMK_DASHBOARD_SETTINGS_PATH", str(path))
+    monkeypatch.setattr(dashboard_main, "_dashboard_candidates", lambda now=None: [])
+
+    response = client.get("/api/display")
+
+    assert response.status_code == 200
+    assert response.json()["mode"] == "clock"
+    assert response.json()["supplemental"] == []
+    assert re.fullmatch(r"\d{2}:\d{2}", response.json()["time"])
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is required for display UI tests")
+def test_clock_polling_updates_existing_supplemental_slots_without_reordering() -> None:
+    javascript_path = Path(__file__).parents[1] / "app" / "static" / "display.js"
+    harness = r'''
+const fs = require("fs"), vm = require("vm");
+function leaf() { return {textContent: "", hidden: false}; }
+function reading() { const children = {"[data-role=\"label\"]": leaf(), "[data-role=\"value\"]": leaf(), "[data-role=\"unit\"]": leaf()}; return {className: "clock-reading clock-reading--unavailable", children, querySelector(selector) { return children[selector]; }}; }
+const date = leaf(), time = leaf(), temperature = reading(), grid = reading();
+const readings = {temperature, grid};
+global.document = {documentElement: {classList: {add() {}}}, querySelector(selector) {
+  if (selector === "#clock-date") return date;
+  if (selector === "#clock-time") return time;
+  const match = selector.match(/^\[data-item-id=\"(.+)\"\]$/); return match ? readings[match[1]] : undefined;
+}};
+global.CSS = {escape: value => value};
+global.window = {setInterval() {}};
+global.fetch = async () => ({ok: true, json: async () => ({})});
+vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8"));
+updateDisplay({mode: "clock", date: "2026年8月19日 水曜日", time: "12:34", supplemental: [
+  {id: "temperature", short_label: "温度", value: "27.1", unit: "°C", freshness: "normal"},
+  {id: "grid", short_label: "系統電力", value: "1.8", unit: "kW", freshness: "normal"},
+]});
+console.log(JSON.stringify({date: date.textContent, time: time.textContent, temperature: temperature.children, grid: grid.children, classes: [temperature.className, grid.className], ids: Object.keys(readings)}));
+'''
+    completed = subprocess.run(["node", "-e", harness, str(javascript_path)], check=True, capture_output=True, text=True)
+    result = json.loads(completed.stdout)
+
+    assert result["date"] == "2026年8月19日 水曜日"
+    assert result["time"] == "12:34"
+    assert result["temperature"]["[data-role=\"label\"]"]["textContent"] == "温度"
+    assert result["grid"]["[data-role=\"value\"]"]["textContent"] == "1.8"
+    assert result["grid"]["[data-role=\"unit\"]"]["textContent"] == "kW"
+    assert result["classes"] == ["clock-reading clock-reading--normal", "clock-reading clock-reading--normal"]
+    assert result["ids"] == ["temperature", "grid"]
 
 
 def _write_instantaneous_data(
@@ -507,6 +639,7 @@ def test_hero_display_html_and_javascript_expose_polling_targets(tmp_path: Path,
     assert "DISPLAY_POLL_INTERVAL_MS = 10_000" in javascript
     assert "headerWeekday.textContent" in javascript
     assert 'WEEKDAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]' in javascript
+    assert 'data.mode === "clock"' in javascript
     assert '["standard", "custom", "recommended"].includes(data.mode)' in javascript
     assert "Array.isArray(data.blocks)" in javascript
     assert "data-item-id" in javascript
@@ -1035,11 +1168,16 @@ def test_admin_display_css_allows_vertical_scroll_without_changing_kiosk_overflo
     assert '<html lang="ja" class="admin-document">' in admin_template
     assert '<body class="admin-body">' in admin_template
     assert 'href="/display">ダッシュボードを確認</a>' in admin_template
-    assert re.search(r"admin_display\.js'\) }}\?v=20260819-display-mode-\d+", admin_template)
-    assert re.search(r"display\.css'\) }}\?v=20260819-display-mode-\d+", admin_template)
+    assert re.search(r"admin_display\.js'\) }}\?v=20260819-clock-mode-\d+", admin_template)
+    assert re.search(r"display\.css'\) }}\?v=20260819-clock-mode-\d+", admin_template)
     assert '<body class="admin-body">' not in display_template
-    assert re.search(r"display\.js'\) }}\?v=20260819-display-mode-\d+", display_template)
-    assert re.search(r"display\.css'\) }}\?v=20260819-display-mode-\d+", display_template)
+    assert re.search(r"display\.js'\) }}\?v=20260819-clock-mode-\d+", display_template)
+    assert re.search(r"display\.css'\) }}\?v=20260819-clock-mode-\d+", display_template)
+    assert 'data-mode="clock"' in admin_template
+    assert 'id="clock-summary"' in admin_template
+    assert "mode !== \"clock\"" in (Path(__file__).parents[1] / "app" / "static" / "admin_display.js").read_text(encoding="utf-8")
+    assert 'class="clock-dashboard"' in display_template
+    assert 'data-role="unit"' in display_template
     assert "overflow: hidden;" in stylesheet
 
 

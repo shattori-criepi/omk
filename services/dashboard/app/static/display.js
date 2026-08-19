@@ -4,13 +4,15 @@ const currentDatetime = document.querySelector("#current-datetime");
 const headerDateMain = document.querySelector("#header-date-main");
 const headerWeekday = document.querySelector("#header-weekday");
 const headerTime = document.querySelector("#header-time");
+const clockDate = document.querySelector("#clock-date");
+const clockTime = document.querySelector("#clock-time");
 const DISPLAY_POLL_INTERVAL_MS = 10_000;
 const WEEKDAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const WEEKDAY_ARIA_NAMES = ["日曜日", "月曜日", "火曜日", "水曜日", "木曜日", "金曜日", "土曜日"];
 let displayFetchInProgress = false;
 
 function updateCurrentDatetime() {
-  if (!currentDatetime) return;
+  if (!currentDatetime && !clockDate && !clockTime) return;
 
   const now = new Date();
   const parts = new Intl.DateTimeFormat("ja-JP", {
@@ -28,11 +30,16 @@ function updateCurrentDatetime() {
   if (headerDateMain) headerDateMain.textContent = dateText;
   if (headerWeekday) headerWeekday.textContent = weekday;
   if (headerTime) headerTime.textContent = ` ${time}`;
-  currentDatetime.setAttribute(
-    "aria-label",
-    `${values.year}年${values.month}月${values.day}日 ${WEEKDAY_ARIA_NAMES[weekdayIndex]} ${time}`,
-  );
-  currentDatetime.dateTime = now.toISOString();
+  const clockTimeText = new Intl.DateTimeFormat("ja-JP", {timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit", hour12: false}).format(now);
+  if (clockDate) clockDate.textContent = `${values.year}年${Number(values.month)}月${Number(values.day)}日 ${WEEKDAY_ARIA_NAMES[weekdayIndex]}`;
+  if (clockTime) { clockTime.textContent = clockTimeText; clockTime.dateTime = now.toISOString(); }
+  if (currentDatetime) {
+    currentDatetime.setAttribute(
+      "aria-label",
+      `${values.year}年${values.month}月${values.day}日 ${WEEKDAY_ARIA_NAMES[weekdayIndex]} ${time}`,
+    );
+    currentDatetime.dateTime = now.toISOString();
+  }
 }
 
 function setText(id, value) {
@@ -69,6 +76,22 @@ function updateSourceStatus(sectionId, badgeId, freshness) {
 }
 
 function updateDisplay(data) {
+  if (data.mode === "clock" && Array.isArray(data.supplemental)) {
+    if (clockDate && data.date) clockDate.textContent = data.date;
+    if (clockTime && data.time) clockTime.textContent = data.time;
+    data.supplemental.forEach((item) => {
+      const reading = document.querySelector(`[data-item-id="${CSS.escape(item.id)}"]`);
+      if (!reading) return;
+      const label = reading.querySelector('[data-role="label"]');
+      const value = reading.querySelector('[data-role="value"]');
+      const unit = reading.querySelector('[data-role="unit"]');
+      if (label) label.textContent = item.short_label || item.label;
+      if (value) value.textContent = item.value;
+      if (unit) { unit.textContent = displayUnitText(item); unit.hidden = false; }
+      reading.className = `clock-reading clock-reading--${item.freshness}`;
+    });
+    return;
+  }
   if (["standard", "custom", "recommended"].includes(data.mode) && Array.isArray(data.blocks)) {
     data.blocks.forEach((block) => {
       const card = document.querySelector(`[data-block-id="${CSS.escape(block.id)}"]`);

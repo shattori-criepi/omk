@@ -18,7 +18,7 @@ from app.data.parquet_repository import EnergyTotals, ParquetRepository
 from app.data.display_repository import DisplayRepository
 from app.data.settings_repository import DashboardSettings, DisplayBlock, SettingsError, SettingsRepository, default_layout_pattern, item_limit
 from app.display_items import DisplayItem, catalog_items_with_latest, display_candidates, display_item_migrations, selected_blocks
-from app.recommendations import BROUTE_GROUP, recommended_blocks
+from app.recommendations import BROUTE_GROUP, clock_item_ids, recommended_blocks
 from app.view_models import FreshnessStatus, format_timestamp_seconds, worst_freshness
 from app.view_models import get_display_view_model
 
@@ -62,6 +62,20 @@ class BlockDashboard:
 
     def as_dict(self) -> dict:
         return {"mode": self.mode, "blocks": [block.as_dict() for block in self.blocks], "updated_at": self.updated_at, "updated_at_iso": self.updated_at_iso, "freshness": self.freshness.value}
+
+
+@dataclass(frozen=True)
+class ClockDashboard:
+    date: str
+    time: str
+    supplemental: list[DisplayItem]
+
+    @property
+    def mode(self) -> str:
+        return "clock"
+
+    def as_dict(self) -> dict:
+        return {"mode": self.mode, "date": self.date, "time": self.time, "supplemental": [item.as_dict() for item in self.supplemental]}
 
 
 def _default_blocks(candidates: list) -> list[DisplayBlock]:
@@ -135,15 +149,33 @@ def get_dashboard_view_model():
     selectable = [item for item in candidates if item.selectable]
     if selectable:
         settings = _settings_for(candidates)
-        now = datetime.now().astimezone()
-        blocks = selected_blocks(display_repository, settings.active_blocks, now, _dashboard_candidates(now))
+        now = datetime.now(JST)
+        current_candidates = _dashboard_candidates(now)
+        if settings.mode == "clock":
+            current = {item.id: item for item in current_candidates}
+            supplemental = [current[item_id] for item_id in settings.clock_item_ids if item_id in current]
+            return ClockDashboard(_clock_date(now), now.strftime("%H:%M"), supplemental)
+        blocks = selected_blocks(display_repository, settings.active_blocks, now, current_candidates)
         statuses = [FreshnessStatus(block.freshness) for block in blocks] or [FreshnessStatus.UNAVAILABLE]
         updated = max((block.last_received_at for block in blocks if block.last_received_at), default="")
         return BlockDashboard(mode=settings.mode,
             blocks=blocks, updated_at=format_timestamp_seconds(updated) if updated else "--",
             updated_at_iso=updated, freshness=worst_freshness(*statuses),
         )
+    # A persisted clock configuration remains useful even when no source is
+    # presently discoverable: the clock itself must never depend on a sensor.
+    repository = get_settings_repository()
+    if repository.path.exists():
+        settings = _settings_for(candidates)
+        if settings.mode == "clock":
+            now = datetime.now(JST)
+            return ClockDashboard(_clock_date(now), now.strftime("%H:%M"), [])
     return get_display_view_model(get_latest_repository(), get_parquet_repository())
+
+
+def _clock_date(now: datetime) -> str:
+    weekdays = ("月曜日", "火曜日", "水曜日", "木曜日", "金曜日", "土曜日", "日曜日")
+    return f"{now.year}年{now.month}月{now.day}日 {weekdays[now.weekday()]}"
 
 
 @app.get("/display", response_class=HTMLResponse)
@@ -299,12 +331,15 @@ async def update_dashboard_mode(request: Request) -> dict:
     candidates = _dashboard_candidates()
     try:
         mode = (await request.json()).get("mode")
-        if mode not in {"recommended", "custom"}:
+        if mode not in {"recommended", "custom", "clock"}:
             raise SettingsError("この表示モードはまだ利用できません")
         settings = _settings_for(candidates)
-        # Entering recommended intentionally makes a fresh, persisted snapshot.
-        recommended = tuple(recommended_blocks([item for item in candidates if item.selectable])) if mode == "recommended" else settings.recommended_blocks
-        updated = DashboardSettings(mode, settings.custom_blocks, recommended)
+        selectable = [item for item in candidates if item.selectable]
+        # Mode changes only select a stored preset.  The explicit refresh action
+        # is responsible for replacing the recommendation snapshot.
+        recommended = settings.recommended_blocks
+        clock_items = clock_item_ids(selectable) if mode == "clock" else settings.clock_item_ids
+        updated = DashboardSettings(mode, settings.custom_blocks, recommended, clock_items)
         get_settings_repository().save(updated, _available_display_groups(candidates))
     except (SettingsError, ValueError, AttributeError) as error:
         raise HTTPException(400, str(error)) from error
@@ -316,7 +351,7 @@ async def refresh_recommended_dashboard() -> dict:
     candidates = _dashboard_candidates()
     try:
         settings = _settings_for(candidates)
-        updated = DashboardSettings("recommended", settings.custom_blocks, tuple(recommended_blocks([item for item in candidates if item.selectable])))
+        updated = DashboardSettings("recommended", settings.custom_blocks, tuple(recommended_blocks([item for item in candidates if item.selectable])), settings.clock_item_ids)
         get_settings_repository().save(updated, _available_display_groups(candidates))
     except (SettingsError, OSError) as error:
         raise HTTPException(400, str(error)) from error
