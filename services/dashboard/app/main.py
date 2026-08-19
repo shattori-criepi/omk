@@ -69,13 +69,21 @@ class ClockDashboard:
     date: str
     time: str
     supplemental: list[DisplayItem]
+    updated_at: str
+    updated_at_iso: str
+    freshness: FreshnessStatus
 
     @property
     def mode(self) -> str:
         return "clock"
 
     def as_dict(self) -> dict:
-        return {"mode": self.mode, "date": self.date, "time": self.time, "supplemental": [item.as_dict() for item in self.supplemental]}
+        return {
+            "mode": self.mode, "date": self.date, "time": self.time,
+            "supplemental": [item.as_dict() for item in self.supplemental],
+            "updated_at": self.updated_at, "updated_at_iso": self.updated_at_iso,
+            "freshness": self.freshness.value,
+        }
 
 
 def _default_blocks(candidates: list) -> list[DisplayBlock]:
@@ -154,7 +162,7 @@ def get_dashboard_view_model():
         if settings.mode == "clock":
             current = {item.id: item for item in current_candidates}
             supplemental = [current[item_id] for item_id in settings.clock_item_ids if item_id in current]
-            return ClockDashboard(_clock_date(now), now.strftime("%H:%M"), supplemental)
+            return _clock_dashboard(now, supplemental)
         blocks = selected_blocks(display_repository, settings.active_blocks, now, current_candidates)
         statuses = [FreshnessStatus(block.freshness) for block in blocks] or [FreshnessStatus.UNAVAILABLE]
         updated = max((block.last_received_at for block in blocks if block.last_received_at), default="")
@@ -169,13 +177,23 @@ def get_dashboard_view_model():
         settings = _settings_for(candidates)
         if settings.mode == "clock":
             now = datetime.now(JST)
-            return ClockDashboard(_clock_date(now), now.strftime("%H:%M"), [])
+            return _clock_dashboard(now, [])
     return get_display_view_model(get_latest_repository(), get_parquet_repository())
 
 
 def _clock_date(now: datetime) -> str:
     weekdays = ("月曜日", "火曜日", "水曜日", "木曜日", "金曜日", "土曜日", "日曜日")
     return f"{now.year}年{now.month}月{now.day}日 {weekdays[now.weekday()]}"
+
+
+def _clock_dashboard(now: datetime, supplemental: list[DisplayItem]) -> ClockDashboard:
+    statuses = [FreshnessStatus(item.freshness) for item in supplemental] or [FreshnessStatus.UNAVAILABLE]
+    updated = max((item.last_received_at for item in supplemental if item.last_received_at), default="")
+    return ClockDashboard(
+        _clock_date(now), now.strftime("%H:%M"), supplemental,
+        format_timestamp_seconds(updated) if updated else "--", updated,
+        worst_freshness(*statuses),
+    )
 
 
 @app.get("/display", response_class=HTMLResponse)

@@ -241,8 +241,15 @@ def test_clock_mode_switch_preserves_custom_and_recommended_and_renders_api(tmp_
     assert snapshot.json()["mode"] == "clock"
     assert snapshot.json()["date"].endswith("曜日")
     assert re.fullmatch(r"\d{2}:\d{2}", snapshot.json()["time"])
+    assert snapshot.json()["freshness"] == "normal"
+    assert snapshot.json()["updated_at"] != "--"
     assert [item["id"] for item in snapshot.json()["supplemental"]] == ["temperature", "humidity", "co2", "grid"]
     assert "import" not in {item["id"] for item in snapshot.json()["supplemental"]}
+    clock_html = client.get("/display").text
+    for element_id in ("clock-date", "clock-time", "clock-updated-at", "clock-freshness", "clock-supplemental"):
+        assert f'id="{element_id}"' in clock_html
+    assert 'class="dashboard clock-dashboard"' in clock_html
+    assert 'href="/admin/display"' in clock_html
 
     assert client.post("/api/admin/dashboard-settings/mode", json={"mode": "custom"}).json()["presets"]["standard"]["blocks"] == original_custom
     assert client.post("/api/admin/dashboard-settings/mode", json={"mode": "recommended"}).json()["presets"]["recommended"]["blocks"] == original_recommended
@@ -259,6 +266,8 @@ def test_clock_mode_without_sensors_still_returns_date_and_time(tmp_path: Path, 
     assert response.status_code == 200
     assert response.json()["mode"] == "clock"
     assert response.json()["supplemental"] == []
+    assert response.json()["updated_at"] == "--"
+    assert response.json()["freshness"] == "unavailable"
     assert re.fullmatch(r"\d{2}:\d{2}", response.json()["time"])
 
 
@@ -267,30 +276,34 @@ def test_clock_polling_updates_existing_supplemental_slots_without_reordering() 
     javascript_path = Path(__file__).parents[1] / "app" / "static" / "display.js"
     harness = r'''
 const fs = require("fs"), vm = require("vm");
-function leaf() { return {textContent: "", hidden: false}; }
+function leaf() { return {textContent: "", hidden: false, className: "", dateTime: ""}; }
 function reading() { const children = {"[data-role=\"label\"]": leaf(), "[data-role=\"value\"]": leaf(), "[data-role=\"unit\"]": leaf()}; return {className: "clock-reading clock-reading--unavailable", children, querySelector(selector) { return children[selector]; }}; }
-const date = leaf(), time = leaf(), temperature = reading(), grid = reading();
+const date = leaf(), time = leaf(), updated = leaf(), freshness = leaf(), temperature = reading(), grid = reading();
 const readings = {temperature, grid};
 global.document = {documentElement: {classList: {add() {}}}, querySelector(selector) {
   if (selector === "#clock-date") return date;
   if (selector === "#clock-time") return time;
+  if (selector === "#clock-updated-at") return updated;
+  if (selector === "#clock-freshness") return freshness;
   const match = selector.match(/^\[data-item-id=\"(.+)\"\]$/); return match ? readings[match[1]] : undefined;
 }};
 global.CSS = {escape: value => value};
 global.window = {setInterval() {}};
 global.fetch = async () => ({ok: true, json: async () => ({})});
 vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8"));
-updateDisplay({mode: "clock", date: "2026年8月19日 水曜日", time: "12:34", supplemental: [
+updateDisplay({mode: "clock", date: "2026年8月19日 水曜日", time: "12:34", updated_at: "2026-08-19 12:34:00", updated_at_iso: "2026-08-19T12:34:00+09:00", freshness: "normal", supplemental: [
   {id: "temperature", short_label: "温度", value: "27.1", unit: "°C", freshness: "normal"},
   {id: "grid", short_label: "系統電力", value: "1.8", unit: "kW", freshness: "normal"},
 ]});
-console.log(JSON.stringify({date: date.textContent, time: time.textContent, temperature: temperature.children, grid: grid.children, classes: [temperature.className, grid.className], ids: Object.keys(readings)}));
+console.log(JSON.stringify({date: date.textContent, time: time.textContent, updated: updated.textContent, freshness: freshness, temperature: temperature.children, grid: grid.children, classes: [temperature.className, grid.className], ids: Object.keys(readings)}));
 '''
     completed = subprocess.run(["node", "-e", harness, str(javascript_path)], check=True, capture_output=True, text=True)
     result = json.loads(completed.stdout)
 
     assert result["date"] == "2026年8月19日 水曜日"
     assert result["time"] == "12:34"
+    assert result["updated"] == "2026-08-19 12:34:00"
+    assert result["freshness"]["className"] == "freshness freshness--normal"
     assert result["temperature"]["[data-role=\"label\"]"]["textContent"] == "温度"
     assert result["grid"]["[data-role=\"value\"]"]["textContent"] == "1.8"
     assert result["grid"]["[data-role=\"unit\"]"]["textContent"] == "kW"
@@ -1014,7 +1027,7 @@ def test_small_plug_block_uses_full_consumption_label_without_ellipsis(tmp_path:
     assert ".display-card--small.display-card--compact.display-card--items-1 .display-compact-reading { width: 100%; min-width: 0; }" in stylesheet
     assert ".display-card--small.display-card--compact.display-card--items-1 .display-secondary-item { grid-column: 1 / -1; }" in stylesheet
     assert ".display-card--small.display-card--compact.display-card--items-2 .display-card-compact-items" not in stylesheet
-    assert re.search(r"display\.css'\) }}\?v=20260819-clock-mode-\d+", template)
+    assert re.search(r"display\.css'\) }}\?v=20260819-clock-visual-\d+", template)
     assert ".display-card--small.display-card--compact.display-card--items-1 .display-secondary-label { overflow: visible; text-overflow: clip; white-space: nowrap; }" in stylesheet
 
 
@@ -1168,16 +1181,22 @@ def test_admin_display_css_allows_vertical_scroll_without_changing_kiosk_overflo
     assert '<html lang="ja" class="admin-document">' in admin_template
     assert '<body class="admin-body">' in admin_template
     assert 'href="/display">ダッシュボードを確認</a>' in admin_template
-    assert re.search(r"admin_display\.js'\) }}\?v=20260819-clock-mode-\d+", admin_template)
-    assert re.search(r"display\.css'\) }}\?v=20260819-clock-mode-\d+", admin_template)
+    assert re.search(r"admin_display\.js'\) }}\?v=20260819-clock-visual-\d+", admin_template)
+    assert re.search(r"display\.css'\) }}\?v=20260819-clock-visual-\d+", admin_template)
     assert '<body class="admin-body">' not in display_template
-    assert re.search(r"display\.js'\) }}\?v=20260819-clock-mode-\d+", display_template)
-    assert re.search(r"display\.css'\) }}\?v=20260819-clock-mode-\d+", display_template)
+    assert re.search(r"display\.js'\) }}\?v=20260819-clock-visual-\d+", display_template)
+    assert re.search(r"display\.css'\) }}\?v=20260819-clock-visual-\d+", display_template)
     assert 'data-mode="clock"' in admin_template
     assert 'id="clock-summary"' in admin_template
     assert "mode !== \"clock\"" in (Path(__file__).parents[1] / "app" / "static" / "admin_display.js").read_text(encoding="utf-8")
     assert "dashboard.mode is defined and dashboard.mode == 'clock'" in display_template
     assert "clock-dashboard" in display_template
+    assert 'id="clock-updated-at"' in display_template
+    assert 'id="clock-freshness"' in display_template
+    assert 'href="/admin/display"' in display_template
+    assert ".clock-status-area" in stylesheet
+    assert "font-size: clamp(176px, 24vw, 360px);" in stylesheet
+    assert ".clock-reading + .clock-reading { border-left:" in stylesheet
     assert 'data-role="unit"' in display_template
     assert "overflow: hidden;" in stylesheet
 

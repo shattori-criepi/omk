@@ -6,6 +6,8 @@ const headerWeekday = document.querySelector("#header-weekday");
 const headerTime = document.querySelector("#header-time");
 const clockDate = document.querySelector("#clock-date");
 const clockTime = document.querySelector("#clock-time");
+const clockUpdatedAt = document.querySelector("#clock-updated-at");
+const clockFreshness = document.querySelector("#clock-freshness");
 const DISPLAY_POLL_INTERVAL_MS = 10_000;
 const WEEKDAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const WEEKDAY_ARIA_NAMES = ["日曜日", "月曜日", "火曜日", "水曜日", "木曜日", "金曜日", "土曜日"];
@@ -79,6 +81,8 @@ function updateDisplay(data) {
   if (data.mode === "clock" && Array.isArray(data.supplemental)) {
     if (clockDate && data.date) clockDate.textContent = data.date;
     if (clockTime && data.time) clockTime.textContent = data.time;
+    if (clockUpdatedAt) { clockUpdatedAt.textContent = data.updated_at; clockUpdatedAt.dateTime = data.updated_at_iso; }
+    if (clockFreshness) { clockFreshness.textContent = data.freshness; clockFreshness.className = `freshness freshness--${data.freshness}`; }
     data.supplemental.forEach((item) => {
       const reading = document.querySelector(`[data-item-id="${CSS.escape(item.id)}"]`);
       if (!reading) return;
