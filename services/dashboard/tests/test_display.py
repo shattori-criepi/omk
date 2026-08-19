@@ -729,6 +729,30 @@ def test_ichijo_charge_and_discharge_are_one_dashboard_only_battery_row(tmp_path
     ]
 
 
+def test_ichijo_load_hero_exposes_legacy_grid_flow_as_auxiliary_status(tmp_path: Path) -> None:
+    def render(root: Path, *, imported: float, exported: float, layout: str = "hero"):
+        load = _write_generic_item(root, "l", topic="omk/ichijo/power-flow", device_id="ichijo", field="load_power_w", value=1234, received_at=NOW)
+        imported_id = _write_generic_item(root, "i", topic="omk/ichijo/power-flow", device_id="ichijo", field="grid_import_power_w", value=imported, received_at=NOW)
+        _write_generic_item(root, "e", topic="omk/ichijo/power-flow", device_id="ichijo", field="grid_export_power_w", value=exported, received_at=NOW)
+        repository = DisplayRepository(root)
+        candidates = display_candidates(repository, NOW)
+        block = DisplayBlock("ichijo", "一条パワコン", "一条パワコン", "large", load, (load, imported_id), layout)
+        return selected_blocks(repository, (block,), NOW, candidates)[0]
+
+    imported = render(tmp_path / "import", imported=420, exported=0)
+    exported = render(tmp_path / "export", imported=420, exported=3150)
+    neutral = render(tmp_path / "neutral", imported=0, exported=0)
+    non_hero = render(tmp_path / "compact", imported=420, exported=0, layout="compact")
+
+    assert (imported.auxiliary_supported, imported.auxiliary_label, imported.auxiliary_value, imported.auxiliary_unit) == (True, "買電中", "0.42", "kW")
+    assert (exported.auxiliary_label, exported.auxiliary_value) == ("売電中", "3.15")
+    assert (neutral.auxiliary_label, neutral.auxiliary_value) == ("", "")
+    assert len(imported.secondary) == 1
+    assert non_hero.auxiliary_supported is False
+    template = (Path(__file__).parents[1] / "app" / "templates" / "display.html").read_text(encoding="utf-8")
+    assert 'class="display-card-auxiliary" data-role="auxiliary"' in template
+
+
 def test_display_items_api_lists_multiple_values_from_one_source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     latest_root = tmp_path / "latest"
     broute_fields = ("net_power_w", "cumulative_energy_import_kwh", "cumulative_energy_export_kwh")
@@ -908,29 +932,29 @@ global.fetch = async url => ({ok: true, json: async () => url.endsWith("display-
   capacity: 6,
   groups: [
     {name: "電力メーター（Bルート）", items: [
-      {id: "grid", label: "Bルート 系統電力", group: "電力メーター（Bルート）", selectable: true},
-      {id: "import-total", label: "Bルート 買電積算", group: "電力メーター（Bルート）", selectable: true},
-      {id: "export-total", label: "Bルート 売電積算", group: "電力メーター（Bルート）", selectable: true},
+      {id: "grid", label: "Bルート 系統電力", short_label: "系統電力", group: "電力メーター（Bルート）", selectable: true},
+      {id: "import-total", label: "Bルート 買電積算", short_label: "買電積算", group: "電力メーター（Bルート）", selectable: true},
+      {id: "export-total", label: "Bルート 売電積算", short_label: "売電積算", group: "電力メーター（Bルート）", selectable: true},
     ]},
-    {name: "太陽光・蓄電池", items: [
-      {id: "load", label: "一条パワコン 家庭消費電力", group: "太陽光・蓄電池", selectable: true},
-      {id: "pv", label: "一条パワコン PV発電", group: "太陽光・蓄電池", selectable: true},
-      {id: "soc", label: "一条パワコン 蓄電池残量", group: "太陽光・蓄電池", selectable: true},
+    {name: "一条パワコン", items: [
+      {id: "load", field: "load_power_w", label: "一条パワコン 住宅内消費電力", short_label: "住宅内消費電力", group: "一条パワコン", selectable: true},
+      {id: "pv", label: "一条パワコン PV発電", short_label: "PV発電", group: "一条パワコン", selectable: true},
+      {id: "soc", label: "一条パワコン 蓄電池残量", short_label: "蓄電池残量", group: "一条パワコン", selectable: true},
     ]},
     {name: "SEN66", items: [
-      {id: "temperature", label: "sen66 温度", group: "SEN66", selectable: true},
-      {id: "humidity", label: "sen66 湿度", group: "SEN66", selectable: true},
-      {id: "co2", label: "sen66 CO₂", group: "SEN66", selectable: true},
+      {id: "temperature", label: "sen66 温度", short_label: "温度", group: "SEN66", selectable: true},
+      {id: "humidity", label: "sen66 湿度", short_label: "湿度", group: "SEN66", selectable: true},
+      {id: "co2", label: "sen66 CO₂", short_label: "CO₂", group: "SEN66", selectable: true},
     ]},
     {name: "plug-001", items: [
-      {id: "plug-power", label: "plug-001 消費電力", group: "plug-001", selectable: true},
-      {id: "plug-state", label: "plug-001 状態", group: "plug-001", selectable: true},
+      {id: "plug-power", label: "plug-001 消費電力", short_label: "消費電力", group: "plug-001", selectable: true},
+      {id: "plug-state", label: "plug-001 状態", short_label: "状態", group: "plug-001", selectable: true},
     ]},
-    {name: "th-001", items: [{id: "th-temperature", label: "th-001 温度", group: "th-001", selectable: true}]},
+    {name: "th-002", items: [{id: "th-temperature", label: "th-002 温度", short_label: "温度", group: "th-002", selectable: true}]},
   ],
 } : {presets: {standard: {blocks: [
   {block_id: "b", group: "電力メーター（Bルート）", title: "Bルート", size: "large", primary_item_id: "grid", item_ids: ["grid"]},
-  {block_id: "p", group: "太陽光・蓄電池", title: "一条パワコン", size: "small", primary_item_id: "load", item_ids: ["load"]},
+  {block_id: "p", group: "一条パワコン", title: "一条パワコン", size: "small", primary_item_id: "load", item_ids: ["load"]},
   {block_id: "s", group: "SEN66", title: "SEN66", size: "small", primary_item_id: "temperature", item_ids: ["temperature"]},
 ]}}}});
 vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8"));
@@ -950,22 +974,73 @@ setImmediate(() => {
     )
     result = json.loads(completed.stdout)
 
-    assert all(group in result["availableWithSpace"] for group in ("電力メーター（Bルート）", "太陽光・蓄電池", "SEN66"))
+    assert all(group in result["availableWithSpace"] for group in ("電力メーター（Bルート）", "一条パワコン", "SEN66", "th-002"))
     assert all(label in result["availableWithSpace"] for label in (
-        "Bルート 系統電力", "Bルート 買電積算", "Bルート 売電積算",
-        "一条パワコン 家庭消費電力", "一条パワコン PV発電", "一条パワコン 蓄電池残量",
-        "sen66 温度", "sen66 湿度", "sen66 CO₂",
+        "系統電力", "買電積算", "売電積算", "住宅内消費電力", "PV発電", "蓄電池残量",
+        "温度", "湿度", "CO₂",
     ))
+    assert "一条パワコン PV発電" not in result["availableWithSpace"]
+    assert "th-002 温度" not in result["availableAtCapacity"]
     assert "このデータでブロックを追加" in result["availableWithSpace"]
-    assert "一条パワコン PV発電" in result["selected"]
-    assert "sen66 CO₂" in result["selected"]
+    assert "PV発電" in result["selected"]
+    assert "CO₂" in result["selected"]
     assert "表示形式" in result["selected"]
     assert "均等に並べる" in result["selected"]
     assert "このブロックに表示する値（3 / 3）" in result["selected"]
-    assert "plug-001 消費電力" in result["selected"]
-    assert "th-001 温度" in result["availableAtCapacity"]
+    assert "消費電力" in result["selected"]
+    assert "温度" in result["availableAtCapacity"]
     assert "表示領域がいっぱいです" in result["availableAtCapacity"]
     assert result["status"] == ""
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is required for admin UI tests")
+def test_display_settings_ui_defaults_ichijo_primary_and_keeps_save_feedback_compact() -> None:
+    javascript_path = Path(__file__).parents[1] / "app" / "static" / "admin_display.js"
+    template_path = Path(__file__).parents[1] / "app" / "templates" / "admin_display.html"
+    harness = r'''
+const fs = require("fs"), vm = require("vm");
+function element() { return {innerHTML: "", textContent: "", disabled: false, listeners: {}, addEventListener(type, handler) { this.listeners[type] = handler; }, closest() { return null; }}; }
+const elements = Object.fromEntries(["#selected-items", "#available-items", "#capacity-status", "#settings-status", "#save-settings"].map(key => [key, element()]));
+let savedPayload;
+global.document = {querySelector: selector => elements[selector]};
+global.fetch = async (url, options = {}) => {
+  if (options.method === "PUT") { savedPayload = JSON.parse(options.body); return {ok: true, json: async () => ({})}; }
+  return {ok: true, json: async () => url.endsWith("display-items") ? {capacity: 6, groups: [{name: "一条パワコン", items: [
+    {id: "pv", field: "pv_power_w", label: "一条パワコン PV発電", short_label: "PV発電", group: "一条パワコン", selectable: true},
+    {id: "load", field: "load_power_w", label: "一条パワコン 住宅内消費電力", short_label: "住宅内消費電力", group: "一条パワコン", selectable: true},
+  ]}]} : {presets: {standard: {blocks: []}}}};
+};
+vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8"));
+setImmediate(async () => {
+  elements["#available-items"].listeners.click({target: {closest() { return {dataset: {addBlock: "一条パワコン"}}; }}});
+  await elements["#save-settings"].listeners.click();
+  console.log(JSON.stringify({selected: elements["#selected-items"].innerHTML, saved: savedPayload, status: elements["#settings-status"].textContent}));
+});
+'''
+    completed = subprocess.run(["node", "-e", harness, str(javascript_path)], check=True, capture_output=True, text=True)
+    result = json.loads(completed.stdout)
+
+    block = result["saved"]["presets"]["standard"]["blocks"][0]
+    assert block["primary_item_id"] == "load"
+    assert block["item_ids"] == ["load"]
+    assert "住宅内消費電力" in result["selected"]
+    assert result["status"] == "保存しました"
+    assert "ダッシュボードを確認" not in result["status"]
+    assert 'class="dashboard-check-link" href="/display">ダッシュボードを確認</a>' in template_path.read_text(encoding="utf-8")
+
+
+def test_existing_ichijo_block_primary_is_preserved(tmp_path: Path) -> None:
+    repository = SettingsRepository(tmp_path / "dashboard" / "settings.json")
+    settings = repository.save_payload(
+        _block_payload({
+            "block_id": "ichijo", "group": "一条パワコン", "title": "一条パワコン", "size": "small",
+            "layout_pattern": "compact", "primary_item_id": "pv", "item_ids": ["pv", "load"],
+        }),
+        {"pv": "一条パワコン", "load": "一条パワコン"},
+    )
+
+    assert settings.blocks[0].primary_item_id == "pv"
+    assert settings.blocks[0].item_ids == ("pv", "load")
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is required for admin UI tests")
