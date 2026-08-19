@@ -272,7 +272,8 @@ def test_clock_mode_switch_preserves_custom_and_recommended_and_renders_api(tmp_
     for element_id in ("clock-date", "clock-time", "clock-updated-at", "clock-freshness", "clock-supplemental"):
         assert f'id="{element_id}"' in clock_html
     assert 'class="dashboard clock-dashboard"' in clock_html
-    assert 'href="/admin/display"' in clock_html
+    assert 'href="/admin"' in clock_html
+    assert 'href="/admin/display"' not in clock_html
 
     assert client.post("/api/admin/dashboard-settings/mode", json={"mode": "custom"}).json()["presets"]["standard"]["blocks"] == original_custom
     assert client.post("/api/admin/dashboard-settings/mode", json={"mode": "recommended"}).json()["presets"]["recommended"]["blocks"] == original_recommended
@@ -1052,7 +1053,7 @@ def test_small_plug_block_uses_full_consumption_label_without_ellipsis(tmp_path:
     assert ".display-card--small.display-card--compact.display-card--items-1 .display-compact-reading { width: 100%; min-width: 0; }" in stylesheet
     assert ".display-card--small.display-card--compact.display-card--items-1 .display-secondary-item { grid-column: 1 / -1; }" in stylesheet
     assert ".display-card--small.display-card--compact.display-card--items-2 .display-card-compact-items" not in stylesheet
-    assert re.search(r"display\.css'\) }}\?v=20260819-clock-center-\d+", template)
+    assert re.search(r"display\.css'\) }}\?v=20260819-clock-navigation-\d+", template)
     assert ".display-card--small.display-card--compact.display-card--items-1 .display-secondary-label { overflow: visible; text-overflow: clip; white-space: nowrap; }" in stylesheet
 
 
@@ -1205,12 +1206,14 @@ def test_admin_display_css_allows_vertical_scroll_without_changing_kiosk_overflo
     assert "min-height: 46px;" in stylesheet
     assert '<html lang="ja" class="admin-document">' in admin_template
     assert '<body class="admin-body">' in admin_template
-    assert 'href="/display">ダッシュボードを確認</a>' in admin_template
-    assert re.search(r"admin_display\.js'\) }}\?v=20260819-clock-center-\d+", admin_template)
-    assert re.search(r"display\.css'\) }}\?v=20260819-clock-center-\d+", admin_template)
+    assert '保存してダッシュボードを確認' in admin_template
+    assert 'href="/display">ダッシュボードを確認</a>' not in admin_template
+    assert '>保存する<' not in admin_template
+    assert re.search(r"admin_display\.js'\) }}\?v=20260819-clock-navigation-\d+", admin_template)
+    assert re.search(r"display\.css'\) }}\?v=20260819-clock-navigation-\d+", admin_template)
     assert '<body class="admin-body">' not in display_template
-    assert re.search(r"display\.js'\) }}\?v=20260819-clock-center-\d+", display_template)
-    assert re.search(r"display\.css'\) }}\?v=20260819-clock-center-\d+", display_template)
+    assert re.search(r"display\.js'\) }}\?v=20260819-clock-navigation-\d+", display_template)
+    assert re.search(r"display\.css'\) }}\?v=20260819-clock-navigation-\d+", display_template)
     assert 'data-mode="clock"' in admin_template
     assert 'id="clock-summary"' in admin_template
     assert "mode !== \"clock\"" in (Path(__file__).parents[1] / "app" / "static" / "admin_display.js").read_text(encoding="utf-8")
@@ -1218,7 +1221,12 @@ def test_admin_display_css_allows_vertical_scroll_without_changing_kiosk_overflo
     assert "clock-dashboard" in display_template
     assert 'id="clock-updated-at"' in display_template
     assert 'id="clock-freshness"' in display_template
-    assert 'href="/admin/display"' in display_template
+    assert 'href="/admin"' in display_template
+    assert 'href="/admin/display"' not in display_template
+    admin_javascript = (Path(__file__).parents[1] / "app" / "static" / "admin_display.js").read_text(encoding="utf-8")
+    assert 'window.location.assign("/display")' in admin_javascript
+    assert 'mode, default_preset: "standard"' in admin_javascript
+    assert ".display-settings-page:has(#recommended-summary:not([hidden])) .display-settings-actions #save-settings" not in stylesheet
     assert ".clock-status-area" in stylesheet
     assert "font-size: clamp(176px, 24vw, 360px);" in stylesheet
     assert ".clock-reading + .clock-reading { border-left:" in stylesheet
@@ -1424,33 +1432,57 @@ def test_display_settings_ui_defaults_ichijo_primary_and_keeps_save_feedback_com
 const fs = require("fs"), vm = require("vm");
 function element() { return {innerHTML: "", textContent: "", disabled: false, listeners: {}, addEventListener(type, handler) { this.listeners[type] = handler; }, closest() { return null; }}; }
 const elements = Object.fromEntries(["#selected-items", "#available-items", "#capacity-status", "#settings-status", "#save-settings"].map(key => [key, element()]));
-let savedPayload;
+let savedPayload, redirect = null;
 global.document = {querySelector: selector => elements[selector]};
+global.window = {location: {assign(path) { redirect = path; }}};
 global.fetch = async (url, options = {}) => {
   if (options.method === "PUT") { savedPayload = JSON.parse(options.body); return {ok: true, json: async () => ({})}; }
   return {ok: true, json: async () => url.endsWith("display-items") ? {capacity: 6, groups: [{name: "一条パワコン", items: [
     {id: "pv", field: "pv_power_w", label: "一条パワコン PV発電", short_label: "PV発電", group: "一条パワコン", selectable: true},
     {id: "load", field: "load_power_w", label: "一条パワコン 住宅内消費電力", short_label: "住宅内消費電力", group: "一条パワコン", selectable: true},
-  ]}]} : {presets: {standard: {blocks: []}}}};
+  ]}]} : {version: 3, mode: "custom", presets: {standard: {blocks: []}, recommended: {blocks: []}, clock: {item_ids: []}}}};
 };
 vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8"));
 setImmediate(async () => {
   elements["#available-items"].listeners.click({target: {closest() { return {dataset: {addBlock: "一条パワコン"}}; }}});
   await elements["#save-settings"].listeners.click();
-  console.log(JSON.stringify({selected: elements["#selected-items"].innerHTML, saved: savedPayload, status: elements["#settings-status"].textContent}));
+  console.log(JSON.stringify({selected: elements["#selected-items"].innerHTML, saved: savedPayload, status: elements["#settings-status"].textContent, redirect}));
 });
 '''
     completed = subprocess.run(["node", "-e", harness, str(javascript_path)], check=True, capture_output=True, text=True)
     result = json.loads(completed.stdout)
 
     block = result["saved"]["presets"]["standard"]["blocks"][0]
+    assert result["saved"]["mode"] == "custom"
     assert block["primary_item_id"] == "load"
     assert block["item_ids"] == ["load"]
     assert "住宅内消費電力" in result["selected"]
     assert 'option value="load" selected' in result["selected"]
-    assert result["status"] == "保存しました"
-    assert "ダッシュボードを確認" not in result["status"]
-    assert 'class="dashboard-check-link" href="/display">ダッシュボードを確認</a>' in template_path.read_text(encoding="utf-8")
+    assert result["redirect"] == "/display"
+    assert result["status"] == ""
+    template = template_path.read_text(encoding="utf-8")
+    assert 'id="save-settings" class="primary">保存してダッシュボードを確認</button>' in template
+    assert 'class="dashboard-check-link"' not in template
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is required for admin UI tests")
+def test_display_settings_save_failure_keeps_the_editor_open() -> None:
+    javascript_path = Path(__file__).parents[1] / "app" / "static" / "admin_display.js"
+    harness = r'''
+const fs = require("fs"), vm = require("vm");
+function element() { return {innerHTML: "", textContent: "", disabled: false, listeners: {}, addEventListener(type, handler) { this.listeners[type] = handler; }, closest() { return null; }}; }
+const elements = Object.fromEntries(["#selected-items", "#available-items", "#capacity-status", "#settings-status", "#save-settings"].map(key => [key, element()]));
+let redirect = null;
+global.document = {querySelector: selector => elements[selector]};
+global.window = {location: {assign(path) { redirect = path; }}};
+global.fetch = async (url, options = {}) => options.method === "PUT" ? {ok: false, json: async () => ({detail: "保存できません"})} : {ok: true, json: async () => url.endsWith("display-items") ? {capacity: 6, groups: []} : {presets: {standard: {blocks: []}}}};
+vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8"));
+setImmediate(async () => { await elements["#save-settings"].listeners.click(); console.log(JSON.stringify({redirect, status: elements["#settings-status"].textContent, disabled: elements["#save-settings"].disabled})); });
+'''
+    completed = subprocess.run(["node", "-e", harness, str(javascript_path)], check=True, capture_output=True, text=True)
+    result = json.loads(completed.stdout)
+
+    assert result == {"redirect": None, "status": "保存できません", "disabled": False}
 
 
 def test_existing_ichijo_block_primary_is_preserved(tmp_path: Path) -> None:
