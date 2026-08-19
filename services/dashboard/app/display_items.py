@@ -225,7 +225,7 @@ def _display_item(
     value = "--"
     if latest is not None and now is not None:
         received_at = _parse_time(latest.received_at)
-        freshness = freshness_for(received_at, now) if received_at else FreshnessStatus.UNAVAILABLE
+        freshness = freshness_for(received_at, now, definition.expected_update_interval_seconds) if received_at else FreshnessStatus.UNAVAILABLE
         if freshness != FreshnessStatus.UNAVAILABLE:
             value = format_value(latest.value, definition)
     return DisplayItem(

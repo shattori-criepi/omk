@@ -100,6 +100,9 @@ def _recommended_item(item_id: str, group: str, role: str | None) -> object:
 def test_recommended_blocks_rank_semantic_groups_and_exclude_ichijo() -> None:
     candidates = [
         _recommended_item("grid", "電力メーター（Bルート）", "grid_power"),
+        _recommended_item("import", "電力メーター（Bルート）", "grid_import_energy"),
+        _recommended_item("import-total", "電力メーター（Bルート）", "grid_import_energy_cumulative"),
+        _recommended_item("export", "電力メーター（Bルート）", "grid_export_energy"),
         _recommended_item("temp", "multi", "temperature"),
         _recommended_item("humidity", "multi", "humidity"),
         _recommended_item("co2", "multi", "co2"),
@@ -114,6 +117,8 @@ def test_recommended_blocks_rank_semantic_groups_and_exclude_ichijo() -> None:
 
     assert [block.group for block in blocks] == ["電力メーター（Bルート）", "multi", "plug-001"]
     assert [block.size for block in blocks] == ["large", "medium", "small"]
+    assert blocks[0].primary_item_id == "grid"
+    assert blocks[0].item_ids == ("grid", "import")
     assert blocks[1].item_ids[:3] == ("temp", "humidity", "co2")
     assert all(block.group != "一条パワコン" for block in blocks)
 
@@ -630,6 +635,27 @@ def test_freshness_status_boundaries() -> None:
     assert freshness_for(datetime(2026, 7, 30, 12, 1, tzinfo=JST), NOW) == FreshnessStatus.NORMAL
 
 
+def test_periodic_energy_freshness_uses_its_30_minute_cadence() -> None:
+    interval = 30 * 60
+    # Instantaneous power keeps its existing short freshness window.
+    assert freshness_for(NOW - timedelta(minutes=7), NOW) == FreshnessStatus.DELAYED
+    assert freshness_for(NOW - timedelta(minutes=11), NOW) == FreshnessStatus.UNAVAILABLE
+    assert freshness_for(NOW - timedelta(minutes=44, seconds=59), NOW, interval) == FreshnessStatus.NORMAL
+    assert freshness_for(NOW - timedelta(minutes=45, seconds=1), NOW, interval) == FreshnessStatus.DELAYED
+    assert freshness_for(NOW - timedelta(minutes=89, seconds=59), NOW, interval) == FreshnessStatus.DELAYED
+    assert freshness_for(NOW - timedelta(minutes=90, seconds=1), NOW, interval) == FreshnessStatus.UNAVAILABLE
+
+
+def test_broute_energy_candidates_keep_30_minute_values_fresh(tmp_path: Path) -> None:
+    grid = _write_generic_item(tmp_path, "g", topic="omk/broute/power", device_id="broute", field="net_power_w", value=100, received_at=NOW - timedelta(minutes=7))
+    imported = _write_generic_item(tmp_path, "i", topic="omk/broute/energy", device_id="broute", field="import_energy_kwh", value=1.2, received_at=NOW - timedelta(minutes=40))
+    candidates = {item.id: item for item in display_candidates(DisplayRepository(tmp_path), NOW)}
+
+    assert candidates[grid].freshness == FreshnessStatus.DELAYED
+    assert candidates[imported].freshness == FreshnessStatus.NORMAL
+    assert definition_for("import_energy_kwh").expected_update_interval_seconds == 30 * 60
+
+
 def test_health_returns_ok() -> None:
     response = client.get("/health")
 
@@ -817,6 +843,19 @@ def test_energy_blocks_keep_multiple_broute_and_ichijo_values(tmp_path: Path) ->
     assert (blocks[1].primary.value, blocks[1].secondary[0].value) == ("1.10", "1.21")
 
 
+def test_small_plug_block_uses_full_consumption_label_without_ellipsis(tmp_path: Path) -> None:
+    plug = _write_generic_item(tmp_path, "p", topic="omk/plug-001/power", device_id="plug-001", field="power_w", value=12.3, received_at=NOW)
+    block = DisplayBlock("plug", "plug-001", "plug-001", "small", plug, (plug,), "compact")
+    rendered = selected_blocks(DisplayRepository(tmp_path), (block,), NOW)[0]
+    stylesheet = (Path(__file__).parents[1] / "app" / "static" / "display.css").read_text(encoding="utf-8")
+    template = (Path(__file__).parents[1] / "app" / "templates" / "display.html").read_text(encoding="utf-8")
+
+    assert rendered.primary.short_label == "消費電力"
+    assert "{{ block.primary.short_label or block.primary.label }}" in template
+    assert ".display-card--small.display-card--compact.display-card--items-1 .display-secondary-item { grid-column: 1 / -1; }" in stylesheet
+    assert ".display-card--small.display-card--compact.display-card--items-1 .display-secondary-label { overflow: visible; text-overflow: clip; white-space: nowrap; }" in stylesheet
+
+
 def test_power_flow_default_group_title_is_rendered_as_ichijo_power_conditioner(tmp_path: Path) -> None:
     load = _write_generic_item(tmp_path, "t", topic="omk/ichijo/power-flow", device_id="ichijo", field="load_power_w", value=1103, received_at=NOW)
     block = DisplayBlock("ichijo", "一条パワコン", "一条パワコン", "large", load, (load,), "hero")
@@ -997,6 +1036,9 @@ def test_display_pattern_css_keeps_only_hero_primary_large_and_fits_the_viewport
     assert ".display-compact-reading { display: flex; align-items: baseline;" in stylesheet
     assert "{% elif block.layout_pattern == 'compact' %}" in template
     assert 'class="display-card-compact-items"' in template
+    assert '{{ block.primary.short_label or block.primary.label }}' in template
+    assert ".display-card--small.display-card--compact.display-card--items-1 .display-secondary-item { grid-column: 1 / -1; }" in stylesheet
+    assert ".display-card--small.display-card--compact.display-card--items-1 .display-secondary-label { overflow: visible; text-overflow: clip; white-space: nowrap; }" in stylesheet
 
 
 def test_dynamic_display_api_uses_selected_order_and_keeps_unavailable_slot(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
