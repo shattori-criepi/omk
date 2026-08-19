@@ -373,7 +373,7 @@ def test_broken_or_missing_latest_data_does_not_break_display(tmp_path: Path, mo
     assert "Traceback" not in response.text
 
 
-def test_display_api_handles_legacy_latest_files_with_standard_blocks(tmp_path: Path, monkeypatch) -> None:
+def test_display_api_handles_legacy_latest_files_with_recommended_blocks(tmp_path: Path, monkeypatch) -> None:
     latest_root = tmp_path / "latest"
     current_time = datetime.now(JST)
     _write_latest(
@@ -419,7 +419,8 @@ def test_display_api_handles_legacy_latest_files_with_standard_blocks(tmp_path: 
 
     assert response.status_code == 200
     snapshot = response.json()
-    assert snapshot["mode"] == "standard"
+    # No settings file represents a new OMK, which defaults to recommended.
+    assert snapshot["mode"] == "recommended"
     assert isinstance(snapshot["blocks"], list)
     assert snapshot["freshness"] in {"normal", "delayed", "unavailable"}
     assert "has_ichijo_power_flow" not in snapshot
@@ -478,7 +479,7 @@ def test_hero_display_html_and_javascript_expose_polling_targets(tmp_path: Path,
     assert "DISPLAY_POLL_INTERVAL_MS = 10_000" in javascript
     assert "headerWeekday.textContent" in javascript
     assert 'WEEKDAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]' in javascript
-    assert 'data.mode === "standard"' in javascript
+    assert '["standard", "custom", "recommended"].includes(data.mode)' in javascript
     assert "Array.isArray(data.blocks)" in javascript
     assert "data-item-id" in javascript
     assert "item.short_label || item.label" in javascript
@@ -575,7 +576,7 @@ global.document = {documentElement: {classList: classList()}, querySelector(sele
 global.window = {setInterval() {}};
 vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8") + "\nglobalThis.__displayTest = { updateDisplay };");
 const item = (id, label, value, unit, freshness) => ({id, short_label: label, label, value, unit, freshness});
-const snapshot = (vocValue, vocFreshness) => ({mode: "standard", blocks: [{id: "sen66", freshness: "normal", primary: item("temperature", "温度", "27.2", "°C", "normal"), secondary: [item("voc", "VOC Index", vocValue, "", vocFreshness)]}], updated_at: "", updated_at_iso: "", freshness: "normal"});
+const snapshot = (vocValue, vocFreshness) => ({mode: "custom", blocks: [{id: "sen66", freshness: "normal", primary: item("temperature", "温度", "27.2", "°C", "normal"), secondary: [item("voc", "VOC Index", vocValue, "", vocFreshness)]}], updated_at: "", updated_at_iso: "", freshness: "normal"});
 const vocUnit = cards.voc.roles.unit;
 const states = [];
 const record = () => states.push({value: cards.voc.roles.value.textContent, unit: cards.voc.roles.unit.textContent, unitHidden: cards.voc.roles.unit.hidden, classes: cards.voc.classList.values()});
@@ -779,7 +780,10 @@ def test_v1_settings_migrate_to_grouped_blocks(tmp_path: Path) -> None:
     assert [(block.group, block.item_ids, block.primary_item_id) for block in settings.blocks] == [
         ("SEN66", ("temp", "humidity"), "temp"), ("電力メーター（Bルート）", ("grid",), "grid"),
     ]
-    assert json.loads(path.read_text(encoding="utf-8"))["version"] == 2
+    migrated = json.loads(path.read_text(encoding="utf-8"))
+    assert migrated["version"] == 3
+    assert migrated["mode"] == "custom"
+    assert migrated["presets"]["standard"]["blocks"] == [block.as_dict() for block in settings.blocks]
 
 
 def test_display_block_resolves_primary_and_multiple_secondary_values(tmp_path: Path) -> None:
@@ -958,11 +962,11 @@ def test_admin_display_css_allows_vertical_scroll_without_changing_kiosk_overflo
     assert '<html lang="ja" class="admin-document">' in admin_template
     assert '<body class="admin-body">' in admin_template
     assert 'href="/display">ダッシュボードを確認</a>' in admin_template
-    assert "admin_display.js') }}?v=20260819-5" in admin_template
-    assert "display.css') }}?v=20260819-admin-5" in admin_template
+    assert re.search(r"admin_display\.js'\) }}\?v=20260819-display-mode-\d+", admin_template)
+    assert re.search(r"display\.css'\) }}\?v=20260819-display-mode-\d+", admin_template)
     assert '<body class="admin-body">' not in display_template
-    assert "display.js') }}?v=20260819-strip-unit-stability-1" in display_template
-    assert "display.css') }}?v=20260819-strip-unit-stability-1" in display_template
+    assert re.search(r"display\.js'\) }}\?v=20260819-display-mode-\d+", display_template)
+    assert re.search(r"display\.css'\) }}\?v=20260819-display-mode-\d+", display_template)
     assert "overflow: hidden;" in stylesheet
 
 
@@ -1007,7 +1011,7 @@ def test_dynamic_display_api_uses_selected_order_and_keeps_unavailable_slot(tmp_
     ))
     assert put.status_code == 200
     snapshot = client.get("/api/display").json()
-    assert snapshot["mode"] == "standard"
+    assert snapshot["mode"] == "custom"
     assert [block["id"] for block in snapshot["blocks"]] == ["old", "fresh"]
     assert snapshot["blocks"][0]["primary"]["value"] == "--"
     assert snapshot["blocks"][0]["primary"]["freshness"] == "unavailable"
