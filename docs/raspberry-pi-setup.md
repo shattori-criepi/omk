@@ -87,12 +87,12 @@ cd omk
 必要な処理だけが`sudo`を使用します。
 
 ```bash
-./scripts/setup-omk-gateway.sh
+./scripts/setup-omk-gateway.sh --with-base
 ```
 
 Onyx、BLE、Bルート、GUI kioskを使う場合は、それぞれ`--with-soracom`、`--with-ble`、
 `--with-broute`、`--with-kiosk`を追加します。実行順だけ確認する場合は`--dry-run`を使えます。
-初回のOS更新またはDocker group追加後に再起動・再ログインが必要な場合、上位スクリプトはそこで安全に停止します。再接続後に同じコマンドを再実行してください。
+初回のOS更新またはDocker group追加後に再起動・再ログインが必要な場合、上位スクリプトはそこで安全に停止します。再接続後は`--with-base`を外して同じ任意オプションを再実行してください。既存Gatewayでの再実行もbase setupを自動実行しないため、通常は`--with-base`を付けません。OS/Dockerのbase setupを明示的に再実行する場合だけ`--with-base`を付けます。
 
 ## 6. スクリプトが実行する処理
 

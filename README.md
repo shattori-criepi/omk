@@ -30,8 +30,8 @@ Windows PCです。初期設定はSSHで行えるため、キーボードとデ�
 1. Raspberry Pi ImagerでOS、`omkdev`ユーザー、SSH、ネットワーク、地域設定を準備する
 2. Raspberry Piを起動し、WindowsからSSH接続する
 3. `/home/omkdev/projects/omk`へこのリポジトリをcloneする
-4. 標準入口として`./scripts/setup-omk-gateway.sh`を実行する。Onyx、BLE、Bルート、GUI kioskが必要な場合はそれぞれ`--with-soracom`、`--with-ble`、`--with-broute`、`--with-kiosk`を付ける
-5. 初回のOS更新・Docker group追加で再ログインまたは再起動が求められた場合は、その後に同じコマンドを再実行して続行する
+4. 新規Gatewayでは標準入口として`./scripts/setup-omk-gateway.sh --with-base`を実行する。Onyx、BLE、Bルート、GUI kioskが必要な場合はそれぞれ`--with-soracom`、`--with-ble`、`--with-broute`、`--with-kiosk`を付ける
+5. 初回のOS更新・Docker group追加で再ログインまたは再起動が求められた場合は、その後に`--with-base`を外して同じオプションを再実行して続行する。既存Gatewayでの再実行も、通常は`--with-base`を付けない
 
 `setup-raspberry-pi.sh`はOS更新、Docker、データ保存領域までを準備します。計測・表示・
 周辺機器の各サービスは個別setup scriptとして直接実行もできます。`setup-system-manager.sh`はDashboardの

@@ -10,6 +10,7 @@ WITH_SORACOM=false
 WITH_BLE=false
 WITH_BROUTE=false
 WITH_KIOSK=false
+WITH_BASE=false
 DRY_RUN=false
 
 usage() {
@@ -20,6 +21,7 @@ Build a standard Raspberry Pi 4/5 (64-bit Raspberry Pi OS) OMK Gateway by
 calling the individual, independently rerunnable setup scripts in order.
 
 Options:
+  --with-base     Run the base OS/Docker setup (required for a new Gateway).
   --with-soracom  Configure SORACOM Onyx after the base host setup.
   --with-ble      Install the optional BLE sensor-manager host service.
   --with-broute   Install the optional B-route meter host service.
@@ -28,8 +30,9 @@ Options:
   -h, --help      Show this help.
 
 The OMK AP step prompts for a PSK without placing it in argv or logs. It may
-disconnect SSH when it activates wlan0. If base setup requests a reboot or
-re-login, this script stops safely; reconnect and run it again to resume.
+disconnect SSH when it activates wlan0. Existing Gateways skip base setup by
+default. If --with-base requests a reboot or re-login, this script stops
+safely; reconnect and rerun without --with-base to continue.
 EOF
 }
 
@@ -38,6 +41,7 @@ fail() { log "ERROR: $*" >&2; exit 1; }
 
 while (($#)); do
   case "$1" in
+    --with-base) WITH_BASE=true ;;
     --with-soracom) WITH_SORACOM=true ;;
     --with-ble) WITH_BLE=true ;;
     --with-broute) WITH_BROUTE=true ;;
@@ -52,9 +56,8 @@ done
 [[ -f "${SCRIPT_DIR}/setup-raspberry-pi.sh" ]] || fail "Run from a complete OMK repository."
 [[ "$(uname -s)" == Linux ]] || fail 'Linux is required.'
 
-steps=(
-  'setup-raspberry-pi.sh|Base OS, Docker, and runtime directories'
-)
+steps=()
+"${WITH_BASE}" && steps+=('setup-raspberry-pi.sh|Base OS, Docker, and runtime directories')
 "${WITH_SORACOM}" && steps+=('setup-soracom-onyx.sh|Optional SORACOM Onyx')
 steps+=(
   'setup-wifi-access-point.sh --activate|Required OMK AP (interactive PSK; may disconnect SSH)'
@@ -67,6 +70,9 @@ steps+=(
 "${WITH_KIOSK}" && steps+=('setup-dashboard-kiosk.sh|Optional GUI kiosk')
 
 log "Repository root: ${OMK_ROOT}"
+if ! "${WITH_BASE}"; then
+  log 'Base setup: skipped (use --with-base for a new Gateway or an explicit base refresh).'
+fi
 log 'Selected setup sequence:'
 for index in "${!steps[@]}"; do
   IFS='|' read -r command description <<<"${steps[index]}"
@@ -85,18 +91,31 @@ run_step() {
   "${SCRIPT_DIR}/${argv[0]}" "${argv[@]:1}"
 }
 
-run_step 'setup-raspberry-pi.sh' 'Base OS, Docker, and runtime directories'
-if [[ -e /var/run/reboot-required ]]; then
-  log 'A reboot is required. Reboot, reconnect, then rerun this command to resume.'
-  exit 0
-fi
-if ! id -nG "${SUDO_USER:-$(id -un)}" | tr ' ' '\n' | grep -Fxq docker; then
-  log 'Docker group membership needs a new login session. Re-login, then rerun this command to resume.'
-  exit 0
+base_reboot_is_required() {
+  local current_kernel latest_kernel
+  [[ -e /var/run/reboot-required ]] && return 0
+  current_kernel="$(uname -r)"
+  latest_kernel="$(find /lib/modules -mindepth 2 -maxdepth 2 -type d -name kernel -printf '%h\n' 2>/dev/null | sed 's|.*/||' | sort -V | tail -n 1)"
+  [[ -n "${latest_kernel}" && "${latest_kernel}" != "${current_kernel}" ]] || return 1
+  [[ "$(printf '%s\n%s\n' "${current_kernel}" "${latest_kernel}" | sort -V | tail -n 1)" == "${latest_kernel}" ]]
+}
+
+if "${WITH_BASE}"; then
+  run_step 'setup-raspberry-pi.sh' 'Base OS, Docker, and runtime directories'
+  if base_reboot_is_required; then
+    log 'A reboot is required. Reboot, reconnect, then rerun this command without --with-base to resume.'
+    exit 0
+  fi
+  if ! id -nG "${SUDO_USER:-$(id -un)}" | tr ' ' '\n' | grep -Fxq docker; then
+    log 'Docker group membership needs a new login session. Re-login, then rerun this command without --with-base to resume.'
+    exit 0
+  fi
 fi
 
 for index in "${!steps[@]}"; do
-  ((index == 0)) && continue
+  if "${WITH_BASE}" && ((index == 0)); then
+    continue
+  fi
   IFS='|' read -r command description <<<"${steps[index]}"
   run_step "${command}" "${description}"
 done
