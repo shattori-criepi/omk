@@ -29,10 +29,11 @@ Options:
   --dry-run       Print the selected sequence without making changes.
   -h, --help      Show this help.
 
-The OMK AP step prompts for a PSK without placing it in argv or logs. It may
-disconnect SSH when it activates wlan0. Existing Gateways skip base setup by
-default. If --with-base requests a reboot or re-login, this script stops
-safely; reconnect and rerun without --with-base to continue.
+The OMK AP step automatically generates a PSK on first setup, so no PSK input
+is required; an existing PSK is preserved. It may disconnect SSH when it
+activates wlan0. Existing Gateways skip base setup by default. If --with-base
+requests a reboot or re-login, this script stops safely; reconnect and rerun
+without --with-base to continue.
 EOF
 }
 
@@ -60,7 +61,7 @@ steps=()
 "${WITH_BASE}" && steps+=('setup-raspberry-pi.sh|Base OS, Docker, and runtime directories')
 "${WITH_SORACOM}" && steps+=('setup-soracom-onyx.sh|Optional SORACOM Onyx')
 steps+=(
-  'setup-wifi-access-point.sh --activate|Required OMK AP (interactive PSK; may disconnect SSH)'
+  'setup-wifi-access-point.sh --activate|Required OMK AP (automatic PSK; may disconnect SSH)'
   'setup-system-manager.sh|Required Dashboard host API and token environment'
   'setup-data-collection.sh|Required Docker collection and Dashboard services'
   'setup-data-transformer.sh|Required JSONL to Parquet timer'
