@@ -17,6 +17,7 @@ ENVIRONMENT_ROLE_SCORE = {
 }
 ENVIRONMENT_ROLE_ORDER = ("temperature", "humidity", "co2", "pm25", "voc", "nox")
 OTHER_ROLE_SCORE = {"device_power": 15, "contact": 10, "motion": 8}
+BROUTE_IMPORT_ROLES = ("grid_import_energy", "grid_import_energy_cumulative")
 
 
 def _items_by_group(candidates: list[DisplayItem]) -> dict[str, list[DisplayItem]]:
@@ -54,6 +55,19 @@ def _block(group: str, items: list[DisplayItem], size: str, index: int) -> Displ
     )
 
 
+def _broute_block(items: list[DisplayItem], index: int) -> DisplayBlock | None:
+    """Keep the automatic B-route card useful without exposing specialist data."""
+    primary = next((item for item in items if item.semantic_role == "grid_power"), None)
+    if primary is None:
+        return None
+    secondary = next((item for role in BROUTE_IMPORT_ROLES for item in items if item.semantic_role == role), None)
+    selected = (primary, secondary) if secondary is not None else (primary,)
+    return DisplayBlock(
+        block_id=f"recommended_{index}", group=BROUTE_GROUP, title=BROUTE_GROUP, size="large",
+        primary_item_id=primary.id, item_ids=tuple(item.id for item in selected), layout_pattern="hero",
+    )
+
+
 def recommended_blocks(candidates: list[DisplayItem]) -> list[DisplayBlock]:
     """Produce at most three persisted blocks without using transient readings.
 
@@ -68,7 +82,8 @@ def recommended_blocks(candidates: list[DisplayItem]) -> list[DisplayBlock]:
     environments.sort(key=lambda entry: (-entry[0], entry[1]))
     used_groups: set[str] = set()
     chosen: list[tuple[str, list[DisplayItem]]] = []
-    if broute:
+    broute_block = _broute_block(broute, 1) if broute else None
+    if broute_block is not None:
         chosen.append((BROUTE_GROUP, broute))
         used_groups.add(BROUTE_GROUP)
     if environments:
@@ -93,4 +108,7 @@ def recommended_blocks(candidates: list[DisplayItem]) -> list[DisplayBlock]:
         chosen.append((others[0][1], others[0][2]))
     chosen = chosen[:3]
     sizes = ("large", "large") if len(chosen) <= 2 else ("large", "medium", "small")
-    return [_block(group, items, sizes[index], index + 1) for index, (group, items) in enumerate(chosen)]
+    blocks = [_block(group, items, sizes[index], index + 1) for index, (group, items) in enumerate(chosen)]
+    if broute_block is not None:
+        blocks[0] = broute_block
+    return blocks

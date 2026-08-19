@@ -184,13 +184,25 @@ def get_display_view_model(
     )
 
 
-def freshness_for(measured_at: datetime | None, now: datetime) -> FreshnessStatus:
+def freshness_for(measured_at: datetime | None, now: datetime, expected_update_interval_seconds: int | None = None) -> FreshnessStatus:
+    """Return freshness using the item's expected publishing cadence.
+
+    Instantaneous values keep the established 6/10 minute thresholds.  A
+    periodic value is normal for one and a half intervals and unavailable only
+    after three intervals, allowing the B-route 30-minute EA/EB cadence a
+    normal window through 45 minutes and a delayed window through 90 minutes.
+    """
     if measured_at is None:
         return FreshnessStatus.UNAVAILABLE
     age_seconds = max(0.0, (_as_jst(now) - _as_jst(measured_at)).total_seconds())
-    if age_seconds <= NORMAL_MAX_AGE_SECONDS:
+    normal_max_age = NORMAL_MAX_AGE_SECONDS
+    delayed_max_age = DELAYED_MAX_AGE_SECONDS
+    if expected_update_interval_seconds is not None:
+        normal_max_age = max(normal_max_age, expected_update_interval_seconds * 1.5)
+        delayed_max_age = max(delayed_max_age, expected_update_interval_seconds * 3)
+    if age_seconds <= normal_max_age:
         return FreshnessStatus.NORMAL
-    if age_seconds <= DELAYED_MAX_AGE_SECONDS:
+    if age_seconds <= delayed_max_age:
         return FreshnessStatus.DELAYED
     return FreshnessStatus.UNAVAILABLE
 
