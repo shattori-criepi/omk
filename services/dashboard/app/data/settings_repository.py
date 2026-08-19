@@ -72,6 +72,7 @@ class DashboardSettings:
     mode: str
     custom_blocks: tuple[DisplayBlock, ...]
     recommended_blocks: tuple[DisplayBlock, ...]
+    clock_item_ids: tuple[str, ...] = ()
 
     @property
     def blocks(self) -> tuple[DisplayBlock, ...]:
@@ -91,6 +92,7 @@ class DashboardSettings:
             "presets": {
                 "standard": {"blocks": [block.as_dict() for block in self.custom_blocks]},
                 "recommended": {"blocks": [block.as_dict() for block in self.recommended_blocks]},
+                "clock": {"item_ids": list(self.clock_item_ids)},
             },
         }
 
@@ -165,7 +167,10 @@ class SettingsRepository:
         if not isinstance(recommended_raw, list):
             raise SettingsError("おすすめプリセット設定が正しくありません")
         recommended, recommended_migrated = self._parse_blocks(recommended_raw, available_groups, allow_missing, item_migrations)
-        settings = DashboardSettings(mode, tuple(blocks), tuple(recommended))
+        clock_raw = payload.get("presets", {}).get("clock", {}).get("item_ids", [])
+        if not isinstance(clock_raw, list) or any(not isinstance(item_id, str) for item_id in clock_raw):
+            raise SettingsError("時計プリセット設定が正しくありません")
+        settings = DashboardSettings(mode, tuple(blocks), tuple(recommended), tuple(clock_raw))
         self._validate(settings, available_groups, allow_missing=allow_missing)
         return settings, migrated or recommended_migrated
 
@@ -233,6 +238,10 @@ class SettingsRepository:
             raise SettingsError("表示モードが正しくありません")
         SettingsRepository._validate_blocks(settings.custom_blocks, available_groups, allow_missing=allow_missing)
         SettingsRepository._validate_blocks(settings.recommended_blocks, available_groups, allow_missing=allow_missing)
+        if len(settings.clock_item_ids) > 4 or len(settings.clock_item_ids) != len(set(settings.clock_item_ids)):
+            raise SettingsError("時計表示項目が正しくありません")
+        if not allow_missing and any(item_id not in available_groups for item_id in settings.clock_item_ids):
+            raise SettingsError("存在しない時計表示項目が含まれています")
 
     @staticmethod
     def _validate_blocks(blocks: tuple[DisplayBlock, ...], available_groups: dict[str, str | frozenset[str]], *, allow_missing: bool) -> None:

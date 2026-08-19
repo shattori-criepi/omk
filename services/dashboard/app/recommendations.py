@@ -16,6 +16,7 @@ ENVIRONMENT_ROLE_SCORE = {
     "pm25": 12, "voc": 10, "nox": 10,
 }
 ENVIRONMENT_ROLE_ORDER = ("temperature", "humidity", "co2", "pm25", "voc", "nox")
+CLOCK_ENVIRONMENT_ROLES = frozenset({"temperature", "humidity", "co2"})
 OTHER_ROLE_SCORE = {"device_power": 15, "contact": 10, "motion": 8}
 
 
@@ -39,6 +40,22 @@ def environment_group_score(items: list[DisplayItem]) -> int:
 def _ordered_environment_items(items: list[DisplayItem]) -> list[DisplayItem]:
     order = {role: index for index, role in enumerate(ENVIRONMENT_ROLE_ORDER)}
     return sorted(items, key=lambda item: (order.get(item.semantic_role, 99), item.short_label, item.id))
+
+
+def clock_item_ids(candidates: list[DisplayItem]) -> tuple[str, ...]:
+    """Persist the clock's sparse readings using the same environment ranking."""
+    groups = _items_by_group(candidates)
+    broute = groups.get(BROUTE_GROUP, [])
+    environments = [(environment_group_score(items), group, items) for group, items in groups.items() if group not in {BROUTE_GROUP, "一条パワコン"}]
+    environments = [entry for entry in environments if entry[0] > 0]
+    environments.sort(key=lambda entry: (-entry[0], entry[1]))
+    selected: list[DisplayItem] = []
+    if environments:
+        selected.extend(item for item in _ordered_environment_items(environments[0][2]) if item.semantic_role in CLOCK_ENVIRONMENT_ROLES)
+    grid_power = next((item for item in broute if item.semantic_role == "grid_power"), None)
+    if grid_power is not None:
+        selected.append(grid_power)
+    return tuple(item.id for item in selected[:4])
 
 
 def _block(group: str, items: list[DisplayItem], size: str, index: int) -> DisplayBlock:
