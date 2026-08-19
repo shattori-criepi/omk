@@ -88,9 +88,10 @@ run_privileged() {
 
 install_ap_isolation_firewall() {
   # NetworkManager's `shared` mode supplies DHCP/DNS, but may also add NAT and
-  # forwarding rules.  This independent, earlier-priority nftables chain drops
-  # every routed packet originating on the AP, regardless of the WAN interface.
-  # Traffic terminating on the Gateway never enters the forward hook.
+  # forwarding rules. Docker publishes host ports by DNATing them to a bridge,
+  # so admit only conntrack-DNAT traffic before dropping all other forwarding
+  # from the AP. This permits MQTT/Dashboard host-port publishing without
+  # depending on Docker's generated bridge name.
   local temporary_config temporary_unit
   if [[ "${DRY_RUN}" != yes ]]; then
     command -v nft >/dev/null 2>&1 || fail "nft is required to isolate OMK AP clients. Install the nftables package and re-run this script."
@@ -102,6 +103,7 @@ install_ap_isolation_firewall() {
 table inet omk_ap_isolation {
   chain forward {
     type filter hook forward priority -100; policy accept;
+    iifname "${INTERFACE}" ct status dnat counter accept comment "Allow Gateway Docker published ports after DNAT"
     iifname "${INTERFACE}" oifname != "${INTERFACE}" counter drop comment "OMK AP clients must not route outside the AP"
   }
 }
@@ -114,9 +116,11 @@ Wants=NetworkManager.service
 
 [Service]
 Type=oneshot
+ExecStartPre=-/usr/sbin/nft delete table inet omk_ap_isolation
 ExecStart=/usr/sbin/nft -f ${FIREWALL_CONFIG_PATH}
+ExecReload=-/usr/sbin/nft delete table inet omk_ap_isolation
 ExecReload=/usr/sbin/nft -f ${FIREWALL_CONFIG_PATH}
-ExecStop=/usr/sbin/nft delete table inet omk_ap_isolation
+ExecStop=-/usr/sbin/nft delete table inet omk_ap_isolation
 RemainAfterExit=yes
 
 [Install]
@@ -129,9 +133,12 @@ EOF
     "${SUDO[@]}" install -o root -g root -m 0644 "${temporary_config}" "${FIREWALL_CONFIG_PATH}"
     "${SUDO[@]}" install -o root -g root -m 0644 "${temporary_unit}" "${FIREWALL_UNIT_PATH}"
     "${SUDO[@]}" systemctl daemon-reload
-    "${SUDO[@]}" systemctl enable --now omk-ap-isolation.service
+    # Restart even when already active. This both applies the revised rules and
+    # replaces any operator-added temporary rule in this dedicated table.
+    "${SUDO[@]}" systemctl enable omk-ap-isolation.service
+    "${SUDO[@]}" systemctl restart omk-ap-isolation.service
     "${SUDO[@]}" nft list table inet omk_ap_isolation >/dev/null
-    log "Installed nftables AP isolation: forwarded traffic from ${INTERFACE} to every other interface is dropped."
+    log "Installed nftables AP isolation: Docker-published DNAT traffic is allowed; other forwarded traffic from ${INTERFACE} is dropped."
   fi
   rm -f -- "${temporary_config}" "${temporary_unit}"
   trap - RETURN
