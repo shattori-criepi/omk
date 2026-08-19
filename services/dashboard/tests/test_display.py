@@ -1014,7 +1014,7 @@ def test_small_plug_block_uses_full_consumption_label_without_ellipsis(tmp_path:
     assert ".display-card--small.display-card--compact.display-card--items-1 .display-compact-reading { width: 100%; min-width: 0; }" in stylesheet
     assert ".display-card--small.display-card--compact.display-card--items-1 .display-secondary-item { grid-column: 1 / -1; }" in stylesheet
     assert ".display-card--small.display-card--compact.display-card--items-2 .display-card-compact-items" not in stylesheet
-    assert "display.css') }}?v=20260819-display-mode-3" in template
+    assert re.search(r"display\.css'\) }}\?v=20260819-clock-mode-\d+", template)
     assert ".display-card--small.display-card--compact.display-card--items-1 .display-secondary-label { overflow: visible; text-overflow: clip; white-space: nowrap; }" in stylesheet
 
 
@@ -1176,7 +1176,8 @@ def test_admin_display_css_allows_vertical_scroll_without_changing_kiosk_overflo
     assert 'data-mode="clock"' in admin_template
     assert 'id="clock-summary"' in admin_template
     assert "mode !== \"clock\"" in (Path(__file__).parents[1] / "app" / "static" / "admin_display.js").read_text(encoding="utf-8")
-    assert 'class="clock-dashboard"' in display_template
+    assert "dashboard.mode is defined and dashboard.mode == 'clock'" in display_template
+    assert "clock-dashboard" in display_template
     assert 'data-role="unit"' in display_template
     assert "overflow: hidden;" in stylesheet
 
