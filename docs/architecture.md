@@ -51,6 +51,7 @@ Raspberry Pi 4とRaspberry Pi 5は、いずれも新OMKの正式対応ゲート�
 
 - 実機周辺機器への接続
 - OMK用Wi-Fiアクセスポイントの提供
+- OMK APクライアントをGateway上のローカルサービスへ接続し、外部Internetへはforwardしないネットワーク分離
 - ESP32等からのMQTT受信（第一候補のWi-Fi＋MQTT）
 - 計測データの正規化
 - ローカル保存

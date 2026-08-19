@@ -22,6 +22,7 @@ from .credentials import (
     validate_broute_credentials,
     write_credentials_atomically,
 )
+from .access_point import AccessPointCredentialError, read_access_point_credentials, read_access_point_status
 from .service_control import BRouteServiceController, ServiceControlError
 from .runtime_status import connection_status, request_immediate_retry
 from .site_uuid import SoracomMetadataClient, resolve_site_uuid
@@ -41,6 +42,7 @@ class Settings:
     status_path: Path = Path("/home/omkdev/projects/omk/data/broute-meter/status.json")
     retry_request_path: Path = Path("/home/omkdev/projects/omk/data/broute-meter/retry-request")
     site_uuid_path: Path = Path("/home/omkdev/projects/omk/data/site/site_uuid")
+    access_point_profile: str = "omk-ap"
 
     @classmethod
     def from_environment(cls) -> "Settings":
@@ -74,6 +76,7 @@ class Settings:
                     "/home/omkdev/projects/omk/data/site/site_uuid",
                 )
             ),
+            access_point_profile=os.environ.get("OMK_AP_CONNECTION_NAME", "omk-ap"),
         )
 
 
@@ -228,6 +231,23 @@ def create_app(
         except (OSError, subprocess.TimeoutExpired):
             raise HTTPException(status_code=502, detail={"code": "system_shutdown_failed"}) from None
         return {"accepted": True}
+
+    @app.get("/api/access-point/status", dependencies=[Depends(authenticated)])
+    def access_point_status(request: Request) -> dict[str, str | bool]:
+        settings: Settings = request.app.state.settings
+        try:
+            return read_access_point_status(settings.access_point_profile)
+        except AccessPointCredentialError as error:
+            raise HTTPException(status_code=503, detail=str(error)) from None
+
+    @app.get("/api/access-point/credentials", dependencies=[Depends(authenticated)])
+    def access_point_credentials(request: Request) -> dict[str, str]:
+        """Return the PSK only to the authenticated Dashboard backend."""
+        settings: Settings = request.app.state.settings
+        try:
+            return read_access_point_credentials(settings.access_point_profile)
+        except AccessPointCredentialError as error:
+            raise HTTPException(status_code=503, detail=str(error)) from None
 
     @app.get("/health")
     def health() -> dict[str, str]:

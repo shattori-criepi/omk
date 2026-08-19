@@ -371,8 +371,14 @@ SSH経由でlabwc設定の即時再読込が必要な場合は、GUIセッショ
 `scripts/setup-wifi-access-point.sh`は、Raspberry Pi OS/DebianのNetworkManagerへOMK用の
 Wi-Fiアクセスポイント接続プロファイルを安全に作成または更新するためのスクリプトです。
 Docker、Bルート、表示、kioskなどは設定しません。既定の接続名は`omk-ap`、インター
-フェースは`wlan0`、IPv4は`192.168.50.1/24`です。プロファイルは`ipv4.method shared`と
-WPA2-PSKを使用します。
+フェースは`wlan0`、IPv4は`192.168.50.1/24`です。プロファイルはDHCP/DNSのため
+`ipv4.method shared`とWPA2-PSKを使用します。ただし、この共有モードが作るNAT/forwardに
+依存してInternet接続を提供しないよう、同じスクリプトが`omk-ap-isolation.service`を導入します。
+このnftablesルールは`wlan0`から他のすべてのインターフェースへのforwardをdropするため、
+`wwan0`、Ethernet、将来追加するWANのいずれにもAPクライアントは到達できません。Gateway自身の
+外部通信およびAPクライアントからGateway上のMQTT/Dashboard等への通信は対象外で、維持されます。
+APプロファイルでは`ipv6.method disabled`も設定します。さらにNetworkManager shared用dnsmasqの
+上流DNS解決を無効にするため、DNS問い合わせをGateway経由の外部通信に使うこともできません。
 
 まず、変更を行わないdry-runで解決済みの値を確認します。
 
@@ -414,6 +420,31 @@ APモード、SSID、鍵管理、IPv4方式・アドレスを確認します。�
 ```bash
 ./scripts/setup-wifi-access-point.sh --activate
 ```
+
+既にAPが稼働している状態でこのスクリプトを更新した場合も、dnsmasq設定を読み直すため
+`--activate`を付けて再実行するか、保守時間に`sudo nmcli connection down omk-ap && sudo nmcli connection up omk-ap`
+を実行してください（後者は接続中のNodeを一時切断します）。
+
+AP接続端末がInternetへ抜けないことは、AP有効化後に必ず確認します。`<AP_CLIENT>`はAPから
+払い出された端末IP、`<MQTT_CLIENT>`はその端末で実行します。Gateway上では次を確認します。
+
+```bash
+sudo nft list table inet omk_ap_isolation
+nmcli -g ipv6.method connection show omk-ap        # disabled
+ip -6 addr show dev wlan0                           # global IPv6がないこと
+ping -I wwan0 -c 3 8.8.8.8                          # Gateway自身は成功すること
+```
+
+AP端末では、`ping 192.168.50.1`、`mosquitto_sub -h 192.168.50.1 -t 'omk/#' -W 3`を確認し、
+`ping -c 3 1.1.1.1`、`curl --connect-timeout 5 https://example.com`および
+`ping6 -c 3 2606:4700:4700::1111`が失敗することを確認します。テスト用MQTT clientがない場合は、
+Nodeの通常MQTT送信が継続することをDashboardまたは`docker compose logs sensor-collector`で確認します。
+`<AP_CLIENT>`からGatewayへ到達でき、Gatewayから外部へ到達できる状態のまま、APクライアントの
+IPv4/IPv6外向き通信だけが失敗するのが期待値です。
+
+市販Wi-Fi中継機を使う場合は、Internet接続なしの親APを単純なWi-Fi repeater/extenderとして
+利用できる製品を選んでください。スマートフォンは「インターネット接続なし」と警告したり、
+モバイル回線へ自動で切り替えたりすることがあります。
 
 状態確認、停止、autoconnect無効化、プロファイル削除は次のコマンドです。削除は復元が
 必要になるため、対象名を確認してから手動で実行してください。

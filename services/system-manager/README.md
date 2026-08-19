@@ -2,7 +2,7 @@
 
 `system-manager` は、Dashboardからホストのハードウェア・systemd操作を直接行わせないための、
 ホスト側FastAPIサービスです。OMKユーザーとして動作し、Bルート認証情報の更新、Bルート
-サービスの状態確認・再試行要求、Raspberry Piの再起動・シャットダウンを仲介します。
+サービスの状態確認・再試行要求、Raspberry Piの再起動・シャットダウン、OMK AP設定の限定参照を仲介します。
 
 Dashboardは`host.docker.internal:8788`へHTTPで接続し、Bearer tokenはDashboardバックエンド
 だけが付与します。ブラウザはsystem-manager token、`credentials.yaml`、sudo権限を持ちません。
@@ -35,6 +35,10 @@ tokenを表示・commitしたり、ブラウザクライアントへコピーし
 - `POST /api/broute/retry` は、長時間未検出時の待機状態だけで利用できる固定の即時再試行要求です。
 - `POST /api/system/reboot` は、OMKホストを再起動します。
 - `POST /api/system/shutdown` は、OMKホストをシャットダウンします。
+- `GET /api/access-point/status` は、NetworkManagerの`omk-ap`プロファイルからSSIDと設定状態だけを返します。
+- `GET /api/access-point/credentials` は、NetworkManagerから都度読んだSSID/PSKを認証済みDashboard
+  バックエンドだけへ返します。PSKは保存・ログ出力せず、sudoersも固定の`nmcli --show-secrets ... omk-ap`
+  コマンドだけを許可します。
 
 `status.json`は`starting`、`adapter_missing`、`adapter_initializing`、`scanning`、
 `authenticating`、`connected`、`scan_error`、`authentication_error`、`connection_error`、
@@ -42,7 +46,8 @@ tokenを表示・commitしたり、ブラウザクライアントへコピーし
 内部例外全文は状態ファイル・API・ログへ出力しません。
 
 sudoersで許可するのは、固定された`systemctl restart omk-broute-meter.service`、
-`systemctl is-active omk-broute-meter.service`、`systemctl reboot`、`systemctl poweroff`だけです。
+`systemctl is-active omk-broute-meter.service`、`systemctl reboot`、`systemctl poweroff`、
+および`omk-ap`のPSKだけを読む固定`nmcli`呼出しです。
 APIからコマンドやunit名を受け取らず、`shell=True`も使用しません。
 
 テスト実行:

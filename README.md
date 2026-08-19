@@ -32,7 +32,7 @@ Windows PCです。初期設定はSSHで行えるため、キーボードとデ�
 3. `/home/omkdev/projects/omk`へこのリポジトリをcloneする
 4. `./scripts/setup-raspberry-pi.sh`を実行し、再ログイン後にDockerを確認する
 5. Onyx を使う場合は [SORACOM Onyx セットアップ](docs/soracom-onyx-setup.md)を実行する
-6. `./scripts/setup-data-collection.sh`でDockerのデータ収集・Dashboardサービスを起動する
+6. `./scripts/setup-wifi-access-point.sh --activate`でOMK用ローカルAPを設定し、`./scripts/setup-data-collection.sh`でDockerのデータ収集・Dashboardサービスを起動する
 7. Bルートを使用する場合は`./scripts/setup-broute-meter.sh`と`./scripts/setup-system-manager.sh`を実行し、管理メニューから認証情報を設定する
 8. BLEセンサを使用する場合は`./scripts/setup-ble-sensor-manager.sh`を実行し、管理メニューから探索・登録する
 9. GUI自動ログイン中に`./scripts/setup-dashboard-kiosk.sh`を実行して、表示用Chromiumとlabwcのカーソル非表示設定をuser systemdへ登録する

@@ -4,8 +4,8 @@ Raspberry Pi上でDockerコンテナとして動作する、利用者向けのDa
 SmartiPi Touch Pro 3を横向きで使用するChromiumキオスク表示を主な利用形態とします。
 瞬時値は最新状態JSON、日計電力量はDuckDBで読むParquetから取得します。
 
-歯車アイコンから開く「管理メニュー」には、センサ管理、Bルート設定、システム操作が
-あります。「ネットワーク」と「システム情報」の管理画面は現在提供していません。
+歯車アイコンから開く「管理メニュー」には、センサ管理、Bルート設定、
+OMKアクセスポイント参照、システム操作があります。
 
 ## ローカル起動
 
@@ -77,6 +77,17 @@ Dashboardバックエンドは、`host.docker.internal:8788`のsystem-managerへ
 再起動後はDashboardが復帰をpollし、復帰したら`/display`へ戻ります。シャットダウン後は
 電源を再投入するまで自動復帰しません。
 
+### OMKアクセスポイント参照
+
+`/admin/access-point`は、NetworkManagerの`omk-ap`プロファイルを正としてSSIDを表示します。
+パスワードとWi-Fi QRコードは初期HTMLやstatus APIに含めず、「表示」操作後だけ、Dashboard
+バックエンドが既存system-managerのBearer token経路でNetworkManagerから都度読み取ります。
+QRコードは`WIFI:T:WPA;S:<SSID>;P:<PASSWORD>;;`形式で、Wi-Fi QR仕様の特殊文字escapeを行います。
+
+パスワードを返す管理APIを外部インターフェースへ公開しないため、ComposeではDashboardを
+`127.0.0.1:8000`（キオスク）および`192.168.50.1:8000`（OMK AP）だけへbindします。`wwan0`や
+EthernetからはDashboard管理画面へ到達できません。
+
 ## Raspberry Pi Chromiumキオスク
 
 DashboardサーバーはDocker Compose、表示用Chromiumは別のuser systemdサービスです。GUI自動
@@ -100,6 +111,7 @@ DashboardサーバーはDocker Compose、表示用Chromiumは別のuser systemd�
 - 管理メニュー: http://localhost:8000/admin
 - Bルート設定: http://localhost:8000/admin/broute
 - システム操作: http://localhost:8000/admin/system
+- OMKアクセスポイント参照: http://localhost:8000/admin/access-point
 
 Raspberry Pi自身またはLAN内から利用する場合は、`localhost`をPiのIPアドレスに置き換えます。
 

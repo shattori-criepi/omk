@@ -46,7 +46,7 @@ def clock_item_ids(candidates: list[DisplayItem]) -> tuple[str, ...]:
     """Persist the clock's sparse readings using the same environment ranking."""
     groups = _items_by_group(candidates)
     broute = groups.get(BROUTE_GROUP, [])
-    environments = [(environment_group_score(items), group, items) for group, items in groups.items() if group not in {BROUTE_GROUP, "一条パワコン"}]
+    environments = [(environment_group_score(items), group, items) for group, items in groups.items() if group not in {BROUTE_GROUP, "パワコン"}]
     environments = [entry for entry in environments if entry[0] > 0]
     environments.sort(key=lambda entry: (-entry[0], entry[1]))
     selected: list[DisplayItem] = []
@@ -96,7 +96,7 @@ def recommended_blocks(candidates: list[DisplayItem]) -> list[DisplayBlock]:
     groups = _items_by_group(candidates)
     broute = groups.pop(BROUTE_GROUP, [])
     today_import = next((item for item in candidates if item.semantic_role == "today_import_energy"), None)
-    groups.pop("一条パワコン", None)
+    groups.pop("パワコン", None)
     environments = [(environment_group_score(items), group, items) for group, items in groups.items()]
     environments = [entry for entry in environments if entry[0] > 0]
     environments.sort(key=lambda entry: (-entry[0], entry[1]))

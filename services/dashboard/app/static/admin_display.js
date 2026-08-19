@@ -10,7 +10,7 @@ const blockFor = id => blocks.find(block => block.block_id === id);
 const patternFor = block => itemLimits[block.size]?.[block.layout_pattern] ? block.layout_pattern : "compact";
 const limitFor = block => itemLimits[block.size]?.[patternFor(block)] || 3;
 const itemLabel = item => item?.short_label || item?.label || "利用できない項目";
-const defaultPrimaryFor = (group, items) => group === "一条パワコン" ? items.find(item => item.field === "load_power_w") || items[0] : items[0];
+const defaultPrimaryFor = (group, items) => group === "パワコン" ? items.find(item => item.field === "load_power_w") || items[0] : items[0];
 
 function trimBlockItems(block) {
   const limit = limitFor(block);

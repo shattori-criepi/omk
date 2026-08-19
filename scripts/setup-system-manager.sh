@@ -26,7 +26,7 @@ fail() { log "ERROR: $*" >&2; exit 1; }
 [[ -f "${OMK_ROOT}/services/system-manager/requirements.txt" ]] || fail 'Missing system-manager requirements.'
 [[ -d "${OMK_ROOT}/broute-meter/config" ]] || fail 'Missing broute-meter config directory.'
 [[ -d "${OMK_ROOT}/data" ]] || fail 'Missing persistent data directory.'
-for command_name in python3 sudo install sed visudo mktemp openssl; do command -v "${command_name}" >/dev/null 2>&1 || fail "Required command is unavailable: ${command_name}"; done
+for command_name in python3 sudo install sed visudo mktemp openssl nmcli; do command -v "${command_name}" >/dev/null 2>&1 || fail "Required command is unavailable: ${command_name}"; done
 id "${TARGET_USER}" >/dev/null 2>&1 || fail "Target user does not exist: ${TARGET_USER}"
 render_unit() {
   sed -e "s|@OMK_ROOT@|${OMK_ROOT}|g" \
@@ -37,8 +37,11 @@ render_unit() {
 }
 
 render_sudoers() {
-  printf '%s ALL=(root) NOPASSWD: %s restart omk-broute-meter.service, %s is-active omk-broute-meter.service, %s reboot, %s poweroff\n' \
-    "${TARGET_USER}" "${SYSTEMCTL_PATH}" "${SYSTEMCTL_PATH}" "${SYSTEMCTL_PATH}" "${SYSTEMCTL_PATH}"
+  local nmcli_path
+  nmcli_path="$(command -v nmcli || true)"
+  [[ "${nmcli_path}" == /* ]] || fail 'An absolute nmcli path is required for OMK AP credential display.'
+  printf '%s ALL=(root) NOPASSWD: %s restart omk-broute-meter.service, %s is-active omk-broute-meter.service, %s reboot, %s poweroff, %s --show-secrets -g 802-11-wireless-security.psk connection show omk-ap\n' \
+    "${TARGET_USER}" "${SYSTEMCTL_PATH}" "${SYSTEMCTL_PATH}" "${SYSTEMCTL_PATH}" "${SYSTEMCTL_PATH}" "${nmcli_path}"
 }
 
 ensure_token_file() {

@@ -8,6 +8,11 @@ set -euo pipefail
 readonly DEFAULT_CONNECTION_NAME="omk-ap"
 readonly DEFAULT_INTERFACE="wlan0"
 readonly DEFAULT_IPV4_ADDRESS="192.168.50.1/24"
+readonly FIREWALL_CONFIG_DIR="/etc/omk"
+readonly FIREWALL_CONFIG_PATH="${FIREWALL_CONFIG_DIR}/omk-ap-isolation.nft"
+readonly FIREWALL_UNIT_PATH="/etc/systemd/system/omk-ap-isolation.service"
+readonly DNSMASQ_SHARED_DIR="/etc/NetworkManager/dnsmasq-shared.d"
+readonly DNSMASQ_ISOLATION_PATH="${DNSMASQ_SHARED_DIR}/omk-ap-isolation.conf"
 
 CONNECTION_NAME="${OMK_AP_CONNECTION_NAME:-${DEFAULT_CONNECTION_NAME}}"
 INTERFACE="${OMK_AP_INTERFACE:-${DEFAULT_INTERFACE}}"
@@ -79,6 +84,72 @@ run_privileged() {
     return 0
   fi
   "${SUDO[@]}" "$@"
+}
+
+install_ap_isolation_firewall() {
+  # NetworkManager's `shared` mode supplies DHCP/DNS, but may also add NAT and
+  # forwarding rules.  This independent, earlier-priority nftables chain drops
+  # every routed packet originating on the AP, regardless of the WAN interface.
+  # Traffic terminating on the Gateway never enters the forward hook.
+  local temporary_config temporary_unit
+  if [[ "${DRY_RUN}" != yes ]]; then
+    command -v nft >/dev/null 2>&1 || fail "nft is required to isolate OMK AP clients. Install the nftables package and re-run this script."
+  fi
+  temporary_config="$(mktemp)"
+  temporary_unit="$(mktemp)"
+  trap 'rm -f -- "${temporary_config}" "${temporary_unit}"' RETURN
+  cat > "${temporary_config}" <<EOF
+table inet omk_ap_isolation {
+  chain forward {
+    type filter hook forward priority -100; policy accept;
+    iifname "${INTERFACE}" oifname != "${INTERFACE}" counter drop comment "OMK AP clients must not route outside the AP"
+  }
+}
+EOF
+  cat > "${temporary_unit}" <<EOF
+[Unit]
+Description=OMK AP client Internet isolation
+After=NetworkManager.service
+Wants=NetworkManager.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/nft -f ${FIREWALL_CONFIG_PATH}
+ExecReload=/usr/sbin/nft -f ${FIREWALL_CONFIG_PATH}
+ExecStop=/usr/sbin/nft delete table inet omk_ap_isolation
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  if [[ "${DRY_RUN}" == yes ]]; then
+    log "DRY-RUN: would install nftables AP isolation (forward ${INTERFACE} -> any non-${INTERFACE} interface: drop)."
+  else
+    "${SUDO[@]}" install -d -o root -g root -m 0755 "${FIREWALL_CONFIG_DIR}"
+    "${SUDO[@]}" install -o root -g root -m 0644 "${temporary_config}" "${FIREWALL_CONFIG_PATH}"
+    "${SUDO[@]}" install -o root -g root -m 0644 "${temporary_unit}" "${FIREWALL_UNIT_PATH}"
+    "${SUDO[@]}" systemctl daemon-reload
+    "${SUDO[@]}" systemctl enable --now omk-ap-isolation.service
+    "${SUDO[@]}" nft list table inet omk_ap_isolation >/dev/null
+    log "Installed nftables AP isolation: forwarded traffic from ${INTERFACE} to every other interface is dropped."
+  fi
+  rm -f -- "${temporary_config}" "${temporary_unit}"
+  trap - RETURN
+}
+
+install_ap_dns_isolation() {
+  # `ipv4.method shared` starts NetworkManager's dnsmasq for DHCP. Without
+  # this, an AP client could use that local resolver to make upstream DNS
+  # queries even though its routed IP packets are blocked.
+  if [[ "${DRY_RUN}" == yes ]]; then
+    log "DRY-RUN: would disable upstream DNS resolution for NetworkManager shared connections."
+    return
+  fi
+  "${SUDO[@]}" install -d -o root -g root -m 0755 "${DNSMASQ_SHARED_DIR}"
+  printf '%s\n' '# OMK AP is a local-only network: retain DHCP, never proxy DNS upstream.' 'no-resolv' \
+    | "${SUDO[@]}" tee "${DNSMASQ_ISOLATION_PATH}" >/dev/null
+  "${SUDO[@]}" chmod 0644 "${DNSMASQ_ISOLATION_PATH}"
+  log "Disabled upstream DNS resolution for NetworkManager shared connections. It applies when the AP is next activated."
 }
 
 nm_value() {
@@ -273,10 +344,11 @@ CURRENT_SSID="$(nm_value 802-11-wireless.ssid)"
 CURRENT_KEY_MGMT="$(nm_value 802-11-wireless-security.key-mgmt)"
 CURRENT_IPV4_METHOD="$(nm_value ipv4.method)"
 CURRENT_IPV4_ADDRESS="$(nm_value ipv4.addresses)"
+CURRENT_IPV6_METHOD="$(nm_value ipv6.method)"
 
 CHANGES=()
 if [[ "${EXISTING}" == no ]]; then
-  CHANGES=("create connection profile" "connection.id=${CONNECTION_NAME}" "connection.interface-name=${INTERFACE}" "connection.autoconnect=yes" "802-11-wireless.mode=ap" "802-11-wireless.ssid=${SSID}" "802-11-wireless-security.key-mgmt=wpa-psk" "ipv4.method=shared" "ipv4.addresses=${IPV4_ADDRESS}")
+  CHANGES=("create connection profile" "connection.id=${CONNECTION_NAME}" "connection.interface-name=${INTERFACE}" "connection.autoconnect=yes" "802-11-wireless.mode=ap" "802-11-wireless.ssid=${SSID}" "802-11-wireless-security.key-mgmt=wpa-psk" "ipv4.method=shared" "ipv4.addresses=${IPV4_ADDRESS}" "ipv6.method=disabled")
   NEEDS_PSK=yes
 else
   [[ "${CURRENT_ID}" == "${CONNECTION_NAME}" ]] || CHANGES+=("connection.id: ${CURRENT_ID:-unset} -> ${CONNECTION_NAME}")
@@ -287,6 +359,7 @@ else
   if [[ "${CURRENT_KEY_MGMT}" != wpa-psk ]]; then CHANGES+=("802-11-wireless-security.key-mgmt: ${CURRENT_KEY_MGMT:-unset} -> wpa-psk"); NEEDS_PSK=yes; fi
   [[ "${CURRENT_IPV4_METHOD}" == shared ]] || CHANGES+=("ipv4.method: ${CURRENT_IPV4_METHOD:-unset} -> shared")
   [[ "${CURRENT_IPV4_ADDRESS}" == "${IPV4_ADDRESS}" ]] || CHANGES+=("ipv4.addresses: ${CURRENT_IPV4_ADDRESS:-unset} -> ${IPV4_ADDRESS}")
+  [[ "${CURRENT_IPV6_METHOD}" == disabled ]] || CHANGES+=("ipv6.method: ${CURRENT_IPV6_METHOD:-unset} -> disabled")
 fi
 
 if ((${#CHANGES[@]} > 0)); then
@@ -298,24 +371,27 @@ if ((${#CHANGES[@]} > 0)); then
   if [[ "${EXISTING}" == no ]]; then
     run_privileged nmcli connection add type wifi ifname "${INTERFACE}" con-name "${CONNECTION_NAME}" autoconnect yes ssid "${SSID}"
   fi
-  run_privileged nmcli connection modify "${CONNECTION_NAME}" connection.interface-name "${INTERFACE}" connection.autoconnect yes 802-11-wireless.mode ap 802-11-wireless.ssid "${SSID}" 802-11-wireless.band bg ipv4.method shared ipv4.addresses "${IPV4_ADDRESS}"
+  run_privileged nmcli connection modify "${CONNECTION_NAME}" connection.interface-name "${INTERFACE}" connection.autoconnect yes 802-11-wireless.mode ap 802-11-wireless.ssid "${SSID}" 802-11-wireless.band bg ipv4.method shared ipv4.addresses "${IPV4_ADDRESS}" ipv6.method disabled
   if [[ "${NEEDS_PSK}" == yes ]]; then
     run_privileged nmcli connection modify "${CONNECTION_NAME}" 802-11-wireless-security.key-mgmt wpa-psk
     configure_wpa2_psk
   fi
-  if [[ "${EXISTING}" == yes ]]; then
-    log "NetworkManager profile was updated. IPv6 settings were not changed."
-  else
-    log "NetworkManager profile was created. IPv6 settings were not changed."
-  fi
+  if [[ "${EXISTING}" == yes ]]; then log "NetworkManager profile was updated; AP-side IPv6 is disabled."; else log "NetworkManager profile was created; AP-side IPv6 is disabled."; fi
 else
   log "Existing profile already matches the requested AP settings; no profile change was made."
 fi
+
+install_ap_isolation_firewall
+install_ap_dns_isolation
 
 if is_yes "${ACTIVATE}"; then
   show_wan_reference
   confirm "Activate ${CONNECTION_NAME} now? This can disconnect SSH" || { log "Profile is saved but was not activated."; ACTIVATE=no; }
   if is_yes "${ACTIVATE}"; then
+    if is_active; then
+      log "Restarting the active AP so its DHCP/DNS isolation configuration is reloaded."
+      run_privileged nmcli connection down "${CONNECTION_NAME}"
+    fi
     run_privileged nmcli connection up "${CONNECTION_NAME}"
     log "AP activation requested."
   fi

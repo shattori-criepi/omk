@@ -82,6 +82,22 @@ def test_token_is_required_and_checked(tmp_path: Path) -> None:
         assert client.get("/api/broute/credentials/status", headers={"Authorization": "Bearer wrong"}).status_code == 401
 
 
+def test_access_point_apis_require_token_and_only_return_password_on_reveal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import omk_system_manager.main as manager_main
+
+    monkeypatch.setattr(manager_main, "read_access_point_status", lambda _: {"ssid": "OMK-TEST", "password_configured": True})
+    monkeypatch.setattr(manager_main, "read_access_point_credentials", lambda _: {"ssid": "OMK-TEST", "password": "secret-canary"})
+    with client_for(tmp_path) as client:
+        assert client.get("/api/access-point/status").status_code == 401
+        status = client.get("/api/access-point/status", headers=headers())
+        credentials = client.get("/api/access-point/credentials", headers=headers())
+
+    assert status.json() == {"ssid": "OMK-TEST", "password_configured": True}
+    assert credentials.json() == {"ssid": "OMK-TEST", "password": "secret-canary"}
+
+
 @pytest.mark.parametrize("path", ["/api/system/reboot", "/api/system/shutdown"])
 def test_host_power_apis_require_token(tmp_path: Path, path: str) -> None:
     with client_for(tmp_path) as client:

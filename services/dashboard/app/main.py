@@ -8,6 +8,8 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import httpx
+import qrcode
+import qrcode.image.svg
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -111,7 +113,7 @@ def _default_blocks(candidates: list) -> list[DisplayBlock]:
 
 
 def _default_block_title(group: str) -> str:
-    return "一条パワコン" if group == "一条パワコン" else group
+    return "パワコン" if group == "パワコン" else group
 
 
 def _dashboard_candidates(now: datetime | None = None) -> list[DisplayItem]:
@@ -124,11 +126,11 @@ def _dashboard_candidates(now: datetime | None = None) -> list[DisplayItem]:
     try:
         totals = get_parquet_repository().today_energy_totals(now.date())
         derived = [
-            DisplayItem("derived:energy:today_import_kwh", "一条パワコン 本日の買電量", "一条パワコン", "derived:broute_interval_energy", "broute-derived", "today_import_kwh", "number", "kWh", "電力", "today_import_energy", True, now.isoformat(), f"{totals.import_energy_kwh:.1f}", "normal", short_label="本日の買電量"),
-            DisplayItem("derived:energy:today_export_kwh", "一条パワコン 本日の売電量", "一条パワコン", "derived:broute_interval_energy", "broute-derived", "today_export_kwh", "number", "kWh", "電力", "today_export_energy", True, now.isoformat(), f"{totals.export_energy_kwh:.1f}", "normal", short_label="本日の売電量"),
+            DisplayItem("derived:energy:today_import_kwh", "パワコン 本日の買電量", "パワコン", "derived:broute_interval_energy", "broute-derived", "today_import_kwh", "number", "kWh", "電力", "today_import_energy", True, now.isoformat(), f"{totals.import_energy_kwh:.1f}", "normal", short_label="本日の買電量"),
+            DisplayItem("derived:energy:today_export_kwh", "パワコン 本日の売電量", "パワコン", "derived:broute_interval_energy", "broute-derived", "today_export_kwh", "number", "kWh", "電力", "today_export_energy", True, now.isoformat(), f"{totals.export_energy_kwh:.1f}", "normal", short_label="本日の売電量"),
         ]
     except (OSError, ValueError):
-        derived = [DisplayItem(item_id, label, "一条パワコン", "derived:broute_interval_energy", "broute-derived", item_id.rsplit(":", 1)[-1], "number", "kWh", "電力", role, True, "", "--", "unavailable", short_label=short) for item_id, label, short, role in (("derived:energy:today_import_kwh", "一条パワコン 本日の買電量", "本日の買電量", "today_import_energy"), ("derived:energy:today_export_kwh", "一条パワコン 本日の売電量", "本日の売電量", "today_export_energy"))]
+        derived = [DisplayItem(item_id, label, "パワコン", "derived:broute_interval_energy", "broute-derived", item_id.rsplit(":", 1)[-1], "number", "kWh", "電力", role, True, "", "--", "unavailable", short_label=short) for item_id, label, short, role in (("derived:energy:today_import_kwh", "パワコン 本日の買電量", "本日の買電量", "today_import_energy"), ("derived:energy:today_export_kwh", "パワコン 本日の売電量", "本日の売電量", "today_export_energy"))]
     _DERIVED_ENERGY_CACHE = (now, derived)
     return candidates + derived
 
@@ -239,6 +241,11 @@ async def admin_broute(request: Request) -> HTMLResponse:
 async def admin_system(request: Request) -> HTMLResponse:
     """Render host power controls without exposing the system-manager token."""
     return templates.TemplateResponse(request=request, name="admin_system.html", context={})
+
+
+@app.get("/admin/access-point", response_class=HTMLResponse)
+async def admin_access_point(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse(request=request, name="admin_access_point.html", context={})
 
 
 async def _ble_request(method: str, path: str, body: dict | None = None) -> dict:
@@ -449,6 +456,27 @@ async def reboot_system() -> dict:
 @app.post("/api/admin/system/shutdown")
 async def shutdown_system() -> dict:
     return await _system_manager_request("POST", "/api/system/shutdown")
+
+
+@app.get("/api/admin/access-point")
+async def access_point_status() -> dict:
+    return await _system_manager_request("GET", "/api/access-point/status")
+
+
+def _wifi_qr_escape(value: str) -> str:
+    return "".join(f"\\{character}" if character in r'\\;,:\"' else character for character in value)
+
+
+@app.post("/api/admin/access-point/reveal")
+async def reveal_access_point_credentials() -> dict[str, str]:
+    credentials = await _system_manager_request("GET", "/api/access-point/credentials")
+    ssid, password = credentials.get("ssid"), credentials.get("password")
+    if not isinstance(ssid, str) or not isinstance(password, str):
+        raise HTTPException(502, "OMKアクセスポイント設定の応答が不正です")
+    payload = f"WIFI:T:WPA;S:{_wifi_qr_escape(ssid)};P:{_wifi_qr_escape(password)};;"
+    image = qrcode.make(payload, image_factory=qrcode.image.svg.SvgPathImage, border=2)
+    svg = image.to_string(encoding="unicode")
+    return {"ssid": ssid, "password": password, "qr_svg": svg}
 
 
 @app.get("/api/display")
