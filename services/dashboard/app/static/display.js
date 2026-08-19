@@ -87,6 +87,8 @@ function updateDisplay(data) {
         const hasAuxiliary = Boolean(block.auxiliary_label);
         auxiliary.hidden = !hasAuxiliary;
         if (hasAuxiliary) {
+          auxiliary.classList.remove("display-card-auxiliary--purchase", "display-card-auxiliary--sale");
+          auxiliary.classList.add(`display-card-auxiliary--${block.auxiliary_flow}`);
           auxiliary.querySelector('[data-role="auxiliary-label"]').textContent = block.auxiliary_label;
           auxiliary.querySelector('[data-role="auxiliary-value"]').textContent = block.auxiliary_value;
           auxiliary.querySelector('[data-role="auxiliary-unit"]').textContent = block.auxiliary_unit;
