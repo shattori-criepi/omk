@@ -50,11 +50,11 @@ def clock_item_ids(candidates: list[DisplayItem]) -> tuple[str, ...]:
     environments = [entry for entry in environments if entry[0] > 0]
     environments.sort(key=lambda entry: (-entry[0], entry[1]))
     selected: list[DisplayItem] = []
-    if environments:
-        selected.extend(item for item in _ordered_environment_items(environments[0][2]) if item.semantic_role in CLOCK_ENVIRONMENT_ROLES)
     grid_power = next((item for item in broute if item.semantic_role == "grid_power"), None)
     if grid_power is not None:
         selected.append(grid_power)
+    if environments:
+        selected.extend(item for item in _ordered_environment_items(environments[0][2]) if item.semantic_role in CLOCK_ENVIRONMENT_ROLES)
     return tuple(item.id for item in selected[:4])
 
 

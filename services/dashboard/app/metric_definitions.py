@@ -30,7 +30,7 @@ DEFINITIONS: dict[str, MetricDefinition] = {
     "temperature_c": MetricDefinition("温度", "℃", 1, "室内環境", "temperature"),
     "temperature_celsius": MetricDefinition("温度", "℃", 1, "室内環境", "temperature"),
     "relative_humidity_percent": MetricDefinition("湿度", "%", 0, "室内環境", "humidity"),
-    "co2_ppm": MetricDefinition("CO₂", "ppm", 0, "室内環境", "co2"),
+    "co2_ppm": MetricDefinition("CO₂濃度", "ppm", 0, "室内環境", "co2"),
     "pm1_0_ug_m3": MetricDefinition("PM1.0", "µg/m³", 1, "室内環境"),
     "pm2_5_ug_m3": MetricDefinition("PM2.5", "µg/m³", 1, "室内環境", "pm25"),
     "pm4_0_ug_m3": MetricDefinition("PM4.0", "µg/m³", 1, "室内環境"),

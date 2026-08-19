@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <title>OMK ダッシュボード</title>
-    <link rel="stylesheet" href="{{ url_for('static', path='/display.css') }}?v=20260819-clock-visual-1">
+    <link rel="stylesheet" href="{{ url_for('static', path='/display.css') }}?v=20260819-clock-priority-1">
   </head>
   <body>
     {% if dashboard.mode is defined and dashboard.mode == 'clock' %}
@@ -16,7 +16,7 @@
       </section>
       <section id="clock-supplemental" class="clock-supplemental" aria-label="主要情報">
         {% for item in dashboard.supplemental %}
-        <div class="clock-reading clock-reading--{{ item.freshness }}" data-item-id="{{ item.id }}"><span data-role="label">{{ item.short_label or item.label }}</span><strong data-role="value">{{ item.value }}</strong><small data-role="unit">{{ item.unit if item.unit and item.freshness != 'unavailable' else ' ' }}</small></div>
+        <div class="clock-reading clock-reading--{{ item.freshness }}" data-item-id="{{ item.id }}"><span data-role="label">{{ item.short_label or item.label }}</span><span class="clock-reading-value"><strong data-role="value">{{ item.value }}</strong><small data-role="unit">{{ item.unit if item.unit and item.freshness != 'unavailable' else ' ' }}</small></span></div>
         {% endfor %}
       </section>
     </main>
@@ -162,7 +162,7 @@
               <span class="source-unit" {% if dashboard.sen66_freshness == 'unavailable' %}hidden{% endif %}>%</span>
             </article>
             <article class="card">
-              <p>CO2</p>
+              <p>CO₂濃度</p>
               <strong id="co2-ppm">{{ dashboard.co2_ppm }}</strong>
               <span class="source-unit" {% if dashboard.sen66_freshness == 'unavailable' %}hidden{% endif %}>ppm</span>
             </article>
@@ -181,6 +181,6 @@
     </main>
     {% endif %}
 
-    <script src="{{ url_for('static', path='/display.js') }}?v=20260819-clock-visual-1" defer></script>
+    <script src="{{ url_for('static', path='/display.js') }}?v=20260819-clock-priority-1" defer></script>
   </body>
 </html>
