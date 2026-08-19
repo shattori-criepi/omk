@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from collections.abc import Mapping
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
@@ -17,12 +18,13 @@ from app.data.parquet_repository import EnergyTotals, ParquetRepository
 from app.data.display_repository import DisplayRepository
 from app.data.settings_repository import DashboardSettings, DisplayBlock, SettingsError, SettingsRepository, default_layout_pattern, item_limit
 from app.display_items import DisplayItem, catalog_items_with_latest, display_candidates, display_item_migrations, selected_blocks
-from app.recommendations import recommended_blocks
+from app.recommendations import BROUTE_GROUP, recommended_blocks
 from app.view_models import FreshnessStatus, format_timestamp_seconds, worst_freshness
 from app.view_models import get_display_view_model
 
 APP_DIR = Path(__file__).parent
 _DERIVED_ENERGY_CACHE: tuple[datetime, list[DisplayItem]] | None = None
+JST = ZoneInfo("Asia/Tokyo")
 
 app = FastAPI(title="OMK Dashboard")
 app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
@@ -92,7 +94,7 @@ def _default_block_title(group: str) -> str:
 
 def _dashboard_candidates(now: datetime | None = None) -> list[DisplayItem]:
     """Reuse the legacy JST daily-total repository for derived Block values."""
-    now = now or datetime.now().astimezone()
+    now = (now or datetime.now(JST)).astimezone(JST)
     global _DERIVED_ENERGY_CACHE
     candidates = display_candidates(get_display_repository(), now)
     if _DERIVED_ENERGY_CACHE is not None and (now - _DERIVED_ENERGY_CACHE[0]).total_seconds() < 60:
@@ -100,11 +102,11 @@ def _dashboard_candidates(now: datetime | None = None) -> list[DisplayItem]:
     try:
         totals = get_parquet_repository().today_energy_totals(now.date())
         derived = [
-            DisplayItem("derived:energy:today_import_kwh", "一条パワコン 今日の買電量", "一条パワコン", "derived:broute_interval_energy", "broute-derived", "today_import_kwh", "number", "kWh", "電力", "today_import_energy", True, now.isoformat(), f"{totals.import_energy_kwh:.1f}", "normal", short_label="今日の買電量"),
-            DisplayItem("derived:energy:today_export_kwh", "一条パワコン 今日の売電量", "一条パワコン", "derived:broute_interval_energy", "broute-derived", "today_export_kwh", "number", "kWh", "電力", "today_export_energy", True, now.isoformat(), f"{totals.export_energy_kwh:.1f}", "normal", short_label="今日の売電量"),
+            DisplayItem("derived:energy:today_import_kwh", "一条パワコン 本日の買電量", "一条パワコン", "derived:broute_interval_energy", "broute-derived", "today_import_kwh", "number", "kWh", "電力", "today_import_energy", True, now.isoformat(), f"{totals.import_energy_kwh:.1f}", "normal", short_label="本日の買電量"),
+            DisplayItem("derived:energy:today_export_kwh", "一条パワコン 本日の売電量", "一条パワコン", "derived:broute_interval_energy", "broute-derived", "today_export_kwh", "number", "kWh", "電力", "today_export_energy", True, now.isoformat(), f"{totals.export_energy_kwh:.1f}", "normal", short_label="本日の売電量"),
         ]
     except (OSError, ValueError):
-        derived = [DisplayItem(item_id, label, "一条パワコン", "derived:broute_interval_energy", "broute-derived", item_id.rsplit(":", 1)[-1], "number", "kWh", "電力", None, True, "", "--", "unavailable", short_label=short) for item_id, label, short in (("derived:energy:today_import_kwh", "一条パワコン 今日の買電量", "今日の買電量"), ("derived:energy:today_export_kwh", "一条パワコン 今日の売電量", "今日の売電量"))]
+        derived = [DisplayItem(item_id, label, "一条パワコン", "derived:broute_interval_energy", "broute-derived", item_id.rsplit(":", 1)[-1], "number", "kWh", "電力", role, True, "", "--", "unavailable", short_label=short) for item_id, label, short, role in (("derived:energy:today_import_kwh", "一条パワコン 本日の買電量", "本日の買電量", "today_import_energy"), ("derived:energy:today_export_kwh", "一条パワコン 本日の売電量", "本日の売電量", "today_export_energy"))]
     _DERIVED_ENERGY_CACHE = (now, derived)
     return candidates + derived
 
@@ -112,9 +114,18 @@ def _dashboard_candidates(now: datetime | None = None) -> list[DisplayItem]:
 def _settings_for(candidates: list[DisplayItem]):
     selectable = [item for item in candidates if item.selectable]
     return get_settings_repository().load_or_create(
-        {item.id: item.group for item in candidates}, _default_blocks(selectable),
+        _available_display_groups(candidates), _default_blocks(selectable),
         display_item_migrations(candidates), recommended_blocks(selectable),
     )
+
+
+def _available_display_groups(candidates: list[DisplayItem]) -> dict[str, str | frozenset[str]]:
+    """Allow the B-route daily total in its compatible custom/recommended Blocks."""
+    groups: dict[str, str | frozenset[str]] = {item.id: item.group for item in candidates}
+    for item in candidates:
+        if item.semantic_role in {"today_import_energy", "today_export_energy"}:
+            groups[item.id] = frozenset({item.group, BROUTE_GROUP})
+    return groups
 
 
 def get_dashboard_view_model():
@@ -274,7 +285,7 @@ async def update_dashboard_settings(request: Request) -> dict:
     candidates = _dashboard_candidates()
     try:
         settings = get_settings_repository().save_payload(
-            await request.json(), {item.id: item.group for item in candidates if item.selectable}, display_item_migrations(candidates),
+            await request.json(), _available_display_groups([item for item in candidates if item.selectable]), display_item_migrations(candidates),
         )
     except SettingsError as error:
         raise HTTPException(400, str(error)) from error
@@ -294,7 +305,7 @@ async def update_dashboard_mode(request: Request) -> dict:
         # Entering recommended intentionally makes a fresh, persisted snapshot.
         recommended = tuple(recommended_blocks([item for item in candidates if item.selectable])) if mode == "recommended" else settings.recommended_blocks
         updated = DashboardSettings(mode, settings.custom_blocks, recommended)
-        get_settings_repository().save(updated, {item.id: item.group for item in candidates})
+        get_settings_repository().save(updated, _available_display_groups(candidates))
     except (SettingsError, ValueError, AttributeError) as error:
         raise HTTPException(400, str(error)) from error
     return {**updated.as_dict(), "capacity": 6}
@@ -306,7 +317,7 @@ async def refresh_recommended_dashboard() -> dict:
     try:
         settings = _settings_for(candidates)
         updated = DashboardSettings("recommended", settings.custom_blocks, tuple(recommended_blocks([item for item in candidates if item.selectable])))
-        get_settings_repository().save(updated, {item.id: item.group for item in candidates})
+        get_settings_repository().save(updated, _available_display_groups(candidates))
     except (SettingsError, OSError) as error:
         raise HTTPException(400, str(error)) from error
     return {**updated.as_dict(), "capacity": 6}

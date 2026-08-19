@@ -103,6 +103,7 @@ def test_recommended_blocks_rank_semantic_groups_and_exclude_ichijo() -> None:
         _recommended_item("import", "電力メーター（Bルート）", "grid_import_energy"),
         _recommended_item("import-total", "電力メーター（Bルート）", "grid_import_energy_cumulative"),
         _recommended_item("export", "電力メーター（Bルート）", "grid_export_energy"),
+        _recommended_item("derived:energy:today_import_kwh", "一条パワコン", "today_import_energy"),
         _recommended_item("temp", "multi", "temperature"),
         _recommended_item("humidity", "multi", "humidity"),
         _recommended_item("co2", "multi", "co2"),
@@ -118,7 +119,8 @@ def test_recommended_blocks_rank_semantic_groups_and_exclude_ichijo() -> None:
     assert [block.group for block in blocks] == ["電力メーター（Bルート）", "multi", "plug-001"]
     assert [block.size for block in blocks] == ["large", "medium", "small"]
     assert blocks[0].primary_item_id == "grid"
-    assert blocks[0].item_ids == ("grid", "import")
+    assert blocks[0].item_ids == ("grid", "derived:energy:today_import_kwh")
+    assert "import" not in blocks[0].item_ids and "export" not in blocks[0].item_ids
     assert blocks[1].item_ids[:3] == ("temp", "humidity", "co2")
     assert all(block.group != "一条パワコン" for block in blocks)
 
@@ -141,6 +143,27 @@ def test_settings_v2_migrates_to_custom_and_new_settings_default_recommended(tmp
     assert migrated.custom_blocks[0].title == "以前の設定"
     saved = json.loads(path.read_text(encoding="utf-8"))
     assert saved["version"] == 3 and saved["mode"] == "custom"
+
+
+def test_daily_broute_derived_item_can_belong_to_custom_and_recommended_blocks(tmp_path: Path) -> None:
+    repository = SettingsRepository(tmp_path / "dashboard" / "settings.json")
+    derived = "derived:energy:today_import_kwh"
+    settings = repository.save_payload({
+        "version": 3, "mode": "custom", "default_preset": "standard",
+        "presets": {
+            "standard": {"blocks": [{
+                "block_id": "ichijo", "group": "一条パワコン", "title": "一条パワコン", "size": "small",
+                "layout_pattern": "compact", "primary_item_id": derived, "item_ids": [derived],
+            }]},
+            "recommended": {"blocks": [{
+                "block_id": "recommended_1", "group": "電力メーター（Bルート）", "title": "電力メーター（Bルート）", "size": "large",
+                "layout_pattern": "hero", "primary_item_id": "grid", "item_ids": ["grid", derived],
+            }]},
+        },
+    }, {"grid": "電力メーター（Bルート）", derived: frozenset({"一条パワコン", "電力メーター（Bルート）"})})
+
+    assert settings.custom_blocks[0].item_ids == (derived,)
+    assert settings.recommended_blocks[0].item_ids == ("grid", derived)
 
 
 def _write_instantaneous_data(
@@ -852,7 +875,13 @@ def test_small_plug_block_uses_full_consumption_label_without_ellipsis(tmp_path:
 
     assert rendered.primary.short_label == "消費電力"
     assert "{{ block.primary.short_label or block.primary.label }}" in template
+    assert ".display-card--small.display-card--compact.display-card--items-1 .display-card-compact-items { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }" in stylesheet
+    assert ".display-card--small.display-card--compact.display-card--items-1 .display-secondary-item { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); width: 100%; min-width: 0; }" in stylesheet
+    assert ".display-card--small.display-card--compact.display-card--items-1 .display-secondary-label { width: 100%; min-width: 0; overflow: visible; text-overflow: clip; white-space: nowrap; }" in stylesheet
+    assert ".display-card--small.display-card--compact.display-card--items-1 .display-compact-reading { width: 100%; min-width: 0; }" in stylesheet
     assert ".display-card--small.display-card--compact.display-card--items-1 .display-secondary-item { grid-column: 1 / -1; }" in stylesheet
+    assert ".display-card--small.display-card--compact.display-card--items-2 .display-card-compact-items" not in stylesheet
+    assert "display.css') }}?v=20260819-display-mode-3" in template
     assert ".display-card--small.display-card--compact.display-card--items-1 .display-secondary-label { overflow: visible; text-overflow: clip; white-space: nowrap; }" in stylesheet
 
 
@@ -880,6 +909,9 @@ def test_derived_daily_energy_candidates_reuse_legacy_totals_and_cache(monkeypat
     assert [(item.id, item.value, item.unit, item.group) for item in candidates] == [
         ("derived:energy:today_import_kwh", "1.2", "kWh", "一条パワコン"),
         ("derived:energy:today_export_kwh", "3.4", "kWh", "一条パワコン"),
+    ]
+    assert [(item.short_label, item.semantic_role) for item in candidates] == [
+        ("本日の買電量", "today_import_energy"), ("本日の売電量", "today_export_energy"),
     ]
     assert [item.id for item in again] == [item.id for item in candidates]
     assert fake.calls == 1
@@ -983,6 +1015,8 @@ def test_display_items_api_lists_multiple_values_from_one_source(tmp_path: Path,
         assert derived[item_id]["group"] == "一条パワコン"
         assert derived[item_id]["unit"] == "kWh"
         assert derived[item_id]["selectable"] is True
+    assert derived["derived:energy:today_import_kwh"]["short_label"] == "本日の買電量"
+    assert derived["derived:energy:today_export_kwh"]["short_label"] == "本日の売電量"
     assert {item["field"] for item in groups["sen66-001"]} == set(sen66_fields)
 
 
