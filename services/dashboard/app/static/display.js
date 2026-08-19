@@ -77,7 +77,30 @@ function updateSourceStatus(sectionId, badgeId, freshness) {
   }
 }
 
+function renderedDisplayMode() {
+  if (document.querySelector("#clock-supplemental")) return "clock";
+  if (document.querySelector("#display-blocks")) return "blocks";
+  if (document.querySelector("#power-section")) return "legacy";
+  return "unknown";
+}
+
+function responseDisplayMode(data) {
+  if (data.mode === "clock" && Array.isArray(data.supplemental)) return "clock";
+  if (["standard", "custom", "recommended"].includes(data.mode) && Array.isArray(data.blocks)) return "blocks";
+  return "legacy";
+}
+
 function updateDisplay(data) {
+  // A newly discovered catalog can change the server from the legacy template
+  // to Block Dashboard between page load and the first poll. Their DOM shapes
+  // differ, so updating values in place would leave old stale badges visible.
+  // Reload once to render the matching template; ordinary freshness changes
+  // continue through the in-place paths below.
+  const renderedMode = renderedDisplayMode();
+  if (renderedMode !== "unknown" && renderedMode !== responseDisplayMode(data)) {
+    window.location.reload();
+    return;
+  }
   if (data.mode === "clock" && Array.isArray(data.supplemental)) {
     if (clockDate && data.date) clockDate.textContent = data.date;
     if (clockTime && data.time) clockTime.textContent = data.time;
