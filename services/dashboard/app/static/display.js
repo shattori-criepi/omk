@@ -69,7 +69,7 @@ function updateSourceStatus(sectionId, badgeId, freshness) {
 }
 
 function updateDisplay(data) {
-  if (data.mode === "standard" && Array.isArray(data.blocks)) {
+  if (["standard", "custom", "recommended"].includes(data.mode) && Array.isArray(data.blocks)) {
     data.blocks.forEach((block) => {
       const card = document.querySelector(`[data-block-id="${CSS.escape(block.id)}"]`);
       if (!card) return;
