@@ -375,8 +375,10 @@ Docker、Bルート、表示、kioskなどは設定しません。既定の接�
 `ipv4.method shared`とWPA2-PSKを使用します。ただし、この共有モードが作るNAT/forwardに
 依存してInternet接続を提供しないよう、同じスクリプトが`omk-ap-isolation.service`を導入します。
 このnftablesルールは`wlan0`から他のすべてのインターフェースへのforwardをdropするため、
-`wwan0`、Ethernet、将来追加するWANのいずれにもAPクライアントは到達できません。Gateway自身の
-外部通信およびAPクライアントからGateway上のMQTT/Dashboard等への通信は対象外で、維持されます。
+`wwan0`、Ethernet、将来追加するWANのいずれにもAPクライアントは到達できません。一方でDockerが
+Gatewayの公開ポートをcontainerへDNATした通信（MQTT `192.168.50.1:1883`、Dashboard等）だけは、
+bridge名に依存せずconntrackのDNAT状態で許可します。Gateway自身の外部通信およびAPクライアントから
+Gateway上のローカルサービスへの通信は維持されます。
 APプロファイルでは`ipv6.method disabled`も設定します。さらにNetworkManager shared用dnsmasqの
 上流DNS解決を無効にするため、DNS問い合わせをGateway経由の外部通信に使うこともできません。
 
@@ -433,6 +435,15 @@ sudo nft list table inet omk_ap_isolation
 nmcli -g ipv6.method connection show omk-ap        # disabled
 ip -6 addr show dev wlan0                           # global IPv6がないこと
 ping -I wwan0 -c 3 8.8.8.8                          # Gateway自身は成功すること
+```
+
+出力にはDocker公開ポート用の`ct status dnat ... accept`がdropルールより先に1件だけあり、
+`iifname "wlan0" oifname != "wlan0" ... drop`が続くことを確認します。セットアップは専用tableを
+再作成してから適用するため、実機調査時に追加したbridge名指定の一時ルールは残りません。
+
+```bash
+sudo nft -a list chain inet omk_ap_isolation forward
+# ct status dnat を含むacceptが1件で、br-... 指定の一時acceptがないこと
 ```
 
 AP端末では、`ping 192.168.50.1`、`mosquitto_sub -h 192.168.50.1 -t 'omk/#' -W 3`を確認し、
