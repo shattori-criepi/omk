@@ -13,6 +13,8 @@ DOCKER_VERSION="not checked"
 COMPOSE_VERSION="not checked"
 REBOOT_REQUIRED="no"
 RELOGIN_REQUIRED="no"
+REBOOT_REQUIRED_FILE="/var/run/reboot-required"
+KERNEL_MODULES_DIR="/lib/modules"
 
 log() {
   printf '[%s] %s\n' "$(date --iso-8601=seconds)" "$*"
@@ -32,6 +34,30 @@ in_group() {
   return 1
 }
 
+latest_installed_kernel_release() {
+  local module_dir
+
+  [[ -d "${KERNEL_MODULES_DIR}" ]] || return 0
+  for module_dir in "${KERNEL_MODULES_DIR}"/*; do
+    [[ -d "${module_dir}/kernel" ]] || continue
+    # A kernel module file avoids treating an empty or partial directory as an
+    # installed bootable kernel.
+    find "${module_dir}/kernel" -type f -print -quit 2>/dev/null | grep -q . || continue
+    basename "${module_dir}"
+  done | sort -V | tail -n 1
+}
+
+reboot_is_required() {
+  local current_kernel latest_kernel
+
+  [[ -e "${REBOOT_REQUIRED_FILE}" ]] && return 0
+  current_kernel="$(uname -r)"
+  latest_kernel="$(latest_installed_kernel_release)"
+  [[ -n "${latest_kernel}" && "${latest_kernel}" != "${current_kernel}" ]] || return 1
+  # Do not flag a machine merely because it retains an older installed kernel.
+  [[ "$(printf '%s\n%s\n' "${current_kernel}" "${latest_kernel}" | sort -V | tail -n 1)" == "${latest_kernel}" ]]
+}
+
 package_is_installed() {
   local package_status
 
@@ -42,7 +68,7 @@ package_is_installed() {
 finish() {
   local exit_status=$?
 
-  if [[ -f /var/run/reboot-required ]]; then
+  if reboot_is_required; then
     REBOOT_REQUIRED="yes"
   fi
 
@@ -271,9 +297,14 @@ for directory in "${RUNTIME_DIRECTORIES[@]}"; do
   fi
 done
 
-if [[ -f /var/run/reboot-required ]]; then
+if reboot_is_required; then
   REBOOT_REQUIRED="yes"
-  log "A reboot is required by installed OS updates; it will not be started automatically."
+  latest_kernel="$(latest_installed_kernel_release)"
+  if [[ -n "${latest_kernel}" && "${latest_kernel}" != "$(uname -r)" ]]; then
+    log "A reboot is required: running kernel $(uname -r) differs from latest installed kernel ${latest_kernel}; it will not be started automatically."
+  else
+    log "A reboot is required by installed OS updates; it will not be started automatically."
+  fi
 fi
 if [[ "${RELOGIN_REQUIRED}" == "yes" ]]; then
   log "Log out and back in (or reboot) before using Docker without sudo."
