@@ -24,13 +24,17 @@ GatewayはRaspberry Pi 4/5、64-bit Raspberry Pi OS上で動作します。Docke
 
 system-managerはDashboardの`host.docker.internal`経由の要求を認証し、ブラウザへhost権限や秘密情報を渡しません。
 
-## NodeとBLE
+## Node、ESP-WIFI-MESH、BLE
 
-共通ESP32 NodeはUSB Serial/JTAG Provisioning、Wi-Fi/MQTT、SEN66などのI2Cセンサ、BLE relayを扱います。SEN66が未接続でもBLE relayとして利用できます。初回登録に物理ボタン操作は必要ありません。
+共通ESP32 NodeはUSB Serial/JTAG Provisioning、ESP-WIFI-MESH、Wi-Fi/IP/MQTT、SEN66などのI2Cセンサ、BLE relayを同時に扱います。SEN66が未接続でもBLE relayとして利用でき、SEN66とBLE relayを接続したNodeも同じfirmwareで動作します。production対象はAtomS3 Liteです。初回登録に物理ボタン操作は必要ありません。
+
+保存済みGateway SSID/PSKを使ってESP-WIFI-MESHを自動形成する。Nodeごとのparent、root、SSID、IPの手動指定は行わない。rootはGateway APへ通常STA接続し、childはMesh parent経由のinternal IP networkへDHCP接続する。rootはinternal subnet (`10.0.0.1/16`) のDHCP/DNS/NAPTを提供するため、root/childのどちらも通常TCPのMQTTで`192.168.50.1:1883`へ到達できる。
+
+Nodeは計測・BLE relay・Mesh中継を兼ねる。配置と電波条件に応じてroot/parent/childは自動選択され、parentまたはrootを失うとMeshが再構成される。Gatewayは通常のAPとMosquittoだけを提供し、専用Mesh daemonや独自relay protocolを必要としない。市販Wi-Fi中継機は必須ではないが、到達性はNode配置、壁、階層、RSSIに依存する。AC電源を前提とし、電池駆動の省電力Meshとしては設計しない。
 
 BLE environment sensorはGateway direct BLEを主系とし、ESP32 Node relayをfallbackにします。directが約30秒途絶するとrelayを採用し、direct復帰時はdirectへ戻ります。advertisement単位の厳密dedupより、1分集約用途の経路冗長化を優先します。詳細な入力topicと選択理由は[データ経路とMQTT](data-and-mqtt.md)および[decision](../decisions/ble-direct-relay-route-selection.md)を参照してください。
 
-Node間Wi-Fi中継による範囲拡張は今後の方針であり、具体的な方式は未確定です。ESP-MESH等を現行仕様として扱いません。
+Mesh診断status、credential導出、再構成時の観測上の注意は[ESP-WIFI-MESH Node networking decision](../decisions/esp-wifi-mesh-node-networking.md)を正本とします。
 
 ## 保存・表示・送信
 

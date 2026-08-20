@@ -1,23 +1,18 @@
 # OMK ESP32 Node
 
-OMK NodeはAtomS3 Lite、オリジナルM5StickC、および将来のESP32-C3/S3
-センサノードで共用するファームウェア基盤です。ボード固有のLCD、LED、ボタンはこの基盤に含めません。BLE中継（`ble_scan`）とSEN66計測は同じ基盤で共存できます。
-ESP32系Nodeは、SEN66接続やBLE relay利用の有無にかかわらず、このfirmwareを標準とします。
+OMK NodeはAtomS3 Liteをproduction対象とする共通firmware基盤です。ボード固有のLCD、LED、ボタンはこの基盤に含めません。BLE中継（`ble_scan`）とSEN66計測は同じ基盤で共存できます。ESP32系Nodeは、SEN66接続やBLE relay利用の有無にかかわらず、このfirmwareを標準とします。
 
-この文書では、実装済みかつ実機で確認済みのDiscovery、USB Serial/JTAG
-Provisioning、通常起動時のWi-Fi再接続を記録します。USB ProvisioningはAtomS3 Liteで
-MQTT registration statusまでE2E確認済みです。MQTTによるBLE中継は
-SwitchBot Meter一台の初期E2E実装だけを確認済みです。Gateway/Dashboardからの汎用登録自動化、logical IDの割当は未実装です。
+この文書では、実装済みかつ実機で確認済みのDiscovery、USB Serial/JTAG Provisioning、ESP-WIFI-MESH、SEN66、BLE relay、MQTTを記録します。AtomS3 Liteでroot/layer 1、child/layer 2、Gateway MQTT、30秒status、SEN66とBLE relayの同時動作をE2E確認済みです。Gateway/Dashboardからの汎用登録自動化、logical IDの割当は未実装です。
 
 ## 対応環境
 
 - PlatformIO: `espressif32@7.0.1`（ESP-IDF 6.0.1）に固定
 - フレームワーク: ESP-IDF
 - Bluetooth: Bluedroid、BLE-only controller、BLE 4.2 legacy advertising
-- 対応確認済みボード: AtomS3 Lite、オリジナルM5StickC
+- production対象: AtomS3 Lite
+- M5StickC: 今回のMesh production対象外。現行`omk-node` buildのUSB Serial/JTAG link問題も本実装では扱わない
 
-BLE 4.2 legacyを選ぶのは、Discovery v1が31-byte legacy advertisingと
-Bluedroidのraw GAP APIを使うためです。NimBLEまたはextended advertisingへ切り替える場合はプロトコル改訂が必要です。ESP32-S3のAtomS3 Liteでは8 MB、オリジナルM5StickCでは4 MBのFlash設定をボード別に選びます。
+BLE 4.2 legacyを選ぶのは、Discovery v1が31-byte legacy advertisingとBluedroidのraw GAP APIを使うためです。NimBLEまたはextended advertisingへ切り替える場合はプロトコル改訂が必要です。AtomS3 Liteでは8 MB Flash設定を使用します。
 
 `CONFIG_COMPILER_DISABLE_GCC15_WARNINGS=y`はESP-IDF 6のGCC 15互換設定です。
 ESP-IDF本体を修正したり、広範な`-Wno-error`を追加したりしません。
@@ -110,12 +105,17 @@ Wi-Fi Provisioningを介さずBLE relayなどを検証する場合だけ、次�
 ./scripts/set-omk-node-wifi.sh atom-s3-lite /dev/ttyACM0
 ```
 
-SSIDは通常入力、PSKは非表示入力です。どちらもrepository、build flag、ログ、通常の
-firmware sourceには保存しません。一時imageだけがESP-IDFの`esp_wifi_set_config()`を使ってFlash保存のSTA configurationを書込み、read-backで一致を検証します。さらに書込み前後で`omk/prov_pop`が32 bytesのままであることを確認し、`registered`、
-`logical_id`、factory secret、Node IDは変更しません。スクリプトは直後に通常firmwareを書き戻し、credentialを含む一時headerと専用build directoryを削除します。
+SSIDは通常入力、PSKは非表示入力です。どちらもrepository、build flag、ログ、通常のfirmware sourceには保存しません。一時imageはOMK専用NVS credential storeへGateway SSID/PSKを書込み、read-backで一致を検証します。ESP-WIFI-MESHが利用するruntime STA configurationとは共有しません。さらに書込み前後で`omk/prov_pop`が32 bytesのままであることを確認し、`registered`、`logical_id`、factory secret、Node IDは変更しません。スクリプトは直後に通常firmwareを書き戻し、credentialを含む一時headerと専用build directoryを削除します。
 
-これは開発専用の明示的なone-shot操作であり、production firmwareの通常boot、BLE
-Provisioning、MQTT APIから到達する経路はありません。
+credential分離版へ更新した既存Nodeは、旧`WIFI_IF_STA`にMesh parent情報が残っていると安全に自動migrationできない。この場合はGatewayへNodeをUSB接続し、次を実行して専用NVS storeへ再投入する。
+
+```bash
+python3 scripts/provision_omk_node_via_usb.py --device /dev/ttyACM0 --profile omk-ap
+```
+
+`USB provisioning confirmed for node_id=...`を確認する。Nodeの物理ボタン操作やUSB抜き差しを通常のreboot手段として前提にしない。
+
+これは開発専用の明示的なone-shot操作であり、production firmwareの通常boot、BLE Provisioning、MQTT APIから到達する経路はありません。
 
 ## Discovery BLE v1
 
@@ -192,9 +192,7 @@ factory PoP import
               -> OMK Discovery BLE
 ```
 
-`wifi_station_prepare()`はnetif、default event loop、default STA netif、Wi-Fi driverを初期化してから、Flashに保存されたSTA credentialの有無を確認します。
-`wifi_station_start_prepared()`はcredentialがある場合だけevent handler登録、STA開始、接続を担当します。未設定Nodeはprepare済みのnetwork/Wi-Fi初期化をそのままProvisioning側で使うため、
-`esp_netif`、event loop、Wi-Fi driverを二重に初期化しません。
+`wifi_station_init_network_core()`がnetifとdefault event loopを初期化し、ESP-WIFI-MESH通信層がdefault STA netifを作成してから、`wifi_station_prepare()`がWi-Fi driverとFlashに保存されたSTA credentialを初期化・確認します。設定済みNodeのSTA netifはESP-WIFI-MESH通信層が単独で所有し、root時はGateway向けSTA、child時はinternal IP mesh STAへ切り替えます。これによりdefault STA netifを二重に初期化しません。
 
 従来のControl GATT `0x01`は、Wi-Fi設定済みNodeを明示的に再Provisioningする互換経路として残っています。PoPが有効なら`omk/next_boot_mode`へ`PROVISIONING`を保存・commitして再起動し、次bootの先頭でflagを消去・commitします。これはクラッシュ、watchdog、電源断後の
 Provisioning boot loopを防ぐためです。このControl Service、START characteristic、boot flag、
@@ -234,13 +232,34 @@ characteristicへの事前writeは不要です。
 
 ## 通常bootのWi-Fi STA
 
-`wifi_station_prepare()`は保存済みcredentialの有無を確認し、必要なnetif/event loop/Wi-Fi
-初期化を一度だけ行います。設定済みの場合だけ`wifi_station_start_prepared()`がSTA接続を開始します。切断時は通常運用の再接続を行い、`IP_EVENT_STA_GOT_IP`で成功を記録します。SSID/passwordはログしません。Wi-Fi初期化が失敗した場合は、Provisioning/STAを開始せず、既存の安全側エラー処理に従い、Discovery BLEは可能な範囲で継続します。
+`wifi_station_prepare()`は保存済みcredentialの有無を確認し、Wi-Fi driver初期化を一度だけ行います。netif/event loopとdefault STA netifはその前に一度だけ作成する。設定済みの場合はESP-WIFI-MESHが保存済みcredentialをrootのGateway接続に用い、childは自動選択されたparent経由のinternal IP networkingを使います。`IP_EVENT_STA_GOT_IP`はroot/childのどちらでも既存MQTT起動に使われます。SSID/passwordや導出したMesh credentialはログしません。Wi-Fi初期化が失敗した場合は、Meshを開始せず、既存の安全側エラー処理に従い、Discovery BLEは可能な範囲で継続します。
 
 AtomS3 Liteでは再起動後およそ15秒でRaspberry Pi APへ再接続することを確認済みです。
 AP側はSTA MAC `ac:a7:04:03:d7:f8`を観測し、`192.168.50.175`はreachable、pingは
 4/4応答・packet loss 0%でした。Wi-Fi未設定bootではOMK Discovery BLEを開始せず、BLEは
 network provisioningが単独で所有します。
+
+## ESP-WIFI-MESH（正式通信層）
+
+AtomS3 Liteをproduction対象として、共通NodeはESP-WIFI-MESH、SEN66、BLE scan / SwitchBot relay、MQTTを同時に実行する。Node自身が計測・BLE relay・Wi-Fi Mesh中継を兼ねるため、SEN66なしのrelay Nodeと、SEN66ありのrelay Nodeを別firmwareに分けない。
+
+保存済みGateway SSID/PSKからMesh IDとMesh AP passwordをruntime導出する。Gateway credentialはOMK専用NVS storeに保持し、ESP-WIFI-MESHがchild parent選択で変更するruntime STA configurationとは共有しない。root/parent/child、Node別SSID、固定IP、manual parentの設定はない。rootはGateway APへ接続し、internal networkのDHCP/DNS/NAPTを提供する。childは自動選択されたparent経由でIPを得て、既存の`IP_EVENT_STA_GOT_IP`起点で通常TCP MQTTを`mqtt://192.168.50.1:1883`へ接続する。GatewayにMesh daemonや特別なrouting設定は必要ない。市販Wi-Fi中継機は必須ではないが、実際の到達性はNode配置と電波条件に依存する。AC電源で常時動作させる。
+
+parentまたはrootの喪失時にはMeshが自動再構成する。起動時は`esp_wifi_start()`、`esp_mesh_init()`、`esp_mesh_start()`の成功後にだけinternal-netif receive taskを開始する。Mesh初期化前に`esp_mesh_recv()`を呼ばない。
+
+### Mesh diagnostic status
+
+30秒ごとに次の非retain topicへpublishする。
+
+```text
+omk/node/<node_id>/status
+```
+
+```json
+{"node_id":"09dda0d5a8f2","mesh_layer":2,"is_root":false,"parent_bssid":"94:b9:7e:93:20:f5","rssi_dbm":-76,"rssi_valid":true,"ip":"10.0.0.2","parent_change_count":0,"parent_disconnect_count":2,"is_rootless":false,"rootless_duration_s":0,"last_parent_disconnect_reason":201,"last_wifi_disconnect_reason":201,"root_switch_count":0,"mqtt_disconnect_count":1,"uptime_s":123,"free_heap_bytes":223000}
+```
+
+fieldの定義と監視上の注意は[`docs/developer/data-and-mqtt.md`](../../../docs/developer/data-and-mqtt.md#mesh診断status)を正本とする。とくに`parent_disconnect_count`はraw Mesh event回数であり、障害回数ではない。起動・再構成中は複数回増え、`mesh_layer=-1`、旧parent BSSID、旧IPが一時的に見えることがある。`is_rootless`、最後のparent/Wi-Fi切断reason、初期選出を除くroot role変化回数も追跡する。Dashboardは単発値で判定せずstabilization windowを使う。
 
 ### Provisioning BLEの実機確認とBlueZ cache
 
@@ -276,11 +295,9 @@ SwitchBot advertisementを受信し、Wi-Fi/MQTTでGatewayへ中継します。�
 ```bash
 cd firmware/esp32/omk-node
 pio run -e atom-s3-lite
-pio run -e m5stick-c
 ```
 
-AtomS3 Lite、オリジナルM5StickCともbuild SUCCESSを確認済みです。AtomS3 Liteの
-uploadとGatewayによるDiscovery v1検出も確認済みです。M5StickC Plus / Plus2は別ボードprofileを検証してから追加します。
+AtomS3 Liteのbuild、upload、GatewayによるDiscovery v1検出を確認済みです。M5StickCは初期Mesh実験では動作実績がありますが、common firmwareでは`usb_serial_jtag_*`のlink errorが残るためproduction対象外です。この制約はAtomS3 Liteへ影響しません。M5StickC Plus / Plus2は別ボードprofileを検証してから追加します。
 
 ## Repository hygiene
 

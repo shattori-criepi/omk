@@ -12,6 +12,14 @@
 
 `NetworkManager`の`ipv4.method shared`はDHCP払い出しに使うだけで、Internet共有を目的にしません。shared-mode dnsmasqには`no-resolv`を設定し、AP clientの上流DNS解決も停止します。
 
+## ESP-WIFI-MESH Node internal network
+
+AtomS3 Lite NodeはGateway APの外側にESP-WIFI-MESH internal IP networkを形成できる。root NodeだけがGateway APへ通常STA接続し、rootは`10.0.0.1/16`でMesh childへDHCP/DNSを提供してNAPTを有効化する。childの`10.0.0.x`通信はrootでNAPTされ、Gateway Mosquittoの`192.168.50.1:1883`へ通常TCPで到達する。
+
+これはGatewayの`wlan0`にMesh専用プロトコルを追加するものではない。Gateway側にはMesh daemon、static route、Node別IP設定を置かず、既存のAP、Docker公開MQTT、nftables境界を維持する。NodeのMesh AP credentialは保存済みGateway SSID/PSKからruntime導出し、Gateway credential、導出値ともログやsourceへ出さない。
+
+共通firmwareではroot/parent/childをNode IDへ固定しない。配置、電波条件、起動順により役割は変わる。2026-08-20のAtomS3 Lite 2台試験ではrootがGateway側IPを取得し、childが`10.0.0.2`を取得して通常ESP-MQTTでMosquittoへ到達した。これは実測例であり、IPや役割の固定仕様ではない。E2E範囲とcredential migrationは[ESP-WIFI-MESH Node networking decision](../decisions/esp-wifi-mesh-node-networking.md)を参照する。
+
 ## forwardingルール
 
 `setup-wifi-access-point.sh`は専用nftables tableに、次の順序でルールを導入します。

@@ -12,6 +12,7 @@ MQTTは、各データ取得処理をRaspberry Piへ集約するLAN内の内部�
 | --- | --- | --- | --- |
 | SEN66測定値 | `omk/<device_id>/sen66` | 0 | false |
 | OMK Node登録状態 | `omk/node/<node_id>/registration/status` | 1 | true |
+| OMK Node Mesh診断 | `omk/node/<node_id>/status` | 0 | false |
 | BLE環境センサ | `omk/<sensor_id>/environment` | 0 | false |
 | BLE人感状態変化 | `omk/<sensor_id>/motion` | 0 | false |
 | BLE開閉状態変化 | `omk/<sensor_id>/contact` | 0 | false |
@@ -32,6 +33,41 @@ OMK NodeはMQTT接続後、retain付きでregistration statusを送信する。
 ```json
 {"protocol_version":1,"node_id":"112233445566","registration_state":"registered","capabilities":3}
 ```
+
+### Mesh診断status
+
+ESP-WIFI-MESH Nodeは30秒ごとに非retainの診断statusを送信する。
+
+```text
+omk/node/<node_id>/status
+```
+
+```json
+{"node_id":"09dda0d5a8f2","mesh_layer":2,"is_root":false,"parent_bssid":"94:b9:7e:93:20:f5","rssi_dbm":-76,"rssi_valid":true,"ip":"10.0.0.2","parent_change_count":0,"parent_disconnect_count":2,"is_rootless":false,"rootless_duration_s":0,"last_parent_disconnect_reason":201,"last_wifi_disconnect_reason":201,"root_switch_count":0,"mqtt_disconnect_count":1,"uptime_s":123,"free_heap_bytes":223000}
+```
+
+| Field | 意味 |
+| --- | --- |
+| `node_id` | eFuse由来の12桁Node ID |
+| `mesh_layer` | ESP-WIFI-MESH layer。transition中は`-1`になり得る |
+| `is_root` | 観測時点のroot状態 |
+| `parent_bssid` | 観測済みparent BSSID。transition中は旧値が残り得る |
+| `rssi_dbm` / `rssi_valid` | STA接続先RSSIと取得可否。取得失敗時は`rssi_valid=false` |
+| `ip` | 現在または直近のSTA/internal-network IPv4。transition中は旧値が残り得る |
+| `parent_change_count` | 前回と異なるparent BSSIDへの接続回数 |
+| `parent_disconnect_count` | raw `MESH_EVENT_PARENT_DISCONNECTED` 回数 |
+| `is_rootless` | `MESH_EVENT_NETWORK_STATE`が示す、現在のMesh networkにrootがいない状態 |
+| `rootless_duration_s` | rootless状態の継続秒数。rootまたはparent接続成立時は0 |
+| `last_parent_disconnect_reason` | 最後の`MESH_EVENT_PARENT_DISCONNECTED`のWi-Fi reason。未取得時は`0` |
+| `last_wifi_disconnect_reason` | 最後のMesh管理STA切断reason。`MESH_EVENT_PARENT_DISCONNECTED` payloadから取得し、`201`は`WIFI_REASON_NO_AP_FOUND`。未取得時は`0` |
+| `root_switch_count` | 初期root選出を除く、Node自身のroot role変化回数。同一transitionの重複eventは数えない |
+| `mqtt_disconnect_count` | `MQTT_EVENT_DISCONNECTED` 回数 |
+| `uptime_s` | boot後秒数 |
+| `free_heap_bytes` | 観測時点のfree heap |
+
+`parent_disconnect_count`はuser-visible outage数ではない。起動とtopology再構成の1回の事象で複数回増え得る。Dashboardや監視は単発値で異常判定せず、topology stabilization windowを設けて継続増加、MQTT未復帰、計測欠測を組み合わせて扱う。
+
+`is_rootless`、layer、parent BSSID、IPも再構成の途中値である。特に同一SSIDで異なるBSSIDを持つGateway／市販中継機の環境では、異なるroot/treeが形成されるリスクを実機評価中である。非同期起動やNode移設後に最適rootへ自動復帰する保証はないため、root自動再選出はこの診断データを使った後続判断とし、現時点では実装しない。市販中継機との併用自体は否定せず、後続の実住宅試験で評価する。
 
 ## 汎用JSONL収集
 

@@ -7,6 +7,8 @@
 #include "discovery_ble.h"
 #include "node_state.h"
 #include "mqtt_registration.h"
+#include "mesh_network.h"
+#include "mesh_netif.h"
 #include "node_registration.h"
 #include "node_identity.h"
 #include "node_protocol.h"
@@ -87,14 +89,21 @@ void app_main(void) {
     uint64_t node_id;
     ESP_ERROR_CHECK(node_identity_get_id(&node_id));
     bool has_wifi_credentials = false;
-    esp_err_t wifi_err = wifi_station_prepare(&has_wifi_credentials);
+    esp_err_t wifi_err = wifi_station_init_network_core();
+    if (wifi_err == ESP_OK) {
+        /* Match Espressif's Mesh examples: create and attach the default STA
+         * netif before esp_wifi_init(), so its event handlers own the first
+         * root association. */
+        wifi_err = mesh_netifs_init();
+    }
+    if (wifi_err == ESP_OK) wifi_err = wifi_station_prepare(&has_wifi_credentials);
     if (wifi_err != ESP_OK) {
         ESP_LOGW(TAG, "Wi-Fi credential check failed; discovery continues: %s",
                  esp_err_to_name(wifi_err));
     } else if (has_wifi_credentials) {
-        wifi_err = wifi_station_start_prepared();
+        wifi_err = mesh_network_start_prepared();
         if (wifi_err != ESP_OK) {
-            ESP_LOGW(TAG, "Wi-Fi station startup failed; discovery continues: %s",
+            ESP_LOGW(TAG, "Mesh network startup failed; discovery continues: %s",
                      esp_err_to_name(wifi_err));
         } else {
             esp_err_t mqtt_err = mqtt_registration_start();

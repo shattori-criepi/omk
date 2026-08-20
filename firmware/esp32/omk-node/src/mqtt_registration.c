@@ -10,6 +10,7 @@
 #include "cJSON.h"
 #include "esp_event.h"
 #include "esp_log.h"
+#include "esp_netif_ip_addr.h"
 #include "esp_wifi.h"
 #include "mqtt_client.h"
 #include "node_registration.h"
@@ -22,11 +23,13 @@
 #define OMK_MQTT_PAYLOAD_SIZE 128
 #define OMK_MQTT_RELAY_ENVIRONMENT_PAYLOAD_SIZE 256
 #define OMK_MQTT_SEN66_PAYLOAD_SIZE 768
+#define OMK_MQTT_MESH_STATUS_PAYLOAD_SIZE 512
 #define OMK_MQTT_CLIENT_ID_SIZE 32
 static const char *TAG = "omk-mqtt";
 static esp_mqtt_client_handle_t client;
 static bool client_started;
 static volatile bool client_connected;
+static uint32_t mqtt_disconnect_count;
 static bool ip_handler_registered;
 static char registration_topic[OMK_MQTT_TOPIC_SIZE];
 static char registration_config_topic[OMK_MQTT_TOPIC_SIZE];
@@ -163,12 +166,11 @@ static void mqtt_event_handler(void *arg, esp_event_base_t event_base,
                                int32_t event_id, void *event_data) {
     (void)arg;
     (void)event_base;
-    (void)event_data;
 
     switch ((esp_mqtt_event_id_t)event_id) {
     case MQTT_EVENT_CONNECTED:
         client_connected = true;
-        ESP_LOGI(TAG, "Connected to MQTT broker");
+        ESP_LOGI(TAG, "MQTT_EVENT_CONNECTED");
         if (esp_mqtt_client_subscribe(client, registration_config_topic, 1) < 0) {
             ESP_LOGW(TAG, "Could not subscribe to registration config");
         }
@@ -179,21 +181,62 @@ static void mqtt_event_handler(void *arg, esp_event_base_t event_base,
         break;
     case MQTT_EVENT_DISCONNECTED:
         client_connected = false;
-        ESP_LOGW(TAG, "Disconnected from MQTT broker; automatic reconnect pending");
+        mqtt_disconnect_count++;
+        ESP_LOGW(TAG, "MQTT_EVENT_DISCONNECTED; automatic reconnect pending");
         break;
-    case MQTT_EVENT_ERROR:
-        ESP_LOGW(TAG, "MQTT connection error");
+    case MQTT_EVENT_ERROR: {
+        const esp_mqtt_event_handle_t event = event_data;
+        if (event != NULL && event->error_handle != NULL) {
+            ESP_LOGW(TAG, "MQTT_EVENT_ERROR: type=%d tls=%d stack=%d socket_errno=%d connect_rc=%d",
+                     event->error_handle->error_type,
+                     event->error_handle->esp_tls_last_esp_err,
+                     event->error_handle->esp_tls_stack_err,
+                     event->error_handle->esp_transport_sock_errno,
+                     event->error_handle->connect_return_code);
+        } else {
+            ESP_LOGW(TAG, "MQTT_EVENT_ERROR without error details");
+        }
         break;
+    }
     default:
         break;
     }
 }
 
+uint32_t mqtt_registration_get_disconnect_count(void) {
+    return mqtt_disconnect_count;
+}
+
+esp_err_t mqtt_registration_publish_mesh_status(const char *payload) {
+    if (payload == NULL || payload[0] == '\0') {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (client == NULL || !client_connected) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    uint64_t node_id;
+    esp_err_t err = node_identity_get_id(&node_id);
+    if (err != ESP_OK) {
+        return err;
+    }
+    char topic[OMK_MQTT_TOPIC_SIZE];
+    int written = snprintf(topic, sizeof(topic), "omk/node/%012" PRIx64 "/status", node_id);
+    if (written < 0 || written >= (int)sizeof(topic) ||
+        strlen(payload) >= OMK_MQTT_MESH_STATUS_PAYLOAD_SIZE) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+    int message_id = esp_mqtt_client_enqueue(client, topic, payload, 0, 0, 0, true);
+    return message_id < 0 ? ESP_FAIL : ESP_OK;
+}
+
 static void start_or_reconnect_mqtt(void) {
     if (client_started) {
+        ESP_LOGI(TAG, "Requesting MQTT reconnect after IP acquisition");
         esp_err_t err = esp_mqtt_client_reconnect(client);
         if (err != ESP_OK) {
             ESP_LOGW(TAG, "MQTT reconnect request failed: %s", esp_err_to_name(err));
+        } else {
+            ESP_LOGI(TAG, "MQTT reconnect requested");
         }
         return;
     }
@@ -204,7 +247,7 @@ static void start_or_reconnect_mqtt(void) {
         return;
     }
     client_started = true;
-    ESP_LOGI(TAG, "Starting MQTT after Wi-Fi IP acquisition");
+    ESP_LOGI(TAG, "MQTT start requested after IP acquisition");
 }
 
 static void ip_event_handler(void *arg, esp_event_base_t event_base,
@@ -212,7 +255,14 @@ static void ip_event_handler(void *arg, esp_event_base_t event_base,
     (void)arg;
     (void)event_base;
     (void)event_id;
-    (void)event_data;
+    const ip_event_got_ip_t *event = event_data;
+    if (event != NULL) {
+        ESP_LOGI(TAG, "MQTT observed IP_EVENT_STA_GOT_IP: ip=" IPSTR " gw=" IPSTR " mask=" IPSTR,
+                 IP2STR(&event->ip_info.ip), IP2STR(&event->ip_info.gw),
+                 IP2STR(&event->ip_info.netmask));
+    } else {
+        ESP_LOGW(TAG, "MQTT observed IP_EVENT_STA_GOT_IP without event data");
+    }
     start_or_reconnect_mqtt();
 }
 
