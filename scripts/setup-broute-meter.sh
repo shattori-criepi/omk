@@ -162,6 +162,50 @@ ensure_credentials_permissions() {
   fi
 }
 
+migrate_legacy_runtime_config() {
+  local legacy_directory="${OMK_ROOT}/broute-meter/config"
+  local destination_directory="${OMK_ROOT}/services/broute-meter/config"
+  local legacy_credentials="${legacy_directory}/credentials.yaml"
+  local destination_credentials="${destination_directory}/credentials.yaml"
+  local legacy_settings="${legacy_directory}/settings.yaml"
+  local destination_settings="${destination_directory}/settings.yaml"
+  local temporary
+
+  [[ -d "${destination_directory}" ]] || fail "B-route config directory is missing: ${destination_directory}"
+
+  if [[ -e "${destination_credentials}" ]]; then
+    log "B-route credentials already exist at the current path; preserving them."
+  elif [[ -e "${legacy_credentials}" ]]; then
+    [[ -f "${legacy_credentials}" && ! -L "${legacy_credentials}" ]] || fail "Legacy credentials path is not a regular file: ${legacy_credentials}"
+    if "${DRY_RUN}"; then
+      log "Would migrate legacy B-route credentials to the current config directory."
+    else
+      "${SUDO[@]}" install -o "${TARGET_USER}" -g "${TARGET_GROUP}" -m 0600 "${legacy_credentials}" "${destination_credentials}"
+      log "Migrated legacy B-route credentials to the current config directory."
+    fi
+  fi
+
+  if [[ -e "${destination_settings}" ]]; then
+    log "B-route settings already exist at the current path; preserving them."
+  elif [[ -e "${legacy_settings}" ]]; then
+    [[ -f "${legacy_settings}" && ! -L "${legacy_settings}" ]] || fail "Legacy settings path is not a regular file: ${legacy_settings}"
+    if "${DRY_RUN}"; then
+      log "Would migrate legacy B-route settings and update only the known relative data/log paths."
+    else
+      temporary="$(mktemp "${destination_directory}/.settings.yaml.migration.XXXXXX")"
+      trap 'rm -f -- "${temporary}"' RETURN
+      sed -E \
+        -e 's|^([[:space:]]*data_directory:[[:space:]]*)["'"'"']?\.\./data/broute-meter["'"'"']?([[:space:]]*(#.*)?)$|\1"../../data/broute-meter"\2|' \
+        -e 's|^([[:space:]]*directory:[[:space:]]*)["'"'"']?\.\./logs/broute-meter["'"'"']?([[:space:]]*(#.*)?)$|\1"../../logs/broute-meter"\2|' \
+        "${legacy_settings}" > "${temporary}"
+      "${SUDO[@]}" install -o "${TARGET_USER}" -g "${TARGET_GROUP}" -m 0600 "${temporary}" "${destination_settings}"
+      rm -f -- "${temporary}"
+      trap - RETURN
+      log "Migrated legacy B-route settings to the current config directory."
+    fi
+  fi
+}
+
 ensure_system_directory() {
   local directory="$1"
   if [[ -d "${directory}" ]]; then
@@ -331,107 +375,115 @@ verify_installation() {
   log "PASS: ${SERVICE} is enabled and active."
 }
 
-while (($#)); do
-  case "$1" in
-    --dry-run) DRY_RUN=true ;;
-    --print-unit) PRINT_UNIT=true ;;
-    -h|--help) usage; exit 0 ;;
-    *) printf 'Unknown option: %s\n' "$1" >&2; usage >&2; exit 2 ;;
-  esac
-  shift
-done
+main() {
+  while (($#)); do
+    case "$1" in
+      --dry-run) DRY_RUN=true ;;
+      --print-unit) PRINT_UNIT=true ;;
+      -h|--help) usage; return 0 ;;
+      *) printf 'Unknown option: %s\n' "$1" >&2; usage >&2; return 2 ;;
+    esac
+    shift
+  done
 
-if "${DRY_RUN}" && "${PRINT_UNIT}"; then
-  fail "--dry-run and --print-unit cannot be used together."
-fi
-
-initialize_target_identity
-if "${PRINT_UNIT}"; then
-  command -v sed >/dev/null 2>&1 || fail "sed is required to render the unit."
-  [[ -f "${UNIT_TEMPLATE}" ]] || fail "Unit template is missing: ${UNIT_TEMPLATE}"
-  render_unit
-  exit 0
-fi
-
-if ((EUID != 0)); then SUDO=(sudo); fi
-preflight
-
-if "${DRY_RUN}"; then
-  log "Repository root: ${OMK_ROOT}"
-  log "Target user/group: ${TARGET_USER}:${TARGET_GROUP}"
-  log "Service: ${SERVICE}"
-  log "Would install missing python3, python3-venv, and python3-pip packages; create ${VENV_PATH} only if absent; and install runtime dependencies from services/broute-meter/pyproject.toml."
-  if command -v stat >/dev/null 2>&1; then
-    ensure_runtime_directory "${OMK_ROOT}/data/broute-meter"
-    ensure_runtime_directory "${OMK_ROOT}/logs/broute-meter"
-  else
-    warn "Skipping runtime directory inspection because stat is unavailable."
+  if "${DRY_RUN}" && "${PRINT_UNIT}"; then
+    fail "--dry-run and --print-unit cannot be used together."
   fi
-  if [[ -d "${LOG_DIR}" ]]; then
-    log "Would preserve setup log directory: ${LOG_DIR}"
-  elif [[ -e "${LOG_DIR}" ]]; then
-    warn "A normal run would fail: setup log path is a non-directory: ${LOG_DIR}"
-  else
-    log "Would create setup log directory owned by ${TARGET_USER}:${TARGET_GROUP}: ${LOG_DIR}"
+
+  initialize_target_identity
+  if "${PRINT_UNIT}"; then
+    command -v sed >/dev/null 2>&1 || fail "sed is required to render the unit."
+    [[ -f "${UNIT_TEMPLATE}" ]] || fail "Unit template is missing: ${UNIT_TEMPLATE}"
+    render_unit
+    return 0
   fi
-  if [[ -f "${HELPER_SOURCE}" ]] && command -v cmp >/dev/null 2>&1; then
-    plan_file_update "${HELPER_SOURCE}" "${HELPER_DEST}" 'USB reset helper'
-  else
-    warn "Skipping USB reset helper comparison because its source or cmp is unavailable."
-  fi
-  if [[ ! -e "${SUDOERS_DEST}" ]]; then
-    log "Would create sudoers rule: ${SUDOERS_DEST}"
-  elif [[ -r "${SUDOERS_DEST}" ]] && command -v cmp >/dev/null 2>&1; then
-    if compare_files <(render_sudoers) "${SUDOERS_DEST}"; then
-      log "Would preserve identical sudoers rule: ${SUDOERS_DEST}"
+
+  if ((EUID != 0)); then SUDO=(sudo); fi
+  preflight
+
+  if "${DRY_RUN}"; then
+    log "Repository root: ${OMK_ROOT}"
+    log "Target user/group: ${TARGET_USER}:${TARGET_GROUP}"
+    log "Service: ${SERVICE}"
+    migrate_legacy_runtime_config
+    log "Would install missing python3, python3-venv, and python3-pip packages; create ${VENV_PATH} only if absent; and install runtime dependencies from services/broute-meter/pyproject.toml."
+    if command -v stat >/dev/null 2>&1; then
+      ensure_runtime_directory "${OMK_ROOT}/data/broute-meter"
+      ensure_runtime_directory "${OMK_ROOT}/logs/broute-meter"
     else
-      comparison_status=$?
-      if [[ "${comparison_status}" == 1 ]]; then
-        log "Would update changed sudoers rule: ${SUDOERS_DEST}"
-      else
-        warn "Cannot compare existing sudoers rule; it will not be classified as changed: ${SUDOERS_DEST}"
-      fi
+      warn "Skipping runtime directory inspection because stat is unavailable."
     fi
-  else
-    warn "Cannot compare existing sudoers rule without sudo in dry-run; normal execution uses privileged comparison."
-  fi
-  if [[ -f "${UNIT_TEMPLATE}" ]] && command -v sed >/dev/null 2>&1 && command -v cmp >/dev/null 2>&1; then
-    if [[ -e "${UNIT_DEST}" ]] && compare_files <(render_unit) "${UNIT_DEST}"; then
-      log "Would preserve identical systemd unit: ${UNIT_DEST}"
-      log "Would enable ${SERVICE} if needed; would start it only if inactive."
+    if [[ -d "${LOG_DIR}" ]]; then
+      log "Would preserve setup log directory: ${LOG_DIR}"
+    elif [[ -e "${LOG_DIR}" ]]; then
+      warn "A normal run would fail: setup log path is a non-directory: ${LOG_DIR}"
     else
-      comparison_status=$?
-      if [[ -e "${UNIT_DEST}" && "${comparison_status}" == 2 ]]; then
-        warn "Cannot compare existing systemd unit; it will not be classified as changed: ${UNIT_DEST}"
-      else
-        log "Would create or update systemd unit: ${UNIT_DEST}"
-        log "Would run systemctl daemon-reload, enable ${SERVICE} if needed, and start or restart it according to its active state."
-      fi
+      log "Would create setup log directory owned by ${TARGET_USER}:${TARGET_GROUP}: ${LOG_DIR}"
     fi
-  else
-    warn "Skipping systemd unit comparison because the template, sed, or cmp is unavailable."
+    if [[ -f "${HELPER_SOURCE}" ]] && command -v cmp >/dev/null 2>&1; then
+      plan_file_update "${HELPER_SOURCE}" "${HELPER_DEST}" 'USB reset helper'
+    else
+      warn "Skipping USB reset helper comparison because its source or cmp is unavailable."
+    fi
+    if [[ ! -e "${SUDOERS_DEST}" ]]; then
+      log "Would create sudoers rule: ${SUDOERS_DEST}"
+    elif [[ -r "${SUDOERS_DEST}" ]] && command -v cmp >/dev/null 2>&1; then
+      if compare_files <(render_sudoers) "${SUDOERS_DEST}"; then
+        log "Would preserve identical sudoers rule: ${SUDOERS_DEST}"
+      else
+        comparison_status=$?
+        if [[ "${comparison_status}" == 1 ]]; then
+          log "Would update changed sudoers rule: ${SUDOERS_DEST}"
+        else
+          warn "Cannot compare existing sudoers rule; it will not be classified as changed: ${SUDOERS_DEST}"
+        fi
+      fi
+    else
+      warn "Cannot compare existing sudoers rule without sudo in dry-run; normal execution uses privileged comparison."
+    fi
+    if [[ -f "${UNIT_TEMPLATE}" ]] && command -v sed >/dev/null 2>&1 && command -v cmp >/dev/null 2>&1; then
+      if [[ -e "${UNIT_DEST}" ]] && compare_files <(render_unit) "${UNIT_DEST}"; then
+        log "Would preserve identical systemd unit: ${UNIT_DEST}"
+        log "Would enable ${SERVICE} if needed; would start it only if inactive."
+      else
+        comparison_status=$?
+        if [[ -e "${UNIT_DEST}" && "${comparison_status}" == 2 ]]; then
+          warn "Cannot compare existing systemd unit; it will not be classified as changed: ${UNIT_DEST}"
+        else
+          log "Would create or update systemd unit: ${UNIT_DEST}"
+          log "Would run systemctl daemon-reload, enable ${SERVICE} if needed, and start or restart it according to its active state."
+        fi
+      fi
+    else
+      warn "Skipping systemd unit comparison because the template, sed, or cmp is unavailable."
+    fi
+    if ! "${PREFLIGHT_OK}"; then
+      fail "Dry-run found prerequisite failures; no changes were made."
+    fi
+    return 0
   fi
-  if ! "${PREFLIGHT_OK}"; then
-    fail "Dry-run found prerequisite failures; no changes were made."
-  fi
-  exit 0
+
+  ensure_log_directory
+  LOG_FILE="${LOG_DIR}/broute-meter-setup-$(date '+%Y%m%d-%H%M%S').log"
+  exec > >(tee -a "${LOG_FILE}") 2>&1
+  log "B-route meter setup started. Log file: ${LOG_FILE}"
+  migrate_legacy_runtime_config
+  ensure_python_runtime
+  ensure_runtime_directory "${OMK_ROOT}/data/broute-meter"
+  ensure_runtime_directory "${OMK_ROOT}/logs/broute-meter"
+  ensure_credentials_permissions
+
+  temporary_sudoers="$(mktemp)"
+  temporary_unit="$(mktemp)"
+  trap 'rm -f -- "${temporary_sudoers}" "${temporary_unit}"' EXIT
+  install_helper
+  install_sudoers "${temporary_sudoers}"
+  install_unit "${temporary_unit}"
+  ensure_service_state
+  verify_installation
+  log "Installed ${SERVICE}. Check: sudo systemctl status ${SERVICE} --no-pager"
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
 fi
-
-ensure_log_directory
-LOG_FILE="${LOG_DIR}/broute-meter-setup-$(date '+%Y%m%d-%H%M%S').log"
-exec > >(tee -a "${LOG_FILE}") 2>&1
-log "B-route meter setup started. Log file: ${LOG_FILE}"
-ensure_python_runtime
-ensure_runtime_directory "${OMK_ROOT}/data/broute-meter"
-ensure_runtime_directory "${OMK_ROOT}/logs/broute-meter"
-ensure_credentials_permissions
-
-temporary_sudoers="$(mktemp)"
-temporary_unit="$(mktemp)"
-trap 'rm -f -- "${temporary_sudoers}" "${temporary_unit}"' EXIT
-install_helper
-install_sudoers "${temporary_sudoers}"
-install_unit "${temporary_unit}"
-ensure_service_state
-verify_installation
-log "Installed ${SERVICE}. Check: sudo systemctl status ${SERVICE} --no-pager"
