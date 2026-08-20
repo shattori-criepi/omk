@@ -28,6 +28,13 @@ from .runtime_status import connection_status, request_immediate_retry
 from .site_uuid import SoracomMetadataClient, resolve_site_uuid
 
 
+REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
+DEFAULT_BROUTE_CREDENTIALS_PATH = REPOSITORY_ROOT / "services/broute-meter/config/credentials.yaml"
+DEFAULT_BROUTE_STATUS_PATH = REPOSITORY_ROOT / "data/broute-meter/status.json"
+DEFAULT_BROUTE_RETRY_REQUEST_PATH = REPOSITORY_ROOT / "data/broute-meter/retry-request"
+DEFAULT_SITE_UUID_PATH = REPOSITORY_ROOT / "data/site/site_uuid"
+
+
 class SiteUUIDMetadataClient(Protocol):
     def get_site_uuid(self) -> str | None: ...
 
@@ -39,9 +46,9 @@ class Settings:
     token: str = field(repr=False)
     credentials_path: Path
     systemctl_path: str
-    status_path: Path = Path("/home/omkdev/projects/omk/data/broute-meter/status.json")
-    retry_request_path: Path = Path("/home/omkdev/projects/omk/data/broute-meter/retry-request")
-    site_uuid_path: Path = Path("/home/omkdev/projects/omk/data/site/site_uuid")
+    status_path: Path = DEFAULT_BROUTE_STATUS_PATH
+    retry_request_path: Path = DEFAULT_BROUTE_RETRY_REQUEST_PATH
+    site_uuid_path: Path = DEFAULT_SITE_UUID_PATH
     access_point_profile: str = "omk-ap"
 
     @classmethod
@@ -54,26 +61,26 @@ class Settings:
             credentials_path=Path(
                 os.environ.get(
                     "OMK_BROUTE_CREDENTIALS_PATH",
-                    "/home/omkdev/projects/omk/broute-meter/config/credentials.yaml",
+                    str(DEFAULT_BROUTE_CREDENTIALS_PATH),
                 )
             ),
             systemctl_path=os.environ.get("OMK_SYSTEMCTL_PATH", "/usr/bin/systemctl"),
             status_path=Path(
                 os.environ.get(
                     "OMK_BROUTE_STATUS_PATH",
-                    "/home/omkdev/projects/omk/data/broute-meter/status.json",
+                    str(DEFAULT_BROUTE_STATUS_PATH),
                 )
             ),
             retry_request_path=Path(
                 os.environ.get(
                     "OMK_BROUTE_RETRY_REQUEST_PATH",
-                    "/home/omkdev/projects/omk/data/broute-meter/retry-request",
+                    str(DEFAULT_BROUTE_RETRY_REQUEST_PATH),
                 )
             ),
             site_uuid_path=Path(
                 os.environ.get(
                     "OMK_SITE_UUID_PATH",
-                    "/home/omkdev/projects/omk/data/site/site_uuid",
+                    str(DEFAULT_SITE_UUID_PATH),
                 )
             ),
             access_point_profile=os.environ.get("OMK_AP_CONNECTION_NAME", "omk-ap"),

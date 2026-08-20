@@ -9,9 +9,9 @@ StartLimitBurst=5
 Type=simple
 User=@OMK_USER@
 Group=@OMK_GROUP@
-WorkingDirectory=@OMK_ROOT@/broute-meter
+WorkingDirectory=@OMK_ROOT@/services/broute-meter
 Environment=TZ=Asia/Tokyo
-ExecStart=@OMK_ROOT@/broute-meter/.venv/bin/python -m broute_meter run
+ExecStart=@OMK_ROOT@/services/broute-meter/.venv/bin/python -m broute_meter run
 Restart=on-failure
 RestartSec=60s
 TimeoutStopSec=30s

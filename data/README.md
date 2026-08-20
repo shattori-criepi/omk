@@ -8,7 +8,7 @@ CSV、Parquet、SQLite、状態ファイルはGitで管理しません。Gitに�
 
 - `broute-meter/`: ホスト上のBルートサービスによるCSV、回復状態などの固有一次保存。MQTT経由のJSONLとは別経路であり、Git管理外
 - `sensors/`: `sensor-collector`がMQTTメッセージを`YYYY/MM/DD.jsonl`へ保存する一次データ。Git管理外
-- `latest/`: collectorがatomic置換する瞬時値cache。現行Dashboard互換の`broute_power.json`、`sen66.json`、`ichijo_power_flow.json`に加え、可変Dashboardの基盤となる`items/<stable-item-id>.json`と検出済み候補の`catalog.json`を保持する。現行Dashboard画面はまだ固定latestだけを読む。Git管理外
+- `latest/`: collectorがatomic置換する瞬時値cache。現行Dashboardが表示候補と設定の正本として使う`items/<stable-item-id>.json`と検出済み候補の`catalog.json`を保持する。`broute_power.json`、`sen66.json`、`ichijo_power_flow.json`は互換出力として併行して保持する。Git管理外
 - `dashboard/`: Dashboard専用の表示設定。Phase 2では`settings.json`に標準プリセットのDisplay Item、順序、サイズを保存する。秘密情報を含まないため`0644`で保存し、通常のホストユーザーが読取り・バックアップできる。collectorや他サービスは書き込まない。Git管理外
 - `processed/`: `data-transformer`がJSONLから生成する日付パーティション済みParquetの派生データ。Git管理外
 - `errors/transform/`: 変換時に検出した不正・未対応レコードのエラー記録。一次データは変更しない。Git管理外
@@ -21,5 +21,5 @@ Docker Composeからは、原則としてOMKルート基準の`./data/...`をホ
 
 データの保持期間、削除、バックアップ、復元は、運用開始前に別途ルールを定めて
 ください。`processed/`は再生成可能な派生データですが、運用中に無断で削除しません。
-`broute-meter/`の既存CSVと`harvest-uploader/queue.sqlite3`は特に保護してください。
+`broute-meter/`の既存CSVと`harvest-uploader/queue.sqlite3`は特に保護してください。前者の実装本体は`services/broute-meter/`にあります。
 ログはOMKルートの`logs/`へ分離しています。

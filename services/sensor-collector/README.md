@@ -24,8 +24,7 @@ JSONLへの保存成功後、正常なJSON payloadのうち、`omk/<topic-device
 payloadに文字列`device_id`を持つレコードから、表示候補になり得るscalar値を
 `LATEST_DATA_ROOT/items/<stable-item-id>.json`へ保存します。同時に
 `LATEST_DATA_ROOT/catalog.json`を更新するため、Dashboardは全候補をディレクトリ走査なしで
-列挙できます。これは将来の可変Dashboard向けのデータ基盤であり、現行Dashboardの画面は
-まだこのstoreを使用しません。
+列挙できます。現行Dashboardはこのstoreを表示候補と表示設定の正本として使用します。
 
 stable item IDは`SHA-256(topic + NUL + device_id + NUL + field)`のhexに
 `item_v1_`を付けたものです。したがって同じ`power` topic typeや`temperature_c` fieldでも、
@@ -44,11 +43,11 @@ collector再起動後も候補は残ります。
 
 ### 既存Dashboardとの互換性
 
-移行中は固定latestも併行して維持します。Bルート`power`で`net_power_w`を持つものは
+互換性のため固定latestも併行して維持します。Bルート`power`で`net_power_w`を持つものは
 `broute_power.json`、`sen66`は`sen66.json`、`power-flow`は
 `ichijo_power_flow.json`へ従来どおり保存します。BLE Plugの`power_w`/`switch_state`は
 generic storeには保存されますが、`broute_power.json`を上書きしません。後続Phaseで現行Dashboardが
-generic storeへ移行できた時点で、この固定latest互換出力を削除できます。
+旧表示設定・外部参照を廃止できた時点で、この固定latest互換出力を削除できます。
 
 不正JSON、Base64 payload、topic形式または`device_id`が不正なpayloadはgeneric latestを更新しません。
 最新状態の保存に失敗しても、JSONL収集は継続します。

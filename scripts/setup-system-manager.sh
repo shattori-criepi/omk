@@ -25,7 +25,7 @@ fail() { log "ERROR: $*" >&2; exit 1; }
 [[ -n "${SYSTEMCTL_PATH}" && "${SYSTEMCTL_PATH}" == /* ]] || fail 'An absolute systemctl path is required.'
 [[ -f "${UNIT_TEMPLATE}" ]] || fail "Missing unit template: ${UNIT_TEMPLATE}"
 [[ -f "${OMK_ROOT}/services/system-manager/requirements.txt" ]] || fail 'Missing system-manager requirements.'
-[[ -d "${OMK_ROOT}/broute-meter/config" ]] || fail 'Missing broute-meter config directory.'
+[[ -d "${OMK_ROOT}/services/broute-meter/config" ]] || fail 'Missing broute-meter config directory.'
 [[ -d "${OMK_ROOT}/data" ]] || fail 'Missing persistent data directory.'
 if ((EUID != 0)); then
   command -v sudo >/dev/null 2>&1 || fail 'sudo is required when not run as root.'

@@ -7,7 +7,7 @@ OMKはPython services、Docker Compose、host systemd、ESP-IDF firmwareで構�
 - Python service: 各`services/*/requirements*.txt`とREADMEに従う
 - ESP32 Node: ESP-IDF/PlatformIO環境と[共通Node README](../../firmware/esp32/omk-node/README.md)
 - Gateway: Raspberry Pi 4/5、64-bit Raspberry Pi OS、Docker Compose
-- 実行構成: `compose.yaml`。`compose.mock.yaml`、`compose.windows-hardware.yaml`、`compose.pi.yaml`は現行リポジトリに存在しない
+- 実運用構成: `compose.yaml`。Bルートのmock・container testは`compose.dev.yaml`を明示して実行する。`compose.mock.yaml`、`compose.windows-hardware.yaml`、`compose.pi.yaml`は現行リポジトリに存在しない
 
 ## Gatewayでの確認
 

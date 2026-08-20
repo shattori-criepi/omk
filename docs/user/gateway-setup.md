@@ -20,9 +20,8 @@
 
 この手順は、Raspberry Pi OSを書き込んだ直後のRaspberry Piを、OMK Gatewayとして
 再現可能な状態にします。正式対象はRaspberry Pi 4またはRaspberry Pi 5、64-bit Raspberry Pi OS
-（GUIあり）です。OMKの標準ユーザーは`omkdev`、標準配置先は
-`/home/omkdev/projects/omk`です。スクリプトは配置場所を動的に判定するため、
-別の通常ユーザーや配置先でも実行できますが、標準との差異はログに残ります。
+（GUIあり）です。セットアップスクリプトはリポジトリの配置場所を動的に判定するため、
+通常ユーザー名やcheckout先に依存しません。
 
 Windows 11のWSL2とVS Codeを開発環境として想定します。Raspberry Piがインターネット
 へ接続でき、実行ユーザーが`sudo`を利用できることも必要です。
@@ -178,8 +177,8 @@ Dockerのaptソースを確認してから再実行します。既存の別方�
 
 ## 11. データと秘密情報
 
-OMKの計測データ保存先は、リポジトリルート直下の`data/`です。標準配置なら
-`/home/omkdev/projects/omk/data`であり、Docker Composeからは原則として
+OMKの計測データ保存先は、リポジトリルート直下の`data/`です。checkoutした
+リポジトリの`data/`であり、Docker Composeからは原則として
 `./data/...`をマウントします。`/opt/omk/data`や`/var/lib/omk`は使用しません。
 
 初期セットアップは基礎構造だけを作成します。`setup-data-collection.sh`はComposeの
@@ -223,7 +222,7 @@ Wi-Fiアクセスポイントを先に設定し、`wlan0` に `192.168.50.1/24` 
 - `dashboard` (`omk-dashboard`)
 - `harvest-uploader` (`omk-harvest-uploader`)
 
-`broute-meter-mock`、`broute-meter-tests` は起動しません。Bルート本体は
+`broute-meter-mock`、`broute-meter-tests` は`compose.dev.yaml`に分離されており、標準Gateway構成には含まれません。Bルート本体は
 ホストのsystemdサービスとして動作し、Docker化しません。
 
 `harvest-uploader` はMQTTの1分集約データをSORACOM Harvest Dataへ送信する独立した

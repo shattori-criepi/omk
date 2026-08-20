@@ -17,7 +17,6 @@ BUILD_SERVICES=(
   dashboard
   harvest-uploader
 )
-EXCLUDED_SERVICES=(broute-meter-mock broute-meter-tests)
 REQUIRED_DIRECTORIES=(data/sensors data/latest data/processed data/dashboard data/harvest-uploader services/mosquitto/data logs/setup)
 MOSQUITTO_BIND_ADDRESS="192.168.50.1"
 MQTT_PORT="1883"
@@ -138,9 +137,6 @@ validate_static_files() {
   [[ -f "${OMK_ROOT}/services/harvest-uploader/src/harvest_uploader/__main__.py" ]] || fail "harvest-uploader entry point is missing."
   for service in "${PRODUCTION_SERVICES[@]}"; do
     grep -q "^  ${service}:" "${COMPOSE_FILE}" || fail "Production service is absent from compose.yaml: ${service}"
-  done
-  for service in "${EXCLUDED_SERVICES[@]}"; do
-    [[ " ${PRODUCTION_SERVICES[*]} " != *" ${service} "* ]] || fail "Excluded service was added to production targets: ${service}"
   done
   grep -Fq "${MOSQUITTO_BIND_ADDRESS}:${MQTT_PORT}:${MQTT_PORT}" "${COMPOSE_FILE}" ||
     fail "compose.yaml does not match expected Mosquitto bind ${MOSQUITTO_BIND_ADDRESS}:${MQTT_PORT}."
@@ -265,15 +261,6 @@ check_harvest_uploader() {
   fi
 }
 
-warn_for_running_excluded_services() {
-  local service
-  for service in "${EXCLUDED_SERVICES[@]}"; do
-    if docker_compose ps --status running --services | grep -Fxq "${service}"; then
-      warn "${service} is already running; it was not started, stopped, built, or restarted by this script."
-    fi
-  done
-}
-
 while (($#)); do
   case "$1" in
     --dry-run) DRY_RUN=true ;; --print-config) PRINT_CONFIG=true ;; --pull) PULL=true ;;
@@ -349,7 +336,6 @@ docker_compose up -d "${PRODUCTION_SERVICES[@]}"
 for service in "${PRODUCTION_SERVICES[@]}"; do container_status "${service}"; done
 check_container_paths
 check_harvest_uploader
-warn_for_running_excluded_services
 if ! ss -ltn | grep -q "${MOSQUITTO_BIND_ADDRESS}:${MQTT_PORT}"; then warn "Mosquitto TCP listener was not visible at ${MOSQUITTO_BIND_ADDRESS}:${MQTT_PORT}"; else log "PASS: Mosquitto listener is present"; fi
 docker_compose logs --tail 30 mosquitto | grep -Eqi 'fatal|error' && warn "Mosquitto logs contain error text; review the log." || log "PASS: No fatal/error text in recent Mosquitto logs"
 docker_compose logs --tail 30 sensor-collector | grep -Eqi 'connection refused|connection error' && warn "sensor-collector shows MQTT connection errors; it may recover when Mosquitto is ready." || log "PASS: No persistent MQTT connection text in recent collector logs"
