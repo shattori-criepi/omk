@@ -10,7 +10,7 @@ TARGET_GROUP=""
 SERVICE='omk-broute-meter.service'
 UNIT_TEMPLATE="${OMK_ROOT}/systemd/omk-broute-meter.service.in"
 HELPER_SOURCE="${OMK_ROOT}/scripts/reset-rs-wsuha-p-usb.sh"
-VENV_PATH="${OMK_ROOT}/broute-meter/.venv"
+VENV_PATH="${OMK_ROOT}/services/broute-meter/.venv"
 VENV_PYTHON="${VENV_PATH}/bin/python"
 HELPER_DEST='/usr/local/lib/omk/reset-rs-wsuha-p-usb'
 SUDOERS_DEST='/etc/sudoers.d/omk-rs-wsuha-p-reset'
@@ -70,7 +70,7 @@ preflight() {
   require_file "${UNIT_TEMPLATE}" 'Unit template'
   require_file "${HELPER_SOURCE}" 'USB reset helper'
   [[ -x "${HELPER_SOURCE}" ]] || PREFLIGHT_FAILURES+=("USB reset helper is not executable: ${HELPER_SOURCE}")
-  [[ -d "${OMK_ROOT}/broute-meter" ]] || PREFLIGHT_FAILURES+=("B-route working directory is missing: ${OMK_ROOT}/broute-meter")
+  [[ -d "${OMK_ROOT}/services/broute-meter" ]] || PREFLIGHT_FAILURES+=("B-route working directory is missing: ${OMK_ROOT}/services/broute-meter")
   for command_name in apt-get python3 install stat mktemp sed systemctl visudo cmp tee; do require_command "${command_name}"; done
   ((EUID != 0)) || require_command runuser
   if ((EUID != 0)); then
@@ -108,10 +108,10 @@ ensure_python_runtime() {
   log "Installing B-route runtime dependencies from pyproject.toml."
   if ((EUID == 0)); then
     runuser -u "${TARGET_USER}" -- "${VENV_PYTHON}" -m pip install --upgrade pip
-    runuser -u "${TARGET_USER}" -- "${VENV_PYTHON}" -m pip install "${OMK_ROOT}/broute-meter"
+    runuser -u "${TARGET_USER}" -- "${VENV_PYTHON}" -m pip install "${OMK_ROOT}/services/broute-meter"
   else
     "${SUDO[@]}" -u "${TARGET_USER}" "${VENV_PYTHON}" -m pip install --upgrade pip
-    "${SUDO[@]}" -u "${TARGET_USER}" "${VENV_PYTHON}" -m pip install "${OMK_ROOT}/broute-meter"
+    "${SUDO[@]}" -u "${TARGET_USER}" "${VENV_PYTHON}" -m pip install "${OMK_ROOT}/services/broute-meter"
   fi
 }
 
@@ -148,7 +148,7 @@ ensure_log_directory() {
 }
 
 ensure_credentials_permissions() {
-  local credentials_path="${OMK_ROOT}/broute-meter/config/credentials.yaml" actual
+  local credentials_path="${OMK_ROOT}/services/broute-meter/config/credentials.yaml" actual
   if [[ ! -e "${credentials_path}" ]]; then
     log "Credentials file is absent; preserving it as absent: ${credentials_path}"
     return
@@ -319,8 +319,8 @@ verify_installation() {
   "${SUDO[@]}" visudo -cf "${SUDOERS_DEST}"
   cmp -s <(render_unit) "${UNIT_DEST}" || fail "Installed unit differs from the rendered template."
   "${SUDO[@]}" systemctl is-enabled --quiet "${SERVICE}" || fail "Service is not enabled: ${SERVICE}"
-  if [[ -e "${OMK_ROOT}/broute-meter/config/credentials.yaml" ]]; then
-    [[ "$(stat -c '%U:%G:%a' "${OMK_ROOT}/broute-meter/config/credentials.yaml")" == "${TARGET_USER}:${TARGET_GROUP}:600" ]] ||
+  if [[ -e "${OMK_ROOT}/services/broute-meter/config/credentials.yaml" ]]; then
+    [[ "$(stat -c '%U:%G:%a' "${OMK_ROOT}/services/broute-meter/config/credentials.yaml")" == "${TARGET_USER}:${TARGET_GROUP}:600" ]] ||
       fail "Credentials file owner or mode is incorrect."
   fi
   if ! "${SUDO[@]}" systemctl is-active --quiet "${SERVICE}"; then
@@ -360,7 +360,7 @@ if "${DRY_RUN}"; then
   log "Repository root: ${OMK_ROOT}"
   log "Target user/group: ${TARGET_USER}:${TARGET_GROUP}"
   log "Service: ${SERVICE}"
-  log "Would install missing python3, python3-venv, and python3-pip packages; create ${VENV_PATH} only if absent; and install runtime dependencies from broute-meter/pyproject.toml."
+  log "Would install missing python3, python3-venv, and python3-pip packages; create ${VENV_PATH} only if absent; and install runtime dependencies from services/broute-meter/pyproject.toml."
   if command -v stat >/dev/null 2>&1; then
     ensure_runtime_directory "${OMK_ROOT}/data/broute-meter"
     ensure_runtime_directory "${OMK_ROOT}/logs/broute-meter"

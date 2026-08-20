@@ -9,7 +9,7 @@ User=@OMK_USER@
 Group=@OMK_GROUP@
 WorkingDirectory=@OMK_ROOT@/services/system-manager
 EnvironmentFile=@ENV_FILE@
-Environment=OMK_BROUTE_CREDENTIALS_PATH=@OMK_ROOT@/broute-meter/config/credentials.yaml
+Environment=OMK_BROUTE_CREDENTIALS_PATH=@OMK_ROOT@/services/broute-meter/config/credentials.yaml
 Environment=OMK_BROUTE_STATUS_PATH=@OMK_ROOT@/data/broute-meter/status.json
 Environment=OMK_BROUTE_RETRY_REQUEST_PATH=@OMK_ROOT@/data/broute-meter/retry-request
 Environment=OMK_SITE_UUID_PATH=@OMK_ROOT@/data/site/site_uuid
@@ -22,7 +22,7 @@ RestartSec=5
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=@OMK_ROOT@/broute-meter/config @OMK_ROOT@/data/broute-meter @OMK_ROOT@/data/site
+ReadWritePaths=@OMK_ROOT@/services/broute-meter/config @OMK_ROOT@/data/broute-meter @OMK_ROOT@/data/site
 
 [Install]
 WantedBy=multi-user.target
