@@ -1,5 +1,6 @@
 .env
 .env.*
+!services/harvest-uploader/.env.example
 
 # Python development and test output
 .venv/
