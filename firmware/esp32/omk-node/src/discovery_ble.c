@@ -62,7 +62,7 @@ static void log_switchbot_advertisement(const esp_ble_gap_cb_param_t *param) {
                                    sizeof(payload_hex) - offset,
                                    "%02x", manufacturer_data[index]);
     }
-    ESP_LOGI(TAG, "SwitchBot advertisement addr=" ESP_BD_ADDR_STR
+    ESP_LOGD(TAG, "SwitchBot advertisement addr=" ESP_BD_ADDR_STR
                   " rssi=%d len=%u data=%s",
              ESP_BD_ADDR_HEX(param->scan_rst.bda), param->scan_rst.rssi,
              manufacturer_length, payload_hex);
