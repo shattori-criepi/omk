@@ -7,7 +7,7 @@ OMKは、Gatewayを中心に住宅内のセンサ、Bルート、BLE機器、任
 - Raspberry Pi 4または5（64-bit Raspberry Pi OS）と安定した電源・microSDカード
 - 初期設定用のWindows PC、ネットワーク接続、SSH利用環境
 - 必要に応じてESP32 Node、SEN66などのセンサ、BLEセンサ、BルートUSBアダプタ、表示用ディスプレイ
-- SORACOM Onyxは、住宅ネットワークに依存しない外部通信が必要な場合だけ使用します
+- SORACOM Onyxは、GatewayからSORACOM Harvestへ計測データをアップロードするための外部通信回線として使用します。ESP32等のセンサノードとの通信には使用しません
 
 ## 導入の流れ
 

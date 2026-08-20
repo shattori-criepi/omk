@@ -2,8 +2,10 @@
 
 ## 対象と前提
 
-この手順は、Raspberry Pi 4（64-bit Raspberry Pi OS、GUIあり）へ USB 接続した
-SORACOM Onyx を、NetworkManager と ModemManager で使用するためのものです。実機での
+この手順は、GatewayからSORACOM Harvestへ計測データをアップロードする外部通信回線として、
+Raspberry Pi 4（64-bit Raspberry Pi OS、GUIあり）へ USB 接続したSORACOM Onyxを、
+NetworkManager と ModemManager で使用するためのものです。ESP32等のセンサノードとの通信には
+使用しません。実機での
 確認対象は Quectel EG25-G 系モデム（例: USB ID `2c7c:0125`）、QMI デバイス
 `cdc-wdm0`、ネットワークインターフェース `wwan0`、シリアルポート
 `/dev/ttyUSB0`～`/dev/ttyUSB3`です。EC25/EG25 系や同様の構成も診断対象にしますが、
