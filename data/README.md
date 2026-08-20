@@ -1,8 +1,7 @@
 # OMKデータディレクトリ
 
 このディレクトリは、OMKが生成・保持する計測データの標準保存先です。実際の計測値、
-CSV、Parquet、SQLite、状態ファイルはGitで管理しません。Gitにはこの説明と、空の標準構造を
-保つ必要がある`.gitkeep`だけを登録します。
+CSV、Parquet、SQLite、状態ファイルはGitで管理しません。Gitにはこの説明と、空の標準構造を保つ必要がある`.gitkeep`だけを登録します。
 
 想定するサブディレクトリは次のとおりです。
 
@@ -14,12 +13,9 @@ CSV、Parquet、SQLite、状態ファイルはGitで管理しません。Gitに�
 - `errors/transform/`: 変換時に検出した不正・未対応レコードのエラー記録。一次データは変更しない。Git管理外
 - `harvest-uploader/`: Harvest送信失敗時の再送用SQLiteキュー。運用データのため削除に注意し、Git管理外
 
-Docker Composeからは、原則としてOMKルート基準の`./data/...`をホスト側パスとして
-参照してください。`/opt/omk/data`や`/var/lib/omk`は使用しません。
+Docker Composeからは、原則としてOMKルート基準の`./data/...`をホスト側パスとして参照してください。`/opt/omk/data`や`/var/lib/omk`は使用しません。
 
 `latest/`はJSONLの代替や履歴保存ではなく、画面の瞬時値用キャッシュです。collectorが書き込み、dashboardは読み取り専用で参照します。実測JSON本体はGit管理対象外で、読取り途中の内容を公開しないようファイルは同一ディレクトリ内の一時ファイルから原子的に置換されます。
 
-データの保持期間、削除、バックアップ、復元は、運用開始前に別途ルールを定めて
-ください。`processed/`は再生成可能な派生データですが、運用中に無断で削除しません。
-`broute-meter/`の既存CSVと`harvest-uploader/queue.sqlite3`は特に保護してください。前者の実装本体は`services/broute-meter/`にあります。
-ログはOMKルートの`logs/`へ分離しています。
+データの保持期間、削除、バックアップ、復元は、運用開始前に別途ルールを定めてください。`processed/`は再生成可能な派生データですが、運用中に無断で削除しません。
+`broute-meter/`の既存CSVと`harvest-uploader/queue.sqlite3`は特に保護してください。前者の実装本体は`services/broute-meter/`にあります。ログはOMKルートの`logs/`へ分離しています。

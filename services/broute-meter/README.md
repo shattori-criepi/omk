@@ -118,11 +118,7 @@ mqtt:
 `cumulative_check_interval_seconds`は設定読込みの互換性のためだけに受け付け、
 `run`のEA/EB取得周期には使用しません。
 
-`run`では、アクティブスキャンで候補が見つからない、またはPANA接続に失敗した
-場合でも終了しません。`retry.reconnect_wait_seconds`待機後に、Bルート認証から
-スキャン、PANA接続までを再試行します。`Ctrl+C`または`SIGTERM`で待機中の再試行を
-安全に中断できます。診断用の`test-connection`は単発実行のため、失敗時に再試行を
-継続せず終了します。
+`run`では、アクティブスキャンで候補が見つからない、またはPANA接続に失敗した場合でも終了しません。`retry.reconnect_wait_seconds`待機後に、Bルート認証からスキャン、PANA接続までを再試行します。`Ctrl+C`または`SIGTERM`で待機中の再試行を安全に中断できます。診断用の`test-connection`は単発実行のため、失敗時に再試行を継続せず終了します。
 
 ```yaml
 # config/credentials.yaml
@@ -146,10 +142,7 @@ b_route:
 - `MQTT_ENABLED`, `MQTT_HOST`, `MQTT_PORT`, `MQTT_DEVICE_ID`, `MQTT_TOPIC_PREFIX`, `MQTT_CLIENT_ID`
 - `MQTT_USERNAME`, `MQTT_PASSWORD`（認証を使う場合は両方を指定）
 
-`OMK_DATA_DIR`と`OMK_LOG_DIR`は、OMK共通の実行時保存先を指定するための環境変数です。
-両方が指定されている場合は、互換用の`B_ROUTE_DATA_DIR`より`OMK_DATA_DIR`を優先します。
-開発時の既定値はOMKルートから見て`data/broute-meter/`と`logs/broute-meter/`です。
-実行時データ・ログはGit管理対象外です。
+`OMK_DATA_DIR`と`OMK_LOG_DIR`は、OMK共通の実行時保存先を指定するための環境変数です。両方が指定されている場合は、互換用の`B_ROUTE_DATA_DIR`より`OMK_DATA_DIR`を優先します。開発時の既定値はOMKルートから見て`data/broute-meter/`と`logs/broute-meter/`です。実行時データ・ログはGit管理対象外です。
 
 瞬時電力間隔は10秒以上でなければなりません。空の環境変数は下位設定へフォールバックせず、設定ミスとして扱います。BルートIDまたはパスワードが不足している場合、通信を開始するコマンドは設定エラーで終了します。
 
@@ -239,10 +232,8 @@ python -m broute_meter \
 
 ## Dockerによるモック実行
 
-DockerfileはこのPythonサブプロジェクト内にあります。B-route開発用Compose定義は
-リポジトリルートの`compose.dev.yaml`です。Dockerではホストの
-`data/broute-meter/`と`logs/broute-meter/`を、コンテナの`/data`と`/logs`へ
-マウントします。
+DockerfileはこのPythonサブプロジェクト内にあります。B-route開発用Compose定義はリポジトリルートの`compose.dev.yaml`です。Dockerではホストの
+`data/broute-meter/`と`logs/broute-meter/`を、コンテナの`/data`と`/logs`へマウントします。
 
 ```bash
 cd ../..
@@ -326,13 +317,10 @@ sudo journalctl -u omk-broute-meter.service -n 100 --no-pager
 ```
 
 通常実行のログは`logs/setup/broute-meter-setup-YYYYMMDD-HHMMSS.log`へ保存されます。再実行時は
-helper、sudoers、unitの内容を比較し、同一なら維持します。変更があるunitだけをdaemon-reloadし、
-すでにactiveなサービスはunit変更時だけrestartします。スクリプトは既存CSV、認証情報、
+helper、sudoers、unitの内容を比較し、同一なら維持します。変更があるunitだけをdaemon-reloadし、すでにactiveなサービスはunit変更時だけrestartします。スクリプトは既存CSV、認証情報、
 `broute-recovery-state.json`、Bルートログを変更・削除しません。
 
-`--dry-run`はsudoや書込みを実行せず、前提条件をすべて表示します。不足があれば予定を可能な
-範囲で表示した後、変更なしで非ゼロ終了します。root専用の既存sudoersはdry-runでは内容を読まず、
-通常実行時に権限付き比較で判定します。
+`--dry-run`はsudoや書込みを実行せず、前提条件をすべて表示します。不足があれば予定を可能な範囲で表示した後、変更なしで非ゼロ終了します。root専用の既存sudoersはdry-runでは内容を読まず、通常実行時に権限付き比較で判定します。
 
 systemdは`Restart=on-failure`、60秒待機、15分あたり5回の起動失敗上限です。上限に達して`failed`になった場合、原因を取り除いた後に次で再開します。
 

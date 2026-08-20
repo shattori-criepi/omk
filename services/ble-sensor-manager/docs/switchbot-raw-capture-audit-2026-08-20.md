@@ -2,13 +2,10 @@
 
 ## 目的と適用範囲
 
-2026-08-19、SwitchBot CO2センサーのmanufacturer packetで、少数capture時に
-固定と見えたbyteをclassifierに使ったため、有効な広告をdecoderが拒否した。この文書は、
-同じ問題を他機種で繰り返さないために、2026-08-20に所有実機から採取したraw
+2026-08-19、SwitchBot CO2センサーのmanufacturer packetで、少数capture時に固定と見えたbyteをclassifierに使ったため、有効な広告をdecoderが拒否した。この文書は、同じ問題を他機種で繰り返さないために、2026-08-20に所有実機から採取したraw
 advertisementの観測結果を記録するものである。
 
-対象はMotion、防水温湿度、Meter、Plugである。ここに記載する「安定」は観測範囲内の
-事実であり、SwitchBotの全firmware・全個体での仕様保証を意味しない。MACアドレスは
+対象はMotion、防水温湿度、Meter、Plugである。ここに記載する「安定」は観測範囲内の事実であり、SwitchBotの全firmware・全個体での仕様保証を意味しない。MACアドレスは
 captureを同一物理個体として対応付けるためだけに記載し、decoder classifierには使わない。
 
 ## 根拠レベル
@@ -27,8 +24,7 @@ CO2問題のように実測で可変と分かったbyteを固定し、有効pack
 
 ## CO2問題からの前提
 
-旧CO2 decoderは`index 7 == 0xe4`と`index 11 == 0`を要求していた。2個体での追加captureでは
-これらに加えindex 6と12も可変と判明した。現行CO2 decoderは次だけを用いる。
+旧CO2 decoderは`index 7 == 0xe4`と`index 11 == 0`を要求していた。2個体での追加captureではこれらに加えindex 6と12も可変と判明した。現行CO2 decoderは次だけを用いる。
 
 - manufacturer dataが16 byte
 - `data[15] == 0`
@@ -93,8 +89,7 @@ d6 69 17 d3 10 38 d3 0b 02 9d ca 00
 | index 11 | 56 packetすべて`00` | 現行条件の実測根拠。ただしreservedらしき注意値 |
 
 防水温湿度とPlugはいずれも12 byte manufacturer layoutである。index 11を安易に緩和すると
-collisionの評価が必要になるため、現行decoderは変更しない。index 11は1個体の観測根拠であり、
-仕様保証として記述・利用しない。
+collisionの評価が必要になるため、現行decoderは変更しない。index 11は1個体の観測根拠であり、仕様保証として記述・利用しない。
 
 ### Meter
 
@@ -124,8 +119,7 @@ cf 39 41 c7 ed 79 3d 03 00 99 33
 | index 9 | `98` / `99` | 温湿度値の一部として可変 |
 | index 10 | `33` / `35` / `38` | 温湿度値の一部として可変 |
 
-現行decoderは変更しない。`index 7 == 0x03`は今回の1個体では安定したが、将来緩和または
-強化する根拠としては別個体captureが必要である。
+現行decoderは変更しない。`index 7 == 0x03`は今回の1個体では安定したが、将来緩和または強化する根拠としては別個体captureが必要である。
 
 ### Plug
 

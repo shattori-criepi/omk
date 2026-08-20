@@ -5,8 +5,7 @@ OMK Gateway内のMQTT brokerです。標準Gateway構成ではリポジトリル
 serviceのメッセージを中継します。
 
 - `config/mosquitto.conf`: broker設定。Composeから読み取り専用でmountする。
-- `data/`: Mosquittoの永続データ領域。実行時データはGit管理せず、空ディレクトリを
-  保つ`.gitkeep`だけを追跡する。
+- `data/`: Mosquittoの永続データ領域。実行時データはGit管理せず、空ディレクトリを保つ`.gitkeep`だけを追跡する。
 
 通常はGatewayセットアップを通して起動します。単体確認はリポジトリルートで行えます。
 

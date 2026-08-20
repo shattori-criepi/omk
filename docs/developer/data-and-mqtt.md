@@ -68,16 +68,12 @@ registryで解決した後だけ、通常の`omk/<sensor_id>/environment`へcano
 direct/relayの経路選択仕様とpayload例は
 [BLE direct / ESP32 Node relayの経路選択](../decisions/ble-direct-relay-route-selection.md)を参照する。
 
-BLE advertisement は常時受信し、runtimeのlatest値、RSSI、受信時刻は広告ごとに
-更新する。environmentは初回の正常値を即時publishし、以後は`device_key`ごとに
-最短10秒間隔でpublishする。Motion Sensorは状態変化時に即時publishし、同一状態も
-最短10秒間隔で `{"device_id":"motion-001","measured_at":"...","motion_state":1}`
+BLE advertisement は常時受信し、runtimeのlatest値、RSSI、受信時刻は広告ごとに更新する。environmentは初回の正常値を即時publishし、以後は`device_key`ごとに最短10秒間隔でpublishする。Motion Sensorは状態変化時に即時publishし、同一状態も最短10秒間隔で `{"device_id":"motion-001","measured_at":"...","motion_state":1}`
 の形でpublishする。`motion_state`は0=不在、1=検知である。
 
 Contact Sensorも状態変化時に即時publishし、同一状態も最短10秒間隔で
 `{"device_id":"contact-001","measured_at":"...","contact_state":1}` を
-publishする。`contact_state`は0=閉、1=開で、公式のtimeout-not-closeも開（1）として
-正規化する。各rate limitはmonotonic clockを使い、`enabled=false`ではBLE observationと
+publishする。`contact_state`は0=閉、1=開で、公式のtimeout-not-closeも開（1）として正規化する。各rate limitはmonotonic clockを使い、`enabled=false`ではBLE observationと
 runtime更新を継続する一方、MQTT publishは停止する。したがってJSONLへのSwitchBot
 一次保存は厳密な固定周期ではなく、通常は最短約10秒間隔となる。
 

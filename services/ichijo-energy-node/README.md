@@ -67,8 +67,7 @@ PYTHONPATH=src .venv/bin/python -m pytest
 
 ## Raspberry Piでのsystemd常時運用
 
-実運用では、リポジトリルートから次を実行します。スクリプト全体を`sudo`で起動せず、
-必要な管理操作だけでsudoを使います。runtime依存だけを`requirements.txt`から導入し、
+実運用では、リポジトリルートから次を実行します。スクリプト全体を`sudo`で起動せず、必要な管理操作だけでsudoを使います。runtime依存だけを`requirements.txt`から導入し、
 systemdサービスを有効化して起動します。
 
 ```bash
