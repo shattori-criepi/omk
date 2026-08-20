@@ -186,6 +186,10 @@ mountと`data/sensors`、`data/latest`、`data/processed`、`data/dashboard`、`
 `services/mosquitto/data`を確認します。`setup-data-transformer.sh`は`data/processed`と
 `data/errors/transform`、venv、systemd timerを、`setup-broute-meter.sh`は
 `data/broute-meter`と`logs/broute-meter`、Bルートsystemd設定を確認します。
+旧リポジトリ配置の`broute-meter/config/credentials.yaml`または`settings.yaml`が残る
+既存Gatewayでは、新しい`services/broute-meter/config/`側に対応する設定がない場合だけ
+setupが移行します。既存の新設定は上書きせず、旧settings内の標準相対data/logパスだけを
+新配置用に補正します。
 `setup-system-manager.sh`はDashboardのシステム操作、AP資格情報参照、Bルート認証情報を扱うhost API、token、
 sudoersを設定し、`setup-ble-sensor-manager.sh`はBlueZを使うBLE探索・登録用host APIを設定します。
 Dashboardコンテナからこれらのhost APIへは`host.docker.internal`経由で接続します。
