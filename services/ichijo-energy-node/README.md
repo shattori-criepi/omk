@@ -1,22 +1,37 @@
 # ichijo-energy-node
 
-一条工務店の太陽光発電・蓄電池システムがローカルLANで公開するECHONET Lite値を、OMKのMQTTブローカーへ送る読み取り専用サービスです。標準ライブラリの小さなUDP実装を使い、GET以外のECHONET Lite要求、機器設定変更、探索、ブロードキャスト、ルーティングは行いません。
+開発者宅の住宅用PV・蓄電池・PCS設備がローカルLANで公開するECHONET Lite値を、OMKのMQTTブローカーへ送る読み取り専用サービスです。標準ライブラリの小さなUDP実装を使い、GET以外のECHONET Lite要求、機器設定変更、探索、ブロードキャスト、ルーティングは行いません。
 
 ## 位置づけ
 
-`ichijo-energy-node`は、OMKの標準構成や必須サービスには含まれないオプションサービスです。一条工務店の特定の太陽光発電・蓄電池システムを対象にしています。
+`ichijo-energy-node`は、OMKの標準構成や必須サービスには含まれないオプションサービスです。service名は検証profileの由来を示す内部識別子であり、住宅販売会社や機器メーカーの対応範囲を表すものではありません。
 
-現時点では開発者宅の1住宅・1実機構成でのみ動作確認しています。すべての一条工務店住宅、パワーコンディショナ、蓄電池構成での動作を保証するものではありません。対象設備がないOMK環境では、導入、設定、起動する必要はありません。
+現時点では、開発者宅の**1住宅・1メーカー・単一機種／設備構成**でのみ動作確認しています。同一または近い設備を含め、他個体、他型番、他構成での動作は保証しません。住宅販売会社・機器メーカーが公式提供または想定するAPI／利用方法ではありません。対象設備がないOMK環境では、導入、設定、起動する必要はありません。
 
 既存のBルート、SEN66、sensor-collectorとは独立したサービスであり、未使用時にOMKの標準機能へ影響しません。同種の住宅設備やパワーコンディショナのローカルデータをMQTTへ変換するエッジノードを実装する際の参考実装として、OMKリポジトリ内に保持します。
 
-一条設備固有のECHONET Liteオブジェクト、プロパティ、単位、符号規則、状態コードを前提とするため、現時点では汎用的な`power-conditioner-node`などへ改名しません。他設備へ流用する場合は、対象実機でEOJ、EPC、単位、符号、状態コードをあらためて確認してください。
+この検証profile固有のECHONET Liteオブジェクト、プロパティ、単位、符号規則、状態コードを前提とするため、現時点では汎用的な`power-conditioner-node`などへ改名しません。他設備へ流用する場合は、対象実機でEOJ、EPC、単位、符号、状態コードをあらためて確認してください。
 
 ```text
-Ichijo ECHONET node -- UDP/3610, GET only --> Raspberry Pi --> MQTT --> OMK collector (omk/#)
+Validated PV / battery / PCS ECHONET Lite profile -- UDP/3610, GET only --> Raspberry Pi --> MQTT --> OMK collector (omk/#)
 ```
 
-`sensor-collector`はすでに`omk/#`を購読しているため、`power-flow`と`status`は変更なしでJSONL一次保存されます。正常な`power-flow`は表示用の`data/latest/ichijo_power_flow.json`も更新し、dashboardの一条表示に使用されます。
+`sensor-collector`はすでに`omk/#`を購読しているため、`power-flow`と`status`は変更なしでJSONL一次保存されます。正常な`power-flow`は表示用の`data/latest/ichijo_power_flow.json`も更新し、dashboardのPV・蓄電池表示に使用されます。
+
+## Validated equipment profile
+
+このprofileは開発者宅の1住宅・1メーカー・単一機種／設備構成での確認結果であり、他設備への互換性を示すものではありません。検証profileの由来として住宅販売会社名を内部service名に残していますが、同社または各機器メーカーの公式API／公式利用方法ではありません。
+
+| 項目 | 現在の記録 |
+| --- | --- |
+| PCS manufacturer / model | **TODO — human confirmation required** |
+| battery manufacturer / model | **TODO — human confirmation required** |
+| communication device manufacturer / model | **TODO — human confirmation required** |
+| firmware version | **TODO — human confirmation required** |
+| verification date | **TODO — human confirmation required** |
+| 接続方式 | 同一L2上のIPv4 UDP/3610、ECHONET Lite Format 1、GET-only/read-only |
+
+ここにない機器情報は推測しません。型番または構成が異なる設備へ適用する前に、下記のEOJ、EPC、単位、符号、状態コードを実機で確認してください。
 
 ## 対象と変換
 
@@ -109,4 +124,4 @@ QoSは0です。`omk/<device_id>/power-flow`はサイクルごとに1件、retai
 
 `Network configuration error`は対象インターフェースにIPv4がない状態です。`ECHONET timeout`は対象IP、同一L2接続、UDP 3610、送信元が3610であることを確認します。DEBUGログで生フレームを確認できますが、通常ログへは出しません。
 
-対象IPの将来的な変更、自動探索、E7正値の意味、長期連続運転、ネットワーク切断からの実機復旧、OMK専用AP経由のMQTTは未実装・未確認です。`power-flow`のJSONL→Parquet変換とlatest JSON経由のdashboard表示は対応済みです。dashboardは一条データが10分を超えて古い場合、Bルート電力へフォールバックします。
+対象IPの将来的な変更、自動探索、E7正値の意味、長期連続運転、ネットワーク切断からの実機復旧、OMK専用AP経由のMQTTは未実装・未確認です。`power-flow`のJSONL→Parquet変換とlatest JSON経由のdashboard表示は対応済みです。dashboardはこのprofileのデータが10分を超えて古い場合、Bルート電力へフォールバックします。

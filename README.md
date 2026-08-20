@@ -7,10 +7,10 @@ OMK（おうちモニタキット）は、住宅内の電力・環境・行動�
 - Raspberry Pi 4/5上のGateway、OMK専用Wi-Fi AP、MQTTによるセンサ集約
 - JSONL一次保存、Parquet変換、Dashboardでの瞬時値・履歴表示
 - Bルート、BLEセンサ、ESP32 Node、SORACOM Harvest連携
-- 任意のパワコン連携（現行実装は一条設備向け `ichijo-energy-node`）
+- 任意の住宅用PV・蓄電池・PCS連携（現行は単一の検証profile向け `ichijo-energy-node`）
 
 ```text
-センサ / Bルート / パワコン / BLE
+センサ / Bルート / PV・蓄電池・PCS / BLE
              ↓ MQTT
 Gateway → sensor-collector → JSONL → Parquet → Dashboard
              └ harvest-uploader → SORACOM Harvest
@@ -45,7 +45,7 @@ Gateway → sensor-collector → JSONL → Parquet → Dashboard
 - 正式対象: Raspberry Pi 4/5、64-bit Raspberry Pi OS
 - Gateway: Docker Compose、host systemd、NetworkManager
 - Node: 共通ESP32 firmware（SEN66計測、BLE relay、USB Serial/JTAG Provisioning）
-- 任意機能: SORACOM Onyx、BLEセンサ、Bルート、GUI kiosk、パワコン連携
+- 任意機能: SORACOM Onyx、BLEセンサ、Bルート、GUI kiosk、住宅用PV・蓄電池・PCS連携
 
 MQTTは現在、OMK専用LAN内の匿名・平文接続です。認証、ACL、TLSは将来課題です。
 
@@ -57,6 +57,30 @@ OMKは研究・実験用途のシステムです。計測値の正確性、完�
 用途での利用は想定していません。研究所および開発者は、個別のサポート、保守、動作保証を
 提供するものではありません。将来正式なOSS licenseを追加した場合は、その無保証・責任制限
 条項も適用する予定です。
+
+## サポートと開発方針
+
+OMKは研究・実験用のオープンな計測基盤であり、一般利用者向けの商用製品やサポートサービス
+ではありません。GitHub等から利用する一般利用者は、原則として自ら機器を準備し、構築、設定、
+運用、保守します。質問、活用例、アイデア、改善案の共有は歓迎しますが、相談・要望を受けた
+こと自体は、個別の開発、機器対応、サポートを約束するものではありません。
+
+特定の利用者だけに必要な機能は、必要に応じて利用者自身のforkで開発・維持することを想定
+します。一方、OMK全体にとって有用性が高いアイデアは、研究目的、汎用性、保守性、開発優先度
+などを踏まえ、maintainer側で採用・実装する場合があります。採用する場合も、提案者へPR作成を
+求めるとは限らず、maintainer側で実装する場合、または実装しない場合があります。
+
+Issueは単なる機能追加要望の受付窓口ではなく、再現可能な不具合や、具体的に対応することに
+なった課題の管理に用います。一般的なアイデア、相談、利用方法の議論には、その前段となる
+コミュニケーションの場を設ける方針です。将来の第一候補はGitHub Discussionsですが、現時点で
+GitHub設定は変更していません。コード変更や機能追加を提案したい場合は、まず目的、背景、
+想定用途、OMK全体への有用性を共有してください。maintainerが本体への取り込みを検討する価値が
+あると判断した場合に、必要に応じてIssue化またはPR提出を案内します。PRは常時募集する入口では
+なく、事前相談のないPRについてreview、merge、対応は約束しません。
+
+電中研等が主体となる研究・実証・被験者実験でOMKを設置する場合は、一般OSS利用とは別扱いです。
+その場合は研究計画に基づき、研究実施者側が必要な設置、運用、保守、トラブル対応等を行う場合が
+あります。上記の自己責任・一般サポート方針は、研究参加者へ保守責任を転嫁する意味ではありません。
 
 ## 開発状況と履歴
 

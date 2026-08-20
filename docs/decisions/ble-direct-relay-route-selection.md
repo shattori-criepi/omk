@@ -90,7 +90,7 @@ MQTT broker上では、directとGatewayでcanonical化済みのrelayが同じ`om
 - `sensor-collector`: JSONL append直前
 - `harvest-uploader`: `MinuteAggregator.ingest()`直前
 
-両サービスは独立したMQTT clientとして`omk/#`を購読するため、同一のroute selection仕様をそれぞれ持つ。`source`がない旧payloadは移行互換のため従来どおり通過させる。SEN66、Bルート、一条パワコンなどenvironment BLE以外のtopicは対象外である。
+両サービスは独立したMQTT clientとして`omk/#`を購読するため、同一のroute selection仕様をそれぞれ持つ。`source`がない旧payloadは移行互換のため従来どおり通過させる。SEN66、Bルート、住宅用PV・蓄電池・PCS profileの`power-flow`などenvironment BLE以外のtopicは対象外である。
 
 ## 実機E2E確認（2026-08-17）
 

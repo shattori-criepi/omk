@@ -4,7 +4,7 @@
 
 | パス | 役割 |
 |---|---|
-| `services/` | Dashboard、collector、Bルート、system-manager、BLE manager、data-transformer、Harvest、パワコン連携などのサービス |
+| `services/` | Dashboard、collector、Bルート、system-manager、BLE manager、data-transformer、Harvest、住宅用PV・蓄電池・PCS連携などのサービス |
 | `firmware/` | ESP32共通Nodeと既存SEN66専用Nodeのfirmware |
 | `scripts/` | Gateway、Node、各host serviceのセットアップ・診断スクリプト |
 | `systemd/` | host systemdおよびuser systemd unit template |

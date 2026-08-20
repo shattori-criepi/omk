@@ -8,7 +8,7 @@
 - Node: 共通ESP32 Node。SEN66等のI2CセンサとBLE relayを扱う
 - Bルート: 対応USBシリアルアダプタをGatewayのhost serviceで利用
 - BLE: Gateway direct BLEを主系、Node relayを補助経路として利用
-- パワコン: 現行の一条設備向け連携はGatewayとは別Raspberry Piで動作
+- 住宅用PV・蓄電池・PCS: 現行の単一検証profile向けECHONET Lite連携はGatewayとは別Raspberry Piで動作
 
 ## ディレクトリ
 

@@ -20,7 +20,7 @@ GatewayはRaspberry Pi 4/5、64-bit Raspberry Pi OS上で動作します。Docke
 - `omk-ble-sensor-manager.service`: BlueZによるBLE探索・登録・受信。
 - `omk-data-transformer.timer`: JSONLを日次のParquetへ変換。
 - `omk-dashboard-kiosk.service`: GUI session内の任意のChromium kiosk。
-- `omk-ichijo-energy-node.service`: Gatewayとは別Raspberry Pi上で動かす、現行一条設備向けパワコン連携。
+- `omk-ichijo-energy-node.service`: Gatewayとは別Raspberry Pi上で動かす、単一の検証profile向け住宅用PV・蓄電池・PCS ECHONET Lite連携。汎用PCS collectorではない。
 
 system-managerはDashboardの`host.docker.internal`経由の要求を認証し、ブラウザへhost権限や秘密情報を渡しません。
 

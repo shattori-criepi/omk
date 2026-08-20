@@ -122,7 +122,7 @@ Raspberry Pi自身またはLAN内から利用する場合は、`localhost`をPi�
 使用します。collectorは将来の可変Dashboard用に、汎用latest item store
 （`items/<stable-item-id>.json`）と候補一覧（`catalog.json`）も保存しますが、Display Item選択、
 プリセット、可変カード表示はまだ実装していません。
-`OMK_PROCESSED_DATA_ROOT`は日計電力量用の処理済みParquetのルートです。一条`power-flow`が
+`OMK_PROCESSED_DATA_ROOT`は日計電力量用の処理済みParquetのルートです。住宅用PV・蓄電池・PCS profileの`power-flow`が
 10分を超えて古い場合、画面はBルート電力へフォールバックします。
 
 データセットまたは値がない場合も画面は表示され、数値は`--`、電力状態は「データなし」、

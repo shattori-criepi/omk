@@ -1,6 +1,6 @@
 # OMKを使い始める
 
-OMKは、Gatewayを中心に住宅内のセンサ、Bルート、BLE機器、任意のパワコン連携を集約し、Dashboardで確認する仕組みです。
+OMKは、Gatewayを中心に住宅内のセンサ、Bルート、BLE機器、任意の住宅用PV・蓄電池・PCS連携を集約し、Dashboardで確認する仕組みです。
 
 ## 主な機材
 
