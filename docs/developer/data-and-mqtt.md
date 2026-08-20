@@ -6,18 +6,18 @@ MQTTは、各データ取得処理をRaspberry Piへ集約するLAN内の内部�
 
 ## トピックとdevice_id
 
-`device_id`は各ノードを識別する設定値である。トピックは`omk/<device_id>/<data_type>`を基本とし、`data_type`には測定種別または`status`を置く。現時点では`network_config.h`の固定値を使い、将来MACアドレス由来のIDへ変更できるよう、トピックとpayloadで直接固定しない。
+`device_id`は各ノードを識別する設定値である。測定トピックは`omk/<device_id>/<data_type>`を基本とする。OMK Nodeの登録状態は、eFuse由来の`node_id`を使う専用のregistration topicで通知する。
 
 | 用途 | トピック | QoS | retain |
 | --- | --- | --- | --- |
 | SEN66測定値 | `omk/<device_id>/sen66` | 0 | false |
-| 接続状態 | `omk/<device_id>/status` | 0 | true |
+| OMK Node登録状態 | `omk/node/<node_id>/registration/status` | 1 | true |
 | BLE環境センサ | `omk/<sensor_id>/environment` | 0 | false |
 | BLE人感状態変化 | `omk/<sensor_id>/motion` | 0 | false |
 | BLE開閉状態変化 | `omk/<sensor_id>/contact` | 0 | false |
 | BLEプラグ電力 | `omk/<sensor_id>/power` | 0 | false |
 
-初期ノードの例は`omk/sen66-001/sen66`と`omk/sen66-001/status`である。
+SEN66測定トピックの例は`omk/sen66-001/sen66`である。
 
 ## Payload
 
@@ -27,21 +27,15 @@ MQTTは、各データ取得処理をRaspberry Piへ集約するLAN内の内部�
 {"device_id":"sen66-001","uptime_ms":123456,"pm1_0_ug_m3":4.1,"pm2_5_ug_m3":6.8,"pm4_0_ug_m3":8.2,"pm10_0_ug_m3":10.5,"relative_humidity_percent":48.2,"temperature_celsius":25.3,"voc_index":92.0,"nox_index":null,"co2_ppm":612.0}
 ```
 
-MQTT接続直後はretain付きで次を送信する。
+OMK NodeはMQTT接続後、retain付きでregistration statusを送信する。
 
 ```json
-{"device_id":"sen66-001","status":"online","firmware_name":"omk-sen66-node","firmware_version":"0.1.0"}
-```
-
-接続時にはLast Willを設定し、予期しない切断ではretain付きで次を送信する。
-
-```json
-{"device_id":"sen66-001","status":"offline"}
+{"protocol_version":1,"node_id":"112233445566","registration_state":"registered","capabilities":3}
 ```
 
 ## 汎用JSONL収集
 
-`sensor-collector`は`omk/#`をQoS 0で購読し、測定値と`omk/<device_id>/status`の両方を収集する。collectorはセンサ機種、`device_id`、測定項目の意味を解釈せず、受信したpayloadをトップレベルへ展開しない。
+`sensor-collector`は`omk/#`をQoS 0で購読し、測定値とOMK Nodeのregistration statusを収集する。collectorはセンサ機種、`device_id`、測定項目の意味を解釈せず、受信したpayloadをトップレベルへ展開しない。
 
 Raspberry Pi側でAsia/Tokyoの受信時刻をミリ秒付きISO 8601形式で付与し、`data/sensors/YYYY/MM/DD.jsonl`へ1メッセージ1行で追記する。通常のJSON payloadの共通構造は次のとおりである。
 

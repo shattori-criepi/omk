@@ -3,6 +3,7 @@
 OMK NodeはAtomS3 Lite、オリジナルM5StickC、および将来のESP32-C3/S3
 センサノードで共用するファームウェア基盤です。ボード固有のLCD、LED、ボタンは
 この基盤に含めません。BLE中継（`ble_scan`）とSEN66計測は同じ基盤で共存できます。
+ESP32系Nodeは、SEN66接続やBLE relay利用の有無にかかわらず、このfirmwareを標準とします。
 
 この文書では、実装済みかつ実機で確認済みのDiscovery、USB Serial/JTAG
 Provisioning、通常起動時のWi-Fi再接続を記録します。USB ProvisioningはAtomS3 Liteで
