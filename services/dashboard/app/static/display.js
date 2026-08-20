@@ -130,14 +130,12 @@ function updateDisplay(data) {
         const label = itemCard.querySelector('[data-role="label"]');
         const value = itemCard.querySelector('[data-role="value"]');
         const unit = itemCard.querySelector('[data-role="unit"]');
-        const freshness = itemCard.querySelector('[data-role="freshness"]');
         if (label) label.textContent = item.short_label || item.label;
         if (value) value.textContent = item.value;
         if (unit) {
           unit.textContent = displayUnitText(item);
           unit.hidden = false;
         }
-        if (freshness) freshness.textContent = sourceBadgeText(item.freshness);
         itemCard.classList.remove("display-card--normal", "display-card--delayed", "display-card--unavailable");
         itemCard.classList.add(`display-card--${item.freshness}`);
       });
@@ -153,6 +151,8 @@ function updateDisplay(data) {
           auxiliary.querySelector('[data-role="auxiliary-unit"]').textContent = block.auxiliary_unit;
         }
       }
+      const badge = card.querySelector('[data-role="freshness"]');
+      if (badge) badge.textContent = sourceBadgeText(block.freshness);
       card.classList.remove("display-card--normal", "display-card--delayed", "display-card--unavailable");
       card.classList.add(`display-card--${block.freshness}`);
     });

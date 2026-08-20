@@ -821,6 +821,31 @@ def test_strip_initial_render_keeps_an_empty_unit_element_for_voc_index() -> Non
     assert '<small class="display-secondary-unit" data-role="unit">\xa0</small>' in voc_markup.group(1)
 
 
+def test_block_initial_render_keeps_units_for_recovery_from_unavailable() -> None:
+    item = lambda item_id, unit: SimpleNamespace(id=item_id, label=item_id, short_label=item_id, value="--", unit=unit, freshness="unavailable")
+    hero_primary, hero_secondary = item("hero-primary", "kW"), item("hero-secondary", "°C")
+    compact_primary, compact_secondary = item("compact-primary", "W"), item("compact-secondary", "%")
+    unitless = item("unitless", "")
+    blocks = [
+        SimpleNamespace(id="hero", title="Hero", size="large", layout_pattern="hero", freshness="unavailable", primary=hero_primary, secondary=[hero_secondary], auxiliary_supported=False),
+        SimpleNamespace(id="compact", title="Compact", size="medium", layout_pattern="compact", freshness="unavailable", primary=compact_primary, secondary=[compact_secondary, unitless]),
+        SimpleNamespace(id="strip", title="Strip", size="small", layout_pattern="strip", freshness="unavailable", primary=item("strip-primary", "ppm"), secondary=[]),
+    ]
+    dashboard = SimpleNamespace(blocks=blocks, updated_at="--", updated_at_iso="", freshness="unavailable")
+    request = SimpleNamespace(url_for=lambda _name, **params: params["path"])
+    response = dashboard_main.templates.get_template("display.html").render(request=request, dashboard=dashboard)
+
+    assert '<div class="display-card-primary" data-item-id="hero-primary">' in response
+    assert '<span class="display-card-unit" data-role="unit" hidden>kW</span>' in response
+    assert '<small class="display-secondary-unit" data-role="unit">\xa0</small>' in response
+    assert '<small class="display-secondary-unit" data-role="unit" hidden>W</small>' in response
+    assert '<small class="display-secondary-unit" data-role="unit" hidden>%</small>' in response
+    unitless_markup = re.search(r'<div class="display-secondary-item" data-item-id="unitless">(.*?)</div>', response, re.DOTALL)
+    assert unitless_markup is not None
+    assert 'data-role="unit"' not in unitless_markup.group(1)
+    assert '<small class="display-secondary-unit" data-role="unit">\xa0</small>' in response
+
+
 @pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is required for display polling tests")
 def test_strip_polling_keeps_unitless_item_unit_row_and_dom_contract() -> None:
     """A unitless VOC item must retain its third strip row after every poll."""
@@ -833,12 +858,13 @@ function classList() {
 }
 function roleElement() { return {textContent: "", hidden: false}; }
 function itemCard() {
-  const roles = {label: roleElement(), value: roleElement(), unit: roleElement(), freshness: roleElement()};
+  const roles = {label: roleElement(), value: roleElement(), unit: roleElement()};
   roles.unit.textContent = "\u00a0";
   return {classList: classList(), roles, querySelector(selector) { const match = selector.match(/data-role="([^"]+)"/); return match ? roles[match[1]] : null; }};
 }
 const cards = {temperature: itemCard(), voc: itemCard()};
-const block = {classList: classList(), querySelector() { return null; }};
+const blockFreshness = roleElement();
+const block = {classList: classList(), querySelector(selector) { return selector === '[data-role="freshness"]' ? blockFreshness : null; }};
 const byId = {"#current-datetime": null, "#header-date-main": null, "#header-weekday": null, "#header-time": null, "#updated-at": null, "#freshness": null};
 global.CSS = {escape: value => value};
 global.document = {documentElement: {classList: classList()}, querySelector(selector) {
@@ -876,7 +902,7 @@ console.log(JSON.stringify({
         "unit": "\u00a0",
         "unitHidden": False,
         "unitRetained": True,
-        "roleNames": ["freshness", "label", "unit", "value"],
+        "roleNames": ["label", "unit", "value"],
         "classes": ["display-card--normal"],
     }
     assert result["temperature"] == {"unit": "°C", "unitHidden": False}
@@ -886,6 +912,105 @@ console.log(JSON.stringify({
         {"value": "--", "unit": "\u00a0", "unitHidden": False, "classes": ["display-card--unavailable"]},
         {"value": "440", "unit": "\u00a0", "unitHidden": False, "classes": ["display-card--normal"]},
     ]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is required for display polling tests")
+def test_block_polling_updates_card_freshness_badge_and_values() -> None:
+    """The card-level badge must clear after a recovered block without affecting item updates."""
+    javascript_path = Path(__file__).parents[1] / "app" / "static" / "display.js"
+    harness = r'''
+const fs = require("fs"), vm = require("vm");
+function classList() {
+  const values = new Set();
+  return {add: (...names) => names.forEach(name => values.add(name)), remove: (...names) => names.forEach(name => values.delete(name)), values: () => [...values].sort()};
+}
+function leaf() { return {textContent: "", hidden: false}; }
+function itemCard() {
+  const roles = {label: leaf(), value: leaf(), unit: leaf()};
+  return {classList: classList(), querySelector(selector) { const match = selector.match(/data-role="([^"]+)"/); return match ? roles[match[1]] : null; }, roles};
+}
+const item = itemCard(), badge = leaf();
+const block = {classList: classList(), querySelector(selector) { return selector === '[data-role="freshness"]' ? badge : null; }};
+const byId = {"#current-datetime": null, "#header-date-main": null, "#header-weekday": null, "#header-time": null, "#updated-at": leaf(), "#freshness": leaf()};
+global.CSS = {escape: value => value};
+global.document = {documentElement: {classList: classList()}, querySelector(selector) {
+  if (selector.startsWith('[data-block-id=')) return block;
+  if (selector.startsWith('[data-item-id=')) return item;
+  return byId[selector] || null;
+}};
+global.window = {setInterval() {}};
+global.fetch = async () => ({ok: true, json: async () => ({})});
+vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8") + "\nglobalThis.__displayTest = { updateDisplay };");
+const snapshot = (freshness, value) => ({mode: "custom", freshness, updated_at: "2026/08/20 12:00:00", updated_at_iso: "2026-08-20T12:00:00+09:00", blocks: [{id: "power", freshness, primary: {id: "power-item", short_label: "消費電力", label: "消費電力", value, unit: "kW", freshness}, secondary: []}]});
+const states = [];
+for (const [freshness, value] of [["delayed", "1.20"], ["normal", "1.30"], ["unavailable", "--"], ["normal", "1.40"], ["delayed", "1.50"], ["unavailable", "--"]]) {
+  __displayTest.updateDisplay(snapshot(freshness, value));
+  states.push({freshness, badge: badge.textContent, value: item.roles.value.textContent, cardClasses: block.classList.values(), itemClasses: item.classList.values()});
+}
+console.log(JSON.stringify(states));
+'''
+    completed = subprocess.run(["node", "-e", harness, str(javascript_path)], check=True, capture_output=True, text=True)
+    assert json.loads(completed.stdout) == [
+        {"freshness": "delayed", "badge": "遅延", "value": "1.20", "cardClasses": ["display-card--delayed"], "itemClasses": ["display-card--delayed"]},
+        {"freshness": "normal", "badge": "", "value": "1.30", "cardClasses": ["display-card--normal"], "itemClasses": ["display-card--normal"]},
+        {"freshness": "unavailable", "badge": "取得不可", "value": "--", "cardClasses": ["display-card--unavailable"], "itemClasses": ["display-card--unavailable"]},
+        {"freshness": "normal", "badge": "", "value": "1.40", "cardClasses": ["display-card--normal"], "itemClasses": ["display-card--normal"]},
+        {"freshness": "delayed", "badge": "遅延", "value": "1.50", "cardClasses": ["display-card--delayed"], "itemClasses": ["display-card--delayed"]},
+        {"freshness": "unavailable", "badge": "取得不可", "value": "--", "cardClasses": ["display-card--unavailable"], "itemClasses": ["display-card--unavailable"]},
+    ]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is required for display polling tests")
+def test_block_polling_restores_units_for_all_layout_patterns() -> None:
+    javascript_path = Path(__file__).parents[1] / "app" / "static" / "display.js"
+    harness = r'''
+const fs = require("fs"), vm = require("vm");
+function classList() {
+  const values = new Set();
+  return {add: (...names) => names.forEach(name => values.add(name)), remove: (...names) => names.forEach(name => values.delete(name)), values: () => [...values].sort()};
+}
+function leaf(hidden = false) { return {textContent: "", hidden}; }
+function itemCard(unit) {
+  const roles = {label: leaf(), value: leaf()};
+  if (unit !== null) roles.unit = leaf(true);
+  return {classList: classList(), roles, querySelector(selector) { const match = selector.match(/data-role="([^"]+)"/); return match ? roles[match[1]] : null; }};
+}
+function block() { const badge = leaf(); return {classList: classList(), badge, querySelector(selector) { return selector === '[data-role="freshness"]' ? badge : null; }}; }
+const items = {heroPrimary: itemCard("kW"), heroSecondary: itemCard("°C"), compactPrimary: itemCard("W"), stripPrimary: itemCard("ppm"), unitless: itemCard(null)};
+const blocks = {hero: block(), compact: block(), strip: block()};
+const byId = {"#current-datetime": null, "#header-date-main": null, "#header-weekday": null, "#header-time": null, "#updated-at": leaf(), "#freshness": leaf()};
+global.CSS = {escape: value => value};
+global.document = {documentElement: {classList: classList()}, querySelector(selector) {
+  if (selector.startsWith('[data-block-id=')) return blocks[selector.match(/"([^"]+)"/)[1]];
+  if (selector.startsWith('[data-item-id=')) return items[selector.match(/"([^"]+)"/)[1]];
+  return byId[selector] || null;
+}};
+global.window = {setInterval() {}};
+global.fetch = async () => ({ok: true, json: async () => ({})});
+vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8") + "\nglobalThis.__displayTest = { updateDisplay };");
+const item = (id, value, unit, freshness) => ({id, short_label: id, label: id, value, unit, freshness});
+const snapshot = freshness => ({mode: "custom", freshness, updated_at: "", updated_at_iso: "", blocks: [
+  {id: "hero", freshness, primary: item("heroPrimary", freshness === "unavailable" ? "--" : "1.42", "kW", freshness), secondary: [item("heroSecondary", freshness === "unavailable" ? "--" : "26.4", "°C", freshness)]},
+  {id: "compact", freshness, primary: item("compactPrimary", freshness === "unavailable" ? "--" : "120", "W", freshness), secondary: [item("unitless", freshness === "unavailable" ? "--" : "440", "", freshness)]},
+  {id: "strip", freshness, primary: item("stripPrimary", freshness === "unavailable" ? "--" : "620", "ppm", freshness), secondary: []},
+]});
+for (const freshness of ["unavailable", "normal", "delayed", "normal"]) __displayTest.updateDisplay(snapshot(freshness));
+const result = {};
+for (const [id, card] of Object.entries(items)) result[id] = {value: card.roles.value.textContent, unit: card.roles.unit ? card.roles.unit.textContent : null, unitHidden: card.roles.unit ? card.roles.unit.hidden : null};
+for (const [id, card] of Object.entries(blocks)) result[id] = {badge: card.badge.textContent, classes: card.classList.values()};
+console.log(JSON.stringify(result));
+'''
+    completed = subprocess.run(["node", "-e", harness, str(javascript_path)], check=True, capture_output=True, text=True)
+    assert json.loads(completed.stdout) == {
+        "heroPrimary": {"value": "1.42", "unit": "kW", "unitHidden": False},
+        "heroSecondary": {"value": "26.4", "unit": "°C", "unitHidden": False},
+        "compactPrimary": {"value": "120", "unit": "W", "unitHidden": False},
+        "stripPrimary": {"value": "620", "unit": "ppm", "unitHidden": False},
+        "unitless": {"value": "440", "unit": None, "unitHidden": None},
+        "hero": {"badge": "", "classes": ["display-card--normal"]},
+        "compact": {"badge": "", "classes": ["display-card--normal"]},
+        "strip": {"badge": "", "classes": ["display-card--normal"]},
+    }
 
 
 def test_power_direction_rules() -> None:
