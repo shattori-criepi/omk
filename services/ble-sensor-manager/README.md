@@ -95,6 +95,9 @@ Plug Miniの電力も同じ10秒制限に従いますが、`switch_state`の変�
 湿度・CO2をdecodeできます。CO2 layoutは2台の実機で測定値が一致したことに基づき、個体ごとの
 MACアドレスを使用せず、可変byteを定数とはみなしません。
 
+将来のclassifier変更では、[2026-08-20 SwitchBot raw capture監査](docs/switchbot-raw-capture-audit-2026-08-20.md)
+に記録した個体数・capture数・byteごとの根拠レベルも参照してください。
+
 ## Raspberry Piでの確認事項
 
 Piの現在のBlueZ/bleakの組み合わせでは、SwitchBot BLE広告が`manufacturer_data[0x0969]`だけで
