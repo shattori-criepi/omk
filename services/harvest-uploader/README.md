@@ -48,6 +48,8 @@ HTTP成功は2xxです。失敗したレコードは`HARVEST_QUEUE_PATH`のSQLit
 
 環境変数は`MQTT_HOST`（既定`mosquitto`）、`MQTT_PORT`（`1883`）、`MQTT_CLIENT_ID`（`omk-harvest-uploader`）、`MQTT_TOPIC`（`omk/#`）、`HARVEST_ENDPOINT`（`http://harvest.soracom.io`）、`HARVEST_TIMEOUT_SECONDS`（`10`）、`HARVEST_RETRY_MAX_AGE_SECONDS`（`3600`）、`HARVEST_QUEUE_PATH`、`TZ`です。認証情報・APIキーをpayloadやソースへ入れません。
 
+Compose外で起動する場合や既定値を確認する場合は、secretを含まない[`.env.example`](.env.example)を参照してください。必要に応じてこれをローカルの`.env`へコピーし、接続先などを設定します。
+
 Harvest Data側では、731日保持とカスタムタイムスタンプを利用できる設定を別途有効化してください。
 
 ## 起動・テスト
