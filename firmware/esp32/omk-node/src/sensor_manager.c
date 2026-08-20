@@ -89,6 +89,9 @@ static void sensor_manager_task(void *arg) {
                     ESP_LOGW(TAG, "SEN66 MQTT publish unavailable: %s", esp_err_to_name(err));
                     mqtt_warning_logged = true;
                 } else if (err == ESP_OK) {
+                    if (mqtt_warning_logged) {
+                        ESP_LOGI(TAG, "SEN66 MQTT publish recovered");
+                    }
                     mqtt_warning_logged = false;
                 }
             }
