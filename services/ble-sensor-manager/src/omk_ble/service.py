@@ -5,6 +5,7 @@ import json
 import logging
 import math
 import os
+from threading import RLock
 from time import monotonic
 from datetime import datetime, timezone
 from typing import Any, Callable
@@ -52,6 +53,7 @@ class BleManager:
         self._scanner: Any = None
         self._timeout_task: asyncio.Task[None] | None = None
         self._mqtt = mqtt_client
+        self._node_registration_lock = RLock()
         self.offline_seconds = int(os.getenv("OMK_BLE_OFFLINE_SECONDS", "900"))
         self._now_provider = now_provider or (lambda: datetime.now(timezone.utc))
         self._monotonic_provider = monotonic_provider or monotonic
@@ -150,24 +152,36 @@ class BleManager:
     def _logical_id_valid(value: Any) -> bool:
         return isinstance(value, str) and 1 <= len(value) <= 48 and all(char.isascii() and (char.isalnum() or char in "-_") for char in value)
 
+    def _logical_id_owner(self, logical_id: str, *, excluding_node_id: str | None = None) -> str | None:
+        if self.node_registry is None:
+            return None
+        for node_id, node in self.node_registry.list().items():
+            if node_id != excluding_node_id and node.get("logical_id") == logical_id:
+                return node_id
+        return None
+
     def request_node_registration(self, node_id: str, logical_id: str) -> dict[str, Any]:
         if not self._node_id_valid(node_id) or not self._logical_id_valid(logical_id):
             raise ValueError("invalid node_id or logical_id")
-        current = next((item for item in self.node_list() if item["node_id"] == node_id), None)
-        if current is None:
-            raise KeyError(node_id)
-        if current.get("registration_state") == "registered":
-            raise ValueError("node is already registered")
-        if current.get("registration_state") != "provisioned":
-            raise ValueError("node Wi-Fi provisioning is not complete")
-        if not self._mqtt:
-            raise RuntimeError("MQTT client is unavailable")
-        payload = json.dumps({"protocol_version": 1, "logical_id": logical_id})
-        info = self._mqtt.publish(f"omk/node/{node_id}/registration/config", payload, qos=1, retain=False)
-        if getattr(info, "rc", mqtt.MQTT_ERR_SUCCESS) != mqtt.MQTT_ERR_SUCCESS:
-            raise RuntimeError("MQTT publish failed")
-        if self.node_registry:
-            self.node_registry.update(node_id, logical_id=logical_id, request_state="request_sent")
+        with self._node_registration_lock:
+            current = next((item for item in self.node_list() if item["node_id"] == node_id), None)
+            if current is None:
+                raise KeyError(node_id)
+            if current.get("registration_state") == "registered":
+                raise ValueError("node is already registered")
+            if current.get("registration_state") != "provisioned":
+                raise ValueError("node Wi-Fi provisioning is not complete")
+            owner = self._logical_id_owner(logical_id, excluding_node_id=node_id)
+            if owner is not None:
+                raise ValueError(f"logical_id is already assigned to node {owner}")
+            if not self._mqtt:
+                raise RuntimeError("MQTT client is unavailable")
+            payload = json.dumps({"protocol_version": 1, "logical_id": logical_id})
+            info = self._mqtt.publish(f"omk/node/{node_id}/registration/config", payload, qos=1, retain=False)
+            if getattr(info, "rc", mqtt.MQTT_ERR_SUCCESS) != mqtt.MQTT_ERR_SUCCESS:
+                raise RuntimeError("MQTT publish failed")
+            if self.node_registry:
+                self.node_registry.update(node_id, logical_id=logical_id, request_state="request_sent")
         return {"node_id": node_id, "logical_id": logical_id, "status": "request_sent"}
 
     def handle_node_mqtt(self, topic: str, payload: bytes) -> None:
@@ -189,14 +203,24 @@ class BleManager:
             capabilities = value.get("capabilities")
             if state not in {"provisioned", "registered"} or not isinstance(capabilities, int):
                 return
-            self.node_registry.update(parts[2], protocol_version=1, capabilities=capabilities,
-                                      registration_state=state, mqtt_status_seen_at=now_iso())
+            status_values = {"protocol_version": 1, "capabilities": capabilities,
+                             "registration_state": state, "mqtt_status_seen_at": now_iso()}
+            if state == "provisioned":
+                self.node_registry.clear_registration(parts[2], **status_values)
+            else:
+                self.node_registry.update(parts[2], **status_values)
             return
         logical_id = value.get("logical_id")
         if value.get("registration_state") != "registered" or not self._logical_id_valid(logical_id):
             return
-        self.node_registry.update(parts[2], protocol_version=1, logical_id=logical_id,
-                                  registration_state="registered", request_state="registered", ack_seen_at=now_iso())
+        with self._node_registration_lock:
+            owner = self._logical_id_owner(logical_id, excluding_node_id=parts[2])
+            if owner is not None:
+                LOGGER.error("Ignoring duplicate OMK Node logical_id=%s from node_id=%s; already assigned to node_id=%s",
+                             logical_id, parts[2], owner)
+                return
+            self.node_registry.update(parts[2], protocol_version=1, logical_id=logical_id,
+                                      registration_state="registered", request_state="registered", ack_seen_at=now_iso())
 
     def handle_relay_mqtt(self, topic: str, payload: bytes) -> None:
         """Resolve a Node relay observation through the existing BLE registry."""

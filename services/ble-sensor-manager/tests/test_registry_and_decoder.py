@@ -456,6 +456,42 @@ def test_node_registration_request_and_ack_are_persisted(tmp_path: Path) -> None
         manager.request_node_registration("112233445566", "ble-relay-001")
 
 
+def test_node_registration_rejects_duplicate_logical_id_in_requests_and_acks(tmp_path: Path) -> None:
+    publisher = _MqttPublisher()
+    node_registry = NodeRegistry(tmp_path / "nodes.json")
+    manager = BleManager(SensorRegistry(tmp_path / "sensors.json"), publisher, node_registry=node_registry)
+    first = decode_omk_node(-41, {OMK_NODE_SERVICE_UUID: bytes.fromhex("01010001112233445566")}, "now")
+    second = decode_omk_node(-42, {OMK_NODE_SERVICE_UUID: bytes.fromhex("010100019af9509eb8b6")}, "now")
+    assert first is not None and second is not None
+    manager.record_advertisement(first)
+    manager.record_advertisement(second)
+
+    manager.request_node_registration("112233445566", "sen66-001")
+    with pytest.raises(ValueError, match="already assigned to node 112233445566"):
+        manager.request_node_registration("9af9509eb8b6", "sen66-001")
+
+    manager.handle_node_mqtt("omk/node/112233445566/registration/ack", b'{"protocol_version":1,"node_id":"112233445566","logical_id":"sen66-001","registration_state":"registered"}')
+    manager.handle_node_mqtt("omk/node/9af9509eb8b6/registration/ack", b'{"protocol_version":1,"node_id":"9af9509eb8b6","logical_id":"sen66-001","registration_state":"registered"}')
+    saved = node_registry.list()
+    assert saved["112233445566"]["logical_id"] == "sen66-001"
+    assert "9af9509eb8b6" not in saved
+
+
+def test_provisioned_node_status_clears_only_its_gateway_registration_metadata(tmp_path: Path) -> None:
+    node_registry = NodeRegistry(tmp_path / "nodes.json")
+    node_registry.update("9af9509eb8b6", logical_id="sen66-001", request_state="registered",
+                         ack_seen_at="before", unrelated="preserved")
+    manager = BleManager(SensorRegistry(tmp_path / "sensors.json"), node_registry=node_registry)
+
+    manager.handle_node_mqtt("omk/node/9af9509eb8b6/registration/status", b'{"protocol_version":1,"node_id":"9af9509eb8b6","registration_state":"provisioned","capabilities":1}')
+
+    saved = node_registry.list()["9af9509eb8b6"]
+    assert saved["registration_state"] == "provisioned"
+    assert saved["capabilities"] == 1
+    assert saved["unrelated"] == "preserved"
+    assert {"logical_id", "request_state", "ack_seen_at"}.isdisjoint(saved)
+
+
 def test_node_mqtt_status_validation_does_not_persist_invalid_messages(tmp_path: Path) -> None:
     node_registry = NodeRegistry(tmp_path / "nodes.json")
     manager = BleManager(SensorRegistry(tmp_path / "sensors.json"), node_registry=node_registry)

@@ -34,6 +34,18 @@ class NodeRegistry:
             self._write(nodes)
             return current
 
+    def clear_registration(self, node_id: str, **values: Any) -> dict[str, Any]:
+        """Remove only Node registration metadata while retaining its identity and status."""
+        with self._lock:
+            nodes = self.list()
+            current = dict(nodes.get(node_id, {"node_id": node_id}))
+            for key in ("logical_id", "request_state", "ack_seen_at"):
+                current.pop(key, None)
+            current.update(values)
+            nodes[node_id] = current
+            self._write(nodes)
+            return current
+
     def _write(self, nodes: dict[str, dict[str, Any]]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         payload = json.dumps({"nodes": nodes}, ensure_ascii=False, indent=2) + "\n"
