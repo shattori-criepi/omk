@@ -1109,6 +1109,7 @@ def _vbus_recovery_inputs() -> tuple[object, object, object, object]:
 
 def test_vbus_recovery_after_logical_reset_configures_once_and_continues(
     monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     adapter, stop, state, resetter = _vbus_recovery_inputs()
     result = AdapterConfigurationResult({}, {}, {}, (), True)
@@ -1135,13 +1136,15 @@ def test_vbus_recovery_after_logical_reset_configures_once_and_continues(
     monkeypatch.setattr(cli, "_configure_after_usb_reset", configure_after_reset)
     monkeypatch.setattr(cli, "_adapter_device_present", lambda _port: True)
 
-    assert cli._configure_adapter_with_usb_recovery(  # type: ignore[arg-type]
-        adapter, SimpleNamespace(adapter=SimpleNamespace(expected_settings={}, auto_configure=True)),
-        "/dev/serial/by-id/rs-wsuha-p", state, stop, logging.getLogger("broute_meter.test"),
-    ) is result
+    with caplog.at_level(logging.INFO, logger="broute_meter.test"):
+        assert cli._configure_adapter_with_usb_recovery(  # type: ignore[arg-type]
+            adapter, SimpleNamespace(adapter=SimpleNamespace(expected_settings={}, auto_configure=True)),
+            "/dev/serial/by-id/rs-wsuha-p", state, stop, logging.getLogger("broute_meter.test"),
+        ) is result
     assert vbus_calls == 1
     assert post_reset_calls == 2
     assert state.states[-1] == "vbus_recovered"
+    assert "USB VBUS cycle後のRS-WSUHA-P設定読出しに成功しました" in caplog.messages
 
 
 @pytest.mark.parametrize("failure", ["helper", "device", "configure"])

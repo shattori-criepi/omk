@@ -542,6 +542,7 @@ def _configure_adapter_with_usb_recovery(
             )
         ),
     )
+    vbus_recovered = False
     try:
         device = resetter.reset()
         logger.warning(
@@ -579,6 +580,7 @@ def _configure_adapter_with_usb_recovery(
                 raise AdapterResponseTimeoutError("終了要求によりVBUS復旧待機を中止しました。")
             result = _configure_after_usb_reset(adapter, config, stop_event)
             state.write("vbus_recovered", now=datetime.now().astimezone())
+            vbus_recovered = True
     except (AdapterError, SerialTimeoutError, UsbRecoveryError) as exc:
         failure_status = state.read().get("status")
         state.write(
@@ -590,7 +592,11 @@ def _configure_adapter_with_usb_recovery(
         logger.error("USBリセット後のRS-WSUHA-P設定読出しに失敗しました", exc_info=True)
         raise AdapterResponseTimeoutError("RS-WSUHA-P recovery failed after USB reset.") from exc
 
-    logger.info("USBリセット後のRS-WSUHA-P設定読出しに成功しました")
+    logger.info(
+        "USB VBUS cycle後のRS-WSUHA-P設定読出しに成功しました"
+        if vbus_recovered
+        else "USBリセット後のRS-WSUHA-P設定読出しに成功しました"
+    )
     return result
 
 
