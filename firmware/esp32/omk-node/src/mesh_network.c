@@ -154,6 +154,7 @@ static void mesh_event_handler(void *argument, esp_event_base_t base, int32_t id
              * owned STA event handling remains untouched. */
             last_wifi_disconnect_reason = event->reason;
         }
+        current_ip.addr = 0;
         (void)mesh_netifs_stop();
         observe_root_role();
         break;

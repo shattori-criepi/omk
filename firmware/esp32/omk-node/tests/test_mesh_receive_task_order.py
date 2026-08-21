@@ -32,12 +32,16 @@ def test_mesh_diagnostic_handlers_only_record_state():
     assert "root_switch_count++" in network
 
 
-def test_root_parent_connection_uses_default_sta_dhcp_lifecycle():
+def test_root_parent_connection_signals_external_sta_link_and_starts_dhcp():
     netif = (SOURCE / "mesh_netif.c").read_text()
     root_branch = netif[netif.index("if (is_root) {") : netif.index("    if (station_netif != NULL && strcmp(esp_netif_get_desc(station_netif), \"omk_mesh_sta\") == 0) return ESP_OK;")]
 
-    assert "esp_netif_dhcpc_stop" not in root_branch
-    assert "esp_netif_dhcpc_start" not in root_branch
+    assert "return start_root_external_dhcp();" in root_branch
+    helper = netif[netif.index("static esp_err_t start_root_external_dhcp") : netif.index("static void destroy_mesh_ap")]
+    assert "esp_netif_action_connected(station_netif, NULL, 0, NULL);" in helper
+    assert "esp_netif_dhcpc_get_status(station_netif, &dhcp_status)" in helper
+    assert "dhcp_status != ESP_NETIF_DHCP_STARTED" in helper
+    assert "esp_netif_dhcpc_start" not in helper
 
 
 def test_root_recreated_default_sta_starts_wifi_link_once():
@@ -54,16 +58,47 @@ def test_root_recreated_default_sta_starts_wifi_link_once():
     assert root_branch.count("start_default_station_link()") == 1
 
 
-def test_root_default_sta_disconnect_before_internal_ap_is_preserved():
+def test_root_parent_disconnect_recreates_external_sta_even_before_internal_ap_exists():
     netif = (SOURCE / "mesh_netif.c").read_text()
     stop = netif[netif.index("esp_err_t mesh_netifs_stop") : netif.index("esp_err_t mesh_netif_start_root_ap")]
 
-    guard = '''if (station_netif != NULL && strcmp(esp_netif_get_desc(station_netif), "sta") == 0 &&
-        mesh_ap_netif == NULL) {
-        return ESP_OK;
-    }'''
-    assert guard in stop
-    assert stop.index(guard) < stop.index("esp_wifi_clear_default_wifi_driver_and_handlers")
+    assert "mesh_ap_netif == NULL" not in stop
+    assert "esp_wifi_clear_default_wifi_driver_and_handlers(station_netif)" in stop
+    assert "esp_netif_destroy(station_netif)" in stop
+    assert "create_default_station()" in stop
+    assert "start_default_station_link()" in stop
+
+
+def test_repeated_root_parent_reconnects_reuse_safe_dhcp_action():
+    netif = (SOURCE / "mesh_netif.c").read_text()
+    root_branch = netif[netif.index("if (is_root) {") : netif.index("    if (station_netif != NULL && strcmp(esp_netif_get_desc(station_netif), \"omk_mesh_sta\") == 0) return ESP_OK;")]
+    helper = netif[netif.index("static esp_err_t start_root_external_dhcp") : netif.index("static void destroy_mesh_ap")]
+
+    assert root_branch.count("start_root_external_dhcp()") == 1
+    assert "ESP_NETIF_DHCP_STARTED" in helper
+    assert "esp_netif_dhcpc_stop" not in helper
+
+
+def test_root_child_role_transitions_keep_their_existing_netif_replacements():
+    netif = (SOURCE / "mesh_netif.c").read_text()
+    root_branch = netif[netif.index("if (is_root) {") : netif.index("    if (station_netif != NULL && strcmp(esp_netif_get_desc(station_netif), \"omk_mesh_sta\") == 0) return ESP_OK;")]
+    child_branch = netif[netif.index("    ESP_LOGI(TAG, \"Starting child internal STA") : netif.index("esp_err_t mesh_netifs_stop")]
+
+    assert "Replacing child internal STA netif with root external STA" in root_branch
+    assert "destroy_mesh_driver(station_netif)" in root_branch
+    assert "create_default_station()" in root_branch
+    assert "Replacing root external STA netif with child internal STA" in child_branch
+    assert "esp_wifi_clear_default_wifi_driver_and_handlers(station_netif)" in child_branch
+    assert "destroy_mesh_ap();" in child_branch
+    assert "start_mesh_child_station();" in child_branch
+
+
+def test_parent_disconnect_clears_stale_mesh_status_ip():
+    network = (SOURCE / "mesh_network.c").read_text()
+    disconnect = network[network.index("case MESH_EVENT_PARENT_DISCONNECTED") : network.index("    case MESH_EVENT_NETWORK_STATE")]
+
+    assert "current_ip.addr = 0;" in disconnect
+    assert disconnect.index("current_ip.addr = 0;") < disconnect.index("mesh_netifs_stop()")
 
 
 def test_default_sta_is_created_before_wifi_initialization():

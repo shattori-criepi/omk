@@ -162,6 +162,29 @@ static esp_err_t start_default_station_link(void) {
     return ESP_OK;
 }
 
+/* MESH_EVENT_PARENT_CONNECTED is the link-up notification for the root's
+ * external STA.  A freshly recreated default STA has been started above, but
+ * it does not receive a new WIFI_EVENT_STA_START.  Feed that link transition
+ * to esp-netif so it brings the netif up and starts DHCP when its state is
+ * INIT.  The action deliberately leaves an already STARTED client alone. */
+static esp_err_t start_root_external_dhcp(void) {
+    esp_netif_action_connected(station_netif, NULL, 0, NULL);
+
+    esp_netif_dhcp_status_t dhcp_status;
+    esp_err_t err = esp_netif_dhcpc_get_status(station_netif, &dhcp_status);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Could not read root external DHCP client state: %s", esp_err_to_name(err));
+        return err;
+    }
+    if (dhcp_status != ESP_NETIF_DHCP_STARTED) {
+        ESP_LOGW(TAG, "Root external DHCP client did not start after parent connection (state=%s)",
+                 dhcp_status_name(dhcp_status));
+        return ESP_ERR_INVALID_STATE;
+    }
+    ESP_LOGI(TAG, "Root external DHCP client state=%s", dhcp_status_name(dhcp_status));
+    return ESP_OK;
+}
+
 static void destroy_mesh_ap(void) {
     if (mesh_ap_netif == NULL) return;
     (void)esp_netif_dhcps_stop(mesh_ap_netif);
@@ -234,7 +257,7 @@ esp_err_t mesh_netifs_start(bool is_root) {
             esp_err_t err = start_default_station_link();
             if (err != ESP_OK) return err;
         }
-        return ESP_OK;
+        return start_root_external_dhcp();
     }
     ESP_LOGI(TAG, "Starting child internal STA netif after Mesh parent connection");
     if (station_netif != NULL && strcmp(esp_netif_get_desc(station_netif), "omk_mesh_sta") == 0) return ESP_OK;
@@ -250,10 +273,6 @@ esp_err_t mesh_netifs_start(bool is_root) {
 }
 
 esp_err_t mesh_netifs_stop(void) {
-    if (station_netif != NULL && strcmp(esp_netif_get_desc(station_netif), "sta") == 0 &&
-        mesh_ap_netif == NULL) {
-        return ESP_OK;
-    }
     ESP_LOGI(TAG, "Stopping current Mesh IP netif");
     if (station_netif != NULL) {
         if (strcmp(esp_netif_get_desc(station_netif), "omk_mesh_sta") == 0) {
