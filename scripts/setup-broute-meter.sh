@@ -10,9 +10,11 @@ TARGET_GROUP=""
 SERVICE='omk-broute-meter.service'
 UNIT_TEMPLATE="${OMK_ROOT}/systemd/omk-broute-meter.service.in"
 HELPER_SOURCE="${OMK_ROOT}/scripts/reset-rs-wsuha-p-usb.sh"
+VBUS_HELPER_SOURCE="${OMK_ROOT}/scripts/cycle-gateway-usb-vbus.sh"
 VENV_PATH="${OMK_ROOT}/services/broute-meter/.venv"
 VENV_PYTHON="${VENV_PATH}/bin/python"
 HELPER_DEST='/usr/local/lib/omk/reset-rs-wsuha-p-usb'
+VBUS_HELPER_DEST='/usr/local/lib/omk/cycle-gateway-usb-vbus'
 SUDOERS_DEST='/etc/sudoers.d/omk-rs-wsuha-p-reset'
 UNIT_DEST="/etc/systemd/system/${SERVICE}"
 LOG_DIR="${OMK_ROOT}/logs/setup"
@@ -60,7 +62,7 @@ render_unit() {
 }
 
 render_sudoers() {
-  printf '%s ALL=(root) NOPASSWD: %s\n' "${TARGET_USER}" "${HELPER_DEST}"
+  printf '%s ALL=(root) NOPASSWD: %s, %s\n' "${TARGET_USER}" "${HELPER_DEST}" "${VBUS_HELPER_DEST}"
 }
 
 preflight() {
@@ -69,6 +71,7 @@ preflight() {
   PREFLIGHT_OK=true
   require_file "${UNIT_TEMPLATE}" 'Unit template'
   require_file "${HELPER_SOURCE}" 'USB reset helper'
+  require_file "${VBUS_HELPER_SOURCE}" 'USB VBUS helper'
   [[ -x "${HELPER_SOURCE}" ]] || PREFLIGHT_FAILURES+=("USB reset helper is not executable: ${HELPER_SOURCE}")
   [[ -d "${OMK_ROOT}/services/broute-meter" ]] || PREFLIGHT_FAILURES+=("B-route working directory is missing: ${OMK_ROOT}/services/broute-meter")
   for command_name in apt-get python3 install stat mktemp sed systemctl visudo cmp tee; do require_command "${command_name}"; done
@@ -286,6 +289,26 @@ install_helper() {
   ensure_root_metadata "${HELPER_DEST}" 755
 }
 
+install_vbus_helper() {
+  local comparison_status
+  ensure_system_directory /usr/local/lib/omk
+  if [[ ! -e "${VBUS_HELPER_DEST}" ]]; then
+    log "Installing updated USB VBUS helper: ${VBUS_HELPER_DEST}"
+    "${SUDO[@]}" install -o root -g root -m 0755 "${VBUS_HELPER_SOURCE}" "${VBUS_HELPER_DEST}"
+  elif compare_files "${VBUS_HELPER_SOURCE}" "${VBUS_HELPER_DEST}"; then
+    log "USB VBUS helper is identical; preserving it: ${VBUS_HELPER_DEST}"
+  else
+    comparison_status=$?
+    if [[ "${comparison_status}" == 1 ]]; then
+      log "Installing updated USB VBUS helper: ${VBUS_HELPER_DEST}"
+      "${SUDO[@]}" install -o root -g root -m 0755 "${VBUS_HELPER_SOURCE}" "${VBUS_HELPER_DEST}"
+    else
+      fail "Cannot compare existing USB VBUS helper: ${VBUS_HELPER_DEST}"
+    fi
+  fi
+  ensure_root_metadata "${VBUS_HELPER_DEST}" 755
+}
+
 install_sudoers() {
   local temporary="$1" comparison_status
   ensure_system_directory /etc/sudoers.d
@@ -359,6 +382,8 @@ ensure_service_state() {
 verify_installation() {
   [[ "$(stat -c '%u:%g:%a' "${HELPER_DEST}")" == '0:0:755' ]] || fail "USB reset helper metadata is incorrect: ${HELPER_DEST}"
   [[ -x "${HELPER_DEST}" ]] || fail "USB reset helper is not executable: ${HELPER_DEST}"
+  [[ "$(stat -c '%u:%g:%a' "${VBUS_HELPER_DEST}")" == '0:0:755' ]] || fail "USB VBUS helper metadata is incorrect: ${VBUS_HELPER_DEST}"
+  [[ -x "${VBUS_HELPER_DEST}" ]] || fail "USB VBUS helper is not executable: ${VBUS_HELPER_DEST}"
   [[ "$(stat -c '%u:%g:%a' "${SUDOERS_DEST}")" == '0:0:440' ]] || fail "Sudoers metadata is incorrect: ${SUDOERS_DEST}"
   "${SUDO[@]}" visudo -cf "${SUDOERS_DEST}"
   cmp -s <(render_unit) "${UNIT_DEST}" || fail "Installed unit differs from the rendered template."
@@ -420,10 +445,11 @@ main() {
     else
       log "Would create setup log directory owned by ${TARGET_USER}:${TARGET_GROUP}: ${LOG_DIR}"
     fi
-    if [[ -f "${HELPER_SOURCE}" ]] && command -v cmp >/dev/null 2>&1; then
+    if [[ -f "${HELPER_SOURCE}" && -f "${VBUS_HELPER_SOURCE}" ]] && command -v cmp >/dev/null 2>&1; then
       plan_file_update "${HELPER_SOURCE}" "${HELPER_DEST}" 'USB reset helper'
+      plan_file_update "${VBUS_HELPER_SOURCE}" "${VBUS_HELPER_DEST}" 'USB VBUS helper'
     else
-      warn "Skipping USB reset helper comparison because its source or cmp is unavailable."
+      warn "Skipping USB helper comparison because a helper source or cmp is unavailable."
     fi
     if [[ ! -e "${SUDOERS_DEST}" ]]; then
       log "Would create sudoers rule: ${SUDOERS_DEST}"
@@ -477,6 +503,7 @@ main() {
   temporary_unit="$(mktemp)"
   trap 'rm -f -- "${temporary_sudoers}" "${temporary_unit}"' EXIT
   install_helper
+  install_vbus_helper
   install_sudoers "${temporary_sudoers}"
   install_unit "${temporary_unit}"
   ensure_service_state

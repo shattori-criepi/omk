@@ -54,6 +54,7 @@ from broute_meter.serial.transport import PySerialTransport, SerialTimeoutError,
 from broute_meter.storage import CsvMeasurementStorage, StorageError
 from broute_meter.usb_recovery import (
     STARTUP_RETRY_ATTEMPTS,
+    GatewayVbusCycler,
     RecoveryStateStore,
     RsWsuhaPUsbResetter,
     UsbRecoveryError,
@@ -66,6 +67,9 @@ ADAPTER_PRESENCE_CHECK_SECONDS = 5.0
 ADAPTER_SETTLE_SECONDS = 2.0
 ADAPTER_INITIALIZATION_RETRY_SECONDS = 5.0
 ADAPTER_UNRESPONSIVE_RETRY_SECONDS = 300.0
+VBUS_DEVICE_REAPPEAR_TIMEOUT_SECONDS = 45.0
+VBUS_DEVICE_POLL_SECONDS = 1.0
+VBUS_SETTLE_SECONDS = 5.0
 ADAPTER_READINESS_RETRY_ATTEMPTS = 6
 ADAPTER_READINESS_RETRY_SECONDS = 2.0
 ADAPTER_POST_RESET_RETRY_ATTEMPTS = 3
@@ -425,7 +429,10 @@ def _configure_adapter_after_adapter_presence(
             if not _adapter_device_present(port):
                 logger.warning("アダプター設定中にデバイスが取り外されました")
                 continue
-            recovery_failed = getattr(state, "read", lambda: {})().get("status") == "recovery_failed"
+            recovery_failed = getattr(state, "read", lambda: {})().get("status") in {
+                "recovery_failed",
+                "vbus_recovery_failed",
+            }
             retry_seconds = ADAPTER_UNRESPONSIVE_RETRY_SECONDS if recovery_failed else ADAPTER_INITIALIZATION_RETRY_SECONDS
             if recovery_failed:
                 _write_runtime_status(runtime_status, "adapter_unresponsive", logger, retry_after_seconds=retry_seconds)
@@ -548,18 +555,53 @@ def _configure_adapter_with_usb_recovery(
             raise AdapterResponseTimeoutError(
                 "終了要求によりUSBリセット後の起動待機を中止しました。"
             )
-        result = _configure_after_usb_reset(
-            adapter,
-            config,
-            stop_event,
-        )
+        try:
+            result = _configure_after_usb_reset(adapter, config, stop_event)
+        except (AdapterError, SerialTimeoutError, UsbRecoveryError) as post_reset_error:
+            if getattr(state, "vbus_cooldown_active", lambda **_kwargs: False)(
+                now=datetime.now().astimezone()
+            ):
+                state.write("vbus_recovery_failed", now=datetime.now().astimezone())
+                raise post_reset_error
+            cycle_at = datetime.now().astimezone()
+            state.write("vbus_cycling", now=cycle_at, vbus_cycle_at=cycle_at)
+            GatewayVbusCycler(
+                Path(
+                    os.environ.get(
+                        "OMK_GATEWAY_VBUS_HELPER",
+                        "/usr/local/lib/omk/cycle-gateway-usb-vbus",
+                    )
+                )
+            ).cycle()
+            if not _wait_for_vbus_device(port, stop_event):
+                raise AdapterResponseTimeoutError("VBUS cycle後にRS-WSUHA-Pが再出現しませんでした。")
+            if stop_event.wait(VBUS_SETTLE_SECONDS):
+                raise AdapterResponseTimeoutError("終了要求によりVBUS復旧待機を中止しました。")
+            result = _configure_after_usb_reset(adapter, config, stop_event)
+            state.write("vbus_recovered", now=datetime.now().astimezone())
     except (AdapterError, SerialTimeoutError, UsbRecoveryError) as exc:
-        state.write("recovery_failed", now=datetime.now().astimezone())
+        failure_status = state.read().get("status")
+        state.write(
+            "vbus_recovery_failed"
+            if failure_status in {"vbus_cycling", "vbus_recovery_failed"}
+            else "recovery_failed",
+            now=datetime.now().astimezone(),
+        )
         logger.error("USBリセット後のRS-WSUHA-P設定読出しに失敗しました", exc_info=True)
         raise AdapterResponseTimeoutError("RS-WSUHA-P recovery failed after USB reset.") from exc
 
     logger.info("USBリセット後のRS-WSUHA-P設定読出しに成功しました")
     return result
+
+
+def _wait_for_vbus_device(port: str, stop_event: threading.Event) -> bool:
+    """Wait a bounded interval for the stable RS-WSUHA-P by-id path."""
+    deadline = time.monotonic() + VBUS_DEVICE_REAPPEAR_TIMEOUT_SECONDS
+    while not _adapter_device_present(port):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0 or stop_event.wait(min(VBUS_DEVICE_POLL_SECONDS, remaining)):
+            return False
+    return True
 
 
 def _configure_after_usb_reset(

@@ -75,3 +75,13 @@ def test_usb_reset_policy_requires_repeated_failures_and_one_reset_per_process(
     assert not usb_reset_allowed(3, 1, store, now=now)
     store.write("usb_resetting", now=now, reset_at=now)
     assert not usb_reset_allowed(3, 0, store, now=now)
+
+
+def test_vbus_cooldown_is_persistent_for_one_hour_across_store_instances(tmp_path: Path) -> None:
+    path = tmp_path / "state.json"
+    cycle_at = datetime(2026, 8, 21, 12, 0, tzinfo=UTC)
+    RecoveryStateStore(path).write("vbus_cycling", now=cycle_at, vbus_cycle_at=cycle_at)
+
+    restarted_store = RecoveryStateStore(path)
+    assert restarted_store.vbus_cooldown_active(now=cycle_at + timedelta(minutes=59, seconds=59))
+    assert not restarted_store.vbus_cooldown_active(now=cycle_at + timedelta(hours=1))

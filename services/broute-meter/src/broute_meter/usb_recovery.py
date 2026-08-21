@@ -14,6 +14,7 @@ RS_WSUHA_P_PRODUCT = "6015"
 RS_WSUHA_P_SERIAL = "DM006AOS"
 STARTUP_RETRY_ATTEMPTS = 3
 USB_RESET_COOLDOWN = timedelta(minutes=20)
+VBUS_CYCLE_COOLDOWN = timedelta(hours=1)
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,12 +80,14 @@ class RecoveryStateStore:
             isinstance(key, str) and isinstance(item, str) for key, item in value.items()
         ) else {}
 
-    def write(self, status: str, *, now: datetime, reset_at: datetime | None = None) -> None:
+    def write(self, status: str, *, now: datetime, reset_at: datetime | None = None, vbus_cycle_at: datetime | None = None) -> None:
         data = self.read()
         data["status"] = status
         data["updated_at"] = now.astimezone(UTC).isoformat()
         if reset_at is not None:
             data["last_usb_reset_at"] = reset_at.astimezone(UTC).isoformat()
+        if vbus_cycle_at is not None:
+            data["last_vbus_cycle_at"] = vbus_cycle_at.astimezone(UTC).isoformat()
         self.path.parent.mkdir(parents=True, exist_ok=True)
         temporary = self.path.with_suffix(self.path.suffix + ".tmp")
         temporary.write_text(
@@ -102,6 +105,16 @@ class RecoveryStateStore:
         except ValueError:
             return False
         return now.astimezone(UTC) < last_reset.astimezone(UTC) + USB_RESET_COOLDOWN
+
+    def vbus_cooldown_active(self, *, now: datetime) -> bool:
+        raw = self.read().get("last_vbus_cycle_at")
+        if raw is None:
+            return False
+        try:
+            last_cycle = datetime.fromisoformat(raw)
+        except (TypeError, ValueError):
+            return False
+        return now.astimezone(UTC) < last_cycle.astimezone(UTC) + VBUS_CYCLE_COOLDOWN
 
 
 def usb_reset_allowed(
@@ -134,3 +147,16 @@ class RsWsuhaPUsbResetter:
         except (OSError, subprocess.SubprocessError) as exc:
             raise UsbRecoveryError("RS-WSUHA-P USB reset helper failed.") from exc
         return device
+
+
+class GatewayVbusCycler:
+    """Run only the fixed, root-owned Pi 4 VBUS helper."""
+
+    def __init__(self, command: Path) -> None:
+        self._command = command
+
+    def cycle(self) -> None:
+        try:
+            subprocess.run(("sudo", "-n", str(self._command)), check=True, timeout=30)
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise UsbRecoveryError("Gateway USB VBUS helper failed.") from exc

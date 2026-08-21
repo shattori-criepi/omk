@@ -1069,8 +1069,205 @@ def test_skreset_timeout_falls_through_to_usb_reset(monkeypatch: pytest.MonkeyPa
     assert "usb_resetting" in state.states
 
 
+def _vbus_recovery_inputs() -> tuple[object, object, object, object]:
+    class Adapter(_FakeSetupAdapter):
+        def configure(self, *_args: object, **_kwargs: object) -> AdapterConfigurationResult:
+            raise AdapterResponseTimeoutError("RUART timeout")
+
+        def reset(self) -> None:
+            raise AdapterResponseTimeoutError("SKRESET timeout")
+
+    class Stop:
+        def wait(self, _timeout: float) -> bool:
+            return False
+
+    class State:
+        def __init__(self) -> None:
+            self.states: list[str] = []
+
+        def write(self, state: str, **_kwargs: object) -> None:
+            self.states.append(state)
+
+        def read(self) -> dict[str, str]:
+            return {"status": self.states[-1]} if self.states else {}
+
+        def cooldown_active(self, **_kwargs: object) -> bool:
+            return False
+
+        def vbus_cooldown_active(self, **_kwargs: object) -> bool:
+            return False
+
+    class Resetter:
+        def __init__(self, *_args: object) -> None:
+            pass
+
+        def reset(self) -> SimpleNamespace:
+            return SimpleNamespace(vendor="0403", product="6015", serial="DM006AOS", sysfs_path="/sys/test")
+
+    return Adapter(), Stop(), State(), Resetter
+
+
+def test_vbus_recovery_after_logical_reset_configures_once_and_continues(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter, stop, state, resetter = _vbus_recovery_inputs()
+    result = AdapterConfigurationResult({}, {}, {}, (), True)
+    post_reset_calls = 0
+    vbus_calls = 0
+
+    def configure_after_reset(*_args: object) -> AdapterConfigurationResult:
+        nonlocal post_reset_calls
+        post_reset_calls += 1
+        if post_reset_calls == 1:
+            raise AdapterResponseTimeoutError("logical reset did not recover UART")
+        return result
+
+    class Cycler:
+        def __init__(self, *_args: object) -> None:
+            pass
+
+        def cycle(self) -> None:
+            nonlocal vbus_calls
+            vbus_calls += 1
+
+    monkeypatch.setattr(cli, "RsWsuhaPUsbResetter", resetter)
+    monkeypatch.setattr(cli, "GatewayVbusCycler", Cycler)
+    monkeypatch.setattr(cli, "_configure_after_usb_reset", configure_after_reset)
+    monkeypatch.setattr(cli, "_adapter_device_present", lambda _port: True)
+
+    assert cli._configure_adapter_with_usb_recovery(  # type: ignore[arg-type]
+        adapter, SimpleNamespace(adapter=SimpleNamespace(expected_settings={}, auto_configure=True)),
+        "/dev/serial/by-id/rs-wsuha-p", state, stop, logging.getLogger("broute_meter.test"),
+    ) is result
+    assert vbus_calls == 1
+    assert post_reset_calls == 2
+    assert state.states[-1] == "vbus_recovered"
+
+
+@pytest.mark.parametrize("failure", ["helper", "device", "configure"])
+def test_vbus_failure_paths_never_repeat_the_cycle(
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str,
+) -> None:
+    adapter, stop, state, resetter = _vbus_recovery_inputs()
+    vbus_calls = 0
+
+    class Cycler:
+        def __init__(self, *_args: object) -> None:
+            pass
+
+        def cycle(self) -> None:
+            nonlocal vbus_calls
+            vbus_calls += 1
+            if failure == "helper":
+                raise cli.UsbRecoveryError("helper failure")
+
+    monkeypatch.setattr(cli, "RsWsuhaPUsbResetter", resetter)
+    monkeypatch.setattr(cli, "GatewayVbusCycler", Cycler)
+    monkeypatch.setattr(cli, "_configure_after_usb_reset", lambda *_args: (_ for _ in ()).throw(AdapterResponseTimeoutError("not ready")))
+    monkeypatch.setattr(cli, "_adapter_device_present", lambda _port: True)
+    if failure == "device":
+        monkeypatch.setattr(cli, "_wait_for_vbus_device", lambda *_args: False)
+
+    with pytest.raises(AdapterResponseTimeoutError):
+        cli._configure_adapter_with_usb_recovery(  # type: ignore[arg-type]
+            adapter, SimpleNamespace(adapter=SimpleNamespace(expected_settings={}, auto_configure=True)),
+            "/dev/serial/by-id/rs-wsuha-p", state, stop, logging.getLogger("broute_meter.test"),
+        )
+    assert vbus_calls == 1
+    assert state.states[-1] == "vbus_recovery_failed"
+
+
+def test_vbus_cooldown_suppresses_the_helper_and_marks_unresponsive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter, stop, state, resetter = _vbus_recovery_inputs()
+    vbus_calls = 0
+    state.vbus_cooldown_active = lambda **_kwargs: True  # type: ignore[attr-defined]
+
+    class Cycler:
+        def __init__(self, *_args: object) -> None:
+            pass
+
+        def cycle(self) -> None:
+            nonlocal vbus_calls
+            vbus_calls += 1
+
+    monkeypatch.setattr(cli, "RsWsuhaPUsbResetter", resetter)
+    monkeypatch.setattr(cli, "GatewayVbusCycler", Cycler)
+    monkeypatch.setattr(cli, "_configure_after_usb_reset", lambda *_args: (_ for _ in ()).throw(AdapterResponseTimeoutError("not ready")))
+
+    with pytest.raises(AdapterResponseTimeoutError):
+        cli._configure_adapter_with_usb_recovery(  # type: ignore[arg-type]
+            adapter, SimpleNamespace(adapter=SimpleNamespace(expected_settings={}, auto_configure=True)),
+            "/dev/serial/by-id/rs-wsuha-p", state, stop, logging.getLogger("broute_meter.test"),
+        )
+    assert vbus_calls == 0
+    assert state.states[-1] == "vbus_recovery_failed"
+
+
+def test_vbus_device_wait_and_settle_are_interruptible(monkeypatch: pytest.MonkeyPatch) -> None:
+    class StopDuringDeviceWait:
+        def __init__(self) -> None:
+            self.waits: list[float] = []
+
+        def wait(self, timeout: float) -> bool:
+            self.waits.append(timeout)
+            return True
+
+    stop = StopDuringDeviceWait()
+    monkeypatch.setattr(cli, "_adapter_device_present", lambda _port: False)
+    assert not cli._wait_for_vbus_device("/dev/serial/by-id/rs-wsuha-p", stop)  # type: ignore[arg-type]
+    assert stop.waits == [cli.VBUS_DEVICE_POLL_SECONDS]
+
+    adapter, _unused_stop, state, resetter = _vbus_recovery_inputs()
+
+    class SettleStop:
+        def wait(self, timeout: float) -> bool:
+            return timeout == cli.VBUS_SETTLE_SECONDS
+
+    class Cycler:
+        def __init__(self, *_args: object) -> None:
+            pass
+
+        def cycle(self) -> None:
+            pass
+
+    monkeypatch.setattr(cli, "RsWsuhaPUsbResetter", resetter)
+    monkeypatch.setattr(cli, "GatewayVbusCycler", Cycler)
+    monkeypatch.setattr(cli, "_configure_after_usb_reset", lambda *_args: (_ for _ in ()).throw(AdapterResponseTimeoutError("not ready")))
+    monkeypatch.setattr(cli, "_adapter_device_present", lambda _port: True)
+    with pytest.raises(AdapterResponseTimeoutError):
+        cli._configure_adapter_with_usb_recovery(  # type: ignore[arg-type]
+            adapter, SimpleNamespace(adapter=SimpleNamespace(expected_settings={}, auto_configure=True)),
+            "/dev/serial/by-id/rs-wsuha-p", state, SettleStop(), logging.getLogger("broute_meter.test"),
+        )
+    assert state.states[-1] == "vbus_recovery_failed"
+
+
+def test_vbus_device_wait_uses_the_bounded_reappearance_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Stop:
+        def __init__(self) -> None:
+            self.waits: list[float] = []
+
+        def wait(self, timeout: float) -> bool:
+            self.waits.append(timeout)
+            return False
+
+    moments = iter((0.0, 0.0, cli.VBUS_DEVICE_REAPPEAR_TIMEOUT_SECONDS))
+    monkeypatch.setattr(cli, "_adapter_device_present", lambda _port: False)
+    monkeypatch.setattr(cli.time, "monotonic", lambda: next(moments))
+    stop = Stop()
+    assert not cli._wait_for_vbus_device("/dev/serial/by-id/rs-wsuha-p", stop)  # type: ignore[arg-type]
+    assert stop.waits == [cli.VBUS_DEVICE_POLL_SECONDS]
+
+
+@pytest.mark.parametrize("recovery_state", ["recovery_failed", "vbus_recovery_failed"])
 def test_post_reset_failure_uses_interruptible_low_frequency_retry(
     monkeypatch: pytest.MonkeyPatch,
+    recovery_state: str,
 ) -> None:
     class StopEvent:
         def __init__(self) -> None:
@@ -1083,7 +1280,7 @@ def test_post_reset_failure_uses_interruptible_low_frequency_retry(
 
     class State:
         def read(self) -> dict[str, str]:
-            return {"status": "recovery_failed"}
+            return {"status": recovery_state}
 
     class Status:
         def __init__(self) -> None:
