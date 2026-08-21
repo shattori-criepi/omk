@@ -1289,6 +1289,18 @@ def test_derived_daily_energy_candidates_reuse_legacy_totals_and_cache(monkeypat
     assert fake.calls == 1
 
 
+def test_derived_daily_energy_candidates_show_missing_data_as_dash(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeParquet:
+        def today_energy_totals(self, _today):
+            return dashboard_main.EnergyTotals(None, None)
+    monkeypatch.setattr(dashboard_main, "_DERIVED_ENERGY_CACHE", None)
+    monkeypatch.setattr(dashboard_main, "display_candidates", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(dashboard_main, "get_display_repository", lambda: object())
+    monkeypatch.setattr(dashboard_main, "get_parquet_repository", lambda: FakeParquet())
+    candidates = dashboard_main._dashboard_candidates(NOW)
+    assert [(item.value, item.freshness) for item in candidates] == [("--", "unavailable"), ("--", "unavailable")]
+
+
 def test_new_ichijo_block_accepts_raw_virtual_and_derived_ids(tmp_path: Path) -> None:
     repository = SettingsRepository(tmp_path / "dashboard" / "settings.json")
     ids = ("load", "pv", "export", "soc", "virtual:battery_power_bidirectional:ichijo", "derived:energy:today_import_kwh")

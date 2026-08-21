@@ -41,8 +41,8 @@ class LatestIchijoPowerFlow:
 
 @dataclass(frozen=True)
 class EnergyTotals:
-    import_energy_kwh: float
-    export_energy_kwh: float
+    import_energy_kwh: float | None
+    export_energy_kwh: float | None
 
 
 class ParquetRepository:
@@ -125,16 +125,16 @@ class ParquetRepository:
             "broute_interval_energy",
             """
             SELECT
-                COALESCE(SUM(import_energy_kwh), 0),
-                COALESCE(SUM(export_energy_kwh), 0)
+                SUM(import_energy_kwh),
+                SUM(export_energy_kwh)
             FROM read_parquet(?, hive_partitioning = true)
             WHERE CAST(end_at AT TIME ZONE 'Asia/Tokyo' AS DATE) = ?
             """,
             [today],
         )
         if row is None:
-            return EnergyTotals(0.0, 0.0)
-        return EnergyTotals(float(row[0]), float(row[1]))
+            return EnergyTotals(None, None)
+        return EnergyTotals(_optional_float(row[0]), _optional_float(row[1]))
 
     def _one(self, dataset: str, query: str, parameters: list[object] | None = None) -> tuple | None:
         parquet_glob = self.data_root / dataset / "**" / "*.parquet"

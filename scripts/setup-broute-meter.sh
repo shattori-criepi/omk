@@ -88,7 +88,7 @@ preflight() {
 ensure_python_runtime() {
   local package
   local -a missing=()
-  for package in python3 python3-venv python3-pip; do
+  for package in python3 python3-venv python3-pip uhubctl; do
     dpkg-query -W -f='${db:Status-Abbrev}' "${package}" 2>/dev/null | grep -q '^ii' || missing+=("${package}")
   done
   if ((${#missing[@]})); then
@@ -406,7 +406,7 @@ main() {
     log "Target user/group: ${TARGET_USER}:${TARGET_GROUP}"
     log "Service: ${SERVICE}"
     migrate_legacy_runtime_config
-    log "Would install missing python3, python3-venv, and python3-pip packages; create ${VENV_PATH} only if absent; and install runtime dependencies from services/broute-meter/pyproject.toml."
+    log "Would install missing python3, python3-venv, python3-pip, and uhubctl packages; create ${VENV_PATH} only if absent; and install runtime dependencies from services/broute-meter/pyproject.toml."
     if command -v stat >/dev/null 2>&1; then
       ensure_runtime_directory "${OMK_ROOT}/data/broute-meter"
       ensure_runtime_directory "${OMK_ROOT}/logs/broute-meter"

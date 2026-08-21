@@ -65,6 +65,7 @@ EXTENDED_CONNECTION_RETRY_WAIT_SECONDS = 300.0
 ADAPTER_PRESENCE_CHECK_SECONDS = 5.0
 ADAPTER_SETTLE_SECONDS = 2.0
 ADAPTER_INITIALIZATION_RETRY_SECONDS = 5.0
+ADAPTER_UNRESPONSIVE_RETRY_SECONDS = 300.0
 ADAPTER_READINESS_RETRY_ATTEMPTS = 6
 ADAPTER_READINESS_RETRY_SECONDS = 2.0
 ADAPTER_POST_RESET_RETRY_ATTEMPTS = 3
@@ -424,11 +425,12 @@ def _configure_adapter_after_adapter_presence(
             if not _adapter_device_present(port):
                 logger.warning("アダプター設定中にデバイスが取り外されました")
                 continue
-            logger.warning(
-                "RS-WSUHA-Pの応答待ちを継続します retry_seconds=%s",
-                ADAPTER_INITIALIZATION_RETRY_SECONDS,
-            )
-            if stop_event.wait(ADAPTER_INITIALIZATION_RETRY_SECONDS):
+            recovery_failed = getattr(state, "read", lambda: {})().get("status") == "recovery_failed"
+            retry_seconds = ADAPTER_UNRESPONSIVE_RETRY_SECONDS if recovery_failed else ADAPTER_INITIALIZATION_RETRY_SECONDS
+            if recovery_failed:
+                _write_runtime_status(runtime_status, "adapter_unresponsive", logger, retry_after_seconds=retry_seconds)
+            logger.warning("RS-WSUHA-Pの応答待ちを継続します retry_seconds=%s", retry_seconds)
+            if stop_event.wait(retry_seconds):
                 return None
         except (AdapterError, TransportError):
             if _adapter_device_present(port):
@@ -493,6 +495,27 @@ def _configure_adapter_with_usb_recovery(
                 ) from exc
 
     assert last_error is not None
+    # RATOC's reference sequence issues SKRESET after opening the serial port.
+    # A wedged WSUHA can time out on RUART before BRouteSession.connect() gets
+    # its normal chance to reset it, so make one bounded best-effort attempt
+    # before escalating to the USB logical reset.
+    try:
+        adapter.close()
+        adapter.open()
+        adapter.reset()
+        result = adapter.configure(
+            config.adapter.expected_settings,
+            write_changes=config.adapter.auto_configure,
+        )
+        logger.info("SKRESET後のRS-WSUHA-P設定読出しに成功しました")
+        return result
+    except (AdapterError, SerialTimeoutError, AdapterResponseTimeoutError):
+        logger.warning("SKRESET後もRS-WSUHA-P設定読出しに失敗しました。USBリセットへ進みます")
+        try:
+            adapter.close()
+        except AdapterError:
+            pass
+
     now = datetime.now().astimezone()
     if not usb_reset_allowed(ADAPTER_READINESS_RETRY_ATTEMPTS, 0, state, now=now):
         logger.error("USBリセットはクールダウン中のため抑止しました reason=startup_serial_timeout")
@@ -531,7 +554,7 @@ def _configure_adapter_with_usb_recovery(
             stop_event,
         )
     except (AdapterError, SerialTimeoutError, UsbRecoveryError) as exc:
-        state.write("failed", now=datetime.now().astimezone())
+        state.write("recovery_failed", now=datetime.now().astimezone())
         logger.error("USBリセット後のRS-WSUHA-P設定読出しに失敗しました", exc_info=True)
         raise AdapterResponseTimeoutError("RS-WSUHA-P recovery failed after USB reset.") from exc
 

@@ -13,6 +13,7 @@ CONNECTION_STATES: Final = frozenset(
         "starting",
         "adapter_missing",
         "adapter_initializing",
+        "adapter_unresponsive",
         "scanning",
         "authenticating",
         "connected",
@@ -45,7 +46,7 @@ def connection_status(
     if state not in CONNECTION_STATES:
         return "status_unavailable", None, None, None, "status_unavailable"
     retry_after_seconds = data.get("retry_after_seconds")
-    if state != "retry_wait" or not isinstance(retry_after_seconds, (int, float)) or retry_after_seconds <= 0:
+    if state not in {"retry_wait", "adapter_unresponsive"} or not isinstance(retry_after_seconds, (int, float)) or retry_after_seconds <= 0:
         retry_after_seconds = None
     connection_attempt = data.get("connection_attempt")
     if not isinstance(connection_attempt, int) or isinstance(connection_attempt, bool) or connection_attempt < 1:

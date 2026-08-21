@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -1015,6 +1016,90 @@ def test_post_reset_readiness_retries_before_success() -> None:
     ).is_configured
     assert adapter.open_calls == 3
     assert stop_event.waits == [cli.ADAPTER_READINESS_RETRY_SECONDS] * 2
+
+
+def test_startup_timeout_recovers_with_one_skreset_before_usb_reset(monkeypatch: pytest.MonkeyPatch) -> None:
+    class Adapter(_FakeSetupAdapter):
+        def __init__(self) -> None:
+            super().__init__()
+            self.configure_calls = 0
+            self.reset_calls = 0
+        def configure(self, *_args: object, **_kwargs: object) -> AdapterConfigurationResult:
+            self.configure_calls += 1
+            if self.reset_calls == 0:
+                raise AdapterResponseTimeoutError("RUART timeout")
+            return AdapterConfigurationResult({}, {}, {}, (), True)
+        def reset(self) -> None:
+            self.reset_calls += 1
+
+    adapter = Adapter()
+    config = SimpleNamespace(adapter=SimpleNamespace(expected_settings={}, auto_configure=True))
+    result = cli._configure_adapter_with_usb_recovery(adapter, config, "/dev/null", SimpleNamespace(write=lambda *_args, **_kwargs: None, cooldown_active=lambda **_kwargs: False), threading.Event(), logging.getLogger("broute_meter.test"))  # type: ignore[arg-type]
+    assert result.is_configured
+    assert adapter.reset_calls == 1
+    assert adapter.configure_calls == cli.ADAPTER_READINESS_RETRY_ATTEMPTS + 1
+
+
+def test_skreset_timeout_falls_through_to_usb_reset(monkeypatch: pytest.MonkeyPatch) -> None:
+    class Adapter(_FakeSetupAdapter):
+        def configure(self, *_args: object, **_kwargs: object) -> AdapterConfigurationResult:
+            raise AdapterResponseTimeoutError("RUART timeout")
+        def reset(self) -> None:
+            raise AdapterResponseTimeoutError("SKRESET timeout")
+    class Stop:
+        def wait(self, _timeout: float) -> bool:
+            return False
+    class State:
+        def __init__(self) -> None:
+            self.states: list[str] = []
+        def write(self, state: str, **_kwargs: object) -> None:
+            self.states.append(state)
+        def cooldown_active(self, **_kwargs: object) -> bool:
+            return False
+    class Resetter:
+        def __init__(self, *_args: object) -> None:
+            pass
+        def reset(self) -> SimpleNamespace:
+            return SimpleNamespace(vendor="0403", product="6015", serial="DM006AOS", sysfs_path="/sys/test")
+    monkeypatch.setattr(cli, "RsWsuhaPUsbResetter", Resetter)
+    monkeypatch.setattr(cli, "_configure_after_usb_reset", lambda *_args: AdapterConfigurationResult({}, {}, {}, (), True))
+    state = State()
+    result = cli._configure_adapter_with_usb_recovery(Adapter(), SimpleNamespace(adapter=SimpleNamespace(expected_settings={}, auto_configure=True)), "/dev/null", state, Stop(), logging.getLogger("broute_meter.test"))  # type: ignore[arg-type]
+    assert result.is_configured
+    assert "usb_resetting" in state.states
+
+
+def test_post_reset_failure_uses_interruptible_low_frequency_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class StopEvent:
+        def __init__(self) -> None:
+            self.waits: list[float] = []
+        def is_set(self) -> bool:
+            return False
+        def wait(self, timeout: float) -> bool:
+            self.waits.append(timeout)
+            return timeout == cli.ADAPTER_UNRESPONSIVE_RETRY_SECONDS
+
+    class State:
+        def read(self) -> dict[str, str]:
+            return {"status": "recovery_failed"}
+
+    class Status:
+        def __init__(self) -> None:
+            self.states: list[tuple[str, object]] = []
+        def write(self, state: str, **kwargs: object) -> None:
+            self.states.append((state, kwargs.get("retry_after_seconds")))
+
+    monkeypatch.setattr(cli, "_adapter_device_present", lambda _port: True)
+    monkeypatch.setattr(cli, "_configure_adapter_with_usb_recovery", lambda *_args: (_ for _ in ()).throw(AdapterResponseTimeoutError("recovery failed")))
+    stop_event, status = StopEvent(), Status()
+    assert cli._configure_adapter_after_adapter_presence(  # type: ignore[arg-type]
+        _FakeSetupAdapter(), object(), "/dev/serial/by-id/rs-wsuha-p", State(), stop_event,
+        logging.getLogger("broute_meter.test"), status,  # type: ignore[arg-type]
+    ) is None
+    assert cli.ADAPTER_UNRESPONSIVE_RETRY_SECONDS in stop_event.waits
+    assert ("adapter_unresponsive", cli.ADAPTER_UNRESPONSIVE_RETRY_SECONDS) in status.states
 
 
 def test_serial_disconnect_with_missing_device_is_not_connection_error(

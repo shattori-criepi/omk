@@ -126,8 +126,8 @@ def _dashboard_candidates(now: datetime | None = None) -> list[DisplayItem]:
     try:
         totals = get_parquet_repository().today_energy_totals(now.date())
         derived = [
-            DisplayItem("derived:energy:today_import_kwh", "パワコン 本日の買電量", "パワコン", "derived:broute_interval_energy", "broute-derived", "today_import_kwh", "number", "kWh", "電力", "today_import_energy", True, now.isoformat(), f"{totals.import_energy_kwh:.1f}", "normal", short_label="本日の買電量"),
-            DisplayItem("derived:energy:today_export_kwh", "パワコン 本日の売電量", "パワコン", "derived:broute_interval_energy", "broute-derived", "today_export_kwh", "number", "kWh", "電力", "today_export_energy", True, now.isoformat(), f"{totals.export_energy_kwh:.1f}", "normal", short_label="本日の売電量"),
+            DisplayItem(item_id, label, "パワコン", "derived:broute_interval_energy", "broute-derived", metric, "number", "kWh", "電力", role, True, now.isoformat() if value is not None else "", f"{value:.1f}" if value is not None else "--", "normal" if value is not None else "unavailable", short_label=short)
+            for item_id, label, short, metric, role, value in (("derived:energy:today_import_kwh", "パワコン 本日の買電量", "本日の買電量", "today_import_kwh", "today_import_energy", totals.import_energy_kwh), ("derived:energy:today_export_kwh", "パワコン 本日の売電量", "本日の売電量", "today_export_kwh", "today_export_energy", totals.export_energy_kwh))
         ]
     except (OSError, ValueError):
         derived = [DisplayItem(item_id, label, "パワコン", "derived:broute_interval_energy", "broute-derived", item_id.rsplit(":", 1)[-1], "number", "kWh", "電力", role, True, "", "--", "unavailable", short_label=short) for item_id, label, short, role in (("derived:energy:today_import_kwh", "パワコン 本日の買電量", "本日の買電量", "today_import_energy"), ("derived:energy:today_export_kwh", "パワコン 本日の売電量", "本日の売電量", "today_export_energy"))]

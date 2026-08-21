@@ -14,6 +14,7 @@ CONNECTION_STATES: Final = frozenset(
         "starting",
         "adapter_missing",
         "adapter_initializing",
+        "adapter_unresponsive",
         "scanning",
         "authenticating",
         "connected",
@@ -43,7 +44,7 @@ class RuntimeStatusStore:
         if state not in CONNECTION_STATES:
             raise ValueError("Unsupported B-route connection state")
         if retry_after_seconds is not None and (
-            state != "retry_wait" or retry_after_seconds <= 0
+            state not in {"retry_wait", "adapter_unresponsive"} or retry_after_seconds <= 0
         ):
             raise ValueError("retry_after_seconds is only valid for retry_wait")
         if connection_attempt is not None and connection_attempt < 1:
