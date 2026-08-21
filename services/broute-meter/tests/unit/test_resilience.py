@@ -7,8 +7,10 @@ from datetime import UTC, datetime
 
 import pytest
 
+from broute_meter.adapter import AdapterCommunicationError, AdapterOperationCancelled
 from broute_meter.models import InstantaneousPowerReading
 from broute_meter.resilience import (
+    MeasurementCancelledError,
     MeasurementUnavailableError,
     RecoveringMeterReader,
 )
@@ -129,6 +131,82 @@ def test_shutdown_interrupts_reconnect_wait() -> None:
         threshold=1,
     )
 
-    with pytest.raises(MeasurementUnavailableError, match="終了要求"):
+    with pytest.raises(MeasurementCancelledError, match="終了要求"):
         recovering.get_instantaneous_power()
     assert reconnect_calls == 0
+
+
+@pytest.mark.parametrize("measurement", ["instantaneous", "cumulative"])
+def test_adapter_shutdown_cancellation_is_not_counted_as_missing(
+    measurement: str,
+) -> None:
+    class CancelledMeter:
+        def get_instantaneous_power(self) -> InstantaneousPowerReading:
+            raise AdapterOperationCancelled("shutdown")
+
+        def get_cumulative_energy(self) -> object:
+            raise AdapterOperationCancelled("shutdown")
+
+    recovering = RecoveringMeterReader(
+        CancelledMeter(),  # type: ignore[arg-type]
+        lambda: pytest.fail("reconnect must not run"),
+        recoverable_exceptions=(AdapterOperationCancelled, CommunicationFailure),
+        reconnect_after_consecutive_failures=1,
+        reconnect_wait_seconds=30,
+        stop_event=StopEvent(),
+    )
+
+    operation = (
+        recovering.get_instantaneous_power
+        if measurement == "instantaneous"
+        else recovering.get_cumulative_energy
+    )
+    with pytest.raises(MeasurementCancelledError, match="終了要求"):
+        operation()
+    assert recovering._consecutive_failures == 0
+
+
+def test_reconnect_operation_shutdown_cancellation_is_not_missing() -> None:
+    meter = ScriptedMeter([CommunicationFailure("first")])
+
+    class CancelledMeter:
+        def get_instantaneous_power(self) -> InstantaneousPowerReading:
+            raise AdapterOperationCancelled("shutdown")
+
+        def get_cumulative_energy(self) -> object:
+            raise AssertionError("not used")
+
+    recovering = RecoveringMeterReader(
+        meter,
+        lambda: CancelledMeter(),  # type: ignore[arg-type]
+        recoverable_exceptions=(CommunicationFailure, AdapterOperationCancelled),
+        reconnect_after_consecutive_failures=1,
+        reconnect_wait_seconds=0,
+        stop_event=StopEvent(),
+    )
+
+    with pytest.raises(MeasurementCancelledError, match="終了要求"):
+        recovering.get_instantaneous_power()
+    assert recovering._consecutive_failures == 0
+
+
+def test_adapter_communication_failure_remains_missing_and_increments_count() -> None:
+    class FailingMeter:
+        def get_instantaneous_power(self) -> InstantaneousPowerReading:
+            raise AdapterCommunicationError("serial failure")
+
+        def get_cumulative_energy(self) -> object:
+            raise AssertionError("not used")
+
+    recovering = RecoveringMeterReader(
+        FailingMeter(),  # type: ignore[arg-type]
+        lambda: pytest.fail("reconnect threshold was not reached"),
+        recoverable_exceptions=(AdapterCommunicationError, AdapterOperationCancelled),
+        reconnect_after_consecutive_failures=2,
+        reconnect_wait_seconds=30,
+        stop_event=StopEvent(),
+    )
+
+    with pytest.raises(MeasurementUnavailableError, match="瞬時電力を取得できません"):
+        recovering.get_instantaneous_power()
+    assert recovering._consecutive_failures == 1

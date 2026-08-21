@@ -12,7 +12,10 @@ from typing import Protocol
 from broute_meter.models import CumulativeEnergyReading, InstantaneousPowerReading
 from broute_meter.mqtt import MeasurementPublisher, NullMeasurementPublisher
 from broute_meter.processing import QualityStatus, calculate_interval_energy
-from broute_meter.resilience import MeasurementUnavailableError
+from broute_meter.resilience import (
+    MeasurementCancelledError,
+    MeasurementUnavailableError,
+)
 from broute_meter.storage import MeasurementStorage
 
 logger = logging.getLogger(__name__)
@@ -115,6 +118,8 @@ class MeasurementScheduler:
             if current >= next_instant:
                 try:
                     self._measure_instantaneous()
+                except MeasurementCancelledError:
+                    return
                 except MeasurementUnavailableError as exc:
                     logger.warning("瞬時電力を欠測として記録します: %s", exc)
                 finally:
@@ -128,6 +133,8 @@ class MeasurementScheduler:
             if startup_cumulative_pending or current >= next_cumulative:
                 try:
                     self._measure_cumulative()
+                except MeasurementCancelledError:
+                    return
                 except MeasurementUnavailableError as exc:
                     logger.warning(
                         "定時積算電力量を欠測として記録します: %s",

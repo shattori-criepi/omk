@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
 from decimal import Decimal
+
+import pytest
 
 from broute_meter.models import (
     CumulativeEnergyReading,
@@ -11,6 +14,10 @@ from broute_meter.models import (
     IntervalEnergyReading,
 )
 from broute_meter.scheduler import MeasurementScheduler, next_aligned_timestamp
+from broute_meter.resilience import (
+    MeasurementCancelledError,
+    MeasurementUnavailableError,
+)
 
 
 class MutableClock:
@@ -305,3 +312,93 @@ def test_scheduler_publishes_the_saved_readings_without_refetching() -> None:
     assert publisher.instantaneous == storage.instantaneous
     assert publisher.cumulative == storage.cumulative[-1:]
     assert publisher.intervals == storage.intervals
+
+
+def test_shutdown_cancellation_during_instantaneous_skips_storage_publish_and_missing_log(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    clock = MutableClock(0)
+    stop_event = VirtualStopEvent(clock)
+    storage = RecordingStorage()
+    publisher = RecordingPublisher()
+
+    class Meter:
+        def get_instantaneous_power(self) -> InstantaneousPowerReading:
+            stop_event.set()
+            raise MeasurementCancelledError("shutdown")
+
+        def get_cumulative_energy(self) -> CumulativeEnergyReading:
+            raise AssertionError("cumulative must not start")
+
+    with caplog.at_level(logging.WARNING, logger="broute_meter.scheduler"):
+        MeasurementScheduler(
+            Meter(), storage, publisher,
+            instantaneous_interval_seconds=10,
+            cumulative_fetch_delay_seconds=5,
+            now=clock.now,
+            stop_event=stop_event,
+        ).run()
+
+    assert storage.instantaneous == []
+    assert publisher.instantaneous == []
+    assert not any("瞬時電力を欠測として記録します" in message for message in caplog.messages)
+
+
+def test_shutdown_cancellation_during_cumulative_skips_storage_publish_and_missing_log(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    clock = MutableClock(1)
+    stop_event = VirtualStopEvent(clock)
+    storage = RecordingStorage()
+    publisher = RecordingPublisher()
+
+    class Meter:
+        def get_instantaneous_power(self) -> InstantaneousPowerReading:
+            raise AssertionError("instantaneous is not due")
+
+        def get_cumulative_energy(self) -> CumulativeEnergyReading:
+            stop_event.set()
+            raise MeasurementCancelledError("shutdown")
+
+    with caplog.at_level(logging.WARNING, logger="broute_meter.scheduler"):
+        MeasurementScheduler(
+            Meter(), storage, publisher,
+            instantaneous_interval_seconds=10,
+            cumulative_fetch_delay_seconds=5,
+            now=clock.now,
+            stop_event=stop_event,
+        ).run()
+
+    assert storage.cumulative == []
+    assert storage.intervals == []
+    assert publisher.cumulative == []
+    assert publisher.intervals == []
+    assert not any("定時積算電力量を欠測として記録します" in message for message in caplog.messages)
+
+
+def test_real_measurement_failure_remains_missing_even_if_shutdown_follows(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    clock = MutableClock(0)
+    stop_event = VirtualStopEvent(clock)
+    storage = RecordingStorage()
+
+    class Meter:
+        def get_instantaneous_power(self) -> InstantaneousPowerReading:
+            stop_event.set()
+            raise MeasurementUnavailableError("real communication failure")
+
+        def get_cumulative_energy(self) -> CumulativeEnergyReading:
+            raise AssertionError("cumulative must not start")
+
+    with caplog.at_level(logging.WARNING, logger="broute_meter.scheduler"):
+        MeasurementScheduler(
+            Meter(), storage,
+            instantaneous_interval_seconds=10,
+            cumulative_fetch_delay_seconds=5,
+            now=clock.now,
+            stop_event=stop_event,
+    ).run()
+
+    assert storage.instantaneous == []
+    assert any("瞬時電力を欠測として記録します" in message for message in caplog.messages)

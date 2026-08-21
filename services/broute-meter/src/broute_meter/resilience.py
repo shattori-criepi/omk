@@ -6,6 +6,7 @@ import logging
 from collections.abc import Callable
 from typing import Protocol, TypeVar
 
+from broute_meter.adapter import AdapterOperationCancelled
 from broute_meter.models import CumulativeEnergyReading, InstantaneousPowerReading
 
 logger = logging.getLogger(__name__)
@@ -14,6 +15,10 @@ _Reading = TypeVar("_Reading")
 
 class MeasurementUnavailableError(RuntimeError):
     """今回の計測は取得できず、欠測として次の時刻へ進む。"""
+
+
+class MeasurementCancelledError(RuntimeError):
+    """終了要求により意図的に計測を中断したため、欠測ではない。"""
 
 
 class MeterReader(Protocol):
@@ -82,6 +87,10 @@ class RecoveringMeterReader:
     ) -> _Reading:
         try:
             reading = operation()
+        except AdapterOperationCancelled as exc:
+            raise MeasurementCancelledError(
+                "終了要求により計測を中断しました。"
+            ) from exc
         except self._recoverable_exceptions as exc:
             self._consecutive_failures += 1
             logger.warning(
@@ -109,7 +118,7 @@ class RecoveringMeterReader:
             self._wait_seconds,
         )
         if self._stop_event.wait(self._wait_seconds):
-            raise MeasurementUnavailableError(
+            raise MeasurementCancelledError(
                 "終了要求により再接続を中止しました。"
             ) from original_error
 
@@ -122,6 +131,10 @@ class RecoveringMeterReader:
                 else self._meter.get_cumulative_energy
             )
             reading = operation()
+        except AdapterOperationCancelled as exc:
+            raise MeasurementCancelledError(
+                "終了要求により再接続後の計測を中断しました。"
+            ) from exc
         except self._recoverable_exceptions as exc:
             self._consecutive_failures = 1
             raise MeasurementUnavailableError(
