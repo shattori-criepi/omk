@@ -32,12 +32,38 @@ def test_mesh_diagnostic_handlers_only_record_state():
     assert "root_switch_count++" in network
 
 
-def test_root_parent_connection_restarts_default_sta_dhcp_only():
+def test_root_parent_connection_uses_default_sta_dhcp_lifecycle():
     netif = (SOURCE / "mesh_netif.c").read_text()
     root_branch = netif[netif.index("if (is_root) {") : netif.index("    if (station_netif != NULL && strcmp(esp_netif_get_desc(station_netif), \"omk_mesh_sta\") == 0) return ESP_OK;")]
 
-    assert "esp_netif_dhcpc_stop(station_netif)" in root_branch
-    assert "esp_netif_dhcpc_start(station_netif)" in root_branch
+    assert "esp_netif_dhcpc_stop" not in root_branch
+    assert "esp_netif_dhcpc_start" not in root_branch
+
+
+def test_root_recreated_default_sta_starts_wifi_link_once():
+    netif = (SOURCE / "mesh_netif.c").read_text()
+    root_branch = netif[
+        netif.index("if (is_root) {") : netif.index(
+            "    if (station_netif != NULL && strcmp(esp_netif_get_desc(station_netif), \"omk_mesh_sta\") == 0) return ESP_OK;"
+        )
+    ]
+
+    assert "bool default_station_created = false;" in root_branch
+    assert root_branch.count("default_station_created = true;") == 2
+    assert "if (default_station_created) {" in root_branch
+    assert root_branch.count("start_default_station_link()") == 1
+
+
+def test_root_default_sta_disconnect_before_internal_ap_is_preserved():
+    netif = (SOURCE / "mesh_netif.c").read_text()
+    stop = netif[netif.index("esp_err_t mesh_netifs_stop") : netif.index("esp_err_t mesh_netif_start_root_ap")]
+
+    guard = '''if (station_netif != NULL && strcmp(esp_netif_get_desc(station_netif), "sta") == 0 &&
+        mesh_ap_netif == NULL) {
+        return ESP_OK;
+    }'''
+    assert guard in stop
+    assert stop.index(guard) < stop.index("esp_wifi_clear_default_wifi_driver_and_handlers")
 
 
 def test_default_sta_is_created_before_wifi_initialization():

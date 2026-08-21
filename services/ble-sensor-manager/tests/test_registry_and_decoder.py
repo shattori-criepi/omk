@@ -452,8 +452,37 @@ def test_node_registration_request_and_ack_are_persisted(tmp_path: Path) -> None
     assert publisher.messages == [("omk/node/112233445566/registration/config", '{"protocol_version": 1, "logical_id": "ble-relay-001"}')]
     manager.handle_node_mqtt("omk/node/112233445566/registration/ack", b'{"protocol_version":1,"node_id":"112233445566","logical_id":"ble-relay-001","registration_state":"registered"}')
     assert manager.node_list()[0]["registration_state"] == "registered"
-    with pytest.raises(ValueError, match="already registered"):
-        manager.request_node_registration("112233445566", "ble-relay-001")
+    assert manager.request_node_registration("112233445566", "sen66-002")["status"] == "request_sent"
+    assert node_registry.list()["112233445566"]["logical_id"] == "ble-relay-001"
+    manager.handle_node_mqtt("omk/node/112233445566/registration/ack", b'{"protocol_version":1,"node_id":"112233445566","logical_id":"sen66-002","registration_state":"registered"}')
+    assert node_registry.list()["112233445566"]["logical_id"] == "sen66-002"
+
+
+def test_node_registration_removal_preserves_wifi_metadata_and_ignores_old_ack(tmp_path: Path) -> None:
+    publisher = _MqttPublisher()
+    node_registry = NodeRegistry(tmp_path / "nodes.json")
+    node_registry.update("112233445566", logical_id="sen66-001", registration_state="registered", connected_sensors=["sen66"])
+    manager = BleManager(SensorRegistry(tmp_path / "sensors.json"), publisher, node_registry=node_registry)
+
+    assert manager.remove_node_registration("112233445566") == {"node_id": "112233445566", "status": "removed"}
+    saved = node_registry.list()["112233445566"]
+    assert saved["registration_state"] == "provisioned"
+    assert "logical_id" not in saved
+    assert saved["registration_revoked"] is True
+    assert json.loads(publisher.messages[0][1]) == {"protocol_version": 1, "logical_id": None}
+    manager.handle_node_mqtt("omk/node/112233445566/registration/ack", b'{"protocol_version":1,"node_id":"112233445566","logical_id":"sen66-001","registration_state":"registered"}')
+    assert "logical_id" not in node_registry.list()["112233445566"]
+
+
+def test_sen66_telemetry_marks_only_the_registered_node_as_physically_connected(tmp_path: Path) -> None:
+    node_registry = NodeRegistry(tmp_path / "nodes.json")
+    node_registry.update("112233445566", logical_id="sen66-001", registration_state="registered", connected_sensors=["sen66"])
+    node_registry.update("9af9509eb8b6", registration_state="provisioned")
+    manager = BleManager(SensorRegistry(tmp_path / "sensors.json"), node_registry=node_registry)
+    manager.handle_sen66_mqtt("omk/sen66-001/sen66", b'{"device_id":"sen66-001"}')
+    nodes = {node["node_id"]: node for node in manager.node_list()}
+    assert nodes["112233445566"]["attached_sensors"] == ["SEN66"]
+    assert nodes["9af9509eb8b6"]["attached_sensors"] == []
 
 
 def test_node_registration_rejects_duplicate_logical_id_in_requests_and_acks(tmp_path: Path) -> None:
@@ -497,7 +526,12 @@ def test_node_mqtt_status_validation_does_not_persist_invalid_messages(tmp_path:
     manager = BleManager(SensorRegistry(tmp_path / "sensors.json"), node_registry=node_registry)
     manager.handle_node_mqtt("omk/node/112233445566/registration/status", b'{"protocol_version":2,"node_id":"112233445566","registration_state":"registered","capabilities":1}')
     manager.handle_node_mqtt("omk/node/112233445566/registration/status", b'{"protocol_version":1,"node_id":"112233445566","registration_state":"registered","capabilities":1}')
-    assert manager.node_list() == [{"node_id": "112233445566", "protocol_version": 1, "capabilities": ["ble_scan"], "registration_state": "registered", "mqtt_status_seen_at": manager.node_list()[0]["mqtt_status_seen_at"]}]
+    node = manager.node_list()[0]
+    assert node["node_id"] == "112233445566"
+    assert node["capabilities"] == ["ble_scan"]
+    assert node["registration_state"] == "registered"
+    assert node["online"] is True
+    assert node["attached_sensors"] == []
 
 
 def test_node_registration_api_sends_a_pending_request(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

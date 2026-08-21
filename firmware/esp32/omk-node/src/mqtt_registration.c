@@ -41,6 +41,7 @@ static char device_status_topic[OMK_MQTT_TOPIC_SIZE];
 static char device_status_logical_id[OMK_NODE_LOGICAL_ID_MAX_LENGTH + 1];
 static char device_status_will_payload[OMK_MQTT_PAYLOAD_SIZE];
 static bool device_status_configured;
+static bool sen66_connected;
 
 static bool is_lower_hex_identifier(const char *value, size_t length) {
     if (value == NULL || strlen(value) != length) {
@@ -76,9 +77,11 @@ static void publish_registration_status(void) {
     const char *state = registration_is_persisted() ? "registered" : "provisioned";
     int written = snprintf(registration_payload, sizeof(registration_payload),
                            "{\"protocol_version\":%u,\"node_id\":\"%s\","
-                           "\"registration_state\":\"%s\",\"capabilities\":%u}",
+                           "\"registration_state\":\"%s\",\"capabilities\":%u,"
+                           "\"connected_sensors\":%s}",
                            OMK_NODE_PROTOCOL_VERSION, client_id + strlen("omk-node-"),
-                           state, OMK_NODE_CAPABILITIES);
+                           state, OMK_NODE_CAPABILITIES,
+                           sen66_connected ? "[\"sen66\"]" : "[]");
     if (written < 0 || written >= (int)sizeof(registration_payload)) {
         ESP_LOGE(TAG, "Could not build registration status payload");
         return;
@@ -182,6 +185,18 @@ static void publish_registration_ack(const char *logical_id) {
     ESP_LOGI(TAG, "Published retained registration ACK (message_id=%d)", message_id);
 }
 
+static void clear_retained_registration_ack(void) {
+    if (esp_mqtt_client_publish(client, registration_ack_topic, "", 0, 1, 1) < 0) {
+        ESP_LOGW(TAG, "Could not clear retained registration ACK");
+    }
+}
+
+static void clear_retained_registration_config(void) {
+    if (esp_mqtt_client_publish(client, registration_config_topic, "", 0, 1, 1) < 0) {
+        ESP_LOGW(TAG, "Could not clear retained registration config");
+    }
+}
+
 static void process_registration_config(const esp_mqtt_event_handle_t event) {
     if (event->topic == NULL || event->topic_len != (int)strlen(registration_config_topic) ||
         memcmp(event->topic, registration_config_topic, event->topic_len) != 0) {
@@ -201,9 +216,31 @@ static void process_registration_config(const esp_mqtt_event_handle_t event) {
     const cJSON *protocol_version = cJSON_GetObjectItemCaseSensitive(root, "protocol_version");
     const cJSON *logical_id = cJSON_GetObjectItemCaseSensitive(root, "logical_id");
     bool valid = cJSON_IsNumber(protocol_version) &&
-                 protocol_version->valueint == OMK_NODE_PROTOCOL_VERSION &&
-                 cJSON_IsString(logical_id) && logical_id->valuestring != NULL &&
-                 logical_id_is_valid(logical_id->valuestring);
+                 protocol_version->valueint == OMK_NODE_PROTOCOL_VERSION;
+    if (!valid) {
+        ESP_LOGW(TAG, "Ignoring invalid registration config fields");
+        cJSON_Delete(root);
+        return;
+    }
+    if (cJSON_IsNull(logical_id)) {
+        esp_err_t clear_err = node_registration_clear();
+        if (clear_err == ESP_OK) {
+            if (device_status_configured) {
+                esp_mqtt_client_publish(client, device_status_topic, "", 0, 0, 1);
+                device_status_configured = false;
+            }
+            clear_retained_registration_ack();
+            clear_retained_registration_config();
+            publish_registration_status();
+            ESP_LOGI(TAG, "Cleared Node logical registration; Wi-Fi provisioning retained");
+        } else {
+            ESP_LOGE(TAG, "Could not clear Node registration: %s", esp_err_to_name(clear_err));
+        }
+        cJSON_Delete(root);
+        return;
+    }
+    valid = cJSON_IsString(logical_id) && logical_id->valuestring != NULL &&
+            logical_id_is_valid(logical_id->valuestring);
     if (!valid) {
         ESP_LOGW(TAG, "Ignoring invalid registration config fields");
         cJSON_Delete(root);
@@ -231,7 +268,7 @@ static void mqtt_event_handler(void *arg, esp_event_base_t event_base,
     switch ((esp_mqtt_event_id_t)event_id) {
     case MQTT_EVENT_CONNECTED:
         client_connected = true;
-        ESP_LOGI(TAG, "MQTT_EVENT_CONNECTED");
+        ESP_LOGI(TAG, "MQTT connected");
         if (esp_mqtt_client_subscribe(client, registration_config_topic, 1) < 0) {
             ESP_LOGW(TAG, "Could not subscribe to registration config");
         }
@@ -244,7 +281,8 @@ static void mqtt_event_handler(void *arg, esp_event_base_t event_base,
     case MQTT_EVENT_DISCONNECTED:
         client_connected = false;
         mqtt_disconnect_count++;
-        ESP_LOGW(TAG, "MQTT_EVENT_DISCONNECTED; automatic reconnect pending");
+        ESP_LOGW(TAG, "MQTT disconnected: count=%" PRIu32 "; automatic reconnect pending",
+                 mqtt_disconnect_count);
         break;
     case MQTT_EVENT_ERROR: {
         const esp_mqtt_event_handle_t event = event_data;
@@ -267,6 +305,16 @@ static void mqtt_event_handler(void *arg, esp_event_base_t event_base,
 
 uint32_t mqtt_registration_get_disconnect_count(void) {
     return mqtt_disconnect_count;
+}
+
+void mqtt_registration_set_sen66_connected(bool connected) {
+    if (sen66_connected == connected) {
+        return;
+    }
+    sen66_connected = connected;
+    if (client != NULL && client_connected) {
+        publish_registration_status();
+    }
 }
 
 esp_err_t mqtt_registration_publish_mesh_status(const char *payload) {
@@ -303,6 +351,7 @@ static void start_or_reconnect_mqtt(void) {
         return;
     }
 
+    ESP_LOGI(TAG, "Starting MQTT client broker=%s", OMK_MQTT_BROKER_URI);
     esp_err_t err = esp_mqtt_client_start(client);
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "MQTT start failed: %s", esp_err_to_name(err));
@@ -319,7 +368,7 @@ static void ip_event_handler(void *arg, esp_event_base_t event_base,
     (void)event_id;
     const ip_event_got_ip_t *event = event_data;
     if (event != NULL) {
-        ESP_LOGI(TAG, "MQTT observed IP_EVENT_STA_GOT_IP: ip=" IPSTR " gw=" IPSTR " mask=" IPSTR,
+        ESP_LOGI(TAG, "STA IP acquired for MQTT: ip=" IPSTR " gw=" IPSTR " mask=" IPSTR,
                  IP2STR(&event->ip_info.ip), IP2STR(&event->ip_info.gw),
                  IP2STR(&event->ip_info.netmask));
     } else {
@@ -329,6 +378,7 @@ static void ip_event_handler(void *arg, esp_event_base_t event_base,
 }
 
 esp_err_t mqtt_registration_start(void) {
+    ESP_LOGI(TAG, "Initializing MQTT registration");
     if (ip_handler_registered) {
         return ESP_ERR_INVALID_STATE;
     }
@@ -376,6 +426,7 @@ esp_err_t mqtt_registration_start(void) {
     if (client == NULL) {
         return ESP_ERR_NO_MEM;
     }
+    ESP_LOGI(TAG, "MQTT client created broker=%s", OMK_MQTT_BROKER_URI);
 
     err = esp_mqtt_client_register_event(client, MQTT_EVENT_ANY,
                                          mqtt_event_handler, NULL);
@@ -393,6 +444,7 @@ esp_err_t mqtt_registration_start(void) {
      * registers its independent event handler. */
     wifi_ap_record_t ap_info;
     if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
+        ESP_LOGI(TAG, "Existing STA association found while starting MQTT");
         start_or_reconnect_mqtt();
     }
     return ESP_OK;

@@ -100,7 +100,7 @@ esp_err_t node_registration_get_logical_id(char *logical_id, size_t size) {
     return err;
 }
 
-esp_err_t node_registration_clear_for_development(void) {
+esp_err_t node_registration_clear(void) {
     nvs_handle_t nvs;
     esp_err_t err = nvs_open(NODE_NVS_NAMESPACE, NVS_READWRITE, &nvs);
     if (err != ESP_OK) {
@@ -133,4 +133,8 @@ esp_err_t node_registration_clear_for_development(void) {
     }
     nvs_close(nvs);
     return err == ESP_ERR_NVS_NOT_FOUND ? ESP_OK : (err == ESP_OK ? ESP_FAIL : err);
+}
+
+esp_err_t node_registration_clear_for_development(void) {
+    return node_registration_clear();
 }

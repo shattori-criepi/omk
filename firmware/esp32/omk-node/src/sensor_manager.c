@@ -36,11 +36,13 @@ static void sensor_manager_task(void *arg) {
         if (!sen66_sensor_is_measuring(&sen66)) {
             esp_err_t err = sen66_sensor_probe(sensor_i2c_bus, &sen66);
             if (err != ESP_OK) {
+                mqtt_registration_set_sen66_connected(false);
                 ESP_LOGI(TAG, "SEN66 not detected at 0x6B; retrying in 60 seconds");
             } else {
                 ESP_LOGI(TAG, "SEN66 detected at 0x6B");
                 err = sen66_sensor_start(sensor_i2c_bus, &sen66);
                 if (err == ESP_OK) {
+                    mqtt_registration_set_sen66_connected(true);
                     ESP_LOGI(TAG, "SEN66 continuous measurement started");
                     consecutive_read_failures = 0;
                 } else {
@@ -64,6 +66,7 @@ static void sensor_manager_task(void *arg) {
             if (consecutive_read_failures >= 3) {
                 ESP_LOGW(TAG, "Recovering SEN66 after consecutive read failures");
                 esp_err_t stop_err = sen66_sensor_stop(&sen66);
+                mqtt_registration_set_sen66_connected(false);
                 if (stop_err != ESP_OK) {
                     ESP_LOGW(TAG, "SEN66 stop failed during recovery: %s",
                              esp_err_to_name(stop_err));
@@ -89,9 +92,6 @@ static void sensor_manager_task(void *arg) {
                     ESP_LOGW(TAG, "SEN66 MQTT publish unavailable: %s", esp_err_to_name(err));
                     mqtt_warning_logged = true;
                 } else if (err == ESP_OK) {
-                    if (mqtt_warning_logged) {
-                        ESP_LOGI(TAG, "SEN66 MQTT publish recovered");
-                    }
                     mqtt_warning_logged = false;
                 }
             }

@@ -39,7 +39,7 @@ class NodeRegistry:
         with self._lock:
             nodes = self.list()
             current = dict(nodes.get(node_id, {"node_id": node_id}))
-            for key in ("logical_id", "request_state", "ack_seen_at"):
+            for key in ("logical_id", "requested_logical_id", "request_state", "ack_seen_at"):
                 current.pop(key, None)
             current.update(values)
             nodes[node_id] = current

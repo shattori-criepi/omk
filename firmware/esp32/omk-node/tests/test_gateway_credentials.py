@@ -45,3 +45,21 @@ def test_sen66_mqtt_failure_does_not_stop_periodic_measurement():
     assert "mqtt_warning_logged = true;" in publish
     assert "mqtt_warning_logged = false;" in publish
     assert "vTaskDelay(pdMS_TO_TICKS(SEN66_MEASUREMENT_INTERVAL_MS));" in publish
+
+
+def test_operational_logs_cover_boot_mesh_ip_and_mqtt_transitions_without_poc_breadcrumbs():
+    main = (SOURCE / "main.c").read_text()
+    mesh = (SOURCE / "mesh_network.c").read_text()
+    netif = (SOURCE / "mesh_netif.c").read_text()
+    mqtt_registration = (SOURCE / "mqtt_registration.c").read_text()
+    assert "Normal boot begin" in main
+    assert "Mesh parent connected" in mesh
+    assert "Mesh parent disconnected" in mesh
+    assert "Starting child internal STA netif" in netif
+    assert "Stopping current Mesh IP netif" in netif
+    assert "STA IP acquired for MQTT" in mqtt_registration
+    assert "MQTT connected" in mqtt_registration
+    assert "MQTT disconnected" in mqtt_registration
+    for source in (main, mesh, netif, mqtt_registration):
+        assert "OMK_MQTT_DIAG" not in source
+    assert "internal mesh TX observed" not in netif

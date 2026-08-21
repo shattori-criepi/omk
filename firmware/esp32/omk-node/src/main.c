@@ -85,7 +85,7 @@ void app_main(void) {
     import_factory_pop();
     ESP_LOGI(TAG, "Factory provisioning state initialized");
 
-    ESP_LOGI(TAG, "Starting normal boot");
+    ESP_LOGI(TAG, "Normal boot begin");
     uint64_t node_id;
     ESP_ERROR_CHECK(node_identity_get_id(&node_id));
     bool has_wifi_credentials = false;
@@ -101,15 +101,19 @@ void app_main(void) {
         ESP_LOGW(TAG, "Wi-Fi credential check failed; discovery continues: %s",
                  esp_err_to_name(wifi_err));
     } else if (has_wifi_credentials) {
+        ESP_LOGI(TAG, "Starting Mesh network");
         wifi_err = mesh_network_start_prepared();
         if (wifi_err != ESP_OK) {
-            ESP_LOGW(TAG, "Mesh network startup failed; discovery continues: %s",
+            ESP_LOGW(TAG, "Mesh network start failed: %s; discovery continues",
                      esp_err_to_name(wifi_err));
         } else {
+            ESP_LOGI(TAG, "Mesh network started; starting MQTT registration");
             esp_err_t mqtt_err = mqtt_registration_start();
             if (mqtt_err != ESP_OK) {
-                ESP_LOGW(TAG, "MQTT registration startup failed; discovery continues: %s",
+                ESP_LOGW(TAG, "MQTT registration start failed: %s; discovery continues",
                          esp_err_to_name(mqtt_err));
+            } else {
+                ESP_LOGI(TAG, "MQTT registration initialized");
             }
         }
     }
@@ -122,8 +126,10 @@ void app_main(void) {
     }
     esp_err_t sensor_err = sensor_manager_start();
     if (sensor_err != ESP_OK) {
-        ESP_LOGW(TAG, "Sensor manager startup failed; continuing: %s",
+        ESP_LOGW(TAG, "Sensor manager start failed: %s; continuing",
                  esp_err_to_name(sensor_err));
+    } else {
+        ESP_LOGI(TAG, "Sensor manager started");
     }
     // Safe once per boot for BLE-only operation; never repeat this in a
     // discovery lifecycle because the released Classic BT memory is permanent.

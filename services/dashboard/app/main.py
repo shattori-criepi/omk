@@ -397,6 +397,10 @@ async def nodes() -> dict:
 async def register_node(node_id: str, request: Request) -> dict:
     return await _ble_request("POST", f"/api/nodes/{node_id}/register", await request.json())
 
+@app.delete("/api/admin/nodes/{node_id}/registration")
+async def remove_node_registration(node_id: str) -> dict:
+    return await _ble_request("DELETE", f"/api/nodes/{node_id}/registration")
+
 
 @app.post("/api/admin/setup/scan")
 async def start_ble_scan() -> dict:

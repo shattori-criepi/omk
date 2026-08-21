@@ -141,6 +141,9 @@ class BleManager:
             elif isinstance(item.get("capabilities"), int):
                 item["capabilities"] = [name for bit, name in NODE_CAPABILITY_NAMES if item["capabilities"] & bit]
             item["registration_state"] = item.get("registration_state", item.get("ble_state", "unregistered"))
+            item["online"] = bool(item.get("mqtt_status_seen_at") or seen)
+            item["attached_sensors"] = ["SEN66"] if "sen66" in item.get("connected_sensors", []) else []
+            item["relay_active"] = bool(item.get("relay_last_seen_at"))
             result.append(item)
         return result
 
@@ -156,7 +159,7 @@ class BleManager:
         if self.node_registry is None:
             return None
         for node_id, node in self.node_registry.list().items():
-            if node_id != excluding_node_id and node.get("logical_id") == logical_id:
+            if node_id != excluding_node_id and logical_id in {node.get("logical_id"), node.get("requested_logical_id")}:
                 return node_id
         return None
 
@@ -167,9 +170,7 @@ class BleManager:
             current = next((item for item in self.node_list() if item["node_id"] == node_id), None)
             if current is None:
                 raise KeyError(node_id)
-            if current.get("registration_state") == "registered":
-                raise ValueError("node is already registered")
-            if current.get("registration_state") != "provisioned":
+            if current.get("registration_state") not in {"provisioned", "registered"}:
                 raise ValueError("node Wi-Fi provisioning is not complete")
             owner = self._logical_id_owner(logical_id, excluding_node_id=node_id)
             if owner is not None:
@@ -181,7 +182,8 @@ class BleManager:
             if getattr(info, "rc", mqtt.MQTT_ERR_SUCCESS) != mqtt.MQTT_ERR_SUCCESS:
                 raise RuntimeError("MQTT publish failed")
             if self.node_registry:
-                self.node_registry.update(node_id, logical_id=logical_id, request_state="request_sent")
+                self.node_registry.update(node_id, requested_logical_id=logical_id, request_state="request_sent",
+                                          registration_revoked=False)
         return {"node_id": node_id, "logical_id": logical_id, "status": "request_sent"}
 
     def handle_node_mqtt(self, topic: str, payload: bytes) -> None:
@@ -201,10 +203,13 @@ class BleManager:
         if parts[4] == "status":
             state = value.get("registration_state")
             capabilities = value.get("capabilities")
-            if state not in {"provisioned", "registered"} or not isinstance(capabilities, int):
+            connected_sensors = value.get("connected_sensors", [])
+            if (state not in {"provisioned", "registered"} or not isinstance(capabilities, int) or
+                    not isinstance(connected_sensors, list) or any(sensor != "sen66" for sensor in connected_sensors)):
                 return
             status_values = {"protocol_version": 1, "capabilities": capabilities,
-                             "registration_state": state, "mqtt_status_seen_at": now_iso()}
+                             "connected_sensors": connected_sensors, "registration_state": state,
+                             "mqtt_status_seen_at": now_iso()}
             if state == "provisioned":
                 self.node_registry.clear_registration(parts[2], **status_values)
             else:
@@ -214,13 +219,52 @@ class BleManager:
         if value.get("registration_state") != "registered" or not self._logical_id_valid(logical_id):
             return
         with self._node_registration_lock:
+            current = self.node_registry.list().get(parts[2], {})
+            if current.get("registration_revoked"):
+                LOGGER.info("Ignoring retained registration ACK after removal for node_id=%s", parts[2])
+                return
+            requested = current.get("requested_logical_id")
+            if requested is not None and requested != logical_id:
+                LOGGER.warning("Ignoring stale registration ACK for node_id=%s", parts[2])
+                return
             owner = self._logical_id_owner(logical_id, excluding_node_id=parts[2])
             if owner is not None:
                 LOGGER.error("Ignoring duplicate OMK Node logical_id=%s from node_id=%s; already assigned to node_id=%s",
                              logical_id, parts[2], owner)
                 return
             self.node_registry.update(parts[2], protocol_version=1, logical_id=logical_id,
-                                      registration_state="registered", request_state="registered", ack_seen_at=now_iso())
+                                      registration_state="registered", request_state="registered",
+                                      requested_logical_id=None, ack_seen_at=now_iso(), registration_revoked=False)
+
+    def handle_sen66_mqtt(self, topic: str, payload: bytes) -> None:
+        """Mark a SEN66 as physically observed only after valid telemetry arrives."""
+        parts = topic.split("/")
+        if len(parts) != 3 or parts[0] != "omk" or parts[2] != "sen66" or self.node_registry is None:
+            return
+        try:
+            value = json.loads(payload.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return
+        if not isinstance(value, dict) or value.get("device_id") != parts[1]:
+            return
+        for node_id, node in self.node_registry.list().items():
+            if node.get("logical_id") == parts[1]:
+                self.node_registry.update(node_id, sen66_last_seen_at=now_iso())
+
+    def remove_node_registration(self, node_id: str) -> dict[str, Any]:
+        if not self._node_id_valid(node_id) or self.node_registry is None:
+            raise KeyError(node_id)
+        with self._node_registration_lock:
+            if node_id not in self.node_registry.list():
+                raise KeyError(node_id)
+            self.node_registry.clear_registration(node_id, registration_state="provisioned",
+                                                  registration_revoked=True, removed_at=now_iso())
+            if self._mqtt:
+                payload = json.dumps({"protocol_version": 1, "logical_id": None})
+                info = self._mqtt.publish(f"omk/node/{node_id}/registration/config", payload, qos=1, retain=True)
+                if getattr(info, "rc", mqtt.MQTT_ERR_SUCCESS) != mqtt.MQTT_ERR_SUCCESS:
+                    raise RuntimeError("MQTT publish failed")
+        return {"node_id": node_id, "status": "removed"}
 
     def handle_relay_mqtt(self, topic: str, payload: bytes) -> None:
         """Resolve a Node relay observation through the existing BLE registry."""
@@ -239,6 +283,8 @@ class BleManager:
         if not isinstance(value, dict):
             LOGGER.warning("Ignoring non-object relay MQTT payload topic=%s", topic)
             return
+        if self.node_registry:
+            self.node_registry.update(relay_node_id, relay_last_seen_at=now_iso())
         device_key = value.get("device_key")
         temperature_c = value.get("temperature_c")
         humidity = value.get("relative_humidity_percent")

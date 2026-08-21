@@ -78,7 +78,8 @@ static esp_err_t transmit_root_ap_wrap(void *handle, void *buffer, size_t length
 static esp_err_t transmit_child_sta(void *handle, void *buffer, size_t length) {
     (void)handle;
     mesh_data_t data = {.data = buffer, .size = length, .proto = MESH_PROTO_AP, .tos = MESH_TOS_P2P};
-    return esp_mesh_send(NULL, &data, MESH_DATA_TODS, NULL, 0);
+    esp_err_t err = esp_mesh_send(NULL, &data, MESH_DATA_TODS, NULL, 0);
+    return err;
 }
 
 static esp_err_t transmit_child_sta_wrap(void *handle, void *buffer, size_t length, void *netstack_buffer) {
@@ -212,28 +213,33 @@ esp_err_t mesh_netif_start_receive_task(void) {
 
 esp_err_t mesh_netifs_start(bool is_root) {
     if (is_root) {
-        ESP_LOGI(TAG, "Root external STA netif starting after Mesh parent connection");
+        bool default_station_created = false;
+        ESP_LOGI(TAG, "Starting root external STA netif after Mesh parent connection");
         if (station_netif != NULL && strcmp(esp_netif_get_desc(station_netif), "omk_mesh_sta") == 0) {
             (void)esp_netif_action_disconnected(station_netif, NULL, 0, NULL);
             destroy_mesh_driver(station_netif);
             esp_netif_destroy(station_netif);
             station_netif = NULL;
+            ESP_LOGI(TAG, "Replacing child internal STA netif with root external STA");
             esp_err_t err = create_default_station();
             if (err != ESP_OK) return err;
+            default_station_created = true;
         }
         if (station_netif == NULL) {
             esp_err_t err = create_default_station();
             if (err != ESP_OK) return err;
+            default_station_created = true;
         }
-        /* ESP-WIFI-MESH owns association.  Restart DHCP only after the
-         * root's parent-connected event, as in Espressif's Mesh examples. */
-        esp_err_t err = esp_netif_dhcpc_stop(station_netif);
-        if (err != ESP_OK && err != ESP_ERR_ESP_NETIF_DHCP_ALREADY_STOPPED) return err;
-        return esp_netif_dhcpc_start(station_netif);
+        if (default_station_created) {
+            esp_err_t err = start_default_station_link();
+            if (err != ESP_OK) return err;
+        }
+        return ESP_OK;
     }
-    ESP_LOGI(TAG, "Child internal netif starting after Mesh parent connection");
+    ESP_LOGI(TAG, "Starting child internal STA netif after Mesh parent connection");
     if (station_netif != NULL && strcmp(esp_netif_get_desc(station_netif), "omk_mesh_sta") == 0) return ESP_OK;
     if (station_netif != NULL) {
+        ESP_LOGI(TAG, "Replacing root external STA netif with child internal STA");
         (void)esp_netif_action_disconnected(station_netif, NULL, 0, NULL);
         (void)esp_wifi_clear_default_wifi_driver_and_handlers(station_netif);
         esp_netif_destroy(station_netif);
@@ -244,6 +250,11 @@ esp_err_t mesh_netifs_start(bool is_root) {
 }
 
 esp_err_t mesh_netifs_stop(void) {
+    if (station_netif != NULL && strcmp(esp_netif_get_desc(station_netif), "sta") == 0 &&
+        mesh_ap_netif == NULL) {
+        return ESP_OK;
+    }
+    ESP_LOGI(TAG, "Stopping current Mesh IP netif");
     if (station_netif != NULL) {
         if (strcmp(esp_netif_get_desc(station_netif), "omk_mesh_sta") == 0) {
             (void)esp_netif_action_disconnected(station_netif, NULL, 0, NULL);

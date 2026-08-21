@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #include "esp_err.h"
@@ -15,6 +16,9 @@ esp_err_t mqtt_registration_publish_mesh_status(const char *payload);
 
 /* Counts MQTT_EVENT_DISCONNECTED events for mesh diagnostics. */
 uint32_t mqtt_registration_get_disconnect_count(void);
+
+/* Updates the retained Node registration status with physically detected SEN66 state. */
+void mqtt_registration_set_sen66_connected(bool connected);
 
 /* Queues one non-retained environment measurement for delivery once the
  * established MQTT client is connected. The caller owns neither the MQTT

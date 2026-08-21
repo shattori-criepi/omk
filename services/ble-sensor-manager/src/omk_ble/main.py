@@ -44,11 +44,14 @@ def _on_mqtt_connect(client: mqtt.Client, userdata: Any, flags: Any, reason_code
     if reason_code == 0:
         client.subscribe("omk/node/+/registration/status", qos=1)
         client.subscribe("omk/node/+/registration/ack", qos=1)
+        client.subscribe("omk/+/sen66", qos=0)
         client.subscribe("omk-relay/+/ble/environment", qos=0)
 
 def _on_mqtt_message(client: mqtt.Client, userdata: Any, message: mqtt.MQTTMessage) -> None:
     if message.topic.startswith("omk-relay/"):
         manager.handle_relay_mqtt(message.topic, message.payload)
+    elif message.topic.endswith("/sen66"):
+        manager.handle_sen66_mqtt(message.topic, message.payload)
     else:
         manager.handle_node_mqtt(message.topic, message.payload)
 
@@ -115,6 +118,15 @@ def register_node(node_id: str, request: NodeRegistrationRequest) -> dict[str, A
         raise HTTPException(404, "node was not found") from error
     except ValueError as error:
         raise HTTPException(400, str(error)) from error
+    except RuntimeError as error:
+        raise HTTPException(503, str(error)) from error
+
+@app.delete("/api/nodes/{node_id}/registration")
+def remove_node_registration(node_id: str) -> dict[str, Any]:
+    try:
+        return manager.remove_node_registration(node_id)
+    except KeyError as error:
+        raise HTTPException(404, "node was not found") from error
     except RuntimeError as error:
         raise HTTPException(503, str(error)) from error
 

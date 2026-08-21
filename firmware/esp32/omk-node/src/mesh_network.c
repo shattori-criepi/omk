@@ -102,7 +102,7 @@ static void ip_event_handler(void *argument, esp_event_base_t base, int32_t id, 
     ip_event_got_ip_t *event = data;
     if (event == NULL) return;
     current_ip.addr = event->ip_info.ip.addr;
-    ESP_LOGI(TAG, "%s IP_EVENT_STA_GOT_IP: ip=" IPSTR " gw=" IPSTR " mask=" IPSTR,
+    ESP_LOGI(TAG, "%s STA IP acquired: ip=" IPSTR " gw=" IPSTR " mask=" IPSTR,
              esp_mesh_is_root() ? "Root external" : "Child internal",
              IP2STR(&event->ip_info.ip), IP2STR(&event->ip_info.gw),
              IP2STR(&event->ip_info.netmask));
@@ -125,6 +125,8 @@ static void mesh_event_handler(void *argument, esp_event_base_t base, int32_t id
     case MESH_EVENT_PARENT_CONNECTED: {
         const mesh_event_connected_t *event = data;
         if (event == NULL) break;
+        ESP_LOGI(TAG, "Mesh parent connected: role=%s layer=%d",
+                 esp_mesh_is_root() ? "root" : "child", esp_mesh_get_layer());
         if (memcmp(previous_parent_bssid, event->connected.bssid, sizeof(parent_bssid)) != 0) {
             static const uint8_t zero[6];
             if (memcmp(previous_parent_bssid, zero, sizeof(zero)) != 0) parent_change_count++;
@@ -143,6 +145,8 @@ static void mesh_event_handler(void *argument, esp_event_base_t base, int32_t id
     case MESH_EVENT_PARENT_DISCONNECTED: {
         const mesh_event_disconnected_t *event = data;
         parent_disconnect_count++;
+        ESP_LOGW(TAG, "Mesh parent disconnected: role=%s layer=%d count=%" PRIu32,
+                 esp_mesh_is_root() ? "root" : "child", esp_mesh_get_layer(), parent_disconnect_count);
         if (event != NULL) {
             last_parent_disconnect_reason = event->reason;
             /* ESP-IDF defines mesh_event_disconnected_t as the Wi-Fi STA
