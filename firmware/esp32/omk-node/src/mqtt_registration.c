@@ -13,6 +13,7 @@
 #include "esp_netif_ip_addr.h"
 #include "esp_wifi.h"
 #include "mqtt_client.h"
+#include "nvs.h"
 #include "node_registration.h"
 #include "node_identity.h"
 #include "node_protocol.h"
@@ -36,6 +37,10 @@ static char registration_config_topic[OMK_MQTT_TOPIC_SIZE];
 static char registration_ack_topic[OMK_MQTT_TOPIC_SIZE];
 static char registration_payload[OMK_MQTT_PAYLOAD_SIZE];
 static char client_id[OMK_MQTT_CLIENT_ID_SIZE];
+static char device_status_topic[OMK_MQTT_TOPIC_SIZE];
+static char device_status_logical_id[OMK_NODE_LOGICAL_ID_MAX_LENGTH + 1];
+static char device_status_will_payload[OMK_MQTT_PAYLOAD_SIZE];
+static bool device_status_configured;
 
 static bool is_lower_hex_identifier(const char *value, size_t length) {
     if (value == NULL || strlen(value) != length) {
@@ -106,6 +111,57 @@ static bool logical_id_is_valid(const char *logical_id) {
     return true;
 }
 
+/* ``omk/<logical_id>/status`` is the retained availability of the logical
+ * device, not an individual sensor-reading quality.  Freshness remains based
+ * on the timestamp of the actual measurement. */
+static bool configure_device_status(const char *logical_id) {
+    int written = snprintf(device_status_logical_id, sizeof(device_status_logical_id), "%s", logical_id);
+    if (written < 0 || written >= (int)sizeof(device_status_logical_id)) {
+        return false;
+    }
+    written = snprintf(device_status_topic, sizeof(device_status_topic),
+                       "omk/%s/status", logical_id);
+    if (written < 0 || written >= (int)sizeof(device_status_topic)) {
+        return false;
+    }
+    written = snprintf(device_status_will_payload, sizeof(device_status_will_payload),
+                       "{\"device_id\":\"%s\",\"status\":\"offline\"}", logical_id);
+    if (written < 0 || written >= (int)sizeof(device_status_will_payload)) {
+        return false;
+    }
+    device_status_configured = true;
+    return true;
+}
+
+static void load_persisted_device_status(void) {
+    char logical_id[OMK_NODE_LOGICAL_ID_MAX_LENGTH + 1];
+    esp_err_t err = node_registration_get_logical_id(logical_id, sizeof(logical_id));
+    if (err == ESP_ERR_NVS_NOT_FOUND) {
+        return;
+    }
+    if (err != ESP_OK || !logical_id_is_valid(logical_id) || !configure_device_status(logical_id)) {
+        ESP_LOGW(TAG, "Could not configure logical-device MQTT status: %s", esp_err_to_name(err));
+    }
+}
+
+static void publish_device_status(const char *status) {
+    if (!device_status_configured) {
+        return;
+    }
+    char payload[OMK_MQTT_PAYLOAD_SIZE];
+    int written = snprintf(payload, sizeof(payload),
+                           "{\"device_id\":\"%s\",\"status\":\"%s\"}",
+                           device_status_logical_id, status);
+    if (written < 0 || written >= (int)sizeof(payload)) {
+        ESP_LOGE(TAG, "Could not build logical-device status payload");
+        return;
+    }
+    int message_id = esp_mqtt_client_publish(client, device_status_topic, payload, 0, 0, 1);
+    if (message_id < 0) {
+        ESP_LOGW(TAG, "Could not queue retained logical-device status: %d", message_id);
+    }
+}
+
 static void publish_registration_ack(const char *logical_id) {
     char payload[OMK_MQTT_PAYLOAD_SIZE];
     int written = snprintf(payload, sizeof(payload),
@@ -155,6 +211,11 @@ static void process_registration_config(const esp_mqtt_event_handle_t event) {
     }
     esp_err_t save_err = node_registration_save(logical_id->valuestring);
     if (save_err == ESP_OK) {
+        if (!configure_device_status(logical_id->valuestring)) {
+            ESP_LOGE(TAG, "Could not configure logical-device MQTT status after registration");
+        } else {
+            publish_device_status("online");
+        }
         publish_registration_ack(logical_id->valuestring);
     } else {
         ESP_LOGE(TAG, "Could not persist registration: %s", esp_err_to_name(save_err));
@@ -175,6 +236,7 @@ static void mqtt_event_handler(void *arg, esp_event_base_t event_base,
             ESP_LOGW(TAG, "Could not subscribe to registration config");
         }
         publish_registration_status();
+        publish_device_status("online");
         break;
     case MQTT_EVENT_DATA:
         process_registration_config(event_data);
@@ -299,9 +361,16 @@ esp_err_t mqtt_registration_start(void) {
         return ESP_ERR_INVALID_SIZE;
     }
 
+    load_persisted_device_status();
     const esp_mqtt_client_config_t config = {
         .broker.address.uri = OMK_MQTT_BROKER_URI,
         .credentials.client_id = client_id,
+        .session.last_will = {
+            .topic = device_status_configured ? device_status_topic : NULL,
+            .msg = device_status_configured ? device_status_will_payload : NULL,
+            .qos = 0,
+            .retain = device_status_configured ? 1 : 0,
+        },
     };
     client = esp_mqtt_client_init(&config);
     if (client == NULL) {

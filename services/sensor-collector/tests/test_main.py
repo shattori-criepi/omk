@@ -72,6 +72,27 @@ class CollectorTests(unittest.TestCase):
             self.assertTrue((Path(directory) / "catalog.json").exists())
             self.assertFalse((Path(directory) / "broute_power.json").exists())
 
+    def test_retained_offline_status_does_not_replace_fresh_sen66_cache(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            writer = LatestDataWriter(root)
+            offline = build_record(
+                Message(b'{"device_id":"sen66-001","status":"offline"}', "omk/sen66-001/status"),
+                self.received_at,
+            )
+            fresh_sen66 = build_record(
+                Message(b'{"device_id":"sen66-001","temperature_celsius":25.4}', "omk/sen66-001/sen66"),
+                self.received_at,
+            )
+
+            writer.write(offline)
+            writer.write(fresh_sen66)
+
+            self.assertEqual(
+                json.loads((root / "sen66.json").read_text(encoding="utf-8")),
+                fresh_sen66,
+            )
+
     def test_latest_writer_replaces_existing_data_without_temporary_files(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             writer = LatestDataWriter(Path(directory))
