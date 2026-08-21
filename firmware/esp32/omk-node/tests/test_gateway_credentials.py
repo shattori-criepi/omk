@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 
 
 SOURCE = Path(__file__).parents[1] / "src"
@@ -45,6 +46,30 @@ def test_sen66_mqtt_failure_does_not_stop_periodic_measurement():
     assert "mqtt_warning_logged = true;" in publish
     assert "mqtt_warning_logged = false;" in publish
     assert "vTaskDelay(pdMS_TO_TICKS(SEN66_MEASUREMENT_INTERVAL_MS));" in publish
+
+
+def test_registration_status_payload_has_dedicated_capacity_for_sensor_presence():
+    source = (SOURCE / "mqtt_registration.c").read_text()
+    assert "#define OMK_REGISTRATION_PAYLOAD_SIZE 192" in source
+    assert "static char registration_payload[OMK_REGISTRATION_PAYLOAD_SIZE];" in source
+    status = source[source.index("static void publish_registration_status") : source.index("static bool logical_id_is_valid")]
+    assert '"\\\"connected_sensors\\\":%s}"' in status
+    assert "esp_mqtt_client_publish(client, registration_topic," in status
+    assert "registration_payload, 0, 1, 1" in status
+
+    for state, sensors in (("registered", ["sen66"]), ("provisioned", [])):
+        payload = json.dumps({
+            "protocol_version": 1,
+            "node_id": "09dda0d5a8f2",
+            "registration_state": state,
+            "capabilities": 3,
+            "connected_sensors": sensors,
+        }, separators=(",", ":"))
+        assert len(payload) < 192
+        decoded = json.loads(payload)
+        assert decoded["registration_state"] == state
+        assert decoded["capabilities"] == 3
+        assert decoded["connected_sensors"] == sensors
 
 
 def test_operational_logs_cover_boot_mesh_ip_and_mqtt_transitions_without_poc_breadcrumbs():

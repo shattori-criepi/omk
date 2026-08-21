@@ -25,6 +25,7 @@
 #define OMK_MQTT_RELAY_ENVIRONMENT_PAYLOAD_SIZE 256
 #define OMK_MQTT_SEN66_PAYLOAD_SIZE 768
 #define OMK_MQTT_MESH_STATUS_PAYLOAD_SIZE 512
+#define OMK_REGISTRATION_PAYLOAD_SIZE 192
 #define OMK_MQTT_CLIENT_ID_SIZE 32
 static const char *TAG = "omk-mqtt";
 static esp_mqtt_client_handle_t client;
@@ -35,7 +36,7 @@ static bool ip_handler_registered;
 static char registration_topic[OMK_MQTT_TOPIC_SIZE];
 static char registration_config_topic[OMK_MQTT_TOPIC_SIZE];
 static char registration_ack_topic[OMK_MQTT_TOPIC_SIZE];
-static char registration_payload[OMK_MQTT_PAYLOAD_SIZE];
+static char registration_payload[OMK_REGISTRATION_PAYLOAD_SIZE];
 static char client_id[OMK_MQTT_CLIENT_ID_SIZE];
 static char device_status_topic[OMK_MQTT_TOPIC_SIZE];
 static char device_status_logical_id[OMK_NODE_LOGICAL_ID_MAX_LENGTH + 1];
