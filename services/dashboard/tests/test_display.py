@@ -1736,7 +1736,8 @@ global.fetch = async () => ({ok: true, json: async () => ({sensors: [], nodes: [
 vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8"));
 const provisioned = nodeCard({node_id: "112233445566", registration_state: "provisioned", capabilities: ["ble_scan"], attached_sensors: ["SEN66"]});
 const requested = nodeCard({node_id: "112233445566", registration_state: "provisioned", request_state: "request_sent", capabilities: ["ble_scan"], attached_sensors: ["SEN66"]});
-const registeredMarkup = nodeCard({node_id: "112233445566", registration_state: "registered", logical_id: "ble-relay-001", capabilities: ["ble_scan"]});
+const registeredMarkup = nodeCard({node_id: "112233445566", registration_state: "registered", logical_id: "sen66-001", capabilities: ["ble_scan", "sen66"], attached_sensors: ["SEN66"], relay_active: true, online: true});
+const relayMarkup = nodeCard({node_id: "9af9509eb8b6", registration_state: "provisioned", capabilities: ["ble_scan", "sen66"], connected_sensors: [], attached_sensors: [], relay_active: true, online: true});
 const oldInput = Object.assign(element(), {dataset: {nodeId: "112233445566"}, value: "ble-relay-001", selectionStart: 4, selectionEnd: 7});
 const newInput = Object.assign(element(), {dataset: {nodeId: "112233445566"}, value: "", selectionStart: 0, selectionEnd: 0});
 elements["#omk-nodes"].querySelectorAll = () => [oldInput];
@@ -1763,7 +1764,8 @@ global.fetch = async (url, options = {}) => { requests.push({url, options}); ret
   list: formatApiError([{loc: ["body", "logical_id"], msg: "invalid value"}]),
   provisioned: provisioned.includes("register-node"),
   requested: requested.includes("登録要求を送信済み") && !requested.includes("register-node"),
-  registered: registeredMarkup.includes("登録済み") && registeredMarkup.includes("ble-relay-001") && registeredMarkup.includes("register-node") && registeredMarkup.includes("登録解除"),
+  registered: registeredMarkup.includes("登録済み") && registeredMarkup.includes("sen66-001") && registeredMarkup.includes("register-node") && registeredMarkup.includes("登録解除") && registeredMarkup.includes("SEN66（接続確認済み）") && registeredMarkup.includes("BLE relay: 稼働中"),
+  relay: relayMarkup.includes("SEN66対応") && relayMarkup.includes("センサ未接続") && relayMarkup.includes("BLE relay: 稼働中") && !relayMarkup.includes("node-logical-id"),
   preservedValue: newInput.value === "ble-relay-001",
   preservedFocus: global.document.activeElement === newInput && newInput.selectionStart === 4 && newInput.selectionEnd === 7,
   logicalIdValidation: !validLogicalId("") && !validLogicalId("bad id") && validLogicalId("ble-relay-001"),
@@ -1781,6 +1783,7 @@ global.fetch = async (url, options = {}) => { requests.push({url, options}); ret
         "provisioned": True,
         "requested": True,
         "registered": True,
+        "relay": True,
         "preservedValue": True,
         "preservedFocus": True,
         "logicalIdValidation": True,
