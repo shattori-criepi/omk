@@ -394,7 +394,7 @@ class BleManager:
             raise ValueError("OMK Nodeの登録とWi-Fi provisioningはまだ実装されていません")
         prefix = {
             "temperature_humidity_sensor": "th", "waterproof_sensor": "th", "co2_sensor": "co2",
-            "motion_sensor": "motion", "contact_sensor": "contact", "plug_sensor": "plug",
+            "motion_sensor": "motion", "presence_sensor": "motion", "contact_sensor": "contact", "plug_sensor": "plug",
         }.get(candidate.model, "sensor")
         used_ids = {sensor.sensor_id for sensor in self.registry.list()}
         index = 1
@@ -500,6 +500,10 @@ class BleManager:
         last = self._last_state_publish_at.get(sensor.device_key)
         if previous == state and last is not None and now - last < STATE_PUBLISH_INTERVAL_SECONDS:
             return
-        payload = {"device_id": sensor.sensor_id, "measured_at": advertisement.received_at, field: state}
+        payload = {
+            "device_id": sensor.sensor_id,
+            "measured_at": advertisement.received_at,
+            **advertisement.values,
+        }
         self._mqtt.publish(f"omk/{sensor.sensor_id}/{topic_kind}", json.dumps(payload), qos=0, retain=False)
         self._last_state_publish_at[sensor.device_key] = now

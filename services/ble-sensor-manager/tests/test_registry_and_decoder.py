@@ -775,6 +775,94 @@ def test_motion_decoder_does_not_classify_existing_or_unrelated_switchbot_layout
     assert unrelated is not None and unrelated.model == "unknown_switchbot"
 
 
+def test_presence_sensor_pro_decodes_motion_battery_and_light_level() -> None:
+    service = {METER_SERVICE_UUID: bytes.fromhex("0020640110ccc8")}
+    false = decode(
+        "B0:E9:FE:E8:7F:C8", -40,
+        {SWITCHBOT_COMPANY_ID: bytes.fromhex("b0e9fee87fc8208c0004008c")}, service, "now",
+    )
+    true = decode(
+        "B0:E9:FE:E8:7F:C8", -40,
+        {SWITCHBOT_COMPANY_ID: bytes.fromhex("b0e9fee87fc81bcc0008008c")}, service, "now",
+    )
+    changed_light = decode(
+        "B0:E9:FE:E8:7F:C8", -40,
+        {SWITCHBOT_COMPANY_ID: bytes.fromhex("b0e9fee87fc8208c00040087")}, service, "now",
+    )
+    assert false is not None and false.model == "presence_sensor" and false.sensor_type == "motion"
+    assert false.values == {"motion_state": 0, "battery_percent": 100, "light_level": 12}
+    assert true is not None and true.values["motion_state"] == 1
+    assert changed_light is not None and changed_light.values["light_level"] == 7
+
+
+def test_presence_sensor_pro_classifier_uses_only_combined_packet_structure() -> None:
+    service = {METER_SERVICE_UUID: bytes.fromhex("0020640110ccc8")}
+    # Sequence number, motion status, and light level each vary without
+    # affecting classification.
+    for packet in (
+        "b0e9fee87fc8008800040080",
+        "b0e9fee87fc8ffcc0004008f",
+    ):
+        decoded = decode("B0:E9:FE:E8:7F:C8", -40, {SWITCHBOT_COMPANY_ID: bytes.fromhex(packet)}, service, "now")
+        assert decoded is not None and decoded.model == "presence_sensor"
+
+    malformed_packets = (
+        ({SWITCHBOT_COMPANY_ID: bytes.fromhex("b0e9fee87fc8208c000400")}, service),
+        ({SWITCHBOT_COMPANY_ID: bytes.fromhex("b0e9fee87fc8208c0004008c")}, {METER_SERVICE_UUID: bytes.fromhex("0020640110cc")}),
+        ({SWITCHBOT_COMPANY_ID: bytes.fromhex("b0e9fee87fc8208c0004008c")}, {}),
+    )
+    for manufacturer_data, service_data in malformed_packets:
+        decoded = decode("B0:E9:FE:E8:7F:C8", -40, manufacturer_data, service_data, "now")
+        assert decoded is not None and decoded.model == "unknown_switchbot"
+
+
+def test_presence_sensor_pro_does_not_collide_with_existing_12_byte_layouts() -> None:
+    waterproof = decode(
+        "D6:69:17:D3:10:38", -53,
+        {SWITCHBOT_COMPANY_ID: bytes.fromhex("d66917d31038550b069bd200")},
+        {METER_SERVICE_UUID: bytes.fromhex("770047")}, "now",
+    )
+    plug = decode(
+        "AC:27:6E:43:26:9E", -50,
+        {SWITCHBOT_COMPANY_ID: bytes.fromhex("ac276e43269e778010370037")},
+        {METER_SERVICE_UUID: bytes.fromhex("6a0064")}, "now",
+    )
+    assert waterproof is not None and waterproof.model == "waterproof_sensor"
+    assert plug is not None and plug.model == "plug_sensor"
+
+
+def test_presence_sensor_pro_uses_the_existing_motion_setup_id_prefix(tmp_path: Path) -> None:
+    manager = BleManager(SensorRegistry(tmp_path / "sensors.json"))
+    manager.scanning = True
+    decoded = decode(
+        "B0:E9:FE:E8:7F:C8", -40,
+        {SWITCHBOT_COMPANY_ID: bytes.fromhex("b0e9fee87fc8208c0004008c")},
+        {METER_SERVICE_UUID: bytes.fromhex("0020640110ccc8")}, "now",
+    )
+    assert decoded is not None
+    manager.record_advertisement(decoded)
+    assert manager.suggested_sensor_id(decoded.device_key) == "motion-001"
+
+
+def test_presence_sensor_pro_publishes_its_decoded_values_on_the_motion_topic(tmp_path: Path) -> None:
+    advertisement = decode(
+        "B0:E9:FE:E8:7F:C8", -40,
+        {SWITCHBOT_COMPANY_ID: bytes.fromhex("b0e9fee87fc8208c0004008c")},
+        {METER_SERVICE_UUID: bytes.fromhex("0020640110ccc8")}, "now",
+    )
+    assert advertisement is not None
+    registry = SensorRegistry(tmp_path / "sensors.json")
+    registry.register(RegisteredSensor(
+        advertisement.device_key, "motion-001", "motion", "switchbot", "presence_sensor", "", "Presence",
+    ))
+    publisher = _MqttPublisher()
+    BleManager(registry, publisher).record_advertisement(advertisement)
+    assert publisher.messages == [("omk/motion-001/motion", json.dumps({
+        "device_id": "motion-001", "measured_at": "now", "motion_state": 0,
+        "battery_percent": 100, "light_level": 12,
+    }))]
+
+
 def _motion_advertisement(state: int, received_at: str = "2026-08-12T14:47:12+09:00") -> DecodedAdvertisement:
     return DecodedAdvertisement("switchbot:motion", "switchbot", "motion_sensor", "motion", -31, received_at, {"motion_state": state}, {"manufacturer_data": {"0969": "raw"}})
 

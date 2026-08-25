@@ -69,6 +69,16 @@ PLUG_STATE_INDEX = 7
 PLUG_LAYOUT_MARKER_INDEX = 8
 PLUG_LAYOUT_MARKER = 0x16
 
+# Presence Sensor Pro advertisements combine a 12-byte manufacturer payload
+# with a 7-byte SwitchBot fd3d service payload. This joint structure is the
+# classifier: status, sequence, battery, and light values are deliberately not
+# used to identify the model.
+PRESENCE_MANUFACTURER_LENGTH = 12
+PRESENCE_SERVICE_DATA_LENGTH = 7
+PRESENCE_STATUS_INDEX = 7
+PRESENCE_LIGHT_LEVEL_INDEX = 11
+PRESENCE_BATTERY_PERCENT_INDEX = 2
+
 
 def _hex_map(values: dict[str, bytes]) -> dict[str, str]:
     return {key: value.hex() for key, value in values.items()}
@@ -124,6 +134,24 @@ def _decode_plug_service_data(data: bytes | None) -> tuple[str, str, dict[str, A
     if not data or len(data) != 3 or data[0] not in PLUG_SERVICE_DEVICE_TYPES:
         return None
     return "plug_sensor", "power", {}
+
+
+def _decode_presence_sensor_data(
+    manufacturer_data: bytes | None, service_data: bytes | None,
+) -> tuple[str, str, dict[str, Any]] | None:
+    """Decode Presence Sensor Pro only from its combined advertisement shape."""
+    if (
+        manufacturer_data is None
+        or service_data is None
+        or len(manufacturer_data) != PRESENCE_MANUFACTURER_LENGTH
+        or len(service_data) != PRESENCE_SERVICE_DATA_LENGTH
+    ):
+        return None
+    return "presence_sensor", "motion", {
+        "motion_state": 1 if manufacturer_data[PRESENCE_STATUS_INDEX] & 0x40 else 0,
+        "battery_percent": service_data[PRESENCE_BATTERY_PERCENT_INDEX] & 0x7F,
+        "light_level": manufacturer_data[PRESENCE_LIGHT_LEVEL_INDEX] & 0x0F,
+    }
 
 
 def _decode_meter_expression(fraction: int, signed_integer: int, humidity: int) -> tuple[float, int] | None:
@@ -269,6 +297,10 @@ def decode(address: str, rssi: int, manufacturer_data: dict[int, bytes], service
         "manufacturer_data": _hex_map({f"{key:04x}": value for key, value in manufacturer_data.items()}),
         "service_data": _hex_map(service_data),
     }
+    # Evaluate this before manufacturer-only 12-byte layouts. Presence Sensor
+    # Pro is identified by the complete manufacturer-plus-service structure;
+    # Plug Mini and Waterproof Sensor use their distinct 3-byte service forms.
+    presence = _decode_presence_sensor_data(company_data, service_bytes)
     # Contact service data reliably identifies the device, but the current Pi
     # captures show its state can be stale. When a complete Contact
     # manufacturer layout is available, prefer its state snapshot.
@@ -284,7 +316,8 @@ def decode(address: str, rssi: int, manufacturer_data: dict[int, bytes], service
         company_data, require_marker=plug_from_service is None,
     ) if company_data else None
     decoded = (
-        contact_from_manufacturer
+        presence
+        or contact_from_manufacturer
         or contact_from_service
         or waterproof_from_manufacturer
         or waterproof_from_service
