@@ -832,7 +832,11 @@ def test_presence_sensor_pro_does_not_collide_with_existing_12_byte_layouts() ->
 
 
 def test_presence_sensor_pro_uses_the_existing_motion_setup_id_prefix(tmp_path: Path) -> None:
-    manager = BleManager(SensorRegistry(tmp_path / "sensors.json"))
+    registry = SensorRegistry(tmp_path / "sensors.json")
+    registry.register(RegisteredSensor(
+        "switchbot:existing", "motion-001", "motion", "switchbot", "motion_sensor", "", "既存人感",
+    ))
+    manager = BleManager(registry)
     manager.scanning = True
     decoded = decode(
         "B0:E9:FE:E8:7F:C8", -40,
@@ -841,7 +845,13 @@ def test_presence_sensor_pro_uses_the_existing_motion_setup_id_prefix(tmp_path: 
     )
     assert decoded is not None
     manager.record_advertisement(decoded)
-    assert manager.suggested_sensor_id(decoded.device_key) == "motion-001"
+    candidate = manager.candidate_list()[0]
+    assert candidate["model"] == "presence_sensor"
+    assert candidate["sensor_type"] == "motion"
+    assert candidate["values"] == {"motion_state": 0, "battery_percent": 100, "light_level": 12}
+    assert manager.suggested_sensor_id(decoded.device_key) == "motion-002"
+    registered = manager.register({"device_key": decoded.device_key, "sensor_id": "motion-002", "display_name": "Presence"})
+    assert (registered.model, registered.sensor_type) == ("presence_sensor", "motion")
 
 
 def test_presence_sensor_pro_publishes_its_decoded_values_on_the_motion_topic(tmp_path: Path) -> None:

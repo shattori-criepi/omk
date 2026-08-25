@@ -1805,6 +1805,31 @@ global.fetch = async (url, options = {}) => { requests.push({url, options}); ret
     }
 
 
+@pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is required for admin UI tests")
+def test_sensor_management_ui_renders_presence_sensor_values_and_safe_missing_values() -> None:
+    javascript_path = Path(__file__).parents[1] / "app" / "static" / "admin.js"
+    harness = r'''
+const fs = require("fs"), vm = require("vm");
+function element() { return {hidden: false, textContent: "", className: "", value: "", onclick: null, onsubmit: null, closest() { return null; }, querySelector() { return element(); }, querySelectorAll() { return []; }, focus() {}, showModal() {}, close() {}}; }
+const selectors = ["#setup-status", "#candidates", "#registered-sensors", "#omk-nodes", "#start-scan", "#stop-scan", "#register-dialog", "#register-form", "#register-error", "#edit-dialog", "#edit-form", "#edit-error", "#cancel-register", "#cancel-edit", "#delete-sensor"];
+const elements = Object.fromEntries(selectors.map(key => [key, element()]));
+global.document = {querySelector: selector => elements[selector] || element()};
+global.window = {setInterval() {}, confirm() { return false; }};
+global.fetch = async () => ({ok: true, json: async () => ({sensors: [], nodes: []})});
+vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8"));
+const candidate = card({vendor: "switchbot", model: "presence_sensor", sensor_type: "motion", rssi: -42, identifier_suffix: "7fc8", received_at: "now", values: {motion_state: 1, battery_percent: 100, light_level: 12}}, true);
+const registeredMarkup = registeredCard({device_key: "switchbot:b0e9fee87fc8", sensor_id: "motion-002", display_name: "玄関", location: "玄関", vendor: "switchbot", model: "presence_sensor", sensor_type: "motion", online: true, status: "normal", latest: {received_at: "now", rssi: -42, values: {motion_state: 0, battery_percent: 87, light_level: 7}}});
+const missingMarkup = registeredCard({device_key: "switchbot:b0e9fee87fc8", sensor_id: "motion-002", display_name: "玄関", location: "", vendor: "switchbot", model: "presence_sensor", sensor_type: "motion", online: false, status: "offline", latest: {received_at: "now", rssi: -42, values: {motion_state: 0}}});
+console.log(JSON.stringify({
+  candidate: ["SwitchBot Presence Sensor Pro", "RSSI -42 dBm", "検出", "バッテリー: <strong>100%</strong>", "照度レベル: <strong>12</strong>", "このセンサを登録"].every(value => candidate.includes(value)),
+  registered: ["motion-002", "玄関 · switchbot Presence Sensor Pro", "未検出", "バッテリー</span><strong>87</strong><small>%", "照度レベル</span><strong>7</strong>", "正常"].every(value => registeredMarkup.includes(value)),
+  missing: missingMarkup.includes("未検出") && !missingMarkup.includes("undefined") && !missingMarkup.includes("NaN"),
+}));
+'''
+    completed = subprocess.run(["node", "-e", harness, str(javascript_path)], check=True, capture_output=True, text=True)
+    assert json.loads(completed.stdout) == {"candidate": True, "registered": True, "missing": True}
+
+
 def test_broute_status_proxy_returns_only_safe_status(monkeypatch: pytest.MonkeyPatch) -> None:
     raw_identifier = "A" * 32
     raw_password = "B" * 12
