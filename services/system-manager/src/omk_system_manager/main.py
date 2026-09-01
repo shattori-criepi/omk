@@ -13,7 +13,7 @@ from typing import AsyncIterator, Protocol
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from .credentials import (
     CredentialValidationError,
@@ -26,6 +26,7 @@ from .access_point import AccessPointCredentialError, read_access_point_credenti
 from .service_control import BRouteServiceController, ServiceControlError
 from .runtime_status import connection_status, request_immediate_retry
 from .site_uuid import SoracomMetadataClient, resolve_site_uuid
+from .usb_export import DATASETS, UsbExportController
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
@@ -50,6 +51,7 @@ class Settings:
     retry_request_path: Path = DEFAULT_BROUTE_RETRY_REQUEST_PATH
     site_uuid_path: Path = DEFAULT_SITE_UUID_PATH
     access_point_profile: str = "omk-ap"
+    usb_export_command: str = "/usr/local/bin/omk-export-usb"
 
     @classmethod
     def from_environment(cls) -> "Settings":
@@ -84,6 +86,7 @@ class Settings:
                 )
             ),
             access_point_profile=os.environ.get("OMK_AP_CONNECTION_NAME", "omk-ap"),
+            usb_export_command=os.environ.get("OMK_EXPORT_USB_COMMAND", "/usr/local/bin/omk-export-usb"),
         )
 
 
@@ -98,6 +101,20 @@ class UpdateCredentialsRequest(BaseModel):
         """Do not disclose credentials if a model is accidentally repr'd."""
         return []
 
+class UsbExportRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    from_: str = Field(alias="from")
+    to: str
+    datasets: list[str]
+
+    @classmethod
+    def validate_request(cls, body: "UsbExportRequest") -> None:
+        from datetime import date
+        try: start, end = date.fromisoformat(body.from_), date.fromisoformat(body.to)
+        except ValueError: raise ValueError("invalid_date")
+        if start > end: raise ValueError("invalid_date_range")
+        if not body.datasets or any(dataset not in DATASETS for dataset in body.datasets): raise ValueError("invalid_datasets")
+
 
 def create_app(
     configured_settings: Settings | None = None,
@@ -109,6 +126,7 @@ def create_app(
         settings = configured_settings or Settings.from_environment()
         app.state.settings = settings
         app.state.controller = BRouteServiceController(settings.systemctl_path)
+        app.state.usb_export = UsbExportController(settings.usb_export_command)
         app.state.site_uuid = resolve_site_uuid(
             settings.site_uuid_path,
             site_uuid_metadata or SoracomMetadataClient(),
@@ -237,6 +255,22 @@ def create_app(
             raise HTTPException(status_code=502, detail={"code": error.code}) from None
         except (OSError, subprocess.TimeoutExpired):
             raise HTTPException(status_code=502, detail={"code": "system_shutdown_failed"}) from None
+        return {"accepted": True}
+
+    @app.get("/api/export/usb/status", dependencies=[Depends(authenticated)])
+    def usb_export_status(request: Request) -> dict:
+        controller: UsbExportController = request.app.state.usb_export
+        return {"usb": controller.status(), "export": controller.job.public()}
+
+    @app.post("/api/export/usb", dependencies=[Depends(authenticated)], status_code=202)
+    def start_usb_export(request: Request, body: UsbExportRequest) -> dict[str, bool]:
+        try:
+            UsbExportRequest.validate_request(body)
+        except ValueError as error:
+            raise HTTPException(400, detail=str(error)) from None
+        controller: UsbExportController = request.app.state.usb_export
+        if not controller.start(body.from_, body.to, body.datasets):
+            raise HTTPException(409, detail="export_running")
         return {"accepted": True}
 
     @app.get("/api/access-point/status", dependencies=[Depends(authenticated)])

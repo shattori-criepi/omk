@@ -247,6 +247,10 @@ async def admin_system(request: Request) -> HTMLResponse:
 async def admin_access_point(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(request=request, name="admin_access_point.html", context={})
 
+@app.get("/admin/export", response_class=HTMLResponse)
+async def admin_export(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse(request=request, name="admin_export.html", context={})
+
 
 async def _ble_request(method: str, path: str, body: dict | None = None) -> dict:
     try:
@@ -460,6 +464,14 @@ async def reboot_system() -> dict:
 @app.post("/api/admin/system/shutdown")
 async def shutdown_system() -> dict:
     return await _system_manager_request("POST", "/api/system/shutdown")
+
+@app.get("/api/export/usb/status")
+async def usb_export_status() -> dict:
+    return await _system_manager_request("GET", "/api/export/usb/status")
+
+@app.post("/api/export/usb", status_code=202)
+async def start_usb_export(request: Request) -> dict:
+    return await _system_manager_request("POST", "/api/export/usb", await request.json())
 
 
 @app.get("/api/admin/access-point")
