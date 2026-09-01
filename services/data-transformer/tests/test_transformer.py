@@ -13,6 +13,27 @@ def _record(topic, payload, received_at="2026-07-30T13:00:08.866+09:00"):
     return {"received_at": received_at, "topic": topic, "qos": 0, "retain": False, "payload": payload}
 
 
+def _ichijo_payload(**overrides):
+    payload = {
+        "device_id": "ichijo-001",
+        "measured_at": "2026-08-04T08:38:52+09:00",
+        "pv_power_w": 1610,
+        "battery_soc_percent": 73,
+        "battery_charge_power_w": 0,
+        "battery_discharge_power_w": 87,
+        "battery_operating_state": "discharging",
+        "battery_operating_state_raw": 67,
+        "grid_import_power_w": 3,
+        "grid_export_power_w": 0,
+        "pcs_ac_output_power_w": 1697,
+        "load_power_w": 1700,
+        "quality": "normal",
+        "errors": [],
+    }
+    payload.update(overrides)
+    return payload
+
+
 def test_transform_separates_datasets_preserves_timestamps_and_is_idempotent(tmp_path):
     input_file = tmp_path / "30.jsonl"
     records = [
@@ -114,35 +135,42 @@ def test_status_topics_are_ignored_without_error_jsonl(tmp_path):
     power = _record("omk/broute-001/power", {"device_id": "broute-001", "measured_at": "2026-07-30T13:00:00+09:00", "net_power_w": 100})
     broute_status = _record("omk/broute-001/status", {"device_id": "broute-001", "status": "online"})
     sen66_status = _record("omk/sen66-001/status", {"device_id": "sen66-001", "status": "online"})
-    input_file.write_text("\n".join(json.dumps(record) for record in [power, broute_status, sen66_status]) + "\n", encoding="utf-8")
+    node_status = _record("omk/node/9af9509eb8b6/status", {"status": "online"})
+    registration_status = _record("omk/node/9af9509eb8b6/registration/status", {"status": "registered"})
+    input_file.write_text("\n".join(json.dumps(record) for record in [
+        power, broute_status, sen66_status, node_status, registration_status,
+    ]) + "\n", encoding="utf-8")
     result = transform(input_file, tmp_path / "processed")
     assert result.converted == 1
-    assert result.ignored == 2
-    assert result.ignored_topics == {"omk/broute-001/status": 1, "omk/sen66-001/status": 1}
+    assert result.ignored == 4
+    assert result.ignored_topics == {
+        "omk/broute-001/status": 1,
+        "omk/sen66-001/status": 1,
+        "omk/node/9af9509eb8b6/status": 1,
+        "omk/node/9af9509eb8b6/registration/status": 1,
+    }
     assert not result.errors
     assert not (tmp_path / "errors/transform/30.jsonl").exists()
+
+
+def test_unknown_node_topic_is_not_ignored(tmp_path):
+    input_file = tmp_path / "30.jsonl"
+    input_file.write_text(json.dumps(_record(
+        "omk/node/9af9509eb8b6/registration",
+        {"status": "registered"},
+    )) + "\n", encoding="utf-8")
+
+    result = transform(input_file, tmp_path / "processed")
+
+    assert result.ignored == 0
+    assert result.errors == {"unsupported_topic": 1}
 
 
 def test_ichijo_power_flow_is_written_to_partitioned_parquet(tmp_path):
     input_file = tmp_path / "04.jsonl"
     record = _record(
         "omk/ichijo-001/power-flow",
-        {
-            "device_id": "ichijo-001",
-            "measured_at": "2026-08-04T08:38:52+09:00",
-            "pv_power_w": 1610,
-            "battery_soc_percent": 73,
-            "battery_charge_power_w": 0,
-            "battery_discharge_power_w": 87,
-            "battery_operating_state": "discharging",
-            "battery_operating_state_raw": 67,
-            "grid_import_power_w": 3,
-            "grid_export_power_w": 0,
-            "pcs_ac_output_power_w": 1697,
-            "load_power_w": 1700,
-            "quality": "normal",
-            "errors": [],
-        },
+        _ichijo_payload(),
         received_at="2026-08-04T08:38:51.970+09:00",
     )
     input_file.write_text(json.dumps(record) + "\n", encoding="utf-8")
@@ -171,6 +199,96 @@ def test_ichijo_power_flow_is_written_to_partitioned_parquet(tmp_path):
     assert row["grid_import_power_w"] == 3
     assert row["grid_export_power_w"] == 0
     assert row["quality"] == "normal"
+    assert row["errors"] == []
+
+
+def test_ichijo_normal_payload_rejects_missing_required_measurement(tmp_path):
+    input_file = tmp_path / "04.jsonl"
+    input_file.write_text(json.dumps(_record(
+        "omk/ichijo-001/power-flow",
+        _ichijo_payload(pv_power_w=None),
+    )) + "\n", encoding="utf-8")
+
+    result = transform(input_file, tmp_path / "processed")
+
+    assert result.converted == 0
+    assert result.errors == {"missing_required_field": 1}
+
+
+def test_ichijo_degraded_payload_preserves_null_measurements_and_errors(tmp_path):
+    input_file = tmp_path / "01.jsonl"
+    measurements = {
+        "pv_power_w": None,
+        "battery_soc_percent": None,
+        "battery_charge_power_w": None,
+        "battery_discharge_power_w": None,
+        "battery_operating_state": None,
+        "battery_operating_state_raw": None,
+        "grid_import_power_w": None,
+        "grid_export_power_w": None,
+        "pcs_ac_output_power_w": None,
+        "load_power_w": None,
+    }
+    error_codes = ["pv_power_read_failed", "battery_soc_read_failed"]
+    input_file.write_text(json.dumps(_record(
+        "omk/ichijo-001/power-flow",
+        _ichijo_payload(
+            **measurements,
+            measured_at="2026-09-01T04:19:18+09:00",
+            quality="degraded",
+            errors=error_codes,
+        ),
+    )) + "\n", encoding="utf-8")
+
+    output = tmp_path / "processed"
+    result = transform(input_file, output)
+
+    assert result.converted == 1
+    row = pq.read_table(output / "ichijo_power_flow/date=2026-09-01/data.parquet").to_pylist()[0]
+    assert row["quality"] == "degraded"
+    assert row["pv_power_w"] is None
+    assert row["battery_soc_percent"] is None
+    assert row["errors"] == error_codes
+
+
+def test_ichijo_merge_normalizes_existing_schema_without_errors_column(tmp_path):
+    output = tmp_path / "processed"
+    source_a = tmp_path / "04.jsonl"
+    source_b = tmp_path / "04-retry.jsonl"
+    source_a.write_text(json.dumps(_record(
+        "omk/ichijo-001/power-flow",
+        _ichijo_payload(),
+    )) + "\n", encoding="utf-8")
+    transform(source_a, output)
+
+    parquet = output / "ichijo_power_flow/date=2026-08-04/data.parquet"
+    old_table = pq.ParquetFile(parquet).read()
+    pq.write_table(old_table.remove_column(old_table.schema.get_field_index("errors")), parquet)
+    source_b.write_text(json.dumps(_record(
+        "omk/ichijo-001/power-flow",
+        _ichijo_payload(
+            measured_at="2026-08-04T08:39:52+09:00",
+            quality="degraded",
+            pv_power_w=None,
+            battery_soc_percent=None,
+            battery_charge_power_w=None,
+            battery_discharge_power_w=None,
+            battery_operating_state=None,
+            battery_operating_state_raw=None,
+            grid_import_power_w=None,
+            grid_export_power_w=None,
+            pcs_ac_output_power_w=None,
+            load_power_w=None,
+            errors=["pv_power_read_failed"],
+        ),
+    )) + "\n", encoding="utf-8")
+
+    transform(source_b, output)
+
+    rows = pq.read_table(parquet).to_pylist()
+    assert len(rows) == 2
+    assert rows[0]["errors"] is None
+    assert rows[1]["errors"] == ["pv_power_read_failed"]
 
 
 def test_ble_datasets_preserve_direct_relay_and_optional_measurements(tmp_path):

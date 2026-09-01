@@ -77,6 +77,7 @@ SCHEMAS = {
         ("battery_operating_state_raw", pa.int64()),
         ("pcs_ac_output_power_w", pa.int64()),
         ("quality", pa.string()),
+        ("errors", pa.list_(pa.string())),
         ("topic", pa.string()),
         ("source_file", pa.string()),
         ("source_line_number", pa.int64()),
@@ -263,7 +264,10 @@ def _ichijo_power_flow(
         "payload.measured_at",
     )
 
-    required_integer_fields = (
+    quality = _optional_string(payload, "quality")
+    is_degraded = quality == "degraded"
+
+    integer_fields = (
         "pv_power_w",
         "load_power_w",
         "grid_import_power_w",
@@ -272,18 +276,18 @@ def _ichijo_power_flow(
         "battery_discharge_power_w",
         "pcs_ac_output_power_w",
     )
-    for field_name in required_integer_fields:
+    for field_name in integer_fields:
         row[field_name] = _number(
             payload,
             field_name,
-            required=True,
+            required=not is_degraded,
             integer=True,
         )
 
     row["battery_soc_percent"] = _number(
         payload,
         "battery_soc_percent",
-        required=True,
+        required=not is_degraded,
     )
     row["battery_operating_state_raw"] = _number(
         payload,
@@ -291,13 +295,12 @@ def _ichijo_power_flow(
         integer=True,
     )
 
-    battery_state = payload.get("battery_operating_state")
-    row["battery_operating_state"] = (
-        battery_state if isinstance(battery_state, str) else None
+    row["battery_operating_state"] = _optional_string(
+        payload,
+        "battery_operating_state",
     )
-
-    quality = payload.get("quality")
-    row["quality"] = quality if isinstance(quality, str) else None
+    row["quality"] = quality
+    row["errors"] = _optional_string_list(payload, "errors")
 
     return (
         ICHIJO_POWER_FLOW,
@@ -312,6 +315,15 @@ def _optional_string(payload: dict[str, Any], field_name: str) -> str | None:
         return None
     if not isinstance(value, str):
         raise RecordError("invalid_string", f"{field_name} must be a string")
+    return value
+
+
+def _optional_string_list(payload: dict[str, Any], field_name: str) -> list[str] | None:
+    value = payload.get(field_name)
+    if value is None:
+        return None
+    if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+        raise RecordError("invalid_type", f"{field_name} must be a list of strings")
     return value
 
 
@@ -390,7 +402,13 @@ def _is_status_topic(record: dict[str, Any]) -> bool:
     if not isinstance(topic, str):
         return False
     parts = topic.split("/")
-    return len(parts) == 3 and parts[0] == "omk" and bool(parts[1]) and parts[2] == "status"
+    if parts[0] != "omk":
+        return False
+    return (
+        (len(parts) == 3 and bool(parts[1]) and parts[2] == "status")
+        or (len(parts) == 4 and parts[1] == "node" and bool(parts[2]) and parts[3] == "status")
+        or (len(parts) == 5 and parts[1] == "node" and bool(parts[2]) and parts[3] == "registration" and parts[4] == "status")
+    )
 
 
 def transform(input_file: Path, output_root: Path, *, dry_run: bool = False, error_root: Path | None = None) -> TransformResult:
