@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+OMK_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd -P)"
+PYTHON="${OMK_ROOT}/services/data-exporter/.venv/bin/python"
+[[ -x "${PYTHON}" ]] || { printf 'ERROR: data-exporter virtual environment is unavailable: %s\n' "${PYTHON}" >&2; exit 1; }
+export PYTHONPATH="${OMK_ROOT}/services/data-exporter/src${PYTHONPATH:+:${PYTHONPATH}}"
+cd "${OMK_ROOT}"
+exec "${PYTHON}" -m data_exporter.usb_cli "$@"

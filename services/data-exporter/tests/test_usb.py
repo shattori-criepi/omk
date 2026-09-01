@@ -1,0 +1,94 @@
+from __future__ import annotations
+
+from datetime import date
+from pathlib import Path
+import subprocess
+
+import pytest
+
+from data_exporter.engine import ExportResult
+from data_exporter.usb import MOUNT_POINT, UsbExportError, UsbExportService, UsbLocator
+
+
+def _lsblk(devices):
+    def run(*args, **kwargs):
+        import json
+        return subprocess.CompletedProcess(args[0], 0, json.dumps({"blockdevices": devices}), "")
+    return run
+
+
+def _usb(filesystem="vfat", mounted=None):
+    return [{"path": "/dev/sda", "type": "disk", "tran": "usb", "children": [
+        {"path": "/dev/sda1", "type": "part", "tran": None, "fstype": filesystem, "label": "OMK", "size": 1024,
+         "mountpoint": mounted}
+    ]}]
+
+
+@pytest.mark.parametrize("filesystem", ["vfat", "exfat"])
+def test_locator_finds_supported_partition_through_usb_parent(filesystem):
+    status = UsbLocator(_lsblk(_usb(filesystem))).status()
+    assert status.state == "available"
+    assert status.device == "/dev/sda1"
+    assert status.filesystem == filesystem
+
+
+def test_locator_handles_absent_ambiguous_and_non_usb():
+    assert UsbLocator(_lsblk([])).status().state == "not_present"
+    assert UsbLocator(_lsblk(_usb() + [{"path": "/dev/sdb", "tran": "usb", "fstype": "exfat", "mountpoint": None}])).status().state == "ambiguous"
+    assert UsbLocator(_lsblk([{"path": "/dev/nvme0n1p1", "tran": "nvme", "fstype": "vfat", "mountpoint": None}])).status().state == "not_present"
+    assert UsbLocator(_lsblk(_usb("ntfs"))).status().state == "unsupported_filesystem"
+
+
+class MutableLocator:
+    def __init__(self): self.mounted = False
+    def status(self):
+        import data_exporter.usb as usb
+        return UsbLocator(_lsblk(_usb(mounted=str(usb.MOUNT_POINT) if self.mounted else None))).status()
+    def one_available(self):
+        status = self.status()
+        if status.state != "available": raise UsbExportError(status.state)
+        from data_exporter.usb import UsbDevice
+        return UsbDevice(status.device, status.filesystem, status.label, status.size, None)
+
+
+def test_export_mounts_writes_fixed_directory_syncs_and_unmounts(tmp_path, monkeypatch):
+    locator = MutableLocator(); actions = []; synced = []
+    monkeypatch.setattr("data_exporter.usb.MOUNT_POINT", tmp_path / "mount")
+    def helper(action):
+        actions.append(action); locator.mounted = action == "mount"
+        if action == "mount": (tmp_path / "mount").mkdir(exist_ok=True)
+    def exporter(root, output, *_):
+        assert output == tmp_path / "mount" / "OMK"; return ExportResult(output / "done.zip", ("sen66",), {"sen66": 1})
+    service = UsbExportService(tmp_path, locator, helper, exporter, lambda: synced.append(True), tmp_path / "lock")
+    service.export(date(2026, 8, 1), date(2026, 8, 1))
+    assert actions == ["mount", "unmount"] and synced == [True]
+
+
+def test_export_failure_unmounts_and_unmount_failure_is_not_success(tmp_path, monkeypatch):
+    locator = MutableLocator(); monkeypatch.setattr("data_exporter.usb.MOUNT_POINT", tmp_path / "mount")
+    actions = []
+    def helper(action):
+        actions.append(action); locator.mounted = action == "mount"
+        if action == "mount": (tmp_path / "mount").mkdir(exist_ok=True)
+    service = UsbExportService(tmp_path, locator, helper, lambda *args: (_ for _ in ()).throw(RuntimeError("export")), lock_path=tmp_path / "lock")
+    with pytest.raises(RuntimeError): service.export(date(2026, 8, 1), date(2026, 8, 1))
+    assert actions == ["mount", "unmount"]
+    locator = MutableLocator()
+    def bad_unmount(action):
+        if action == "mount":
+            locator.mounted = True
+            (tmp_path / "mount").mkdir(exist_ok=True)
+        else: raise RuntimeError("busy")
+    service = UsbExportService(tmp_path, locator, bad_unmount, lambda *args: ExportResult(tmp_path / "x", (), {}), lock_path=tmp_path / "lock2")
+    with pytest.raises(UsbExportError, match="busy") as error: service.export(date(2026, 8, 1), date(2026, 8, 1))
+    assert error.value.code == "unmount_failed"
+
+
+def test_lock_prevents_second_export(tmp_path):
+    import fcntl
+    lock = tmp_path / "lock"; lock.touch()
+    with lock.open("w") as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        service = UsbExportService(tmp_path, MutableLocator(), lambda _: None, lock_path=lock)
+        with pytest.raises(UsbExportError, match="busy"):
+            service.export(date(2026, 8, 1), date(2026, 8, 1))

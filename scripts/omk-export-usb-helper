@@ -1,0 +1,45 @@
+#!/usr/bin/python3
+"""Root-only, fixed-action USB mount helper installed by setup-data-exporter."""
+import json
+import subprocess
+import sys
+
+MOUNT_POINT = "/run/omk-export-usb"
+UID = "@TARGET_UID@"
+GID = "@TARGET_GID@"
+
+
+def candidate():
+    result = subprocess.run(["lsblk", "--json", "--bytes", "-o", "PATH,TRAN,FSTYPE,MOUNTPOINT"], capture_output=True, text=True, check=False)
+    if result.returncode:
+        raise RuntimeError("lsblk_failed")
+    found = []
+    def visit(nodes, inherited=None):
+        for node in nodes:
+            transport = node.get("tran") or inherited
+            filesystem = (node.get("fstype") or "").lower()
+            if transport == "usb" and filesystem in {"vfat", "exfat"} and node.get("path") and node.get("mountpoint") != "/":
+                found.append(node)
+            visit(node.get("children") or [], transport)
+    visit(json.loads(result.stdout).get("blockdevices", []))
+    if len(found) != 1:
+        raise RuntimeError("usb_not_single_supported_candidate")
+    return found[0]
+
+
+def main():
+    if len(sys.argv) != 2 or sys.argv[1] not in {"mount", "unmount"}:
+        raise SystemExit("fixed action required")
+    device = candidate()
+    if sys.argv[1] == "mount":
+        if device.get("mountpoint"):
+            raise SystemExit("device_already_mounted")
+        subprocess.run(["systemd-mount", "--collect", "--fsck=no", f"--options=uid={UID},gid={GID},umask=022", device["path"], MOUNT_POINT], check=True)
+    else:
+        if device.get("mountpoint") != MOUNT_POINT:
+            raise SystemExit("fixed_mount_not_present")
+        subprocess.run(["systemd-umount", MOUNT_POINT], check=True)
+
+
+if __name__ == "__main__":
+    main()
