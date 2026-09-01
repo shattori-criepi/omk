@@ -40,15 +40,16 @@ def test_locator_handles_absent_ambiguous_and_non_usb():
 
 
 class MutableLocator:
-    def __init__(self): self.mounted = False
+    def __init__(self, mount_path=None): self.mounted = mount_path is not None; self.mount_path = mount_path
     def status(self):
         import data_exporter.usb as usb
-        return UsbLocator(_lsblk(_usb(mounted=str(usb.MOUNT_POINT) if self.mounted else None))).status()
-    def one_available(self):
+        path = self.mount_path if self.mounted and self.mount_path else (str(usb.MOUNT_POINT) if self.mounted else None)
+        return UsbLocator(_lsblk(_usb(mounted=path))).status()
+    def one_exportable(self):
         status = self.status()
-        if status.state != "available": raise UsbExportError(status.state)
+        if status.state not in {"available", "mounted"}: raise UsbExportError(status.state)
         from data_exporter.usb import UsbDevice
-        return UsbDevice(status.device, status.filesystem, status.label, status.size, None)
+        return UsbDevice(status.device, status.filesystem, status.label, status.size, Path(status.mount_point) if status.mount_point else None)
 
 
 def test_export_mounts_writes_fixed_directory_syncs_and_unmounts(tmp_path, monkeypatch):
@@ -84,6 +85,20 @@ def test_export_failure_unmounts_and_unmount_failure_is_not_success(tmp_path, mo
     assert error.value.code == "unmount_failed"
 
 
+def test_export_uses_existing_automount_and_unmounts_it(tmp_path, monkeypatch):
+    mount = tmp_path / "media" / "UUID"; mount.mkdir(parents=True)
+    locator = MutableLocator(str(mount)); actions = []
+    monkeypatch.setattr("data_exporter.usb.os.access", lambda path, mode: True)
+    def helper(action):
+        actions.append(action)
+        if action == "unmount": locator.mounted = False
+    def exporter(root, output, *_):
+        assert output == mount / "OMK"
+        return ExportResult(output / "done.zip", (), {})
+    UsbExportService(tmp_path, locator, helper, exporter, lock_path=tmp_path / "lock").export(date(2026, 8, 1), date(2026, 8, 1))
+    assert actions == ["unmount"]
+
+
 def test_lock_prevents_second_export(tmp_path):
     import fcntl
     lock = tmp_path / "lock"; lock.touch()
@@ -92,3 +107,9 @@ def test_lock_prevents_second_export(tmp_path):
         service = UsbExportService(tmp_path, MutableLocator(), lambda _: None, lock_path=lock)
         with pytest.raises(UsbExportError, match="busy"):
             service.export(date(2026, 8, 1), date(2026, 8, 1))
+
+
+def test_default_lock_is_under_user_writable_data_directory(tmp_path):
+    processed = tmp_path / "data" / "processed"
+    service = UsbExportService(processed, MutableLocator(), lambda _: None)
+    assert service._lock_path == tmp_path / "data" / ".omk-export-usb.lock"

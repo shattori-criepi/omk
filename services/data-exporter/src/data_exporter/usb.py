@@ -79,12 +79,15 @@ class UsbLocator:
                          candidate.label, candidate.size, free_space, mount_state,
                          str(candidate.mount_point) if candidate.mount_point else None)
 
-    def one_available(self) -> UsbDevice:
+    def one_exportable(self) -> UsbDevice:
         status = self.status()
-        if status.state != "available":
+        if status.state not in {"available", "mounted"}:
             raise UsbExportError(status.state)
         assert status.device and status.filesystem
-        return UsbDevice(status.device, status.filesystem, status.label, status.size, None)
+        mount_point = Path(status.mount_point) if status.mount_point else None
+        if mount_point and not os.access(mount_point, os.W_OK):
+            raise UsbExportError("mount_not_writable")
+        return UsbDevice(status.device, status.filesystem, status.label, status.size, mount_point)
 
 
 def _usb_candidates(nodes: list[dict[str, object]], inherited_transport: str | None = None) -> list[UsbDevice]:
@@ -124,13 +127,13 @@ class UsbExportService:
 
     def __init__(self, processed_root: Path, locator: UsbLocator, helper: Callable[[str], None],
                  exporter: Callable[..., ExportResult] = export_parquet, sync: Callable[[], None] = os.sync,
-                 lock_path: Path = Path("/run/omk-export-usb.lock")) -> None:
+                 lock_path: Path | None = None) -> None:
         self._processed_root = processed_root
         self._locator = locator
         self._helper = helper
         self._exporter = exporter
         self._sync = sync
-        self._lock_path = lock_path
+        self._lock_path = lock_path or processed_root.parent / ".omk-export-usb.lock"
 
     def export(self, from_date: date, to_date: date, datasets: Iterable[str] | None = None) -> ExportResult:
         self._lock_path.parent.mkdir(parents=True, exist_ok=True)
@@ -142,15 +145,20 @@ class UsbExportService:
             return self._export_locked(from_date, to_date, datasets)
 
     def _export_locked(self, from_date: date, to_date: date, datasets: Iterable[str] | None) -> ExportResult:
-        self._locator.one_available()  # Also prevents operating on an existing desktop mount.
-        mounted = False
+        device = self._locator.one_exportable()
+        mounted = device.mount_point is not None
         try:
-            self._helper("mount")
-            mounted = True
-            status = self._locator.status()
-            if status.state != "mounted" or status.mount_point != str(MOUNT_POINT):
-                raise UsbExportError("mount_failed")
-            output = MOUNT_POINT / "OMK"
+            if not mounted:
+                self._helper("mount")
+                mounted = True
+                status = self._locator.status()
+                if status.state != "mounted" or status.mount_point != str(MOUNT_POINT):
+                    raise UsbExportError("mount_failed")
+                output_root = MOUNT_POINT
+            else:
+                output_root = device.mount_point
+            assert output_root is not None
+            output = output_root / "OMK"
             try:
                 output.mkdir(exist_ok=True)
             except OSError as error:

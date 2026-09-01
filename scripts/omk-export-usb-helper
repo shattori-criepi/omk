@@ -36,9 +36,9 @@ def main():
             raise SystemExit("device_already_mounted")
         subprocess.run(["systemd-mount", "--collect", "--fsck=no", f"--options=uid={UID},gid={GID},umask=022", device["path"], MOUNT_POINT], check=True)
     else:
-        if device.get("mountpoint") != MOUNT_POINT:
-            raise SystemExit("fixed_mount_not_present")
-        subprocess.run(["systemd-umount", MOUNT_POINT], check=True)
+        if not device.get("mountpoint"):
+            raise SystemExit("device_not_mounted")
+        subprocess.run(["systemd-umount", device["path"]], check=True)
 
 
 if __name__ == "__main__":
