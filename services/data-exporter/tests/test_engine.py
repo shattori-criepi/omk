@@ -75,6 +75,21 @@ def test_multiple_datasets_days_limits_partitions_and_joins_ichijo_errors(tmp_pa
     assert result.row_counts == {"sen66": 2, "ichijo_power_flow": 1}
 
 
+def test_csv_has_one_bom_and_header_across_multiple_partitions(tmp_path):
+    root = tmp_path / "processed"
+    _write(root, "sen66", "2026-08-01", _rows(datetime(2026, 8, 1, tzinfo=JST)))
+    _write(root, "sen66", "2026-08-02", _rows(datetime(2026, 8, 2, tzinfo=JST)))
+
+    result = export_parquet(root, tmp_path / "exports", date(2026, 8, 1), date(2026, 8, 2), ["sen66"], now=NOW)
+
+    with zipfile.ZipFile(result.path) as archive:
+        raw = archive.read("sen66.csv")
+        rows = _csv(archive, "sen66.csv")
+    assert raw.startswith(b"\xef\xbb\xbfdevice_id,measured_at,quality,value\n")
+    assert raw.count(b"device_id,measured_at,quality,value\n") == 1
+    assert len(rows) == 3
+
+
 def test_no_data_invalid_dates_and_failures_leave_no_completed_zip(tmp_path, monkeypatch):
     root = tmp_path / "processed"
     with pytest.raises(ExportError, match="ありません"):

@@ -2,17 +2,19 @@
 
 from __future__ import annotations
 
-import csv
 from dataclasses import dataclass
 from datetime import date, datetime
 import json
 import os
 from pathlib import Path
 import subprocess
-from typing import Any, Iterable
+from typing import Iterable
 from zoneinfo import ZoneInfo
 import zipfile
 
+import pyarrow as pa
+import pyarrow.compute as pc
+import pyarrow.csv as pa_csv
 import pyarrow.parquet as pq
 
 
@@ -146,31 +148,51 @@ def _write_dataset_csv(archive: zipfile.ZipFile, dataset: str, files: list[Path]
     columns = [field.name for field in schema if field.name not in _EXCLUDED_COLUMNS]
     rows = 0
     with archive.open(f"{dataset}.csv", "w") as binary:
-        # TextIOWrapper writes the BOM exactly once and csv handles quoting.
-        import io
-        with io.TextIOWrapper(binary, encoding="utf-8-sig", newline="") as text:
-            writer = csv.writer(text, lineterminator="\n")
-            writer.writerow(columns)
+        # Keep ZIP output streaming while handing full record batches to Arrow's
+        # native CSV writer. The BOM and header are deliberately written once.
+        binary.write(b"\xef\xbb\xbf")
+        binary.write(",".join(_csv_header_field(column) for column in columns).encode("utf-8") + b"\n")
+        output = pa.PythonFile(binary, mode="w")
+        try:
+            write_options = pa_csv.WriteOptions(include_header=False, batch_size=32768)
             for parquet_path in files:
                 parquet = pq.ParquetFile(parquet_path)
                 available = set(parquet.schema_arrow.names)
                 missing = set(columns) - available
                 if missing:
                     raise ExportError(f"{parquet_path} に必要な列がありません: {', '.join(sorted(missing))}")
-                for batch in parquet.iter_batches(columns=columns, batch_size=8192):
-                    for record in batch.to_pylist():
-                        writer.writerow([_csv_value(name, record[name]) for name in columns])
-                        rows += 1
+                for batch in parquet.iter_batches(columns=columns, batch_size=32768):
+                    pa_csv.write_csv(_csv_batch(batch, columns), output, write_options=write_options)
+                    rows += batch.num_rows
+        finally:
+            output.close()
     return rows
 
 
-def _csv_value(column: str, value: Any) -> Any:
-    if value is None:
-        return ""
-    if column == "errors" and isinstance(value, list):
-        return ";".join(str(item) for item in value)
-    if isinstance(value, datetime):
-        return value.isoformat()
+def _csv_batch(batch: pa.RecordBatch, columns: list[str]) -> pa.RecordBatch:
+    """Apply the two export-only conversions without creating Python rows."""
+    arrays: list[pa.Array] = []
+    for field, values in zip(batch.schema, batch.columns, strict=True):
+        if field.name == "errors" and pa.types.is_list(field.type):
+            values = pc.binary_join(values, ";")
+        elif pa.types.is_timestamp(field.type):
+            values = _iso8601_timestamp(values)
+        arrays.append(values)
+    return pa.RecordBatch.from_arrays(arrays, names=columns)
+
+
+def _iso8601_timestamp(values: pa.Array) -> pa.Array:
+    """Match datetime.isoformat(): offset colon and no zero microseconds."""
+    formatted = pc.strftime(values, format="%Y-%m-%dT%H:%M:%S%z")
+    formatted = pc.replace_substring_regex(formatted, r"\.000000([+-][0-9]{4})$", r"\1")
+    return pc.replace_substring_regex(formatted, r"([+-][0-9]{2})([0-9]{2})$", r"\1:\2")
+
+
+def _csv_header_field(value: str) -> str:
+    # Dataset column names are identifiers today; retain valid CSV escaping if
+    # a future schema adds a comma, quote, or line break.
+    if any(character in value for character in ',"\r\n'):
+        return '"' + value.replace('"', '""') + '"'
     return value
 
 
