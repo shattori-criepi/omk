@@ -205,6 +205,33 @@ def _common(record: dict[str, Any], source_file: Path, line_number: int) -> tupl
     }
 
 
+def _ble_common(record: dict[str, Any], source_file: Path, line_number: int) -> tuple[str, dict[str, Any], datetime, dict[str, Any]]:
+    topic = record.get("topic")
+    payload = record.get("payload")
+    if not isinstance(topic, str) or not isinstance(payload, dict):
+        raise RecordError("missing_required_field", "topic and object payload are required")
+    collector_received_at = _timestamp(record.get("received_at"), "collector received_at")
+    if "device_id" in payload:
+        device_id = payload["device_id"]
+        if not isinstance(device_id, str) or not device_id:
+            raise RecordError("missing_required_field", "payload.device_id must be a non-empty string")
+    else:
+        sensor_id = payload.get("sensor_id")
+        if not isinstance(sensor_id, str) or not sensor_id:
+            raise RecordError("missing_required_field", "payload.device_id or payload.sensor_id is required")
+        device_id = sensor_id
+    return topic, payload, collector_received_at, {
+        "device_id": device_id, "collector_received_at": collector_received_at,
+        "topic": topic, "source_file": str(source_file), "source_line_number": line_number,
+    }
+
+
+def _ble_measured_at(payload: dict[str, Any], collector_received_at: datetime) -> datetime:
+    if "measured_at" not in payload:
+        return collector_received_at
+    return _timestamp(payload["measured_at"], "payload.measured_at")
+
+
 def _power(record: dict[str, Any], source_file: Path, line_number: int) -> tuple[str, str, dict[str, Any]]:
     topic, payload, _, row = _common(record, source_file, line_number)
     row["measured_at"] = _timestamp(payload.get("measured_at"), "payload.measured_at")
@@ -328,8 +355,8 @@ def _optional_string_list(payload: dict[str, Any], field_name: str) -> list[str]
 
 
 def _ble_environment(record: dict[str, Any], source_file: Path, line_number: int) -> tuple[str, str, dict[str, Any]]:
-    _, payload, _, row = _common(record, source_file, line_number)
-    row["measured_at"] = _timestamp(payload.get("measured_at"), "payload.measured_at")
+    _, payload, collector_received_at, row = _ble_common(record, source_file, line_number)
+    row["measured_at"] = _ble_measured_at(payload, collector_received_at)
     row["temperature_c"] = _number(payload, "temperature_c")
     row["relative_humidity_pct"] = _number(payload, "relative_humidity_percent")
     row["co2_ppm"] = _number(payload, "co2_ppm")
@@ -340,8 +367,8 @@ def _ble_environment(record: dict[str, Any], source_file: Path, line_number: int
 
 
 def _ble_motion(record: dict[str, Any], source_file: Path, line_number: int) -> tuple[str, str, dict[str, Any]]:
-    _, payload, _, row = _common(record, source_file, line_number)
-    row["measured_at"] = _timestamp(payload.get("measured_at"), "payload.measured_at")
+    _, payload, collector_received_at, row = _ble_common(record, source_file, line_number)
+    row["measured_at"] = _ble_measured_at(payload, collector_received_at)
     row["motion_state"] = _number(payload, "motion_state", integer=True)
     row["battery_percent"] = _number(payload, "battery_percent", integer=True)
     row["light_level"] = _number(payload, "light_level", integer=True)
@@ -349,15 +376,15 @@ def _ble_motion(record: dict[str, Any], source_file: Path, line_number: int) -> 
 
 
 def _ble_contact(record: dict[str, Any], source_file: Path, line_number: int) -> tuple[str, str, dict[str, Any]]:
-    _, payload, _, row = _common(record, source_file, line_number)
-    row["measured_at"] = _timestamp(payload.get("measured_at"), "payload.measured_at")
+    _, payload, collector_received_at, row = _ble_common(record, source_file, line_number)
+    row["measured_at"] = _ble_measured_at(payload, collector_received_at)
     row["contact_state"] = _number(payload, "contact_state", integer=True)
     return BLE_CONTACT, row["measured_at"].date().isoformat(), row
 
 
 def _ble_power(record: dict[str, Any], source_file: Path, line_number: int) -> tuple[str, str, dict[str, Any]]:
-    _, payload, _, row = _common(record, source_file, line_number)
-    row["measured_at"] = _timestamp(payload.get("measured_at"), "payload.measured_at")
+    _, payload, collector_received_at, row = _ble_common(record, source_file, line_number)
+    row["measured_at"] = _ble_measured_at(payload, collector_received_at)
     row["power_w"] = _number(payload, "power_w")
     row["switch_state"] = _number(payload, "switch_state", integer=True)
     row["quality"] = _optional_string(payload, "quality")
@@ -408,7 +435,23 @@ def _is_status_topic(record: dict[str, Any]) -> bool:
         (len(parts) == 3 and bool(parts[1]) and parts[2] == "status")
         or (len(parts) == 4 and parts[1] == "node" and bool(parts[2]) and parts[3] == "status")
         or (len(parts) == 5 and parts[1] == "node" and bool(parts[2]) and parts[3] == "registration" and parts[4] == "status")
+        or (len(parts) == 5 and parts[1] == "node" and bool(parts[2]) and parts[3] == "registration" and parts[4] in {"ack", "config"})
     )
+
+
+def _error_file_name(input_file: Path) -> str:
+    month_directory = input_file.parent
+    year_directory = month_directory.parent
+    if (
+        len(year_directory.name) == 4
+        and year_directory.name.isdigit()
+        and len(month_directory.name) == 2
+        and month_directory.name.isdigit()
+        and len(input_file.stem) == 2
+        and input_file.stem.isdigit()
+    ):
+        return f"{year_directory.name}-{month_directory.name}-{input_file.stem}.jsonl"
+    return f"{input_file.stem}.jsonl"
 
 
 def transform(input_file: Path, output_root: Path, *, dry_run: bool = False, error_root: Path | None = None) -> TransformResult:
@@ -416,7 +459,7 @@ def transform(input_file: Path, output_root: Path, *, dry_run: bool = False, err
     started = time.monotonic()
     result = TransformResult(input_file=input_file)
     writers: dict[tuple[str, str], tuple[Path, Path, pq.ParquetWriter]] = {}
-    error_file = None if dry_run else (error_root or output_root.parent / "errors" / "transform") / f"{input_file.stem}.jsonl"
+    error_file = None if dry_run else (error_root or output_root.parent / "errors" / "transform") / _error_file_name(input_file)
     error_handle = None
 
     def report_error(category: str, line_number: int, raw: str, detail: str) -> None:

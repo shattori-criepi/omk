@@ -137,17 +137,22 @@ def test_status_topics_are_ignored_without_error_jsonl(tmp_path):
     sen66_status = _record("omk/sen66-001/status", {"device_id": "sen66-001", "status": "online"})
     node_status = _record("omk/node/9af9509eb8b6/status", {"status": "online"})
     registration_status = _record("omk/node/9af9509eb8b6/registration/status", {"status": "registered"})
+    registration_ack = _record("omk/node/9af9509eb8b6/registration/ack", {"accepted": True})
+    registration_config = _record("omk/node/9af9509eb8b6/registration/config", {"configured": True})
     input_file.write_text("\n".join(json.dumps(record) for record in [
         power, broute_status, sen66_status, node_status, registration_status,
+        registration_ack, registration_config,
     ]) + "\n", encoding="utf-8")
     result = transform(input_file, tmp_path / "processed")
     assert result.converted == 1
-    assert result.ignored == 4
+    assert result.ignored == 6
     assert result.ignored_topics == {
         "omk/broute-001/status": 1,
         "omk/sen66-001/status": 1,
         "omk/node/9af9509eb8b6/status": 1,
         "omk/node/9af9509eb8b6/registration/status": 1,
+        "omk/node/9af9509eb8b6/registration/ack": 1,
+        "omk/node/9af9509eb8b6/registration/config": 1,
     }
     assert not result.errors
     assert not (tmp_path / "errors/transform/30.jsonl").exists()
@@ -352,6 +357,76 @@ def test_ble_datasets_preserve_direct_relay_and_optional_measurements(tmp_path):
     assert pq.read_table(output / "ble_contact/date=2026-09-01/data.parquet").to_pylist()[0]["contact_state"] == 1
     assert pq.read_table(output / "ble_power/date=2026-09-01/data.parquet").to_pylist()[0]["power_w"] == 4.1
     assert pq.read_table(output / "broute_power/date=2026-09-01/data.parquet").to_pylist()[0]["net_power_w"] == -3581
+
+
+def test_ble_legacy_device_id_and_measurement_time_compatibility(tmp_path):
+    input_file = tmp_path / "15.jsonl"
+    records = [
+        _record("omk/th-001/environment", {
+            "device_id": "th-001", "measured_at": "2026-08-12T13:21:01+09:00",
+            "temperature_c": 26.4, "relative_humidity_percent": 45,
+        }, received_at="2026-08-15T16:47:28.803+09:00"),
+        _record("omk/co2-001/environment", {
+            "sensor_id": "co2-001", "measured_at": "2026-08-12T14:12:47+09:00",
+            "temperature_c": 27.3, "relative_humidity_percent": 42, "co2_ppm": 585,
+        }, received_at="2026-08-15T16:47:28.803+09:00"),
+        _record("omk/th-002/environment", {
+            "device_id": "th-002", "sensor_id": "wrong-sensor-id",
+            "measured_at": "2026-08-12T14:13:47+09:00",
+        }, received_at="2026-08-15T16:47:28.803+09:00"),
+        _record("omk/switchbot-meter-001/environment", {
+            "device_id": "switchbot-meter-001", "temperature_c": 25.1,
+            "relative_humidity_percent": 49,
+        }, received_at="2026-08-15T16:47:28.803+09:00"),
+        _record("omk/th-003/environment", {
+            "measured_at": "2026-08-12T14:14:47+09:00",
+        }, received_at="2026-08-15T16:47:28.803+09:00"),
+        _record("omk/th-004/environment", {
+            "device_id": "th-004", "measured_at": "not-a-date",
+        }, received_at="2026-08-15T16:47:28.803+09:00"),
+    ]
+    input_file.write_text("\n".join(json.dumps(record) for record in records) + "\n", encoding="utf-8")
+
+    output = tmp_path / "processed"
+    result = transform(input_file, output)
+
+    assert result.converted == 4
+    assert result.errors == {"missing_required_field": 1, "invalid_datetime": 1}
+    historical_rows = pq.read_table(output / "ble_environment/date=2026-08-12/data.parquet").to_pylist()
+    assert [row["device_id"] for row in historical_rows] == ["th-001", "co2-001", "th-002"]
+    assert historical_rows[1]["co2_ppm"] == 585.0
+    fallback_row = pq.read_table(output / "ble_environment/date=2026-08-15/data.parquet").to_pylist()[0]
+    assert fallback_row["device_id"] == "switchbot-meter-001"
+    assert fallback_row["measured_at"].isoformat() == "2026-08-15T16:47:28.803000+09:00"
+
+
+def test_non_ble_datasets_do_not_use_legacy_fallbacks(tmp_path):
+    input_file = tmp_path / "15.jsonl"
+    records = [
+        _record("omk/broute-001/power", {
+            "sensor_id": "broute-001", "measured_at": "2026-08-15T16:47:28+09:00", "net_power_w": 1,
+        }),
+        _record("omk/broute-001/power", {
+            "device_id": "broute-001", "net_power_w": 1,
+        }),
+    ]
+    input_file.write_text("\n".join(json.dumps(record) for record in records) + "\n", encoding="utf-8")
+
+    result = transform(input_file, tmp_path / "processed")
+
+    assert result.converted == 0
+    assert result.errors == {"missing_required_field": 2}
+
+
+def test_error_output_uses_full_source_date(tmp_path):
+    input_file = tmp_path / "sensors/2026/07/30.jsonl"
+    input_file.parent.mkdir(parents=True)
+    input_file.write_text("{not json}\n", encoding="utf-8")
+
+    transform(input_file, tmp_path / "processed", error_root=tmp_path / "errors")
+
+    assert (tmp_path / "errors/2026-07-30.jsonl").is_file()
+    assert not (tmp_path / "errors/30.jsonl").exists()
 
 
 def test_partition_merge_replaces_one_source_without_losing_cross_date_records(tmp_path):
