@@ -10,7 +10,7 @@ GID = "@TARGET_GID@"
 
 
 def candidate():
-    result = subprocess.run(["lsblk", "--json", "--bytes", "-o", "PATH,TRAN,FSTYPE,MOUNTPOINT"], capture_output=True, text=True, check=False)
+    result = subprocess.run(["lsblk", "--json", "--bytes", "-o", "NAME,PATH,TYPE,TRAN,FSTYPE,MOUNTPOINT"], capture_output=True, text=True, check=False)
     if result.returncode:
         raise RuntimeError("lsblk_failed")
     found = []

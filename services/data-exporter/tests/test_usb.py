@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date
 from pathlib import Path
+import runpy
 import subprocess
 
 import pytest
@@ -113,3 +114,17 @@ def test_default_lock_is_under_user_writable_data_directory(tmp_path):
     processed = tmp_path / "data" / "processed"
     service = UsbExportService(processed, MutableLocator(), lambda _: None)
     assert service._lock_path == tmp_path / "data" / ".omk-export-usb.lock"
+
+
+def test_helper_requests_tree_columns_and_inherits_usb_transport(monkeypatch):
+    helper = Path(__file__).parents[3] / "scripts" / "omk-export-usb-helper"
+    namespace = runpy.run_path(str(helper))
+    calls = []
+    def run(arguments, **kwargs):
+        import json
+        calls.append(arguments)
+        return subprocess.CompletedProcess(arguments, 0, json.dumps({"blockdevices": _usb()}), "")
+    monkeypatch.setitem(namespace["subprocess"].__dict__, "run", run)
+    found = namespace["candidate"]()
+    assert found["path"] == "/dev/sda1"
+    assert calls == [["lsblk", "--json", "--bytes", "-o", "NAME,PATH,TYPE,TRAN,FSTYPE,MOUNTPOINT"]]
