@@ -65,6 +65,7 @@ steps+=(
   'setup-system-manager.sh|Required Dashboard host API and token environment'
   'setup-data-collection.sh|Required Docker collection and Dashboard services'
   'setup-data-transformer.sh|Required JSONL to Parquet timer'
+  'setup-data-exporter.sh|Required SSH CSV/ZIP export CLI'
 )
 "${WITH_BLE}" && steps+=('setup-ble-sensor-manager.sh|Optional BLE host service')
 "${WITH_BROUTE}" && steps+=('setup-broute-meter.sh|Optional B-route host service')

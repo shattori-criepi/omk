@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# SSH-friendly entry point installed as /usr/local/bin/omk-export by setup-data-exporter.sh.
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+OMK_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd -P)"
+PYTHON="${OMK_ROOT}/services/data-exporter/.venv/bin/python"
+
+if [[ ! -x "${PYTHON}" ]]; then
+  printf 'ERROR: data-exporter virtual environment is unavailable: %s\n' "${PYTHON}" >&2
+  exit 1
+fi
+export PYTHONPATH="${OMK_ROOT}/services/data-exporter/src${PYTHONPATH:+:${PYTHONPATH}}"
+cd "${OMK_ROOT}"
+exec "${PYTHON}" -m data_exporter "$@"
