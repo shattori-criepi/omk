@@ -171,3 +171,90 @@ def test_ichijo_power_flow_is_written_to_partitioned_parquet(tmp_path):
     assert row["grid_import_power_w"] == 3
     assert row["grid_export_power_w"] == 0
     assert row["quality"] == "normal"
+
+
+def test_ble_datasets_preserve_direct_relay_and_optional_measurements(tmp_path):
+    input_file = tmp_path / "01.jsonl"
+    records = [
+        _record("omk/th-001/environment", {
+            "device_id": "th-001", "measured_at": "2026-09-01T13:57:25+09:00",
+            "quality": "normal", "temperature_c": 24.4,
+            "relative_humidity_percent": 47, "source": "direct",
+        }),
+        _record("omk/th-002/environment", {
+            "device_id": "th-002", "measured_at": "2026-09-01T13:57:26+09:00",
+            "temperature_c": 25.1, "relative_humidity_percent": 48,
+            "source": "relay", "relay_node_id": "9af9509eb8b6",
+        }),
+        _record("omk/co2-001/environment", {
+            "device_id": "co2-001", "measured_at": "2026-09-01T13:57:25+09:00",
+            "temperature_c": 27.9, "relative_humidity_percent": 38,
+            "co2_ppm": 541, "source": "direct",
+        }),
+        _record("omk/motion-002/motion", {
+            "device_id": "motion-002", "measured_at": "2026-09-01T13:57:28+09:00",
+            "motion_state": 1,
+        }),
+        _record("omk/contact-001/contact", {
+            "device_id": "contact-001", "measured_at": "2026-09-01T13:57:23+09:00",
+            "contact_state": 1,
+        }),
+        _record("omk/plug-001/power", {
+            "device_id": "plug-001", "measured_at": "2026-09-01T13:57:21+09:00",
+            "quality": "normal", "power_w": 4.1, "switch_state": 1,
+        }),
+        _record("omk/broute-001/power", {
+            "device_id": "broute-001", "measured_at": "2026-09-01T13:57:20+09:00",
+            "net_power_w": -3581,
+        }),
+    ]
+    input_file.write_text("\n".join(json.dumps(record) for record in records) + "\n", encoding="utf-8")
+
+    output = tmp_path / "processed"
+    result = transform(input_file, output)
+
+    assert result.written == {
+        "ble_environment": 3,
+        "ble_motion": 1,
+        "ble_contact": 1,
+        "ble_power": 1,
+        "broute_power": 1,
+    }
+    environments = pq.read_table(output / "ble_environment/date=2026-09-01/data.parquet").to_pylist()
+    direct, relay, co2 = environments
+    assert direct["co2_ppm"] is None
+    assert direct["relay_node_id"] is None
+    assert relay["source"] == "relay"
+    assert relay["relay_node_id"] == "9af9509eb8b6"
+    assert co2["co2_ppm"] == 541.0
+    motion = pq.read_table(output / "ble_motion/date=2026-09-01/data.parquet").to_pylist()[0]
+    assert motion["motion_state"] == 1
+    assert motion["battery_percent"] is None
+    assert motion["light_level"] is None
+    assert pq.read_table(output / "ble_contact/date=2026-09-01/data.parquet").to_pylist()[0]["contact_state"] == 1
+    assert pq.read_table(output / "ble_power/date=2026-09-01/data.parquet").to_pylist()[0]["power_w"] == 4.1
+    assert pq.read_table(output / "broute_power/date=2026-09-01/data.parquet").to_pylist()[0]["net_power_w"] == -3581
+
+
+def test_partition_merge_replaces_one_source_without_losing_cross_date_records(tmp_path):
+    output = tmp_path / "processed"
+    source_a = tmp_path / "30.jsonl"
+    source_b = tmp_path / "31.jsonl"
+    source_a.write_text(json.dumps(_record("omk/broute-001/power", {
+        "device_id": "broute-001", "measured_at": "2026-08-30T23:59:00+09:00", "net_power_w": 10,
+    })) + "\n", encoding="utf-8")
+    source_b.write_text(json.dumps(_record("omk/broute-001/power", {
+        "device_id": "broute-001", "measured_at": "2026-08-30T23:59:30+09:00", "net_power_w": 20,
+    })) + "\n", encoding="utf-8")
+
+    transform(source_a, output)
+    transform(source_b, output)
+    parquet = output / "broute_power/date=2026-08-30/data.parquet"
+    rows = pq.read_table(parquet).to_pylist()
+    assert {row["net_power_w"] for row in rows} == {10, 20}
+    assert {row["source_file"] for row in rows} == {str(source_a), str(source_b)}
+
+    transform(source_b, output)
+    rows = pq.read_table(parquet).to_pylist()
+    assert len(rows) == 2
+    assert {row["net_power_w"] for row in rows} == {10, 20}
