@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import logging
 import json
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -114,7 +116,7 @@ def test_usb_node_candidates_and_provision_are_token_protected_and_secret_free(
         with caplog.at_level(logging.DEBUG):
             listed = client.get("/api/nodes/usb-candidates", headers=headers())
             provisioned = client.post("/api/nodes/usb-provision", headers=headers(), json={"device": device, "node_id": node_id})
-    assert listed.json() == {"nodes": [{"device": device, "node_id": node_id}]}
+    assert listed.json() == {"nodes": [{"device": device, "node_id": node_id}], "busy": False}
     assert provisioned.json() == {"configured": True, "node_id": node_id}
     assert calls == [(device, node_id)]
     assert "synthetic-secret" not in provisioned.text + caplog.text
@@ -128,9 +130,9 @@ def test_usb_node_provision_rejects_unlisted_device_and_concurrent_request(tmp_p
     with client_for(tmp_path) as client:
         invalid = client.post("/api/nodes/usb-provision", headers=headers(), json={"device": "/tmp/not-a-device", "node_id": "9af9509eb8b6"})
         unavailable = client.post("/api/nodes/usb-provision", headers=headers(), json={"device": "/dev/ttyAC0", "node_id": "9af9509eb8b6"})
-        client.app.state.usb_node_provision_lock.acquire()
+        client.app.state.usb_node_provision_operation_lock.acquire()
         busy = client.post("/api/nodes/usb-provision", headers=headers(), json={"device": "/dev/ttyACM0", "node_id": "9af9509eb8b6"})
-        client.app.state.usb_node_provision_lock.release()
+        client.app.state.usb_node_provision_operation_lock.release()
     assert invalid.status_code == 400
     assert unavailable.status_code == 422 and "対象のUSB接続Node" in unavailable.json()["detail"]
     assert busy.status_code == 409 and "設定中" in busy.json()["detail"]
@@ -143,12 +145,76 @@ def test_usb_candidate_poll_returns_cached_result_without_serial_access_while_pr
     monkeypatch.setattr(manager_main, "usb_candidates", lambda: calls.append("serial") or [{"device": "/dev/ttyACM0", "node_id": "9af9509eb8b6"}])
     with client_for(tmp_path) as client:
         first = client.get("/api/nodes/usb-candidates", headers=headers())
-        client.app.state.usb_node_provision_lock.acquire()
+        client.app.state.usb_node_provision_operation_lock.acquire()
         busy = client.get("/api/nodes/usb-candidates", headers=headers())
-        client.app.state.usb_node_provision_lock.release()
+        client.app.state.usb_node_provision_operation_lock.release()
     assert first.json() == {"nodes": [{"device": "/dev/ttyACM0", "node_id": "9af9509eb8b6"}], "busy": False}
     assert busy.json() == {"nodes": [{"device": "/dev/ttyACM0", "node_id": "9af9509eb8b6"}], "busy": True}
     assert calls == ["serial"]
+
+
+def test_usb_provision_waits_for_candidate_scan_instead_of_returning_409(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import omk_system_manager.main as manager_main
+
+    scanning = threading.Event()
+    finish_scan = threading.Event()
+    provisioned = threading.Event()
+
+    def slow_candidates():
+        scanning.set()
+        assert finish_scan.wait(2)
+        return [{"device": "/dev/ttyACM0", "node_id": "9af9509eb8b6"}]
+
+    monkeypatch.setattr(manager_main, "usb_candidates", slow_candidates)
+    monkeypatch.setattr(manager_main, "provision_selected_node", lambda *_: provisioned.set())
+    with client_for(tmp_path) as client:
+        candidate_thread = threading.Thread(target=lambda: client.get("/api/nodes/usb-candidates", headers=headers()))
+        candidate_thread.start()
+        assert scanning.wait(2)
+        response: dict[str, object] = {}
+        provision_thread = threading.Thread(target=lambda: response.setdefault("value", client.post(
+            "/api/nodes/usb-provision", headers=headers(), json={"device": "/dev/ttyACM0", "node_id": "9af9509eb8b6"}
+        )))
+        provision_thread.start()
+        deadline = time.monotonic() + 2
+        while not client.app.state.usb_node_provision_operation_lock.locked() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert client.app.state.usb_node_provision_operation_lock.locked()
+        finish_scan.set()
+        candidate_thread.join(2)
+        provision_thread.join(2)
+    assert not candidate_thread.is_alive()
+    assert not provision_thread.is_alive()
+    assert response["value"].status_code == 200
+    assert provisioned.is_set()
+
+
+def test_usb_candidate_poll_does_not_open_serial_while_provision_operation_waits_or_runs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import omk_system_manager.main as manager_main
+
+    serial_calls = []
+    monkeypatch.setattr(manager_main, "usb_candidates", lambda: serial_calls.append("serial") or [])
+    with client_for(tmp_path) as client:
+        client.app.state.usb_node_candidates_cache = [{"device": "/dev/ttyACM0", "node_id": "9af9509eb8b6"}]
+        client.app.state.usb_node_provision_operation_lock.acquire()
+        busy = client.get("/api/nodes/usb-candidates", headers=headers())
+        client.app.state.usb_node_provision_operation_lock.release()
+    assert busy.json() == {"nodes": [{"device": "/dev/ttyACM0", "node_id": "9af9509eb8b6"}], "busy": True}
+    assert serial_calls == []
+
+
+def test_usb_serial_and_operation_locks_are_released_after_provision_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import omk_system_manager.main as manager_main
+    from omk_system_manager.node_provisioning import ProvisioningError
+
+    monkeypatch.setattr(manager_main, "provision_selected_node", lambda *_: (_ for _ in ()).throw(ProvisioningError("node_not_available")))
+    with client_for(tmp_path) as client:
+        failed = client.post("/api/nodes/usb-provision", headers=headers(), json={"device": "/dev/ttyACM0", "node_id": "9af9509eb8b6"})
+        assert failed.status_code == 422
+        assert client.app.state.usb_node_provision_operation_lock.acquire(blocking=False)
+        client.app.state.usb_node_provision_operation_lock.release()
+        assert client.app.state.usb_node_serial_access_lock.acquire(blocking=False)
+        client.app.state.usb_node_serial_access_lock.release()
 
 
 @pytest.mark.parametrize("path", ["/api/system/reboot", "/api/system/shutdown"])

@@ -131,6 +131,7 @@ USB_NODE_MESSAGES = {
     "node_identity_changed": "対象Nodeの確認に失敗しました。再読み込みしてやり直してください。",
     "mqtt_registration_timeout": "Nodeの再起動後のMQTT登録を確認できませんでした。",
 }
+USB_NODE_SERIAL_ACCESS_TIMEOUT_SECONDS = 5.0
 
 
 def create_app(
@@ -144,7 +145,11 @@ def create_app(
         app.state.settings = settings
         app.state.controller = BRouteServiceController(settings.systemctl_path)
         app.state.usb_export = UsbExportController(settings.usb_export_command)
-        app.state.usb_node_provision_lock = threading.Lock()
+        # An operation lock distinguishes a second Provisioning request from
+        # an in-flight read-only candidate scan.  The latter only owns the
+        # serial lock and must not cause a misleading 409 response.
+        app.state.usb_node_provision_operation_lock = threading.Lock()
+        app.state.usb_node_serial_access_lock = threading.Lock()
         app.state.usb_node_candidates_cache = []
         app.state.site_uuid = resolve_site_uuid(
             settings.site_uuid_path,
@@ -302,8 +307,11 @@ def create_app(
 
     @app.get("/api/nodes/usb-candidates", dependencies=[Depends(authenticated)])
     def list_usb_node_candidates(request: Request) -> dict:
-        lock: threading.Lock = request.app.state.usb_node_provision_lock
-        if not lock.acquire(blocking=False):
+        operation_lock: threading.Lock = request.app.state.usb_node_provision_operation_lock
+        serial_lock: threading.Lock = request.app.state.usb_node_serial_access_lock
+        # While a Provisioning operation owns its operation lock, candidate
+        # polling is cache-only and never opens the same serial device.
+        if operation_lock.locked() or not serial_lock.acquire(blocking=False):
             return {"nodes": request.app.state.usb_node_candidates_cache, "busy": True}
         try:
             candidates = usb_candidates()
@@ -314,15 +322,24 @@ def create_app(
 
     @app.post("/api/nodes/usb-provision", dependencies=[Depends(authenticated)])
     def provision_usb_node(request: Request, body: UsbNodeProvisionRequest) -> dict[str, str | bool]:
-        lock: threading.Lock = request.app.state.usb_node_provision_lock
-        if not lock.acquire(blocking=False):
+        operation_lock: threading.Lock = request.app.state.usb_node_provision_operation_lock
+        serial_lock: threading.Lock = request.app.state.usb_node_serial_access_lock
+        if not operation_lock.acquire(blocking=False):
             raise HTTPException(status_code=409, detail="別のNodeを設定中です")
         try:
-            provision_selected_node(body.device, body.node_id)
+            # A scan already in progress is allowed to finish.  It is bounded
+            # and no longer probes unrelated ttyUSB hardware, so this should
+            # normally take only a short time.
+            if not serial_lock.acquire(timeout=USB_NODE_SERIAL_ACCESS_TIMEOUT_SECONDS):
+                raise HTTPException(status_code=503, detail="USB接続Nodeの確認待ちがタイムアウトしました。もう一度お試しください。")
+            try:
+                provision_selected_node(body.device, body.node_id)
+            finally:
+                serial_lock.release()
         except ProvisioningError as error:
             raise HTTPException(status_code=422, detail=USB_NODE_MESSAGES.get(error.code, "Nodeを設定できませんでした。")) from None
         finally:
-            lock.release()
+            operation_lock.release()
         return {"configured": True, "node_id": body.node_id}
 
     @app.get("/api/access-point/credentials", dependencies=[Depends(authenticated)])
