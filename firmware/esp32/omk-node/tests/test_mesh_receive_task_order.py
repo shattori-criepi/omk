@@ -36,6 +36,7 @@ def test_mesh_parent_rssi_thresholds_are_configured_and_read_back_before_start()
     network = (SOURCE / "mesh_network.c").read_text()
     kconfig = (SOURCE / "Kconfig.projbuild").read_text()
     defaults = (SOURCE.parents[0] / "sdkconfig.defaults").read_text()
+    atom_defaults = (SOURCE.parents[0] / "sdkconfig.atom-s3-lite").read_text()
 
     assert '#include "esp_mesh_internal.h"' in network
     assert "esp_mesh_set_rssi_threshold(&configured)" in network
@@ -45,6 +46,11 @@ def test_mesh_parent_rssi_thresholds_are_configured_and_read_back_before_start()
     for name, value in (("HIGH", "-78"), ("MEDIUM", "-82"), ("LOW", "-85")):
         assert f"config MESH_PARENT_RSSI_{name}" in kconfig
         assert f"CONFIG_MESH_PARENT_RSSI_{name}={value}" in defaults
+
+    # AtomS3 Lite loads this file after sdkconfig.defaults and therefore owns
+    # the field-validated board profile without changing other targets.
+    for name, value in (("HIGH", "-78"), ("MEDIUM", "-80"), ("LOW", "-82")):
+        assert f"CONFIG_MESH_PARENT_RSSI_{name}={value}" in atom_defaults
 
 
 def test_mesh_disables_root_conflicts_before_start():
