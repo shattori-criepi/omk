@@ -7,6 +7,8 @@
 #include "esp_event.h"
 #include "esp_log.h"
 #include "esp_mesh.h"
+/* Parent RSSI threshold controls are currently exposed by ESP-IDF as an internal Mesh API. */
+#include "esp_mesh_internal.h"
 #include "esp_netif.h"
 #include "esp_netif_ip_addr.h"
 #include "esp_system.h"
@@ -37,6 +39,29 @@ static bool root_role_known;
 static bool previous_is_root;
 static bool started;
 static esp_ip4_addr_t current_ip;
+
+static esp_err_t configure_parent_rssi_thresholds(void) {
+    const mesh_rssi_threshold_t configured = {
+        .high = CONFIG_MESH_PARENT_RSSI_HIGH,
+        .medium = CONFIG_MESH_PARENT_RSSI_MEDIUM,
+        .low = CONFIG_MESH_PARENT_RSSI_LOW,
+    };
+    esp_err_t err = esp_mesh_set_rssi_threshold(&configured);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Could not set Mesh RSSI thresholds: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    mesh_rssi_threshold_t applied = {0};
+    err = esp_mesh_get_rssi_threshold(&applied);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Could not read back Mesh RSSI thresholds: %s", esp_err_to_name(err));
+        return err;
+    }
+    ESP_LOGI(TAG, "Mesh RSSI thresholds: high=%d medium=%d low=%d dBm",
+             applied.high, applied.medium, applied.low);
+    return ESP_OK;
+}
 
 static uint32_t uptime_seconds(void) {
     return (uint32_t)(esp_timer_get_time() / 1000000);
@@ -214,6 +239,8 @@ esp_err_t mesh_network_start_prepared(void) {
     err = esp_wifi_start();
     if (err != ESP_OK) return err;
     err = esp_mesh_init();
+    if (err != ESP_OK) return err;
+    err = configure_parent_rssi_thresholds();
     if (err != ESP_OK) return err;
     err = esp_event_handler_register(MESH_EVENT, ESP_EVENT_ANY_ID, mesh_event_handler, NULL);
     if (err != ESP_OK) return err;

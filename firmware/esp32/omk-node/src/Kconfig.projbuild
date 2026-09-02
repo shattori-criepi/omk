@@ -10,4 +10,28 @@ config MESH_ROUTE_TABLE_SIZE
     range 1 300
     default 50
 
+config MESH_PARENT_RSSI_HIGH
+    int "Mesh parent RSSI high threshold (dBm)"
+    range -120 10
+    default -78
+    help
+        High boundary used by ESP-WIFI-MESH when comparing a current parent
+        and a candidate parent RSSI.
+
+config MESH_PARENT_RSSI_MEDIUM
+    int "Mesh parent RSSI medium threshold (dBm)"
+    range -120 10
+    default -82
+    help
+        Medium boundary used by ESP-WIFI-MESH when comparing a current parent
+        and a candidate parent RSSI.
+
+config MESH_PARENT_RSSI_LOW
+    int "Mesh parent RSSI low threshold (dBm)"
+    range -120 10
+    default -85
+    help
+        Minimum RSSI for a Mesh parent candidate and weak-current-parent
+        threshold. Set this value to -82 dBm for the initial relay PoC.
+
 endmenu
