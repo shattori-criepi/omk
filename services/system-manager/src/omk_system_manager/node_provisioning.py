@@ -17,7 +17,12 @@ from collections.abc import Callable
 PROTOCOL_VERSION = 1
 DEFAULT_PROFILE = "omk-ap"
 DEFAULT_MQTT_BROKER = "192.168.50.1"
-DEFAULT_DEVICE_GLOBS = ("/dev/serial/by-id/*", "/dev/ttyACM*", "/dev/ttyUSB*")
+# AtomS3 Lite exposes its supported USB provisioning interface as USB CDC ACM
+# (and, normally, as an Espressif /dev/serial/by-id symlink).  Do not probe
+# every ttyUSB device: gateways can have modems and FTDI adapters for which an
+# identify timeout is both irrelevant and expensive.
+DEFAULT_DEVICE_GLOBS = ("/dev/serial/by-id/*", "/dev/ttyACM*")
+BY_ID_PREFIX = "/dev/serial/by-id/"
 SERIAL_SETTLE_SECONDS = 0.5
 IDENTIFY_ATTEMPTS = 3
 IDENTIFY_RETRY_SECONDS = 0.1
@@ -84,6 +89,41 @@ def same_physical_device(first: str, second: str) -> bool:
     return canonical_device(first) == canonical_device(second)
 
 
+def device_priority(device: str) -> tuple[int, str]:
+    """Choose a stable, supported representative for a physical USB device."""
+    if device.startswith(BY_ID_PREFIX):
+        # AtomS3 Lite's USB JTAG/Serial Debug Unit must win over generic
+        # symlinks and its ttyACM alias.
+        if "espressif" in os.path.basename(device).lower():
+            return (0, device)
+        return (1, device)
+    if device.startswith("/dev/ttyACM"):
+        return (2, device)
+    return (3, device)
+
+
+def is_supported_device_group(aliases: list[str]) -> bool:
+    """Accept AtomS3 Lite paths without opening unrelated serial hardware."""
+    return any(
+        device.startswith("/dev/ttyACM")
+        or (device.startswith(BY_ID_PREFIX) and "espressif" in os.path.basename(device).lower())
+        for device in aliases
+    )
+
+
+def physical_usb_devices() -> list[tuple[str, str]]:
+    """Return one preferred allowlisted path per physical USB serial device."""
+    aliases: dict[str, list[str]] = {}
+    for device in candidate_devices():
+        aliases.setdefault(canonical_device(device), []).append(device)
+    groups = [
+        (min(group, key=device_priority), canonical)
+        for canonical, group in aliases.items()
+        if is_supported_device_group(group)
+    ]
+    return sorted(groups, key=lambda group: device_priority(group[0]))
+
+
 class SerialJson:
     def __init__(self, device: str) -> None:
         self.device = device
@@ -145,22 +185,15 @@ def identify(device: str, timeout: float = 10) -> dict[str, object] | None:
 
 
 def usb_candidates(timeout: float = 3) -> list[dict[str, str | bool]]:
-    # candidate_devices() is ordered by stable /dev/serial/by-id paths first.
-    # Keep the first identified path for each physical Node, so the UI never
-    # renders its by-id symlink and ttyACM/ttyUSB alias as separate Nodes.
-    devices = candidate_devices()
-    aliases: dict[str, list[str]] = {}
-    for device in devices:
-        aliases.setdefault(canonical_device(device), []).append(device)
+    # Identify exactly once for each physical USB device.  The representative
+    # is the stable by-id path when available, so aliases never cause a second
+    # serial open or an unstable path in the UI.
     nodes: dict[str, dict[str, str | bool]] = {}
-    for device in devices:
+    for device, _canonical in physical_usb_devices():
         response = identify(device, timeout)
         if response is not None:
             node_id = str(response["node_id"])
-            # The first alias in a canonical group is /dev/serial/by-id when
-            # present, even if its first identify response was missed.
-            preferred = aliases[canonical_device(device)][0]
-            nodes.setdefault(node_id, {"device": preferred, "node_id": node_id,
+            nodes.setdefault(node_id, {"device": device, "node_id": node_id,
                                         "wifi_configured": response.get("wifi_configured") is True})
     return list(nodes.values())
 
@@ -205,10 +238,13 @@ def wait_for_rebooted_identify(device: str, node_id: str, timeout: float = 60) -
 def find_usb_node_by_id(node_id: str, timeout: float = 3) -> tuple[str, str]:
     if not valid_node_id(node_id):
         raise RuntimeError("Invalid Node ID")
-    matches = [candidate for candidate in usb_candidates(timeout) if candidate["node_id"] == node_id]
-    if len(matches) != 1:
-        raise RuntimeError("Requested OMK Node was not uniquely identified on USB")
-    return str(matches[0]["device"]), node_id
+    # Do not build a complete candidate list first: a requested Node can be
+    # used immediately and unrelated serial devices must not add their timeout.
+    for device, _canonical in physical_usb_devices():
+        response = identify(device, timeout)
+        if response is not None and response.get("node_id") == node_id:
+            return device, node_id
+    raise RuntimeError("Requested OMK Node was not uniquely identified on USB")
 
 
 def wait_for_registration_status(node_id: str, broker: str = DEFAULT_MQTT_BROKER, timeout: float = 60) -> None:
