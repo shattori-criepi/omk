@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import subprocess
 from pathlib import Path
 
@@ -33,3 +34,15 @@ def test_controller_status_uses_fixed_command_without_shell(monkeypatch):
     monkeypatch.setattr('omk_system_manager.usb_export.subprocess.run',run)
     assert UsbExportController('/usr/local/bin/omk-export-usb').status()['state']=='available'
     assert calls[0][0]==['/usr/local/bin/omk-export-usb','--status'] and calls[0][1]['shell'] is False
+
+
+def test_controller_logs_only_safe_error_code(monkeypatch, caplog):
+    def run(args, **kwargs):
+        return subprocess.CompletedProcess(args, 1, '', 'unmount_failed /media/omkdev/private-volume')
+    monkeypatch.setattr('omk_system_manager.usb_export.subprocess.run', run)
+    controller = UsbExportController('/usr/local/bin/omk-export-usb')
+    with caplog.at_level(logging.WARNING):
+        controller._run('2026-08-01', '2026-08-01', ['sen66'])
+    assert controller.job.error_code == 'unmount_failed'
+    assert 'USB export failed: unmount_failed' in caplog.text
+    assert 'private-volume' not in caplog.text

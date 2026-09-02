@@ -36,6 +36,8 @@ render_sudoers() {
 [[ -f "${HELPER_SOURCE}" ]] || { echo 'ERROR: USB helper source is unavailable.' >&2; exit 1; }
 command -v python3 >/dev/null || { echo 'ERROR: python3 is required.' >&2; exit 1; }
 command -v visudo >/dev/null || { echo 'ERROR: visudo is required.' >&2; exit 1; }
+NSENTER="$(command -v nsenter || true)"
+[[ -x "${NSENTER}" ]] || { echo 'ERROR: nsenter is required for safe USB mount operations.' >&2; exit 1; }
 if ! python3 -m venv --help >/dev/null 2>&1; then
   echo 'ERROR: python3-venv is required.' >&2
   exit 1
@@ -47,7 +49,7 @@ VENV="${OMK_ROOT}/services/data-exporter/.venv"
 temporary_helper="$(mktemp)"
 temporary_sudoers="$(mktemp)"
 trap 'rm -f -- "${temporary_helper}" "${temporary_sudoers}"' EXIT
-sed -e "s|@TARGET_UID@|${TARGET_UID}|g" -e "s|@TARGET_GID@|${TARGET_GID}|g" "${HELPER_SOURCE}" >"${temporary_helper}"
+sed -e "s|@TARGET_UID@|${TARGET_UID}|g" -e "s|@TARGET_GID@|${TARGET_GID}|g" -e "s|@NSENTER@|${NSENTER}|g" "${HELPER_SOURCE}" >"${temporary_helper}"
 render_sudoers >"${temporary_sudoers}"
 "${SUDO[@]}" visudo -cf "${temporary_sudoers}"
 "${SUDO[@]}" install -D -o root -g root -m 0755 "${temporary_helper}" "${HELPER_DEST}"

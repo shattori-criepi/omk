@@ -7,10 +7,17 @@ import sys
 MOUNT_POINT = "/run/omk-export-usb"
 UID = "@TARGET_UID@"
 GID = "@TARGET_GID@"
+NSENTER = "@NSENTER@"
+HOST_MOUNT_NAMESPACE = "/proc/1/ns/mnt"
+
+
+def host_run(command, **kwargs):
+    """Run fixed host-storage commands outside the caller's mount namespace."""
+    return subprocess.run([NSENTER, f"--mount={HOST_MOUNT_NAMESPACE}", "--", *command], **kwargs)
 
 
 def candidate():
-    result = subprocess.run(["lsblk", "--json", "--bytes", "-o", "NAME,PATH,TYPE,TRAN,FSTYPE,MOUNTPOINT"], capture_output=True, text=True, check=False)
+    result = host_run(["lsblk", "--json", "--bytes", "-o", "NAME,PATH,TYPE,TRAN,FSTYPE,MOUNTPOINT"], capture_output=True, text=True, check=False)
     if result.returncode:
         raise RuntimeError("lsblk_failed")
     found = []
@@ -34,11 +41,11 @@ def main():
     if sys.argv[1] == "mount":
         if device.get("mountpoint"):
             raise SystemExit("device_already_mounted")
-        subprocess.run(["systemd-mount", "--collect", "--fsck=no", f"--options=uid={UID},gid={GID},umask=022", device["path"], MOUNT_POINT], check=True)
+        host_run(["systemd-mount", "--collect", "--fsck=no", f"--options=uid={UID},gid={GID},umask=022", device["path"], MOUNT_POINT], check=True)
     else:
         if not device.get("mountpoint"):
             raise SystemExit("device_not_mounted")
-        subprocess.run(["systemd-umount", device["path"]], check=True)
+        host_run(["systemd-umount", device["path"]], check=True)
 
 
 if __name__ == "__main__":

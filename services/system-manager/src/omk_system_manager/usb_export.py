@@ -5,12 +5,14 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 import json
+import logging
 import subprocess
 import threading
 from zoneinfo import ZoneInfo
 
 DATASETS = frozenset(("broute_power", "broute_cumulative_energy", "broute_interval_energy", "sen66", "ichijo_power_flow", "ble_environment", "ble_motion", "ble_contact", "ble_power"))
 JST = ZoneInfo("Asia/Tokyo")
+LOGGER = logging.getLogger(__name__)
 
 @dataclass
 class UsbExportJob:
@@ -53,11 +55,14 @@ class UsbExportController:
                 self.job.finished_at = datetime.now(JST).isoformat()
                 if result.returncode == 0:
                     self.job.state = "succeeded"; self.job.file_name = Path(result.stdout.strip()).name
+                    LOGGER.info("USB export completed")
                 else:
                     self.job.state = "failed"; self.job.error_code = _safe_error_code(result.stderr)
+                    LOGGER.warning("USB export failed: %s", self.job.error_code)
         except (OSError, subprocess.SubprocessError):
             with self.lock:
                 self.job.state = "failed"; self.job.finished_at = datetime.now(JST).isoformat(); self.job.error_code = "export_failed"
+                LOGGER.warning("USB export failed: export_failed")
 
 def _safe_error_code(stderr: str) -> str:
     known = {"not_present", "ambiguous", "unsupported_filesystem", "busy", "mount_not_writable", "export_failed", "sync_failed", "unmount_failed"}

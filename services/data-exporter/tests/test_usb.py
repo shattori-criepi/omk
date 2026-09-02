@@ -173,6 +173,7 @@ def test_default_lock_is_under_user_writable_data_directory(tmp_path):
 def test_helper_requests_tree_columns_and_inherits_usb_transport(monkeypatch):
     helper = Path(__file__).parents[3] / "scripts" / "omk-export-usb-helper"
     namespace = runpy.run_path(str(helper))
+    monkeypatch.setitem(namespace["host_run"].__globals__, "NSENTER", "/usr/bin/nsenter")
     calls = []
     def run(arguments, **kwargs):
         import json
@@ -181,4 +182,27 @@ def test_helper_requests_tree_columns_and_inherits_usb_transport(monkeypatch):
     monkeypatch.setitem(namespace["subprocess"].__dict__, "run", run)
     found = namespace["candidate"]()
     assert found["path"] == "/dev/sda1"
-    assert calls == [["lsblk", "--json", "--bytes", "-o", "NAME,PATH,TYPE,TRAN,FSTYPE,MOUNTPOINT"]]
+    assert calls == [["/usr/bin/nsenter", "--mount=/proc/1/ns/mnt", "--", "lsblk", "--json", "--bytes", "-o", "NAME,PATH,TYPE,TRAN,FSTYPE,MOUNTPOINT"]]
+
+
+@pytest.mark.parametrize(("action", "mountpoint", "expected_command"), [
+    ("mount", None, "systemd-mount"),
+    ("unmount", "/media/omkdev/UUID", "systemd-umount"),
+])
+def test_helper_runs_mount_actions_in_host_mount_namespace(monkeypatch, action, mountpoint, expected_command):
+    helper = Path(__file__).parents[3] / "scripts" / "omk-export-usb-helper"
+    namespace = runpy.run_path(str(helper))
+    monkeypatch.setitem(namespace["host_run"].__globals__, "NSENTER", "/usr/bin/nsenter")
+    calls = []
+    def run(arguments, **kwargs):
+        import json
+        calls.append((arguments, kwargs))
+        if arguments[-1] == "NAME,PATH,TYPE,TRAN,FSTYPE,MOUNTPOINT":
+            return subprocess.CompletedProcess(arguments, 0, json.dumps({"blockdevices": _usb(mounted=mountpoint)}), "")
+        return subprocess.CompletedProcess(arguments, 0, "", "")
+    monkeypatch.setitem(namespace["subprocess"].__dict__, "run", run)
+    monkeypatch.setattr(namespace["sys"], "argv", ["helper", action])
+    namespace["main"]()
+    assert calls[0][0][:3] == ["/usr/bin/nsenter", "--mount=/proc/1/ns/mnt", "--"]
+    assert calls[1][0][:3] == ["/usr/bin/nsenter", "--mount=/proc/1/ns/mnt", "--"]
+    assert calls[1][0][3] == expected_command
