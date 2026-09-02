@@ -19,6 +19,8 @@ typedef struct {
 
 esp_err_t gateway_credentials_save(const uint8_t *ssid, size_t ssid_length,
                                    const uint8_t *psk, size_t psk_length);
+/* Erases only omk_net/gw_cred and verifies the key is absent after commit. */
+esp_err_t gateway_credentials_clear(void);
 esp_err_t gateway_credentials_load(omk_gateway_credentials_t *credentials);
 esp_err_t gateway_credentials_migrate_legacy(const wifi_config_t *legacy,
                                               bool *migrated);

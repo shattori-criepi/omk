@@ -44,7 +44,7 @@ static void write_status(const char *status) {
 static void reboot_task(void *argument) {
     (void)argument;
     vTaskDelay(pdMS_TO_TICKS(USB_PROVISIONING_REBOOT_DELAY_MS));
-    ESP_LOGI(TAG, "USB configuration accepted; restarting into normal boot");
+    ESP_LOGI(TAG, "USB provisioning request accepted; restarting into normal boot");
     esp_restart();
 }
 
@@ -81,9 +81,30 @@ static void handle_line(char *line) {
         write_status("ok");
         return;
     }
-    if (strcmp(command->valuestring, "set_wifi") != 0 || reboot_scheduled) {
+    if (reboot_scheduled) {
         cJSON_Delete(root);
-        write_status(reboot_scheduled ? "busy" : "invalid_request");
+        write_status("busy");
+        return;
+    }
+    if (strcmp(command->valuestring, "clear_wifi") == 0) {
+        cJSON_Delete(root);
+        esp_err_t err = wifi_station_clear_saved_credentials();
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "USB Gateway Wi-Fi credential clear failed: %s", esp_err_to_name(err));
+            write_status("storage_error");
+            return;
+        }
+        if (!schedule_reboot()) {
+            ESP_LOGE(TAG, "Could not schedule USB credential-clear reboot");
+            write_status("restart_error");
+            return;
+        }
+        write_status("accepted");
+        return;
+    }
+    if (strcmp(command->valuestring, "set_wifi") != 0) {
+        cJSON_Delete(root);
+        write_status("invalid_request");
         return;
     }
     const cJSON *ssid = cJSON_GetObjectItemCaseSensitive(root, "ssid");

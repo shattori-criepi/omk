@@ -147,6 +147,31 @@ def provision(device: str, ssid: str, password: str, timeout: float = 10) -> str
     return str(response["node_id"])
 
 
+def clear_wifi(device: str, timeout: float = 10) -> str:
+    """Development-only command; it never reads or handles the AP PSK."""
+    serial = SerialJson(device)
+    try:
+        response = serial.request({"command": "clear_wifi", "protocol_version": PROTOCOL_VERSION}, timeout,
+                                  lambda message: is_protocol_response(message) and message["status"] in {"accepted", "busy", "storage_error", "restart_error"})
+    finally:
+        serial.close()
+    if response.get("status") != "accepted":
+        raise ProvisioningError("clear_wifi_failed")
+    return str(response["node_id"])
+
+
+def wait_for_rebooted_identify(device: str, node_id: str, timeout: float = 60) -> None:
+    """Wait past the scheduled reboot, then prove the same USB Node returned."""
+    deadline = time.monotonic() + timeout
+    time.sleep(1)
+    while time.monotonic() < deadline:
+        response = identify(device, min(3, max(0.1, deadline - time.monotonic())))
+        if response is not None and response.get("node_id") == node_id:
+            return
+        time.sleep(0.5)
+    raise ProvisioningError("clear_wifi_reboot_timeout")
+
+
 def wait_for_registration_status(node_id: str, broker: str = DEFAULT_MQTT_BROKER, timeout: float = 60) -> None:
     process = subprocess.Popen(["mosquitto_sub", "-h", broker, "-C", "1", "-W", str(int(timeout)), "-t", f"omk/node/{node_id}/registration/status"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
     try:

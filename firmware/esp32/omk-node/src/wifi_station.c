@@ -82,6 +82,10 @@ esp_err_t wifi_station_save_credentials(
     return gateway_credentials_save(ssid, ssid_length, password, password_length);
 }
 
+esp_err_t wifi_station_clear_saved_credentials(void) {
+    return gateway_credentials_clear();
+}
+
 esp_err_t wifi_station_set_saved_credentials_for_development(
     const uint8_t *ssid, size_t ssid_length,
     const uint8_t *password, size_t password_length) {

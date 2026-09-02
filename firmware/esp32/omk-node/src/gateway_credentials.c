@@ -79,6 +79,23 @@ esp_err_t gateway_credentials_load(omk_gateway_credentials_t *credentials) {
     return ESP_OK;
 }
 
+esp_err_t gateway_credentials_clear(void) {
+    nvs_handle_t nvs = 0;
+    esp_err_t err = nvs_open(OMK_GATEWAY_CREDENTIALS_NAMESPACE, NVS_READWRITE, &nvs);
+    if (err == ESP_OK) err = nvs_erase_key(nvs, OMK_GATEWAY_CREDENTIALS_KEY);
+    if (err == ESP_OK) err = nvs_commit(nvs);
+    if (err == ESP_OK) {
+        gateway_credentials_record_t record = {0};
+        size_t length = sizeof(record);
+        err = nvs_get_blob(nvs, OMK_GATEWAY_CREDENTIALS_KEY, &record, &length);
+        memset(&record, 0, sizeof(record));
+        if (err == ESP_ERR_NVS_NOT_FOUND) err = ESP_OK;
+        else if (err == ESP_OK) err = ESP_FAIL;
+    }
+    if (nvs != 0) nvs_close(nvs);
+    return err;
+}
+
 esp_err_t gateway_credentials_migrate_legacy(const wifi_config_t *legacy, bool *migrated) {
     if (legacy == NULL || migrated == NULL) return ESP_ERR_INVALID_ARG;
     *migrated = false;

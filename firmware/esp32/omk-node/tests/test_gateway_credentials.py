@@ -16,6 +16,23 @@ def test_gateway_credentials_are_a_readback_verified_omk_nvs_record():
     assert "memcmp(&expected, &verified" in source
 
 
+def test_clear_gateway_credentials_erases_only_the_dedicated_key_and_verifies_absence():
+    credentials = (SOURCE / "gateway_credentials.c").read_text()
+    wifi = (SOURCE / "wifi_station.c").read_text()
+    usb = (SOURCE / "usb_provisioning.c").read_text()
+    clear = credentials[credentials.index("esp_err_t gateway_credentials_clear") : credentials.index("esp_err_t gateway_credentials_migrate_legacy")]
+    assert "nvs_erase_key(nvs, OMK_GATEWAY_CREDENTIALS_KEY)" in clear
+    assert "nvs_commit(nvs)" in clear
+    assert "nvs_get_blob(nvs, OMK_GATEWAY_CREDENTIALS_KEY" in clear
+    assert "ESP_ERR_NVS_NOT_FOUND" in clear
+    assert "gateway_credentials_clear" in wifi
+    assert 'strcmp(command->valuestring, "clear_wifi")' in usb
+    assert "wifi_station_clear_saved_credentials" in usb
+    assert usb.index("wifi_station_clear_saved_credentials") < usb.index("schedule_reboot()")
+    for forbidden in ("NODE_NVS_NAMESPACE", "prov_pop", "factory_secret", "boot_count", "logical_id"):
+        assert forbidden not in clear
+
+
 def test_runtime_sta_configuration_is_not_the_gateway_credential_store():
     wifi = (SOURCE / "wifi_station.c").read_text()
     network = (SOURCE / "mesh_network.c").read_text()

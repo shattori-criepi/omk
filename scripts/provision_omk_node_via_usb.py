@@ -17,6 +17,11 @@ def provision(device: str, ssid: str, password: str, timeout: float = 10) -> str
     return _core.provision(device, ssid, password, timeout)
 
 
+def clear_wifi(device: str, timeout: float = 10) -> str:
+    _core.SerialJson = SerialJson  # type: ignore[name-defined] # noqa: F405
+    return _core.clear_wifi(device, timeout)
+
+
 def find_node(device: str | None, timeout: float) -> tuple[str, str]:
     candidates = [device] if device else candidate_devices()  # noqa: F405
     for candidate in candidates:
@@ -33,10 +38,19 @@ def main() -> int:
     parser.add_argument("--timeout", type=float, default=10)
     parser.add_argument("--status-timeout", type=float, default=60)
     parser.add_argument("--mqtt-broker", default=DEFAULT_MQTT_BROKER)  # noqa: F405
+    parser.add_argument("--clear-wifi", action="store_true", help="development only: erase this Node's Gateway Wi-Fi credential")
     args = parser.parse_args()
     if args.timeout <= 0 or args.status_timeout <= 0:
         parser.error("--timeout and --status-timeout must be positive")
+    if args.clear_wifi and not args.device:
+        parser.error("--clear-wifi requires --device")
     device, node_id = find_node(args.device, args.timeout)
+    if args.clear_wifi:
+        if clear_wifi(device, args.timeout) != node_id:
+            raise RuntimeError("Node identity changed while clearing Wi-Fi")
+        wait_for_rebooted_identify(device, node_id, args.status_timeout)  # noqa: F405
+        print(f"USB Wi-Fi credential cleared for node_id={node_id}.")
+        return 0
     ssid, password = read_gateway_wifi(args.profile)  # noqa: F405
     if provision(device, ssid, password, args.timeout) != node_id:  # noqa: F405
         raise RuntimeError("Node identity changed during USB provisioning")

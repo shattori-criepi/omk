@@ -132,6 +132,40 @@ def test_provision_sends_versioned_request_without_printing_password(monkeypatch
                         "ssid": "omk", "password": "synthetic-secret"}
 
 
+def test_clear_wifi_sends_no_credential_and_accepts_only_success(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+    class FakeSerial:
+        def __init__(self, _device: str) -> None: pass
+        def request(self, request, _timeout, _matches):
+            captured.update(request)
+            return {"status": "accepted", "node_id": "9af9509eb8b6"}
+        def close(self): pass
+    monkeypatch.setattr(MODULE, "SerialJson", FakeSerial)
+    assert MODULE.clear_wifi("/dev/example", 1) == "9af9509eb8b6"
+    assert captured == {"command": "clear_wifi", "protocol_version": 1}
+
+
+def test_clear_wifi_requires_explicit_device(monkeypatch) -> None:
+    monkeypatch.setattr(MODULE.sys, "argv", ["provision_omk_node_via_usb.py", "--clear-wifi"])
+    with pytest.raises(SystemExit) as error:
+        MODULE.main()
+    assert error.value.code == 2
+
+
+def test_clear_wifi_identifies_same_explicit_node_before_and_after_reboot(monkeypatch, capsys) -> None:
+    device = "/dev/serial/by-id/usb-omk-node"
+    node_id = "9af9509eb8b6"
+    monkeypatch.setattr(MODULE.sys, "argv", ["provision_omk_node_via_usb.py", "--device", device, "--clear-wifi"])
+    monkeypatch.setattr(MODULE, "find_node", lambda selected, _timeout: (selected, node_id))
+    monkeypatch.setattr(MODULE, "clear_wifi", lambda selected, _timeout: node_id if selected == device else "other")
+    after = []
+    monkeypatch.setattr(MODULE, "wait_for_rebooted_identify", lambda selected, identified, _timeout: after.append((selected, identified)))
+    monkeypatch.setattr(MODULE, "read_gateway_wifi", lambda *_: (_ for _ in ()).throw(AssertionError("clear must not read PSK")))
+    assert MODULE.main() == 0
+    assert after == [(device, node_id)]
+    assert node_id in capsys.readouterr().out
+
+
 def test_registration_status_requires_matching_provisioned_node(monkeypatch) -> None:
     class FakeProcess:
         returncode = 0
