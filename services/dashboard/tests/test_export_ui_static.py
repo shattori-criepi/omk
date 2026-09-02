@@ -9,6 +9,7 @@ def test_usb_export_ui_static_contract() -> None:
     script = (ROOT / "app/static/export.js").read_text(encoding="utf-8")
     menu = (ROOT / "app/templates/admin.html").read_text(encoding="utf-8")
     assert 'href="/admin/export"' in menu and "データ書き出し" in menu
+    assert '<html lang="ja" class="admin-document">' in template
     for element in (
         "id=\"from-display\"",
         "id=\"to-display\"",
@@ -43,4 +44,9 @@ def test_usb_export_ui_static_contract() -> None:
     assert ".export-management-page .export-datasets::-webkit-scrollbar" in css
     assert "min-height: 58px;" in css and ".export-status--running" in css
     assert "min-height: 82px;" in css
-    assert "20260902-export-touch-5" in template
+    assert ".export-management-page {\n  height: auto;" in css
+    assert "overflow: visible;" in css and "grid-auto-rows: max-content;" in css
+    export_scroll_css = css[css.index("/* The export page is a scrollable admin document"):]
+    assert "\n  height: 100dvh;" not in export_scroll_css
+    assert "<details class=\"export-help\">" in template
+    assert "20260902-export-touch-6" in template
