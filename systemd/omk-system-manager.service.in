@@ -22,7 +22,7 @@ RestartSec=5
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=@OMK_ROOT@/services/broute-meter/config @OMK_ROOT@/data/broute-meter @OMK_ROOT@/data/site
+ReadWritePaths=@OMK_ROOT@/services/broute-meter/config @OMK_ROOT@/data/broute-meter @OMK_ROOT@/data/site @OMK_ROOT@/data -/run/omk-export-usb -/media/@OMK_USER@
 
 [Install]
 WantedBy=multi-user.target
