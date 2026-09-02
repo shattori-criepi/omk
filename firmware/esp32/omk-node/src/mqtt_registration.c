@@ -44,6 +44,9 @@ static char device_status_logical_id[OMK_NODE_LOGICAL_ID_MAX_LENGTH + 1];
 static char device_status_will_payload[OMK_MQTT_PAYLOAD_SIZE];
 static bool device_status_configured;
 static bool sen66_connected;
+static bool sen66_diagnostics_available;
+static uint32_t sen66_recovery_count;
+static uint32_t sen66_measurement_timeout_count;
 
 static bool is_lower_hex_identifier(const char *value, size_t length) {
     if (value == NULL || strlen(value) != length) {
@@ -77,13 +80,24 @@ static bool registration_is_persisted(void) {
 
 static void publish_registration_status(void) {
     const char *state = registration_is_persisted() ? "registered" : "provisioned";
+    char sen66_diagnostic_fields[96] = {0};
+    if (sen66_diagnostics_available) {
+        int diagnostic_written = snprintf(
+            sen66_diagnostic_fields, sizeof(sen66_diagnostic_fields),
+            ",\"sen66_rc\":%" PRIu32 ",\"sen66_to\":%" PRIu32,
+            sen66_recovery_count, sen66_measurement_timeout_count);
+        if (diagnostic_written < 0 || diagnostic_written >= (int)sizeof(sen66_diagnostic_fields)) {
+            ESP_LOGE(TAG, "Could not build SEN66 diagnostic status fields");
+            return;
+        }
+    }
     int written = snprintf(registration_payload, sizeof(registration_payload),
                            "{\"protocol_version\":%u,\"node_id\":\"%s\","
                            "\"registration_state\":\"%s\",\"capabilities\":%u,"
-                           "\"connected_sensors\":%s}",
+                           "\"connected_sensors\":%s%s}",
                            OMK_NODE_PROTOCOL_VERSION, client_id + strlen("omk-node-"),
                            state, OMK_NODE_CAPABILITIES,
-                           sen66_connected ? "[\"sen66\"]" : "[]");
+                           sen66_connected ? "[\"sen66\"]" : "[]", sen66_diagnostic_fields);
     if (written < 0 || written >= (int)sizeof(registration_payload)) {
         ESP_LOGE(TAG, "Could not build registration status payload");
         return;
@@ -316,6 +330,16 @@ void mqtt_registration_set_sen66_connected(bool connected) {
         return;
     }
     sen66_connected = connected;
+    if (client != NULL && client_connected) {
+        publish_registration_status();
+    }
+}
+
+void mqtt_registration_set_sen66_diagnostics(uint32_t recovery_count,
+                                             uint32_t measurement_timeout_count) {
+    sen66_diagnostics_available = true;
+    sen66_recovery_count = recovery_count;
+    sen66_measurement_timeout_count = measurement_timeout_count;
     if (client != NULL && client_connected) {
         publish_registration_status();
     }

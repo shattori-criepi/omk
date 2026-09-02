@@ -47,6 +47,15 @@ def test_mesh_parent_rssi_thresholds_are_configured_and_read_back_before_start()
         assert f"CONFIG_MESH_PARENT_RSSI_{name}={value}" in defaults
 
 
+def test_mesh_disables_root_conflicts_before_start():
+    network = (SOURCE / "mesh_network.c").read_text()
+
+    assert "esp_mesh_allow_root_conflicts(false)" in network
+    assert "esp_mesh_is_root_conflicts_allowed()" in network
+    assert "Mesh root conflicts: disabled" in network
+    assert network.index("disable_root_conflicts();") < network.index("esp_mesh_start();")
+
+
 def test_root_parent_connection_signals_external_sta_link_and_starts_dhcp():
     netif = (SOURCE / "mesh_netif.c").read_text()
     root_branch = netif[netif.index("if (is_root) {") : netif.index("    if (station_netif != NULL && strcmp(esp_netif_get_desc(station_netif), \"omk_mesh_sta\") == 0) return ESP_OK;")]

@@ -1,7 +1,10 @@
 #include "sensor_manager.h"
 
+#include <inttypes.h>
+
 #include "driver/i2c_master.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -22,8 +25,31 @@ static const char *TAG = "sensor_manager";
 #define SENSOR_I2C_FREQUENCY_HZ 100000
 #define SEN66_RETRY_INTERVAL_MS 60000
 #define SEN66_MEASUREMENT_INTERVAL_MS 10000
+#define SEN66_MEASUREMENT_LIVENESS_TIMEOUT_MS 60000
 
 static i2c_master_bus_handle_t sensor_i2c_bus;
+typedef struct {
+    uint32_t recovery_count;
+    uint32_t measurement_timeout_count;
+} sen66_diagnostics_t;
+
+static sen66_diagnostics_t sen66_diagnostics;
+
+static uint64_t monotonic_milliseconds(void) {
+    return (uint64_t)(esp_timer_get_time() / 1000);
+}
+
+static void recover_sen66(sen66_sensor_t *sen66, const char *reason) {
+    ESP_LOGW(TAG, "Recovering SEN66 after %s", reason);
+    ++sen66_diagnostics.recovery_count;
+    mqtt_registration_set_sen66_diagnostics(sen66_diagnostics.recovery_count,
+                                             sen66_diagnostics.measurement_timeout_count);
+    esp_err_t stop_err = sen66_sensor_stop(sen66);
+    mqtt_registration_set_sen66_connected(false);
+    if (stop_err != ESP_OK) {
+        ESP_LOGW(TAG, "SEN66 stop failed during recovery: %s", esp_err_to_name(stop_err));
+    }
+}
 
 static void sensor_manager_task(void *arg) {
     (void)arg;
@@ -31,6 +57,9 @@ static void sensor_manager_task(void *arg) {
     unsigned int consecutive_read_failures = 0;
     bool logical_id_warning_logged = false;
     bool mqtt_warning_logged = false;
+    bool recovery_pending = false;
+    uint64_t measurement_started_ms = 0;
+    uint64_t last_successful_measurement_ms = 0;
 
     for (;;) {
         if (!sen66_sensor_is_measuring(&sen66)) {
@@ -45,6 +74,8 @@ static void sensor_manager_task(void *arg) {
                     mqtt_registration_set_sen66_connected(true);
                     ESP_LOGI(TAG, "SEN66 continuous measurement started");
                     consecutive_read_failures = 0;
+                    measurement_started_ms = monotonic_milliseconds();
+                    last_successful_measurement_ms = measurement_started_ms;
                 } else {
                     ESP_LOGW(TAG, "SEN66 startup failed: %s; retrying in 60 seconds",
                              esp_err_to_name(err));
@@ -64,19 +95,19 @@ static void sensor_manager_task(void *arg) {
             ESP_LOGW(TAG, "SEN66 read failed: %s (consecutive_failures=%u)",
                      esp_err_to_name(err), consecutive_read_failures);
             if (consecutive_read_failures >= 3) {
-                ESP_LOGW(TAG, "Recovering SEN66 after consecutive read failures");
-                esp_err_t stop_err = sen66_sensor_stop(&sen66);
-                mqtt_registration_set_sen66_connected(false);
-                if (stop_err != ESP_OK) {
-                    ESP_LOGW(TAG, "SEN66 stop failed during recovery: %s",
-                             esp_err_to_name(stop_err));
-                }
+                recover_sen66(&sen66, "consecutive read failures");
                 consecutive_read_failures = 0;
+                recovery_pending = true;
                 vTaskDelay(pdMS_TO_TICKS(SEN66_RETRY_INTERVAL_MS));
                 continue;
             }
         } else if (data_ready) {
             consecutive_read_failures = 0;
+            last_successful_measurement_ms = monotonic_milliseconds();
+            if (recovery_pending) {
+                ESP_LOGI(TAG, "SEN66 measurement recovered");
+                recovery_pending = false;
+            }
             char logical_id[OMK_NODE_LOGICAL_ID_MAX_LENGTH + 1];
             err = node_registration_get_logical_id(logical_id, sizeof(logical_id));
             if (err != ESP_OK) {
@@ -95,6 +126,21 @@ static void sensor_manager_task(void *arg) {
                     mqtt_warning_logged = false;
                 }
             }
+        }
+        uint64_t liveness_reference_ms = last_successful_measurement_ms;
+        if (liveness_reference_ms == 0) liveness_reference_ms = measurement_started_ms;
+        uint64_t elapsed_ms = monotonic_milliseconds() - liveness_reference_ms;
+        if (elapsed_ms >= SEN66_MEASUREMENT_LIVENESS_TIMEOUT_MS) {
+            ++sen66_diagnostics.measurement_timeout_count;
+            ESP_LOGW(TAG,
+                     "SEN66 measurement timeout: no successful measurement for %" PRIu64
+                     " s; recovering",
+                     elapsed_ms / 1000);
+            recover_sen66(&sen66, "measurement liveness timeout");
+            consecutive_read_failures = 0;
+            recovery_pending = true;
+            vTaskDelay(pdMS_TO_TICKS(SEN66_RETRY_INTERVAL_MS));
+            continue;
         }
         vTaskDelay(pdMS_TO_TICKS(SEN66_MEASUREMENT_INTERVAL_MS));
     }

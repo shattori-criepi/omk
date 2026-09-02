@@ -63,6 +63,20 @@ static esp_err_t configure_parent_rssi_thresholds(void) {
     return ESP_OK;
 }
 
+static esp_err_t disable_root_conflicts(void) {
+    esp_err_t err = esp_mesh_allow_root_conflicts(false);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Could not disable Mesh root conflicts: %s", esp_err_to_name(err));
+        return err;
+    }
+    if (esp_mesh_is_root_conflicts_allowed()) {
+        ESP_LOGE(TAG, "Mesh root conflicts remain enabled after configuration");
+        return ESP_FAIL;
+    }
+    ESP_LOGI(TAG, "Mesh root conflicts: disabled");
+    return ESP_OK;
+}
+
 static uint32_t uptime_seconds(void) {
     return (uint32_t)(esp_timer_get_time() / 1000000);
 }
@@ -239,6 +253,8 @@ esp_err_t mesh_network_start_prepared(void) {
     err = esp_wifi_start();
     if (err != ESP_OK) return err;
     err = esp_mesh_init();
+    if (err != ESP_OK) return err;
+    err = disable_root_conflicts();
     if (err != ESP_OK) return err;
     err = configure_parent_rssi_thresholds();
     if (err != ESP_OK) return err;

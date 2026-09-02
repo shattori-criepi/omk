@@ -81,7 +81,7 @@ def test_registration_status_payload_has_dedicated_capacity_for_sensor_presence(
     assert "#define OMK_REGISTRATION_PAYLOAD_SIZE 192" in source
     assert "static char registration_payload[OMK_REGISTRATION_PAYLOAD_SIZE];" in source
     status = source[source.index("static void publish_registration_status") : source.index("static bool logical_id_is_valid")]
-    assert '"\\\"connected_sensors\\\":%s}"' in status
+    assert '"\\\"connected_sensors\\\":%s%s}"' in status
     assert "esp_mqtt_client_publish(client, registration_topic," in status
     assert "registration_payload, 0, 1, 1" in status
 
@@ -98,6 +98,27 @@ def test_registration_status_payload_has_dedicated_capacity_for_sensor_presence(
         assert decoded["registration_state"] == state
         assert decoded["capabilities"] == 3
         assert decoded["connected_sensors"] == sensors
+
+    diagnostics_payload = json.dumps({
+        "protocol_version": 1,
+        "node_id": "09dda0d5a8f2",
+        "registration_state": "registered",
+        "capabilities": 3,
+        "connected_sensors": ["sen66"],
+        "sen66_rc": 4294967295,
+        "sen66_to": 4294967295,
+    }, separators=(",", ":"))
+    assert len(diagnostics_payload) < 192
+
+
+def test_registration_status_includes_sen66_recovery_diagnostics_only_after_recovery():
+    source = (SOURCE / "mqtt_registration.c").read_text()
+    status = source[source.index("static void publish_registration_status") : source.index("static bool logical_id_is_valid")]
+
+    assert "if (sen66_diagnostics_available)" in status
+    assert "sen66_rc" in status
+    assert "sen66_to" in status
+    assert "mqtt_registration_set_sen66_diagnostics" in source
 
 
 def test_operational_logs_cover_boot_mesh_ip_and_mqtt_transitions_without_poc_breadcrumbs():
