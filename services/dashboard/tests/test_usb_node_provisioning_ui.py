@@ -8,13 +8,20 @@ def test_sensor_management_integrates_usb_provisioning_into_matching_node_card_w
     template = (ROOT / "app/templates/admin_sensors.html").read_text(encoding="utf-8")
     script = (ROOT / "app/static/admin.js").read_text(encoding="utf-8")
     source = template + script
-    assert '?v=20260902-usb-node-provisioning-wifi-state' in template
+    assert '?v=20260902-usb-provisioning-confirmation' in template
     assert 'id="usb-nodes"' not in template
     for text in ("usbCandidatesByNodeId", "const usbCandidate = usbCandidatesByNodeId.get(node.node_id)", "このNodeを設定", "設定中…", "/setup/usb-nodes", "/setup/usb-provision", "Promise.all([loadNodes(), loadUsbNodes()])"):
         assert text in source
     assert "usbProvisioningInProgress" in script
     assert "if (usbProvisioningInProgress) return;" in script
     assert "usbCandidate?.wifi_configured === false" in script
+    assert "confirmUsbProvisionFailure" in script
+    assert 'if (data.busy) return "unknown"' in script
+    assert 'candidate?.wifi_configured === true' in script
+    assert 'candidate?.wifi_configured === false' in script
+    assert 'state === "retry"' in script
+    assert '状態を確認できません。画面を再読み込みしてください。' in script
+    assert 'button.textContent = "このNodeを設定"' not in script
     assert 'node.registration_state === "registered" ?' in script
     assert 'node.registration_state === "provisioned" ?' in script
     assert "OMK_SYSTEM_MANAGER_TOKEN" not in source and "Bearer " not in source

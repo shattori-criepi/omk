@@ -9,7 +9,7 @@ import threading
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import AsyncIterator, Protocol
+from typing import AsyncIterator, Callable, Protocol
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
@@ -132,6 +132,17 @@ USB_NODE_MESSAGES = {
     "mqtt_registration_timeout": "Nodeの再起動後のMQTT登録を確認できませんでした。",
 }
 USB_NODE_SERIAL_ACCESS_TIMEOUT_SECONDS = 5.0
+
+
+def scan_usb_candidates_with_serial_lock(
+    serial_lock: threading.Lock,
+    scan: Callable[[], list[dict[str, str | bool]]],
+) -> list[dict[str, str | bool]]:
+    """Run an already-authorized candidate scan and always release its lock."""
+    try:
+        return scan()
+    finally:
+        serial_lock.release()
 
 
 def create_app(
@@ -313,12 +324,9 @@ def create_app(
         # polling is cache-only and never opens the same serial device.
         if operation_lock.locked() or not serial_lock.acquire(blocking=False):
             return {"nodes": request.app.state.usb_node_candidates_cache, "busy": True}
-        try:
-            candidates = usb_candidates()
-            request.app.state.usb_node_candidates_cache = candidates
-            return {"nodes": candidates, "busy": False}
-        finally:
-            lock.release()
+        candidates = scan_usb_candidates_with_serial_lock(serial_lock, usb_candidates)
+        request.app.state.usb_node_candidates_cache = candidates
+        return {"nodes": candidates, "busy": False}
 
     @app.post("/api/nodes/usb-provision", dependencies=[Depends(authenticated)])
     def provision_usb_node(request: Request, body: UsbNodeProvisionRequest) -> dict[str, str | bool]:
