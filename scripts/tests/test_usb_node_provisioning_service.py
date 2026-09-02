@@ -16,10 +16,12 @@ DEVICE = "/dev/ttyACM0"
 NODE_ID = "9af9509eb8b6"
 
 
-def test_usb_candidates_only_returns_identified_omk_nodes(monkeypatch) -> None:
-    monkeypatch.setattr(MODULE, "candidate_devices", lambda: ["/dev/ttyACM0", "/dev/ttyUSB0"])
-    monkeypatch.setattr(MODULE, "identify", lambda device, _timeout: None if device.endswith("USB0") else {"node_id": NODE_ID})
-    assert MODULE.usb_candidates() == [{"device": DEVICE, "node_id": NODE_ID}]
+def test_usb_candidates_deduplicates_same_node_and_prefers_by_id(monkeypatch) -> None:
+    by_id = "/dev/serial/by-id/usb-Espressif-if00"
+    monkeypatch.setattr(MODULE, "candidate_devices", lambda: [by_id, DEVICE, "/dev/ttyUSB0"])
+    monkeypatch.setattr(MODULE, "identify", lambda device, _timeout: (
+        {"node_id": NODE_ID} if device != "/dev/ttyUSB0" else None))
+    assert MODULE.usb_candidates() == [{"device": by_id, "node_id": NODE_ID}]
 
 
 def test_selected_node_rechecks_exact_device_and_identity_before_credentials(monkeypatch) -> None:

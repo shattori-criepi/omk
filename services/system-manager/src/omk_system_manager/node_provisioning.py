@@ -123,8 +123,16 @@ def identify(device: str, timeout: float = 10) -> dict[str, object] | None:
 
 
 def usb_candidates(timeout: float = 3) -> list[dict[str, str]]:
-    return [{"device": device, "node_id": str(response["node_id"])} for device in candidate_devices()
-            if (response := identify(device, timeout)) is not None]
+    # candidate_devices() is ordered by stable /dev/serial/by-id paths first.
+    # Keep the first identified path for each physical Node, so the UI never
+    # renders its by-id symlink and ttyACM/ttyUSB alias as separate Nodes.
+    nodes: dict[str, dict[str, str]] = {}
+    for device in candidate_devices():
+        response = identify(device, timeout)
+        if response is not None:
+            node_id = str(response["node_id"])
+            nodes.setdefault(node_id, {"device": device, "node_id": node_id})
+    return list(nodes.values())
 
 
 def provision(device: str, ssid: str, password: str, timeout: float = 10) -> str:
