@@ -14,10 +14,10 @@ def test_usb_export_ui_static_contract() -> None:
         "id=\"to-display\"",
         "id=\"datasets\"",
         "id=\"export-button\"",
+        "id=\"export-status-panel\"",
+        "id=\"export-status-title\"",
         "id=\"usb-status\"",
-        "id=\"export-job-status\"",
-        "id=\"export-job-title\"",
-        "id=\"export-job-detail\"",
+        "id=\"export-status-detail\"",
     ):
         assert element in template
     assert 'type="date"' not in template and 'type="text"' not in template
@@ -26,11 +26,13 @@ def test_usb_export_ui_static_contract() -> None:
     assert 'timeZone: "Asia/Tokyo"' in script and "calendar-grid" in script
     assert "new Date().toISOString().slice(0, 10)" not in script
     assert "function renderUsbStatus" in script and "function renderExportState" in script
-    assert 'id="export-message"' not in template
+    assert 'id="export-message"' not in template and 'id="export-job-status"' not in template
     assert "データを書き出しています…" in script and "書き出し中…" in script
     assert "書き出しが完了しました" in script and "USBメモリを取り外せます" in script
     assert "USBメモリを安全に取り外せません" in script and "まだ取り外さないでください" in script
-    assert 'else if (exportState?.error_code === "unmount_failed")' in script
+    assert "function isUnmountBlocked" in script
+    assert 'usb?.mount_state === "mounted"' in script
+    assert 'exportState?.error_code === "unmount_failed"' in script
     assert 'lastExport = { state: "running" }' in script
     assert "await refresh();" in script and "window.setInterval(refresh, 3000)" in script
     assert "過去7日" in template and "過去30日" in template and "今月" in template
@@ -39,5 +41,6 @@ def test_usb_export_ui_static_contract() -> None:
     css = (ROOT / "app/static/display.css").read_text(encoding="utf-8")
     assert "overflow-y: auto;" in css and "max-height: 202px;" in css
     assert ".export-management-page .export-datasets::-webkit-scrollbar" in css
-    assert "min-height: 58px;" in css and ".export-job-status" in css
-    assert "20260902-export-touch-4" in template
+    assert "min-height: 58px;" in css and ".export-status--running" in css
+    assert "min-height: 82px;" in css
+    assert "20260902-export-touch-5" in template

@@ -10,6 +10,8 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import logging
+import time
 from typing import Callable, Iterable
 
 from .engine import ExportError, ExportResult, export_parquet
@@ -17,6 +19,9 @@ from .engine import ExportError, ExportResult, export_parquet
 
 MOUNT_POINT = Path("/run/omk-export-usb")
 USB_FILESYSTEMS = frozenset({"vfat", "exfat"})
+UNMOUNT_VERIFICATION_ATTEMPTS = 10
+UNMOUNT_VERIFICATION_INTERVAL_SECONDS = 0.25
+LOGGER = logging.getLogger(__name__)
 
 
 class UsbExportError(RuntimeError):
@@ -127,13 +132,14 @@ class UsbExportService:
 
     def __init__(self, processed_root: Path, locator: UsbLocator, helper: Callable[[str], None],
                  exporter: Callable[..., ExportResult] = export_parquet, sync: Callable[[], None] = os.sync,
-                 lock_path: Path | None = None) -> None:
+                 lock_path: Path | None = None, sleep: Callable[[float], None] = time.sleep) -> None:
         self._processed_root = processed_root
         self._locator = locator
         self._helper = helper
         self._exporter = exporter
         self._sync = sync
         self._lock_path = lock_path or processed_root.parent / ".omk-export-usb.lock"
+        self._sleep = sleep
 
     def export(self, from_date: date, to_date: date, datasets: Iterable[str] | None = None) -> ExportResult:
         self._lock_path.parent.mkdir(parents=True, exist_ok=True)
@@ -178,10 +184,21 @@ class UsbExportService:
         try:
             self._helper("unmount")
         except Exception as error:
+            LOGGER.warning("USB export unmount helper failed")
             raise UsbExportError("unmount_failed", str(error)) from error
-        if self._locator.status().state == "mounted":
+        if not self._wait_for_unmount():
+            LOGGER.warning("USB remained mounted after unmount verification")
             raise UsbExportError("unmount_failed")
         return result
+
+    def _wait_for_unmount(self) -> bool:
+        """Absorb the short lsblk/systemd state propagation delay after unmount."""
+        for attempt in range(UNMOUNT_VERIFICATION_ATTEMPTS):
+            if self._locator.status().state != "mounted":
+                return True
+            if attempt + 1 < UNMOUNT_VERIFICATION_ATTEMPTS:
+                self._sleep(UNMOUNT_VERIFICATION_INTERVAL_SECONDS)
+        return False
 
     def _unmount_after_failure(self) -> None:
         try:

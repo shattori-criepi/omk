@@ -8,7 +8,16 @@ import subprocess
 import pytest
 
 from data_exporter.engine import ExportResult
-from data_exporter.usb import MOUNT_POINT, UsbExportError, UsbExportService, UsbLocator
+from data_exporter.usb import (
+    MOUNT_POINT,
+    UNMOUNT_VERIFICATION_ATTEMPTS,
+    UNMOUNT_VERIFICATION_INTERVAL_SECONDS,
+    UsbDevice,
+    UsbExportError,
+    UsbExportService,
+    UsbLocator,
+    UsbStatus,
+)
 
 
 def _lsblk(devices):
@@ -98,6 +107,51 @@ def test_export_uses_existing_automount_and_unmounts_it(tmp_path, monkeypatch):
         return ExportResult(output / "done.zip", (), {})
     UsbExportService(tmp_path, locator, helper, exporter, lock_path=tmp_path / "lock").export(date(2026, 8, 1), date(2026, 8, 1))
     assert actions == ["unmount"]
+
+
+class VerificationLocator:
+    def __init__(self, mount: Path, states: list[str]) -> None:
+        self.mount = mount
+        self.states = iter(states)
+
+    def one_exportable(self) -> UsbDevice:
+        return UsbDevice("/dev/sda1", "vfat", "OMK", 1024, self.mount)
+
+    def status(self) -> UsbStatus:
+        state = next(self.states)
+        return UsbStatus(state, "/dev/sda1", "vfat", mount_state="mounted" if state == "mounted" else "unmounted")
+
+
+def test_unmount_verification_retries_until_usb_is_unmounted(tmp_path):
+    mount = tmp_path / "media"; mount.mkdir()
+    sleeps = []
+    service = UsbExportService(
+        tmp_path,
+        VerificationLocator(mount, ["mounted", "available"]),
+        lambda action: action == "unmount",
+        lambda *args: ExportResult(tmp_path / "x.zip", (), {}),
+        lock_path=tmp_path / "lock",
+        sleep=sleeps.append,
+    )
+    service.export(date(2026, 8, 1), date(2026, 8, 1))
+    assert sleeps == [UNMOUNT_VERIFICATION_INTERVAL_SECONDS]
+
+
+def test_unmount_verification_fails_when_usb_remains_mounted(tmp_path):
+    mount = tmp_path / "media"; mount.mkdir()
+    sleeps = []
+    service = UsbExportService(
+        tmp_path,
+        VerificationLocator(mount, ["mounted"] * UNMOUNT_VERIFICATION_ATTEMPTS),
+        lambda action: action == "unmount",
+        lambda *args: ExportResult(tmp_path / "x.zip", (), {}),
+        lock_path=tmp_path / "lock",
+        sleep=sleeps.append,
+    )
+    with pytest.raises(UsbExportError, match="unmount_failed") as error:
+        service.export(date(2026, 8, 1), date(2026, 8, 1))
+    assert error.value.code == "unmount_failed"
+    assert sleeps == [UNMOUNT_VERIFICATION_INTERVAL_SECONDS] * (UNMOUNT_VERIFICATION_ATTEMPTS - 1)
 
 
 def test_lock_prevents_second_export(tmp_path):

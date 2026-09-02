@@ -515,7 +515,44 @@ html.admin-document::-webkit-scrollbar-thumb { border: 3px solid #0b1220; border
 
 /* Export job feedback stays beside the action, separate from USB detection. */
 .export-management-page .export-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 82px;
   padding-block: 10px;
+}
+
+.export-management-page .export-status > strong {
+  font-size: clamp(24px, 3vw, 28px);
+  font-weight: 800;
+}
+
+.export-management-page .export-status > span {
+  font-size: clamp(20px, 2.4vw, 22px);
+  line-height: 1.35;
+}
+
+.export-management-page .export-status--running,
+.export-management-page .export-status--succeeded,
+.export-management-page .export-status--failed {
+  display: grid;
+  align-content: center;
+  gap: 4px;
+}
+
+.export-management-page .export-status--running {
+  border-color: #fbbf24;
+  background: #3b2f14;
+}
+
+.export-management-page .export-status--succeeded {
+  border-color: #4ade80;
+  background: #14532d;
+}
+
+.export-management-page .export-status--failed {
+  border-color: #f87171;
+  background: #7f1d1d;
 }
 
 .export-management-page .export-datasets {
@@ -544,43 +581,4 @@ html.admin-document::-webkit-scrollbar-thumb { border: 3px solid #0b1220; border
 
 .export-management-page .export-dataset-option {
   min-height: 58px;
-}
-
-.export-management-page .export-job-status {
-  display: grid;
-  gap: 4px;
-  margin: 8px 0;
-  padding: 12px 16px;
-  border: 2px solid #64748b;
-  border-radius: 16px;
-  background: #172554;
-}
-
-.export-management-page .export-job-status[hidden] {
-  display: none;
-}
-
-.export-management-page .export-job-status strong {
-  font-size: clamp(24px, 3vw, 28px);
-  font-weight: 800;
-}
-
-.export-management-page .export-job-status span {
-  font-size: clamp(20px, 2.4vw, 22px);
-  line-height: 1.35;
-}
-
-.export-management-page .export-job-status--running {
-  border-color: #fbbf24;
-  background: #3b2f14;
-}
-
-.export-management-page .export-job-status--succeeded {
-  border-color: #4ade80;
-  background: #14532d;
-}
-
-.export-management-page .export-job-status--failed {
-  border-color: #f87171;
-  background: #7f1d1d;
 }

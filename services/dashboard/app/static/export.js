@@ -24,10 +24,10 @@ const USB_MESSAGES = {
 const $ = (selector) => document.querySelector(selector);
 const form = $("#export-form");
 const actionButton = $("#export-button");
+const statusPanel = $("#export-status-panel");
+const statusTitle = $("#export-status-title");
 const usbStatus = $("#usb-status");
-const jobStatus = $("#export-job-status");
-const jobTitle = $("#export-job-title");
-const jobDetail = $("#export-job-detail");
+const statusDetail = $("#export-status-detail");
 const datasets = $("#datasets");
 const calendarDialog = $("#calendar-dialog");
 const calendarGrid = $("#calendar-grid");
@@ -82,6 +82,11 @@ function renderDatasets() {
 
 function renderUsbStatus(usb) {
   const state = usb?.state || "not_present";
+  statusPanel.className = "export-panel export-status";
+  statusTitle.textContent = "USBメモリ:";
+  usbStatus.hidden = false;
+  statusDetail.hidden = true;
+  statusDetail.textContent = "";
   if (state === "available" || state === "mounted") {
     const filesystem = usb.filesystem === "vfat" ? "FAT32" : usb.filesystem === "exfat" ? "exFAT" : "利用可能";
     usbStatus.textContent = `利用可能 / ${filesystem}`;
@@ -90,38 +95,42 @@ function renderUsbStatus(usb) {
   usbStatus.textContent = USB_MESSAGES[state] || "対応するUSBメモリを挿入してください";
 }
 
-function renderExportState(exportState) {
+function isUnmountBlocked(exportState, usb) {
+  return exportState?.error_code === "unmount_failed" && usb?.mount_state === "mounted";
+}
+
+function renderExportState(exportState, usb) {
   const state = exportState?.state || "idle";
-  jobStatus.className = `export-job-status export-job-status--${state}`;
+  const staleUnmountFailure = exportState?.error_code === "unmount_failed" && !isUnmountBlocked(exportState, usb);
   actionButton.textContent = state === "running" ? "書き出し中…" : "USBへ書き出す";
 
-  if (state === "idle") {
-    jobStatus.hidden = true;
-    jobTitle.textContent = "";
-    jobDetail.textContent = "";
+  if (state === "idle" || staleUnmountFailure) {
+    renderUsbStatus(usb);
     return;
   }
 
-  jobStatus.hidden = false;
+  statusPanel.className = `export-panel export-status export-status--${state}`;
+  usbStatus.hidden = true;
+  statusDetail.hidden = false;
   if (state === "running") {
-    jobTitle.textContent = "データを書き出しています…";
-    jobDetail.textContent = "USBメモリを取り外さないでください";
+    statusTitle.textContent = "データを書き出しています…";
+    statusDetail.textContent = "USBメモリを取り外さないでください";
   } else if (state === "succeeded") {
-    jobTitle.textContent = "書き出しが完了しました";
-    jobDetail.textContent = "USBメモリを取り外せます";
+    statusTitle.textContent = "書き出しが完了しました";
+    statusDetail.textContent = "USBメモリを取り外せます";
   } else if (exportState?.error_code === "unmount_failed") {
-    jobTitle.textContent = "USBメモリを安全に取り外せません";
-    jobDetail.textContent = "まだ取り外さないでください";
+    statusTitle.textContent = "USBメモリを安全に取り外せません";
+    statusDetail.textContent = "まだ取り外さないでください";
   } else {
-    jobTitle.textContent = USB_MESSAGES[exportState?.error_code] || "書き出しに失敗しました";
-    jobDetail.textContent = "必要に応じてもう一度お試しください";
+    statusTitle.textContent = USB_MESSAGES[exportState?.error_code] || "書き出しに失敗しました";
+    statusDetail.textContent = "必要に応じてもう一度お試しください";
   }
 }
 
 function updateControls() {
   const running = lastExport?.state === "running";
   const usbAvailable = ["available", "mounted"].includes(lastUsb?.state);
-  const unsafeToRemove = lastExport?.error_code === "unmount_failed";
+  const unsafeToRemove = isUnmountBlocked(lastExport, lastUsb);
   actionButton.disabled = running || !usbAvailable || unsafeToRemove || selectedDatasetNames().length === 0;
 
   document.querySelectorAll("[data-preset], [data-date-target], #select-all, #select-none, #datasets input")
@@ -184,13 +193,13 @@ async function refresh() {
     lastUsb = status.usb || { state: "not_present" };
     lastExport = status.export || { state: "idle" };
     renderUsbStatus(lastUsb);
-    renderExportState(lastExport);
+    renderExportState(lastExport, lastUsb);
     updateControls();
   } catch (_) {
     lastUsb = { state: "not_present" };
     lastExport = { state: "failed", error_code: "export_failed" };
     renderUsbStatus(lastUsb);
-    renderExportState(lastExport);
+    renderExportState(lastExport, lastUsb);
     updateControls();
   }
 }
@@ -238,7 +247,7 @@ form.addEventListener("submit", async (event) => {
   const selected = selectedDatasetNames();
   if (!selected.length || actionButton.disabled) return;
   lastExport = { state: "running" };
-  renderExportState(lastExport);
+  renderExportState(lastExport, lastUsb);
   updateControls();
   try {
     const response = await fetch("/api/export/usb", {
@@ -250,7 +259,7 @@ form.addEventListener("submit", async (event) => {
     await refresh();
   } catch (_) {
     lastExport = { state: "failed", error_code: "export_failed" };
-    renderExportState(lastExport);
+    renderExportState(lastExport, lastUsb);
     updateControls();
   }
 });
