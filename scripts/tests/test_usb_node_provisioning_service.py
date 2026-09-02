@@ -24,7 +24,30 @@ def test_usb_candidates_deduplicates_same_node_and_prefers_by_id(monkeypatch) ->
     assert MODULE.usb_candidates() == [{"device": by_id, "node_id": NODE_ID}]
 
 
+def test_identify_retries_after_initial_timeout(monkeypatch) -> None:
+    attempts = []
+    class FakeSerial:
+        def __init__(self, _device): attempts.append("open")
+        def request(self, *_args):
+            if len(attempts) == 1: raise TimeoutError()
+            return {"status": "ok", "protocol_version": 1, "node_id": NODE_ID}
+        def close(self): pass
+    monkeypatch.setattr(MODULE, "SerialJson", FakeSerial)
+    monkeypatch.setattr(MODULE.time, "sleep", lambda _: None)
+    assert MODULE.identify(DEVICE, 1) == {"status": "ok", "protocol_version": 1, "node_id": NODE_ID}
+    assert attempts == ["open", "open"]
+
+
+def test_by_id_alias_is_preferred_when_only_tty_alias_identifies(monkeypatch) -> None:
+    by_id = "/dev/serial/by-id/usb-Espressif-if00"
+    monkeypatch.setattr(MODULE, "candidate_devices", lambda: [by_id, DEVICE])
+    monkeypatch.setattr(MODULE, "canonical_device", lambda _device: DEVICE)
+    monkeypatch.setattr(MODULE, "identify", lambda device, _timeout: None if device == by_id else {"node_id": NODE_ID})
+    assert MODULE.usb_candidates() == [{"device": by_id, "node_id": NODE_ID}]
+
+
 def test_selected_node_rechecks_exact_device_and_identity_before_credentials(monkeypatch) -> None:
+    monkeypatch.setattr(MODULE, "candidate_devices", lambda: [DEVICE])
     monkeypatch.setattr(MODULE, "usb_candidates", lambda: [{"device": DEVICE, "node_id": NODE_ID}])
     called = []
     monkeypatch.setattr(MODULE, "read_gateway_wifi", lambda: called.append("credentials") or ("omk", "secret-canary"))
@@ -36,7 +59,23 @@ def test_selected_node_rechecks_exact_device_and_identity_before_credentials(mon
         MODULE.provision_selected_node("/dev/ttyACM1", NODE_ID)
 
 
+def test_selected_node_accepts_realpath_alias_but_rejects_different_physical_device(monkeypatch) -> None:
+    by_id = "/dev/serial/by-id/usb-Espressif-if00"
+    monkeypatch.setattr(MODULE, "candidate_devices", lambda: [by_id, DEVICE])
+    monkeypatch.setattr(MODULE, "usb_candidates", lambda: [{"device": by_id, "node_id": NODE_ID}])
+    monkeypatch.setattr(MODULE, "canonical_device", lambda device: DEVICE if device in {by_id, DEVICE} else device)
+    monkeypatch.setattr(MODULE, "read_gateway_wifi", lambda: ("omk", "secret-canary"))
+    sent = []
+    monkeypatch.setattr(MODULE, "provision", lambda device, *_args: sent.append(device) or NODE_ID)
+    monkeypatch.setattr(MODULE, "wait_for_registration_status", lambda *_args: None)
+    MODULE.provision_selected_node(DEVICE, NODE_ID)
+    assert sent == [by_id]
+    with pytest.raises(MODULE.ProvisioningError, match="node_not_available"):
+        MODULE.provision_selected_node("/dev/ttyACM9", NODE_ID)
+
+
 def test_set_wifi_failure_and_mqtt_timeout_have_safe_codes_without_psk(monkeypatch, caplog) -> None:
+    monkeypatch.setattr(MODULE, "candidate_devices", lambda: [DEVICE])
     monkeypatch.setattr(MODULE, "usb_candidates", lambda: [{"device": DEVICE, "node_id": NODE_ID}])
     monkeypatch.setattr(MODULE, "read_gateway_wifi", lambda: ("omk", "secret-canary"))
     monkeypatch.setattr(MODULE, "provision", lambda *_args: (_ for _ in ()).throw(OSError("serial failure")))

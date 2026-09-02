@@ -19,6 +19,8 @@ DEFAULT_PROFILE = "omk-ap"
 DEFAULT_MQTT_BROKER = "192.168.50.1"
 DEFAULT_DEVICE_GLOBS = ("/dev/serial/by-id/*", "/dev/ttyACM*", "/dev/ttyUSB*")
 SERIAL_SETTLE_SECONDS = 0.5
+IDENTIFY_ATTEMPTS = 3
+IDENTIFY_RETRY_SECONDS = 0.1
 
 
 class ProvisioningError(RuntimeError):
@@ -72,6 +74,15 @@ def candidate_devices() -> list[str]:
     return devices
 
 
+def canonical_device(device: str) -> str:
+    """Compare only resolved paths that already came from our fixed allowlist."""
+    return os.path.realpath(device)
+
+
+def same_physical_device(first: str, second: str) -> bool:
+    return canonical_device(first) == canonical_device(second)
+
+
 class SerialJson:
     def __init__(self, device: str) -> None:
         self.device = device
@@ -110,28 +121,45 @@ class SerialJson:
 
 
 def identify(device: str, timeout: float = 10) -> dict[str, object] | None:
-    serial = None
-    try:
-        serial = SerialJson(device)
-        return serial.request({"command": "identify", "protocol_version": PROTOCOL_VERSION}, timeout,
-                              lambda message: is_protocol_response(message) and message["status"] == "ok")
-    except (OSError, termios.error, TimeoutError):
-        return None
-    finally:
-        if serial is not None:
-            serial.close()
+    deadline = time.monotonic() + timeout
+    for attempt in range(IDENTIFY_ATTEMPTS):
+        serial = None
+        try:
+            serial = SerialJson(device)
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return None
+            response = serial.request({"command": "identify", "protocol_version": PROTOCOL_VERSION},
+                                      remaining / (IDENTIFY_ATTEMPTS - attempt),
+                                      lambda message: is_protocol_response(message) and message["status"] == "ok")
+            return response
+        except (OSError, termios.error, TimeoutError):
+            if attempt + 1 == IDENTIFY_ATTEMPTS or time.monotonic() >= deadline:
+                return None
+            time.sleep(min(IDENTIFY_RETRY_SECONDS, max(0, deadline - time.monotonic())))
+        finally:
+            if serial is not None:
+                serial.close()
+    return None
 
 
 def usb_candidates(timeout: float = 3) -> list[dict[str, str]]:
     # candidate_devices() is ordered by stable /dev/serial/by-id paths first.
     # Keep the first identified path for each physical Node, so the UI never
     # renders its by-id symlink and ttyACM/ttyUSB alias as separate Nodes.
+    devices = candidate_devices()
+    aliases: dict[str, list[str]] = {}
+    for device in devices:
+        aliases.setdefault(canonical_device(device), []).append(device)
     nodes: dict[str, dict[str, str]] = {}
-    for device in candidate_devices():
+    for device in devices:
         response = identify(device, timeout)
         if response is not None:
             node_id = str(response["node_id"])
-            nodes.setdefault(node_id, {"device": device, "node_id": node_id})
+            # The first alias in a canonical group is /dev/serial/by-id when
+            # present, even if its first identify response was missed.
+            preferred = aliases[canonical_device(device)][0]
+            nodes.setdefault(node_id, {"device": preferred, "node_id": node_id})
     return list(nodes.values())
 
 
@@ -192,12 +220,14 @@ def wait_for_registration_status(node_id: str, broker: str = DEFAULT_MQTT_BROKER
 def provision_selected_node(device: str, node_id: str) -> None:
     # Re-discover and identify immediately before sending credentials. This is
     # the allowlist that prevents a request from selecting an arbitrary path.
-    matching = next((item for item in usb_candidates() if item == {"device": device, "node_id": node_id}), None)
-    if matching is None:
+    allowed_devices = candidate_devices()
+    matching = next((item for item in usb_candidates() if item["node_id"] == node_id and
+                     same_physical_device(device, item["device"])), None)
+    if device not in allowed_devices or matching is None:
         raise ProvisioningError("node_not_available")
     ssid, password = read_gateway_wifi()
     try:
-        provisioned_node_id = provision(device, ssid, password)
+        provisioned_node_id = provision(matching["device"], ssid, password)
     except ProvisioningError:
         raise
     except (OSError, termios.error, TimeoutError):

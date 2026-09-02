@@ -136,6 +136,21 @@ def test_usb_node_provision_rejects_unlisted_device_and_concurrent_request(tmp_p
     assert busy.status_code == 409 and "設定中" in busy.json()["detail"]
 
 
+def test_usb_candidate_poll_returns_cached_result_without_serial_access_while_provisioning(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import omk_system_manager.main as manager_main
+
+    calls = []
+    monkeypatch.setattr(manager_main, "usb_candidates", lambda: calls.append("serial") or [{"device": "/dev/ttyACM0", "node_id": "9af9509eb8b6"}])
+    with client_for(tmp_path) as client:
+        first = client.get("/api/nodes/usb-candidates", headers=headers())
+        client.app.state.usb_node_provision_lock.acquire()
+        busy = client.get("/api/nodes/usb-candidates", headers=headers())
+        client.app.state.usb_node_provision_lock.release()
+    assert first.json() == {"nodes": [{"device": "/dev/ttyACM0", "node_id": "9af9509eb8b6"}], "busy": False}
+    assert busy.json() == {"nodes": [{"device": "/dev/ttyACM0", "node_id": "9af9509eb8b6"}], "busy": True}
+    assert calls == ["serial"]
+
+
 @pytest.mark.parametrize("path", ["/api/system/reboot", "/api/system/shutdown"])
 def test_host_power_apis_require_token(tmp_path: Path, path: str) -> None:
     with client_for(tmp_path) as client:

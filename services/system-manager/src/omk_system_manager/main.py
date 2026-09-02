@@ -145,6 +145,7 @@ def create_app(
         app.state.controller = BRouteServiceController(settings.systemctl_path)
         app.state.usb_export = UsbExportController(settings.usb_export_command)
         app.state.usb_node_provision_lock = threading.Lock()
+        app.state.usb_node_candidates_cache = []
         app.state.site_uuid = resolve_site_uuid(
             settings.site_uuid_path,
             site_uuid_metadata or SoracomMetadataClient(),
@@ -300,8 +301,16 @@ def create_app(
             raise HTTPException(status_code=503, detail=str(error)) from None
 
     @app.get("/api/nodes/usb-candidates", dependencies=[Depends(authenticated)])
-    def list_usb_node_candidates() -> dict[str, list[dict[str, str]]]:
-        return {"nodes": usb_candidates()}
+    def list_usb_node_candidates(request: Request) -> dict:
+        lock: threading.Lock = request.app.state.usb_node_provision_lock
+        if not lock.acquire(blocking=False):
+            return {"nodes": request.app.state.usb_node_candidates_cache, "busy": True}
+        try:
+            candidates = usb_candidates()
+            request.app.state.usb_node_candidates_cache = candidates
+            return {"nodes": candidates, "busy": False}
+        finally:
+            lock.release()
 
     @app.post("/api/nodes/usb-provision", dependencies=[Depends(authenticated)])
     def provision_usb_node(request: Request, body: UsbNodeProvisionRequest) -> dict[str, str | bool]:
