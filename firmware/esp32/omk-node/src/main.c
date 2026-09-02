@@ -5,6 +5,7 @@
 #include "nvs.h"
 #include "nvs_flash.h"
 #include "discovery_ble.h"
+#include "boot_diagnostics.h"
 #include "node_state.h"
 #include "mqtt_registration.h"
 #include "mesh_network.h"
@@ -49,6 +50,7 @@ static void import_factory_pop(void) {
 
 void app_main(void) {
     ESP_ERROR_CHECK(nvs_flash_init());
+    boot_diagnostics_init();
 #ifdef OMK_DEVELOPMENT_CLEAR_REGISTRATION
     /* This image is built only by reset-omk-node-registration.sh.  Keep the
      * operation before all normal boot work so it cannot alter Wi-Fi, PoP, or

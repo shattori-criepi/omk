@@ -17,6 +17,7 @@
 #include "node_registration.h"
 #include "node_identity.h"
 #include "node_protocol.h"
+#include "mesh_network.h"
 #include "sen66_sensor.h"
 
 #define OMK_MQTT_BROKER_URI "mqtt://192.168.50.1:1883"
@@ -24,7 +25,7 @@
 #define OMK_MQTT_PAYLOAD_SIZE 128
 #define OMK_MQTT_RELAY_ENVIRONMENT_PAYLOAD_SIZE 256
 #define OMK_MQTT_SEN66_PAYLOAD_SIZE 768
-#define OMK_MQTT_MESH_STATUS_PAYLOAD_SIZE 512
+#define OMK_MQTT_MESH_STATUS_PAYLOAD_SIZE 640
 #define OMK_REGISTRATION_PAYLOAD_SIZE 192
 #define OMK_MQTT_CLIENT_ID_SIZE 32
 static const char *TAG = "omk-mqtt";
@@ -269,6 +270,7 @@ static void mqtt_event_handler(void *arg, esp_event_base_t event_base,
     switch ((esp_mqtt_event_id_t)event_id) {
     case MQTT_EVENT_CONNECTED:
         client_connected = true;
+        mesh_network_log_diagnostics("MQTT connected", 0);
         ESP_LOGI(TAG, "MQTT connected");
         if (esp_mqtt_client_subscribe(client, registration_config_topic, 1) < 0) {
             ESP_LOGW(TAG, "Could not subscribe to registration config");
@@ -282,6 +284,7 @@ static void mqtt_event_handler(void *arg, esp_event_base_t event_base,
     case MQTT_EVENT_DISCONNECTED:
         client_connected = false;
         mqtt_disconnect_count++;
+        mesh_network_log_diagnostics("MQTT disconnected", 0);
         ESP_LOGW(TAG, "MQTT disconnected: count=%" PRIu32 "; automatic reconnect pending",
                  mqtt_disconnect_count);
         break;
@@ -343,6 +346,7 @@ esp_err_t mqtt_registration_publish_mesh_status(const char *payload) {
 static void start_or_reconnect_mqtt(void) {
     if (client_started) {
         ESP_LOGI(TAG, "Requesting MQTT reconnect after IP acquisition");
+        mesh_network_log_diagnostics("MQTT reconnect requested", 0);
         esp_err_t err = esp_mqtt_client_reconnect(client);
         if (err != ESP_OK) {
             ESP_LOGW(TAG, "MQTT reconnect request failed: %s", esp_err_to_name(err));

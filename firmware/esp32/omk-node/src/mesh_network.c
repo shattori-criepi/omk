@@ -12,6 +12,7 @@
 #include "esp_system.h"
 #include "esp_timer.h"
 #include "esp_wifi.h"
+#include "boot_diagnostics.h"
 #include "gateway_credentials.h"
 #include "mesh_credentials.h"
 #include "mesh_netif.h"
@@ -20,6 +21,7 @@
 
 #define OMK_MESH_STATUS_INTERVAL_MS 30000
 #define OMK_MESH_AP_MAX_CONNECTIONS 6
+#define OMK_MESH_STATUS_PAYLOAD_SIZE 640
 
 static const char *TAG = "omk-mesh";
 static uint8_t parent_bssid[6];
@@ -40,6 +42,16 @@ static uint32_t uptime_seconds(void) {
     return (uint32_t)(esp_timer_get_time() / 1000000);
 }
 
+void mesh_network_log_diagnostics(const char *event, uint32_t reason) {
+    ESP_LOGI(TAG,
+             "%s: uptime=%" PRIu32 "s layer=%d is_root=%s parent_bssid=%02x:%02x:%02x:%02x:%02x:%02x reason=%" PRIu32
+             " parent_disconnect_count=%" PRIu32 " mqtt_disconnect_count=%" PRIu32 " free_heap=%u min_free_heap=%u",
+             event, uptime_seconds(), esp_mesh_get_layer(), esp_mesh_is_root() ? "true" : "false",
+             parent_bssid[0], parent_bssid[1], parent_bssid[2], parent_bssid[3], parent_bssid[4], parent_bssid[5],
+             reason, parent_disconnect_count, mqtt_registration_get_disconnect_count(),
+             esp_get_free_heap_size(), esp_get_minimum_free_heap_size());
+}
+
 /* The first observed role is boot-time election, not a root switch.  Later
  * changes are counted once per local root-role transition, irrespective of
  * how many Mesh events report the same topology transition. */
@@ -53,6 +65,7 @@ static void observe_root_role(void) {
     if (previous_is_root != is_root) {
         root_switch_count++;
         previous_is_root = is_root;
+        mesh_network_log_diagnostics(is_root ? "Mesh role switched to root" : "Mesh role switched to child", 0);
     }
 }
 
@@ -66,7 +79,7 @@ static void publish_status(void *argument) {
     snprintf(ip_text, sizeof(ip_text), IPSTR, IP2STR(&current_ip));
     uint64_t node_id;
     if (node_identity_get_id(&node_id) != ESP_OK) return;
-    char payload[512];
+    char payload[OMK_MESH_STATUS_PAYLOAD_SIZE];
     uint32_t uptime_s = uptime_seconds();
     uint32_t rootless_duration_s = is_rootless ? uptime_s - rootless_since_s : 0;
     int written = snprintf(payload, sizeof(payload),
@@ -80,7 +93,10 @@ static void publish_status(void *argument) {
                            "\"last_wifi_disconnect_reason\":%" PRIu32 ","
                            "\"root_switch_count\":%" PRIu32 ","
                            "\"mqtt_disconnect_count\":%" PRIu32 ","
-                           "\"uptime_s\":%" PRIu32 ",\"free_heap_bytes\":%" PRIu32 "}",
+                           "\"uptime_s\":%" PRIu32 ",\"free_heap_bytes\":%" PRIu32 ","
+                           "\"minimum_free_heap_bytes\":%" PRIu32 ","
+                           "\"reset_reason\":\"%s\",\"reset_reason_code\":%" PRIu32 ","
+                           "\"boot_count\":%" PRIu32 "}",
                            node_id, esp_mesh_get_layer(), esp_mesh_is_root() ? "true" : "false",
                            parent_bssid[0], parent_bssid[1], parent_bssid[2], parent_bssid[3],
                            parent_bssid[4], parent_bssid[5], rssi, rssi_valid ? "true" : "false", ip_text,
@@ -89,7 +105,9 @@ static void publish_status(void *argument) {
                            last_parent_disconnect_reason, last_wifi_disconnect_reason,
                            root_switch_count,
                            mqtt_registration_get_disconnect_count(),
-                           uptime_s, esp_get_free_heap_size());
+                           uptime_s, esp_get_free_heap_size(), esp_get_minimum_free_heap_size(),
+                           boot_diagnostics_reset_reason(), boot_diagnostics_reset_reason_code(),
+                           boot_diagnostics_boot_count());
     if (written > 0 && written < (int)sizeof(payload)) {
         (void)mqtt_registration_publish_mesh_status(payload);
     }
@@ -106,6 +124,7 @@ static void ip_event_handler(void *argument, esp_event_base_t base, int32_t id, 
              esp_mesh_is_root() ? "Root external" : "Child internal",
              IP2STR(&event->ip_info.ip), IP2STR(&event->ip_info.gw),
              IP2STR(&event->ip_info.netmask));
+    mesh_network_log_diagnostics("Mesh IP ready", 0);
     if (!esp_mesh_is_root()) return;
     esp_netif_dns_info_t dns;
     if (esp_netif_get_dns_info(event->esp_netif, ESP_NETIF_DNS_MAIN, &dns) == ESP_OK) {
@@ -125,8 +144,6 @@ static void mesh_event_handler(void *argument, esp_event_base_t base, int32_t id
     case MESH_EVENT_PARENT_CONNECTED: {
         const mesh_event_connected_t *event = data;
         if (event == NULL) break;
-        ESP_LOGI(TAG, "Mesh parent connected: role=%s layer=%d",
-                 esp_mesh_is_root() ? "root" : "child", esp_mesh_get_layer());
         if (memcmp(previous_parent_bssid, event->connected.bssid, sizeof(parent_bssid)) != 0) {
             static const uint8_t zero[6];
             if (memcmp(previous_parent_bssid, zero, sizeof(zero)) != 0) parent_change_count++;
@@ -135,6 +152,7 @@ static void mesh_event_handler(void *argument, esp_event_base_t base, int32_t id
         memcpy(parent_bssid, event->connected.bssid, sizeof(parent_bssid));
         is_rootless = false;
         rootless_since_s = 0;
+        mesh_network_log_diagnostics("Mesh parent connected", 0);
         esp_err_t err = mesh_netifs_start(esp_mesh_is_root());
         if (err != ESP_OK) {
             ESP_LOGW(TAG, "Could not start Mesh IP netif for parent connection: %s", esp_err_to_name(err));
@@ -145,8 +163,6 @@ static void mesh_event_handler(void *argument, esp_event_base_t base, int32_t id
     case MESH_EVENT_PARENT_DISCONNECTED: {
         const mesh_event_disconnected_t *event = data;
         parent_disconnect_count++;
-        ESP_LOGW(TAG, "Mesh parent disconnected: role=%s layer=%d count=%" PRIu32,
-                 esp_mesh_is_root() ? "root" : "child", esp_mesh_get_layer(), parent_disconnect_count);
         if (event != NULL) {
             last_parent_disconnect_reason = event->reason;
             /* ESP-IDF defines mesh_event_disconnected_t as the Wi-Fi STA
@@ -154,7 +170,10 @@ static void mesh_event_handler(void *argument, esp_event_base_t base, int32_t id
              * owned STA event handling remains untouched. */
             last_wifi_disconnect_reason = event->reason;
         }
+        mesh_network_log_diagnostics("Mesh parent disconnected / Wi-Fi STA disconnected",
+                                     last_parent_disconnect_reason);
         current_ip.addr = 0;
+        mesh_network_log_diagnostics("Mesh IP lost", last_parent_disconnect_reason);
         (void)mesh_netifs_stop();
         observe_root_role();
         break;
