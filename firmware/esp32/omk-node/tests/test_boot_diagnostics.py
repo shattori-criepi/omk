@@ -9,12 +9,20 @@ def test_reset_reason_mapping_covers_required_idf_reasons():
     source = (SOURCE / "boot_diagnostics.c").read_text()
     expected = {
         "ESP_RST_POWERON": "power_on",
+        "ESP_RST_EXT": "external",
         "ESP_RST_SW": "software",
         "ESP_RST_PANIC": "panic",
         "ESP_RST_TASK_WDT": "task_watchdog",
         "ESP_RST_INT_WDT": "interrupt_watchdog",
+        "ESP_RST_WDT": "watchdog",
         "ESP_RST_BROWNOUT": "brownout",
         "ESP_RST_DEEPSLEEP": "deep_sleep",
+        "ESP_RST_SDIO": "sdio",
+        "ESP_RST_USB": "usb",
+        "ESP_RST_JTAG": "jtag",
+        "ESP_RST_EFUSE": "efuse",
+        "ESP_RST_PWR_GLITCH": "power_glitch",
+        "ESP_RST_CPU_LOCKUP": "cpu_lockup",
     }
     for enum_name, status_name in expected.items():
         assert f'case {enum_name}: return "{status_name}";' in source
