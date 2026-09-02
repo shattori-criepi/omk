@@ -83,6 +83,7 @@ esp_err_t gateway_credentials_clear(void) {
     nvs_handle_t nvs = 0;
     esp_err_t err = nvs_open(OMK_GATEWAY_CREDENTIALS_NAMESPACE, NVS_READWRITE, &nvs);
     if (err == ESP_OK) err = nvs_erase_key(nvs, OMK_GATEWAY_CREDENTIALS_KEY);
+    if (err == ESP_ERR_NVS_NOT_FOUND) err = ESP_OK;
     if (err == ESP_OK) err = nvs_commit(nvs);
     if (err == ESP_OK) {
         gateway_credentials_record_t record = {0};

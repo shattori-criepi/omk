@@ -21,6 +21,7 @@ esp_err_t wifi_station_save_credentials(const uint8_t *ssid, size_t ssid_length,
 
 /* Development USB operation: clears only the dedicated Gateway credential. */
 esp_err_t wifi_station_clear_saved_credentials(void);
+esp_err_t wifi_station_has_saved_credentials(bool *configured);
 
 /* Development setter-image helper. It persists the supplied Gateway
  * credential through the OMK credential store and does not modify runtime

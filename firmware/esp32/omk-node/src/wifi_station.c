@@ -86,6 +86,18 @@ esp_err_t wifi_station_clear_saved_credentials(void) {
     return gateway_credentials_clear();
 }
 
+esp_err_t wifi_station_has_saved_credentials(bool *configured) {
+    if (configured == NULL) return ESP_ERR_INVALID_ARG;
+    omk_gateway_credentials_t credentials;
+    esp_err_t err = gateway_credentials_load(&credentials);
+    if (err == ESP_OK) {
+        *configured = true;
+        return ESP_OK;
+    }
+    *configured = false;
+    return err == ESP_ERR_NVS_NOT_FOUND ? ESP_OK : err;
+}
+
 esp_err_t wifi_station_set_saved_credentials_for_development(
     const uint8_t *ssid, size_t ssid_length,
     const uint8_t *password, size_t password_length) {

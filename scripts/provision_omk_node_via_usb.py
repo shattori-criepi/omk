@@ -39,12 +39,18 @@ def main() -> int:
     parser.add_argument("--status-timeout", type=float, default=60)
     parser.add_argument("--mqtt-broker", default=DEFAULT_MQTT_BROKER)  # noqa: F405
     parser.add_argument("--clear-wifi", action="store_true", help="development only: erase this Node's Gateway Wi-Fi credential")
+    parser.add_argument("--node-id", help="development clear target; selects one identified USB Node")
     args = parser.parse_args()
     if args.timeout <= 0 or args.status_timeout <= 0:
         parser.error("--timeout and --status-timeout must be positive")
-    if args.clear_wifi and not args.device:
-        parser.error("--clear-wifi requires --device")
-    device, node_id = find_node(args.device, args.timeout)
+    if args.clear_wifi and bool(args.device) == bool(args.node_id):
+        parser.error("--clear-wifi requires exactly one of --device or --node-id")
+    if args.node_id and not args.clear_wifi:
+        parser.error("--node-id is only available with --clear-wifi")
+    if args.clear_wifi and args.node_id:
+        device, node_id = find_usb_node_by_id(args.node_id, args.timeout)  # noqa: F405
+    else:
+        device, node_id = find_node(args.device, args.timeout)
     if args.clear_wifi:
         if clear_wifi(device, args.timeout) != node_id:
             raise RuntimeError("Node identity changed while clearing Wi-Fi")

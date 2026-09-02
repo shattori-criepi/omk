@@ -145,6 +145,17 @@ def test_clear_wifi_sends_no_credential_and_accepts_only_success(monkeypatch) ->
     assert captured == {"command": "clear_wifi", "protocol_version": 1}
 
 
+@pytest.mark.parametrize("status", ["busy", "storage_error", "restart_error", "invalid_request"])
+def test_clear_wifi_preserves_safe_node_response_status(monkeypatch, status) -> None:
+    class FakeSerial:
+        def __init__(self, _device: str) -> None: pass
+        def request(self, *_args): return {"status": status, "node_id": "9af9509eb8b6"}
+        def close(self): pass
+    monkeypatch.setattr(MODULE, "SerialJson", FakeSerial)
+    with pytest.raises(MODULE.ProvisioningError, match=status):
+        MODULE.clear_wifi("/dev/example", 1)
+
+
 def test_clear_wifi_requires_explicit_device(monkeypatch) -> None:
     monkeypatch.setattr(MODULE.sys, "argv", ["provision_omk_node_via_usb.py", "--clear-wifi"])
     with pytest.raises(SystemExit) as error:
@@ -163,6 +174,17 @@ def test_clear_wifi_identifies_same_explicit_node_before_and_after_reboot(monkey
     monkeypatch.setattr(MODULE, "read_gateway_wifi", lambda *_: (_ for _ in ()).throw(AssertionError("clear must not read PSK")))
     assert MODULE.main() == 0
     assert after == [(device, node_id)]
+    assert node_id in capsys.readouterr().out
+
+
+def test_clear_wifi_node_id_selects_only_the_identified_usb_node(monkeypatch, capsys) -> None:
+    node_id = "3df94c3f187e"
+    device = "/dev/serial/by-id/usb-omk-node"
+    monkeypatch.setattr(MODULE.sys, "argv", ["provision_omk_node_via_usb.py", "--node-id", node_id, "--clear-wifi"])
+    monkeypatch.setattr(MODULE, "find_usb_node_by_id", lambda requested, _timeout: (device, requested))
+    monkeypatch.setattr(MODULE, "clear_wifi", lambda selected, _timeout: node_id if selected == device else "wrong-node")
+    monkeypatch.setattr(MODULE, "wait_for_rebooted_identify", lambda *_args: None)
+    assert MODULE.main() == 0
     assert node_id in capsys.readouterr().out
 
 

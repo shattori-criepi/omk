@@ -21,6 +21,7 @@ DEFAULT_DEVICE_GLOBS = ("/dev/serial/by-id/*", "/dev/ttyACM*", "/dev/ttyUSB*")
 SERIAL_SETTLE_SECONDS = 0.5
 IDENTIFY_ATTEMPTS = 3
 IDENTIFY_RETRY_SECONDS = 0.1
+IDENTIFY_ATTEMPT_TIMEOUT_SECONDS = 1.25
 
 
 class ProvisioningError(RuntimeError):
@@ -130,7 +131,7 @@ def identify(device: str, timeout: float = 10) -> dict[str, object] | None:
             if remaining <= 0:
                 return None
             response = serial.request({"command": "identify", "protocol_version": PROTOCOL_VERSION},
-                                      remaining / (IDENTIFY_ATTEMPTS - attempt),
+                                      min(IDENTIFY_ATTEMPT_TIMEOUT_SECONDS, remaining),
                                       lambda message: is_protocol_response(message) and message["status"] == "ok")
             return response
         except (OSError, termios.error, TimeoutError):
@@ -143,7 +144,7 @@ def identify(device: str, timeout: float = 10) -> dict[str, object] | None:
     return None
 
 
-def usb_candidates(timeout: float = 3) -> list[dict[str, str]]:
+def usb_candidates(timeout: float = 3) -> list[dict[str, str | bool]]:
     # candidate_devices() is ordered by stable /dev/serial/by-id paths first.
     # Keep the first identified path for each physical Node, so the UI never
     # renders its by-id symlink and ttyACM/ttyUSB alias as separate Nodes.
@@ -151,7 +152,7 @@ def usb_candidates(timeout: float = 3) -> list[dict[str, str]]:
     aliases: dict[str, list[str]] = {}
     for device in devices:
         aliases.setdefault(canonical_device(device), []).append(device)
-    nodes: dict[str, dict[str, str]] = {}
+    nodes: dict[str, dict[str, str | bool]] = {}
     for device in devices:
         response = identify(device, timeout)
         if response is not None:
@@ -159,7 +160,8 @@ def usb_candidates(timeout: float = 3) -> list[dict[str, str]]:
             # The first alias in a canonical group is /dev/serial/by-id when
             # present, even if its first identify response was missed.
             preferred = aliases[canonical_device(device)][0]
-            nodes.setdefault(node_id, {"device": preferred, "node_id": node_id})
+            nodes.setdefault(node_id, {"device": preferred, "node_id": node_id,
+                                        "wifi_configured": response.get("wifi_configured") is True})
     return list(nodes.values())
 
 
@@ -171,7 +173,7 @@ def provision(device: str, ssid: str, password: str, timeout: float = 10) -> str
     finally:
         serial.close()
     if response.get("status") != "accepted":
-        raise ProvisioningError("set_wifi_failed")
+        raise ProvisioningError(str(response.get("status", "set_wifi_failed")))
     return str(response["node_id"])
 
 
@@ -180,11 +182,11 @@ def clear_wifi(device: str, timeout: float = 10) -> str:
     serial = SerialJson(device)
     try:
         response = serial.request({"command": "clear_wifi", "protocol_version": PROTOCOL_VERSION}, timeout,
-                                  lambda message: is_protocol_response(message) and message["status"] in {"accepted", "busy", "storage_error", "restart_error"})
+                                  lambda message: is_protocol_response(message) and message["status"] in {"accepted", "busy", "storage_error", "restart_error", "invalid_request"})
     finally:
         serial.close()
     if response.get("status") != "accepted":
-        raise ProvisioningError("clear_wifi_failed")
+        raise ProvisioningError(str(response.get("status", "clear_wifi_failed")))
     return str(response["node_id"])
 
 
@@ -198,6 +200,15 @@ def wait_for_rebooted_identify(device: str, node_id: str, timeout: float = 60) -
             return
         time.sleep(0.5)
     raise ProvisioningError("clear_wifi_reboot_timeout")
+
+
+def find_usb_node_by_id(node_id: str, timeout: float = 3) -> tuple[str, str]:
+    if not valid_node_id(node_id):
+        raise RuntimeError("Invalid Node ID")
+    matches = [candidate for candidate in usb_candidates(timeout) if candidate["node_id"] == node_id]
+    if len(matches) != 1:
+        raise RuntimeError("Requested OMK Node was not uniquely identified on USB")
+    return str(matches[0]["device"]), node_id
 
 
 def wait_for_registration_status(node_id: str, broker: str = DEFAULT_MQTT_BROKER, timeout: float = 60) -> None:

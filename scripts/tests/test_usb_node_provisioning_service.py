@@ -21,7 +21,7 @@ def test_usb_candidates_deduplicates_same_node_and_prefers_by_id(monkeypatch) ->
     monkeypatch.setattr(MODULE, "candidate_devices", lambda: [by_id, DEVICE, "/dev/ttyUSB0"])
     monkeypatch.setattr(MODULE, "identify", lambda device, _timeout: (
         {"node_id": NODE_ID} if device != "/dev/ttyUSB0" else None))
-    assert MODULE.usb_candidates() == [{"device": by_id, "node_id": NODE_ID}]
+    assert MODULE.usb_candidates() == [{"device": by_id, "node_id": NODE_ID, "wifi_configured": False}]
 
 
 def test_identify_retries_after_initial_timeout(monkeypatch) -> None:
@@ -43,7 +43,18 @@ def test_by_id_alias_is_preferred_when_only_tty_alias_identifies(monkeypatch) ->
     monkeypatch.setattr(MODULE, "candidate_devices", lambda: [by_id, DEVICE])
     monkeypatch.setattr(MODULE, "canonical_device", lambda _device: DEVICE)
     monkeypatch.setattr(MODULE, "identify", lambda device, _timeout: None if device == by_id else {"node_id": NODE_ID})
-    assert MODULE.usb_candidates() == [{"device": by_id, "node_id": NODE_ID}]
+    assert MODULE.usb_candidates() == [{"device": by_id, "node_id": NODE_ID, "wifi_configured": False}]
+
+
+def test_find_usb_node_by_id_selects_only_requested_node(monkeypatch) -> None:
+    other = "09dda0d5a8f2"
+    monkeypatch.setattr(MODULE, "usb_candidates", lambda _timeout: [
+        {"device": "/dev/serial/by-id/other", "node_id": other, "wifi_configured": True},
+        {"device": DEVICE, "node_id": NODE_ID, "wifi_configured": False},
+    ])
+    assert MODULE.find_usb_node_by_id(NODE_ID) == (DEVICE, NODE_ID)
+    with pytest.raises(RuntimeError, match="not uniquely"):
+        MODULE.find_usb_node_by_id("3df94c3f187e")
 
 
 def test_selected_node_rechecks_exact_device_and_identity_before_credentials(monkeypatch) -> None:

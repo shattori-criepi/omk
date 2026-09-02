@@ -41,11 +41,20 @@ static void write_status(const char *status) {
     }
 }
 
-static void reboot_task(void *argument) {
-    (void)argument;
-    vTaskDelay(pdMS_TO_TICKS(USB_PROVISIONING_REBOOT_DELAY_MS));
-    ESP_LOGI(TAG, "USB provisioning request accepted; restarting into normal boot");
-    esp_restart();
+static void write_identify_status(void) {
+    bool wifi_configured = false;
+    esp_err_t err = wifi_station_has_saved_credentials(&wifi_configured);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Could not read Gateway Wi-Fi credential state: %s", esp_err_to_name(err));
+    }
+    char response[128];
+    int length = snprintf(response, sizeof(response),
+                          "{\"status\":\"ok\",\"protocol_version\":%u,"
+                          "\"node_id\":\"%012" PRIx64 "\",\"wifi_configured\":%s}",
+                          USB_PROVISIONING_PROTOCOL_VERSION,
+                          provision_node_id & UINT64_C(0x0000ffffffffffff),
+                          wifi_configured ? "true" : "false");
+    if (length > 0 && length < (int)sizeof(response)) write_response(response);
 }
 
 static bool schedule_reboot(void) {
@@ -53,10 +62,6 @@ static bool schedule_reboot(void) {
         return false;
     }
     reboot_scheduled = true;
-    if (xTaskCreate(reboot_task, "usb_prov_reboot", 2048, NULL, 5, NULL) != pdPASS) {
-        reboot_scheduled = false;
-        return false;
-    }
     return true;
 }
 
@@ -78,7 +83,7 @@ static void handle_line(char *line) {
     }
     if (strcmp(command->valuestring, "identify") == 0) {
         cJSON_Delete(root);
-        write_status("ok");
+        write_identify_status();
         return;
     }
     if (reboot_scheduled) {
@@ -158,6 +163,11 @@ static void usb_provisioning_task(void *argument) {
             line[used] = '\0';
             if (used != 0) {
                 handle_line(line);
+                if (reboot_scheduled) {
+                    vTaskDelay(pdMS_TO_TICKS(USB_PROVISIONING_REBOOT_DELAY_MS));
+                    ESP_LOGI(TAG, "USB provisioning request accepted; restarting into normal boot");
+                    esp_restart();
+                }
             }
             used = 0;
         } else if (used < USB_PROVISIONING_LINE_MAX) {
