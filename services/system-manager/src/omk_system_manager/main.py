@@ -5,6 +5,7 @@ from __future__ import annotations
 import hmac
 import os
 import subprocess
+import threading
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -27,6 +28,7 @@ from .service_control import BRouteServiceController, ServiceControlError
 from .runtime_status import connection_status, request_immediate_retry
 from .site_uuid import SoracomMetadataClient, resolve_site_uuid
 from .usb_export import DATASETS, UsbExportController
+from .node_provisioning import ProvisioningError, provision_selected_node, usb_candidates
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
@@ -116,6 +118,21 @@ class UsbExportRequest(BaseModel):
         if not body.datasets or any(dataset not in DATASETS for dataset in body.datasets): raise ValueError("invalid_datasets")
 
 
+class UsbNodeProvisionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    device: str = Field(pattern=r"^/dev/(serial/by-id/[^/]+|ttyACM[0-9]+|ttyUSB[0-9]+)$")
+    node_id: str = Field(pattern=r"^[0-9a-f]{12}$")
+
+
+USB_NODE_MESSAGES = {
+    "node_not_available": "対象のUSB接続Nodeを確認できません。接続を確認して再読み込みしてください。",
+    "gateway_credential_unavailable": "GatewayのWi-Fi設定を取得できませんでした。",
+    "set_wifi_failed": "NodeへWi-Fi設定を送信できませんでした。",
+    "node_identity_changed": "対象Nodeの確認に失敗しました。再読み込みしてやり直してください。",
+    "mqtt_registration_timeout": "Nodeの再起動後のMQTT登録を確認できませんでした。",
+}
+
+
 def create_app(
     configured_settings: Settings | None = None,
     *,
@@ -127,6 +144,7 @@ def create_app(
         app.state.settings = settings
         app.state.controller = BRouteServiceController(settings.systemctl_path)
         app.state.usb_export = UsbExportController(settings.usb_export_command)
+        app.state.usb_node_provision_lock = threading.Lock()
         app.state.site_uuid = resolve_site_uuid(
             settings.site_uuid_path,
             site_uuid_metadata or SoracomMetadataClient(),
@@ -280,6 +298,23 @@ def create_app(
             return read_access_point_status(settings.access_point_profile)
         except AccessPointCredentialError as error:
             raise HTTPException(status_code=503, detail=str(error)) from None
+
+    @app.get("/api/nodes/usb-candidates", dependencies=[Depends(authenticated)])
+    def list_usb_node_candidates() -> dict[str, list[dict[str, str]]]:
+        return {"nodes": usb_candidates()}
+
+    @app.post("/api/nodes/usb-provision", dependencies=[Depends(authenticated)])
+    def provision_usb_node(request: Request, body: UsbNodeProvisionRequest) -> dict[str, str | bool]:
+        lock: threading.Lock = request.app.state.usb_node_provision_lock
+        if not lock.acquire(blocking=False):
+            raise HTTPException(status_code=409, detail="別のNodeを設定中です")
+        try:
+            provision_selected_node(body.device, body.node_id)
+        except ProvisioningError as error:
+            raise HTTPException(status_code=422, detail=USB_NODE_MESSAGES.get(error.code, "Nodeを設定できませんでした。")) from None
+        finally:
+            lock.release()
+        return {"configured": True, "node_id": body.node_id}
 
     @app.get("/api/access-point/credentials", dependencies=[Depends(authenticated)])
     def access_point_credentials(request: Request) -> dict[str, str]:

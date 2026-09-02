@@ -308,7 +308,7 @@ async def _system_manager_request(method: str, path: str, body: dict | None = No
         # system-manager can legitimately wait for its bounded 45-second
         # systemctl operation. Keep this longer than that bound so a working
         # host service is not mislabeled as unreachable by the proxy.
-        async with httpx.AsyncClient(timeout=60) as client:
+        async with httpx.AsyncClient(timeout=90) as client:
             response = await client.request(
                 method,
                 f"{SYSTEM_MANAGER_URL}{path}",
@@ -404,6 +404,16 @@ async def register_node(node_id: str, request: Request) -> dict:
 @app.delete("/api/admin/nodes/{node_id}/registration")
 async def remove_node_registration(node_id: str) -> dict:
     return await _ble_request("DELETE", f"/api/nodes/{node_id}/registration")
+
+
+@app.get("/api/admin/setup/usb-nodes")
+async def usb_nodes() -> dict:
+    return await _system_manager_request("GET", "/api/nodes/usb-candidates")
+
+
+@app.post("/api/admin/setup/usb-provision")
+async def provision_usb_node(request: Request) -> dict:
+    return await _system_manager_request("POST", "/api/nodes/usb-provision", await request.json())
 
 
 @app.post("/api/admin/setup/scan")

@@ -98,6 +98,44 @@ def test_access_point_apis_require_token_and_only_return_password_on_reveal(
     assert credentials.json() == {"ssid": "OMK-TEST", "password": "secret-canary"}
 
 
+def test_usb_node_candidates_and_provision_are_token_protected_and_secret_free(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog
+) -> None:
+    import omk_system_manager.main as manager_main
+
+    device = "/dev/ttyACM0"
+    node_id = "9af9509eb8b6"
+    monkeypatch.setattr(manager_main, "usb_candidates", lambda: [{"device": device, "node_id": node_id}])
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(manager_main, "provision_selected_node", lambda selected, identified: calls.append((selected, identified)))
+    with client_for(tmp_path) as client:
+        assert client.get("/api/nodes/usb-candidates").status_code == 401
+        assert client.post("/api/nodes/usb-provision", json={"device": device, "node_id": node_id}).status_code == 401
+        with caplog.at_level(logging.DEBUG):
+            listed = client.get("/api/nodes/usb-candidates", headers=headers())
+            provisioned = client.post("/api/nodes/usb-provision", headers=headers(), json={"device": device, "node_id": node_id})
+    assert listed.json() == {"nodes": [{"device": device, "node_id": node_id}]}
+    assert provisioned.json() == {"configured": True, "node_id": node_id}
+    assert calls == [(device, node_id)]
+    assert "synthetic-secret" not in provisioned.text + caplog.text
+
+
+def test_usb_node_provision_rejects_unlisted_device_and_concurrent_request(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import omk_system_manager.main as manager_main
+    from omk_system_manager.node_provisioning import ProvisioningError
+
+    monkeypatch.setattr(manager_main, "provision_selected_node", lambda *_: (_ for _ in ()).throw(ProvisioningError("node_not_available")))
+    with client_for(tmp_path) as client:
+        invalid = client.post("/api/nodes/usb-provision", headers=headers(), json={"device": "/tmp/not-a-device", "node_id": "9af9509eb8b6"})
+        unavailable = client.post("/api/nodes/usb-provision", headers=headers(), json={"device": "/dev/ttyAC0", "node_id": "9af9509eb8b6"})
+        client.app.state.usb_node_provision_lock.acquire()
+        busy = client.post("/api/nodes/usb-provision", headers=headers(), json={"device": "/dev/ttyACM0", "node_id": "9af9509eb8b6"})
+        client.app.state.usb_node_provision_lock.release()
+    assert invalid.status_code == 400
+    assert unavailable.status_code == 422 and "対象のUSB接続Node" in unavailable.json()["detail"]
+    assert busy.status_code == 409 and "設定中" in busy.json()["detail"]
+
+
 @pytest.mark.parametrize("path", ["/api/system/reboot", "/api/system/shutdown"])
 def test_host_power_apis_require_token(tmp_path: Path, path: str) -> None:
     with client_for(tmp_path) as client:
