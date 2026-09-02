@@ -9,17 +9,35 @@ def test_usb_export_ui_static_contract() -> None:
     script = (ROOT / "app/static/export.js").read_text(encoding="utf-8")
     menu = (ROOT / "app/templates/admin.html").read_text(encoding="utf-8")
     assert 'href="/admin/export"' in menu and "データ書き出し" in menu
-    for element in ("id=\"from-display\"", "id=\"to-display\"", "id=\"datasets\"", "id=\"export-button\""):
+    for element in (
+        "id=\"from-display\"",
+        "id=\"to-display\"",
+        "id=\"datasets\"",
+        "id=\"export-button\"",
+        "id=\"usb-status\"",
+        "id=\"export-job-status\"",
+        "id=\"export-job-title\"",
+        "id=\"export-job-detail\"",
+    ):
         assert element in template
     assert 'type="date"' not in template and 'type="text"' not in template
     assert 'id="calendar-dialog"' in template and 'id="calendar-prev"' in template and 'id="calendar-next"' in template
     assert "OMK_SYSTEM_MANAGER_TOKEN" not in template + script and "Bearer " not in template + script
-    assert "timeZone:'Asia/Tokyo'" in script and "calendar-grid" in script
-    assert "new Date().toISOString().slice(0,10)" not in script
-    assert "e.state==='running'" in script and "btn.disabled=e.state==='running'||!ok" in script
-    assert "e.state==='succeeded'" in script and "e.state==='failed'" in script
-    assert "unmount_failed" in script and "USBメモリを取り外せます" in script
-    assert "書き出しが完了しました" in script and "USBメモリを安全に取り外せません" in script
-    assert "setInterval(refresh,3000)" in script
+    assert 'timeZone: "Asia/Tokyo"' in script and "calendar-grid" in script
+    assert "new Date().toISOString().slice(0, 10)" not in script
+    assert "function renderUsbStatus" in script and "function renderExportState" in script
+    assert 'id="export-message"' not in template
+    assert "データを書き出しています…" in script and "書き出し中…" in script
+    assert "書き出しが完了しました" in script and "USBメモリを取り外せます" in script
+    assert "USBメモリを安全に取り外せません" in script and "まだ取り外さないでください" in script
+    assert 'else if (exportState?.error_code === "unmount_failed")' in script
+    assert 'lastExport = { state: "running" }' in script
+    assert "await refresh();" in script and "window.setInterval(refresh, 3000)" in script
     assert "過去7日" in template and "過去30日" in template and "今月" in template
     assert "export-datasets" in template
+    assert "grid-template-columns: repeat(3, minmax(0, 1fr));" in (ROOT / "app/static/display.css").read_text(encoding="utf-8")
+    css = (ROOT / "app/static/display.css").read_text(encoding="utf-8")
+    assert "overflow-y: auto;" in css and "max-height: 202px;" in css
+    assert ".export-management-page .export-datasets::-webkit-scrollbar" in css
+    assert "min-height: 58px;" in css and ".export-job-status" in css
+    assert "20260902-export-touch-4" in template
