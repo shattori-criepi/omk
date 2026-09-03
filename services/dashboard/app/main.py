@@ -23,6 +23,7 @@ from app.display_items import DisplayItem, catalog_items_with_latest, display_ca
 from app.recommendations import BROUTE_GROUP, clock_item_ids, recommended_blocks
 from app.view_models import FreshnessStatus, format_timestamp_seconds, worst_freshness
 from app.view_models import get_display_view_model
+from app.demo import apply_demo_fallback
 
 APP_DIR = Path(__file__).parent
 _DERIVED_ENERGY_CACHE: tuple[datetime, list[DisplayItem]] | None = None
@@ -152,7 +153,7 @@ def _available_display_groups(candidates: list[DisplayItem]) -> dict[str, str | 
     return groups
 
 
-def get_dashboard_view_model():
+def get_dashboard_view_model(mode_override: str | None = None):
     """Build one consistent snapshot for both HTML and polling API responses."""
     display_repository = get_display_repository()
     candidates = _dashboard_candidates()
@@ -161,13 +162,17 @@ def get_dashboard_view_model():
         settings = _settings_for(candidates)
         now = datetime.now(JST)
         current_candidates = _dashboard_candidates(now)
-        if settings.mode == "clock":
+        if settings.demo_enabled:
+            current_candidates = apply_demo_fallback(current_candidates)
+        mode = mode_override or settings.mode
+        if mode == "clock":
             supplemental = _clock_supplemental(settings.clock_item_ids, current_candidates)
             return _clock_dashboard(now, supplemental)
-        blocks = selected_blocks(display_repository, settings.active_blocks, now, current_candidates)
+        active_blocks = settings.recommended_blocks if mode == "recommended" else settings.custom_blocks
+        blocks = selected_blocks(display_repository, active_blocks, now, current_candidates)
         statuses = [FreshnessStatus(block.freshness) for block in blocks] or [FreshnessStatus.UNAVAILABLE]
         updated = max((block.last_received_at for block in blocks if block.last_received_at), default="")
-        return BlockDashboard(mode=settings.mode,
+        return BlockDashboard(mode=mode,
             blocks=blocks, updated_at=format_timestamp_seconds(updated) if updated else "--",
             updated_at_iso=updated, freshness=worst_freshness(*statuses),
         )
@@ -208,10 +213,14 @@ def _clock_supplemental(item_ids: tuple[str, ...], candidates: list[DisplayItem]
 @app.get("/display", response_class=HTMLResponse)
 async def display(request: Request) -> HTMLResponse:
     """Render the dashboard from latest JSON and daily Parquet totals."""
+    requested_demo_mode = request.query_params.get("demo_mode")
+    if requested_demo_mode not in {None, "custom", "clock", "recommended"}:
+        raise HTTPException(400, "表示モードが正しくありません")
+    demo_enabled = _demo_enabled()
     return templates.TemplateResponse(
         request=request,
         name="display.html",
-        context={"dashboard": get_dashboard_view_model()},
+        context={"dashboard": get_dashboard_view_model(requested_demo_mode or "custom") if demo_enabled else get_dashboard_view_model(), "demo_enabled": demo_enabled},
     )
 
 
@@ -352,8 +361,15 @@ async def dashboard_settings() -> dict:
 async def update_dashboard_settings(request: Request) -> dict:
     candidates = _dashboard_candidates()
     try:
+        payload = await request.json()
+        # The existing preset editor predates exhibition settings.  Preserve
+        # demo state when it submits its legacy payload; the dedicated toggle
+        # is the sole owner of this setting.
+        if isinstance(payload, dict) and "demo" not in payload:
+            current = _settings_for(candidates)
+            payload = {**payload, "demo": {"enabled": current.demo_enabled, "rotation_seconds": current.demo_rotation_seconds}}
         settings = get_settings_repository().save_payload(
-            await request.json(), _available_display_groups([item for item in candidates if item.selectable]), display_item_migrations(candidates),
+            payload, _available_display_groups([item for item in candidates if item.selectable]), display_item_migrations(candidates),
         )
     except SettingsError as error:
         raise HTTPException(400, str(error)) from error
@@ -375,7 +391,7 @@ async def update_dashboard_mode(request: Request) -> dict:
         # is responsible for replacing the recommendation snapshot.
         recommended = settings.recommended_blocks
         clock_items = clock_item_ids(selectable) if mode == "clock" else settings.clock_item_ids
-        updated = DashboardSettings(mode, settings.custom_blocks, recommended, clock_items)
+        updated = DashboardSettings(mode, settings.custom_blocks, recommended, clock_items, settings.demo_enabled, settings.demo_rotation_seconds)
         get_settings_repository().save(updated, _available_display_groups(candidates))
     except (SettingsError, ValueError, AttributeError) as error:
         raise HTTPException(400, str(error)) from error
@@ -387,7 +403,7 @@ async def refresh_recommended_dashboard() -> dict:
     candidates = _dashboard_candidates()
     try:
         settings = _settings_for(candidates)
-        updated = DashboardSettings("recommended", settings.custom_blocks, tuple(recommended_blocks([item for item in candidates if item.selectable])), settings.clock_item_ids)
+        updated = DashboardSettings("recommended", settings.custom_blocks, tuple(recommended_blocks([item for item in candidates if item.selectable])), settings.clock_item_ids, settings.demo_enabled, settings.demo_rotation_seconds)
         get_settings_repository().save(updated, _available_display_groups(candidates))
     except (SettingsError, OSError) as error:
         raise HTTPException(400, str(error)) from error
@@ -505,10 +521,31 @@ async def reveal_access_point_credentials() -> dict[str, str]:
     return {"ssid": ssid, "password": password, "qr_svg": svg}
 
 
+def _demo_enabled() -> bool:
+    return _settings_for(_dashboard_candidates()).demo_enabled
+
+
 @app.get("/api/display")
-async def display_api() -> dict:
+async def display_api(demo_mode: str | None = None) -> dict:
     """Return the current dashboard snapshot for in-page refreshes."""
-    return get_dashboard_view_model().as_dict()
+    if demo_mode is not None and demo_mode not in {"custom", "clock", "recommended"}:
+        raise HTTPException(400, "表示モードが正しくありません")
+    return get_dashboard_view_model(demo_mode if _demo_enabled() else None).as_dict()
+
+
+@app.post("/api/admin/dashboard-settings/demo")
+async def update_dashboard_demo(request: Request) -> dict:
+    candidates = _dashboard_candidates()
+    try:
+        enabled = (await request.json()).get("enabled")
+        if not isinstance(enabled, bool):
+            raise SettingsError("展示用デモモードの指定が正しくありません")
+        settings = _settings_for(candidates)
+        updated = DashboardSettings(settings.mode, settings.custom_blocks, settings.recommended_blocks, settings.clock_item_ids, enabled, settings.demo_rotation_seconds)
+        get_settings_repository().save(updated, _available_display_groups(candidates))
+    except (SettingsError, ValueError, AttributeError) as error:
+        raise HTTPException(400, str(error)) from error
+    return {**updated.as_dict(), "capacity": 6}
 
 
 @app.get("/health")

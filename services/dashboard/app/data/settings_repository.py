@@ -73,6 +73,8 @@ class DashboardSettings:
     custom_blocks: tuple[DisplayBlock, ...]
     recommended_blocks: tuple[DisplayBlock, ...]
     clock_item_ids: tuple[str, ...] = ()
+    demo_enabled: bool = False
+    demo_rotation_seconds: int = 10
 
     @property
     def blocks(self) -> tuple[DisplayBlock, ...]:
@@ -94,6 +96,7 @@ class DashboardSettings:
                 "recommended": {"blocks": [block.as_dict() for block in self.recommended_blocks]},
                 "clock": {"item_ids": list(self.clock_item_ids)},
             },
+            "demo": {"enabled": self.demo_enabled, "rotation_seconds": self.demo_rotation_seconds},
         }
 
 
@@ -170,7 +173,13 @@ class SettingsRepository:
         clock_raw = payload.get("presets", {}).get("clock", {}).get("item_ids", [])
         if not isinstance(clock_raw, list) or any(not isinstance(item_id, str) for item_id in clock_raw):
             raise SettingsError("時計プリセット設定が正しくありません")
-        settings = DashboardSettings(mode, tuple(blocks), tuple(recommended), tuple(clock_raw))
+        demo = payload.get("demo", {})
+        if not isinstance(demo, dict) or not isinstance(demo.get("enabled", False), bool):
+            raise SettingsError("展示用デモモード設定が正しくありません")
+        rotation = demo.get("rotation_seconds", 10)
+        if not isinstance(rotation, int) or rotation < 1 or rotation > 3600:
+            raise SettingsError("展示用デモモードの切替周期が正しくありません")
+        settings = DashboardSettings(mode, tuple(blocks), tuple(recommended), tuple(clock_raw), demo.get("enabled", False), rotation)
         self._validate(settings, available_groups, allow_missing=allow_missing)
         return settings, migrated or recommended_migrated
 

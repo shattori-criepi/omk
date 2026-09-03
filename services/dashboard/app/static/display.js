@@ -12,6 +12,9 @@ const DISPLAY_POLL_INTERVAL_MS = 10_000;
 const WEEKDAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const WEEKDAY_ARIA_NAMES = ["日曜日", "月曜日", "火曜日", "水曜日", "木曜日", "金曜日", "土曜日"];
 let displayFetchInProgress = false;
+const demoEnabled = document.body?.dataset.demoEnabled === "true";
+const demoModes = ["custom", "clock", "recommended"];
+let demoModeIndex = Math.max(0, demoModes.indexOf(document.body?.dataset.demoMode));
 
 function updateCurrentDatetime() {
   if (!currentDatetime && !clockDate && !clockTime) return;
@@ -98,7 +101,8 @@ function updateDisplay(data) {
   // continue through the in-place paths below.
   const renderedMode = renderedDisplayMode();
   if (renderedMode !== "unknown" && renderedMode !== responseDisplayMode(data)) {
-    window.location.reload();
+    if (demoEnabled) window.location.assign(`/display?demo_mode=${demoModes[demoModeIndex]}`);
+    else window.location.reload();
     return;
   }
   if (data.mode === "clock" && Array.isArray(data.supplemental)) {
@@ -217,7 +221,9 @@ async function refreshDisplay() {
   if (displayFetchInProgress) return;
   displayFetchInProgress = true;
   try {
-    const response = await fetch("/api/display", { cache: "no-store" });
+    const response = demoEnabled
+      ? await fetch(`/api/display?demo_mode=${demoModes[demoModeIndex]}`, { cache: "no-store" })
+      : await fetch("/api/display", { cache: "no-store" });
     if (!response.ok) throw new Error(`display API returned ${response.status}`);
     updateDisplay(await response.json());
   } catch (error) {
@@ -229,4 +235,7 @@ async function refreshDisplay() {
 
 updateCurrentDatetime();
 window.setInterval(updateCurrentDatetime, 1_000);
-window.setInterval(refreshDisplay, DISPLAY_POLL_INTERVAL_MS);
+window.setInterval(() => {
+  if (demoEnabled) demoModeIndex = (demoModeIndex + 1) % demoModes.length;
+  refreshDisplay();
+}, DISPLAY_POLL_INTERVAL_MS);
