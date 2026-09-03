@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <title>OMK ダッシュボード</title>
-    <link rel="stylesheet" href="{{ url_for('static', path='/display.css') }}?v=20260819-clock-navigation-1">
+    <link rel="stylesheet" href="{{ url_for('static', path='/display.css') }}?v=20260903-demo-2">
   </head>
   <body data-demo-enabled="{{ 'true' if demo_enabled else 'false' }}" data-demo-mode="{{ dashboard.mode if demo_enabled else '' }}" data-dashboard-mode="{{ dashboard.mode }}">
     {% if demo_enabled %}<p class="demo-mode-notice" role="status">デモモード</p>{% endif %}
@@ -182,6 +182,6 @@
     </main>
     {% endif %}
 
-    <script src="{{ url_for('static', path='/display.js') }}?v=20260819-clock-navigation-2" defer></script>
+    <script src="{{ url_for('static', path='/display.js') }}?v=20260903-demo-2" defer></script>
   </body>
 </html>

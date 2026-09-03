@@ -18,6 +18,7 @@ from app.data.latest_repository import LatestRepository
 from app.data.parquet_repository import LatestPower, ParquetRepository
 from app.data.display_repository import DisplayRepository
 from app.data.settings_repository import DashboardSettings, DisplayBlock, DisplaySelection, SettingsError, SettingsRepository
+from app.demo import apply_demo_fallback
 from app.display_items import DisplayItem, candidate_for, catalog_items_with_latest, display_candidates, display_item_migrations, selected_blocks, selected_items
 from app.metric_definitions import definition_for, format_value
 from app.recommendations import clock_item_ids, recommended_blocks
@@ -431,6 +432,31 @@ console.log(JSON.stringify(["custom", "clock", "recommended", "custom"].map(__di
     user_javascript = javascript_path.read_text(encoding="utf-8")
     assert "fixture" not in user_html.lower()
     assert "fixture" not in user_javascript.lower()
+
+
+def test_demo_indicator_is_fixed_and_display_assets_share_a_new_version() -> None:
+    template = (Path(__file__).parents[1] / "app" / "templates" / "display.html").read_text(encoding="utf-8")
+    stylesheet = (Path(__file__).parents[1] / "app" / "static" / "display.css").read_text(encoding="utf-8")
+
+    assert "display.css') }}?v=20260903-demo-2" in template
+    assert "display.js') }}?v=20260903-demo-2" in template
+    notice = stylesheet.split(".demo-mode-notice {", 1)[1].split("}", 1)[0]
+    assert "position: fixed;" in notice
+    assert "margin: 0;" in notice
+
+
+def test_demo_fixture_uses_anonymized_snapshots_and_keeps_sen66_and_switchbot_distinct() -> None:
+    fixture = json.loads((Path(__file__).parents[1] / "app" / "demo" / "readings.json").read_text(encoding="utf-8"))
+    values = fixture["values"]
+    assert fixture["source"] == "Anonymized snapshots from actual OMK development measurements"
+    assert fixture["captured_date"] == "2026-09-03"
+    assert abs((float(values["pv_power"]) + float(values["battery_discharge"])) - (float(values["load_power"]) + float(values["grid_export"]))) <= 0.01
+
+    sen66_pm1 = DisplayItem("pm1", "PM1.0", "sen66", "omk/sen66/environment", "sen66", "pm1_0_ug_m3", "number", "µg/m³", "環境", None, True, "", "--", "unavailable", short_label="PM1.0")
+    switchbot_temperature = DisplayItem("temp", "温度", "th", "omk/th/environment", "th-demo", "temperature_c", "number", "℃", "環境", "temperature", True, "", "--", "unavailable", short_label="温度")
+    result = apply_demo_fallback([sen66_pm1, switchbot_temperature])
+    assert [item.value for item in result] == ["0.7", "25.1"]
+    assert all("模擬" in item.short_label for item in result)
 
 
 def _write_instantaneous_data(

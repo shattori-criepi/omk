@@ -1,1 +1,25 @@
-{"source":"Representative development-machine snapshots; display-only fallback.","values":{"pv_power":"3.84","load_power":"2.16","grid_import":"0.00","grid_export":"1.68","battery_soc":"72","battery_charge":"0.00","battery_discharge":"0.00","temperature":"25.4","humidity":"48","co2":"612","pm25":"4.2","voc":"108","nox":"12"}}
+{
+  "source": "Anonymized snapshots from actual OMK development measurements",
+  "captured_date": "2026-09-03",
+  "values": {
+    "pv_power": "0.19",
+    "load_power": "1.33",
+    "grid_import": "0.00",
+    "grid_export": "0.01",
+    "battery_soc": "93",
+    "battery_charge": "0.00",
+    "battery_discharge": "1.16",
+    "battery_power_bidirectional": "1.16",
+    "temperature": "27.9",
+    "humidity": "40",
+    "co2": "615",
+    "pm25": "0.9",
+    "voc": "110",
+    "nox": "1",
+    "pm1_0_ug_m3": "0.7",
+    "pm4_0_ug_m3": "1.1",
+    "pm10_0_ug_m3": "1.2",
+    "switchbot_temperature_c": "25.1",
+    "switchbot_relative_humidity_percent": "50"
+  }
+}
