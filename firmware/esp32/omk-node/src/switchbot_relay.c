@@ -20,24 +20,26 @@ typedef struct {
     size_t manufacturer_length;
     size_t service_length;
     int64_t last_fragment_us;
-    uint32_t payload_hash;
+    bool has_published;
+    bool published_has_manufacturer;
+    bool published_has_service;
     int64_t last_publish_us;
 } relay_device_slot_t;
 static relay_device_slot_t relay_device_slots[SWITCHBOT_RELAY_DEVICE_SLOTS];
 static bool node_identity_error_logged;
-static uint32_t hash_bytes(uint32_t value, const uint8_t *data, size_t length) { for (size_t i = 0; i < length; ++i) value = (value ^ data[i]) * 16777619u; return value; }
-static bool should_publish(const uint8_t address[6], uint32_t payload_hash, int64_t now_us) {
-    relay_device_slot_t *available = NULL;
-    for (size_t i = 0; i < SWITCHBOT_RELAY_DEVICE_SLOTS; ++i) {
-        relay_device_slot_t *slot = &relay_device_slots[i];
-        if (slot->in_use && memcmp(slot->address, address, 6) == 0) {
-            if (slot->payload_hash == payload_hash && now_us - slot->last_publish_us < SWITCHBOT_RELAY_INTERVAL_US) return false;
-            slot->payload_hash = payload_hash; slot->last_publish_us = now_us; return true;
-        }
-        if (!slot->in_use && available == NULL) available = slot;
-    }
-    if (available == NULL) { ESP_LOGW(TAG, "Relay device slots exhausted; ignoring BLE observation"); return false; }
-    available->in_use = true; memcpy(available->address, address, 6); available->payload_hash = payload_hash; available->last_publish_us = now_us; return true;
+static bool should_publish(const relay_device_slot_t *slot, int64_t now_us) {
+    if (!slot->has_published || now_us - slot->last_publish_us >= SWITCHBOT_RELAY_INTERVAL_US) return true;
+    /* The sole within-window exception is fragment completeness: active scan
+     * may deliver ADV and SCAN_RSP independently. Payload/counter/RSSI changes
+     * never bypass the per-device ten-second limit. */
+    return (!slot->published_has_manufacturer && slot->manufacturer_length > 0) ||
+           (!slot->published_has_service && slot->service_length > 0);
+}
+static void mark_published(relay_device_slot_t *slot, int64_t now_us) {
+    slot->has_published = true;
+    slot->published_has_manufacturer = slot->manufacturer_length > 0;
+    slot->published_has_service = slot->service_length > 0;
+    slot->last_publish_us = now_us;
 }
 static relay_device_slot_t *find_slot(const uint8_t address[6]) {
     relay_device_slot_t *available = NULL;
@@ -64,8 +66,7 @@ void switchbot_relay_handle_observation(const uint8_t address[6], int rssi, cons
     if (manufacturer_length > 0) { memcpy(slot->manufacturer_data, manufacturer_data, manufacturer_length); slot->manufacturer_length = manufacturer_length; }
     if (service_length > 0) { memcpy(slot->service_data, service_data, service_length); slot->service_length = service_length; }
     slot->last_fragment_us = now_us;
-    uint32_t payload_hash = hash_bytes(hash_bytes(2166136261u, slot->manufacturer_data, slot->manufacturer_length), slot->service_data, slot->service_length);
-    if (!should_publish(address, payload_hash, esp_timer_get_time())) return;
+    if (!should_publish(slot, now_us)) return;
     char relay_node_id[OMK_NODE_ID_HEX_LENGTH + 1];
     esp_err_t err = node_identity_get_id_hex(relay_node_id, sizeof(relay_node_id));
     if (err != ESP_OK) { if (!node_identity_error_logged) ESP_LOGW(TAG, "Could not get relay Node ID: %s", esp_err_to_name(err)); node_identity_error_logged = true; return; }
@@ -75,5 +76,6 @@ void switchbot_relay_handle_observation(const uint8_t address[6], int rssi, cons
     err = mqtt_registration_publish_ble_relay(relay_node_id, ble_address, rssi,
                                               slot->manufacturer_data, slot->manufacturer_length,
                                               slot->service_data, slot->service_length);
+    mark_published(slot, now_us);
     if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) ESP_LOGW(TAG, "Could not queue BLE raw relay: %s", esp_err_to_name(err));
 }
