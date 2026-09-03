@@ -17,8 +17,9 @@ usage() {
   cat <<'EOF'
 Usage: scripts/setup-omk-gateway.sh [OPTIONS]
 
-Build a standard Raspberry Pi 4/5 (64-bit Raspberry Pi OS) OMK Gateway by
-calling the individual, independently rerunnable setup scripts in order.
+Build a standard 64-bit Raspberry Pi OS OMK Gateway by calling the individual,
+independently rerunnable setup scripts in order. Raspberry Pi 4 is the
+officially verified target.
 
 Options:
   --with-base     Run the base OS/Docker setup (required for a new Gateway).

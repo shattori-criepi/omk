@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
-env_name="${1:?usage: flash-omk-node.sh <atom-s3-lite|m5stick-c> [port]}"; port="${2:-}"
+usage() { echo "usage: $0 <atom-s3-lite> [port]" >&2; }
+env_name="${1:-}"; port="${2:-}"
+[[ -n "$env_name" ]] || { usage; exit 2; }
+[[ "$env_name" == "atom-s3-lite" ]] || {
+  echo "unsupported Node board: $env_name. The only supported Node board is atom-s3-lite." >&2
+  exit 2
+}
 root="$(cd "$(dirname "$0")/.." && pwd)"; project="$root/firmware/esp32/omk-node"; store="$root/data/provisioning/nodes"
 mkdir -p "$store"; chmod 700 "$root/data/provisioning" "$store"
 pio=("${PLATFORMIO_CMD:-pio}")

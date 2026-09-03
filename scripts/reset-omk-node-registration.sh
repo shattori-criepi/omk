@@ -8,14 +8,14 @@ port="${2:-}"
 confirmation="${3:-}"
 
 if [[ "$confirmation" != "--confirm" ]]; then
-  echo "usage: $0 <atom-s3-lite|m5stick-c> <serial-port> --confirm" >&2
+  echo "usage: $0 <atom-s3-lite> <serial-port> --confirm" >&2
   exit 2
 fi
 
 case "$board" in
   atom-s3-lite) reset_env="atom-s3-lite-registration-reset" ;;
-  m5stick-c) reset_env="m5stick-c-registration-reset" ;;
-  *) echo "unsupported board: $board" >&2; exit 2 ;;
+  '') echo "usage: $0 <atom-s3-lite> <serial-port> --confirm" >&2; exit 2 ;;
+  *) echo "unsupported Node board: $board. The only supported Node board is atom-s3-lite." >&2; exit 2 ;;
 esac
 
 [[ -n "$port" ]] || { echo "serial port is required" >&2; exit 2; }

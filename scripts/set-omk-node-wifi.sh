@@ -10,8 +10,8 @@ port="${2:-}"
 
 case "$board" in
   atom-s3-lite) set_env="atom-s3-lite-wifi-set" ;;
-  m5stick-c) set_env="m5stick-c-wifi-set" ;;
-  *) echo "usage: $0 <atom-s3-lite|m5stick-c> <serial-port>" >&2; exit 2 ;;
+  '') echo "usage: $0 <atom-s3-lite> <serial-port>" >&2; exit 2 ;;
+  *) echo "unsupported Node board: $board. The only supported Node board is atom-s3-lite." >&2; exit 2 ;;
 esac
 [[ -n "$port" ]] || { echo "serial port is required" >&2; exit 2; }
 
