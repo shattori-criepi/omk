@@ -102,14 +102,18 @@ def _decode_service_data(data: bytes | None) -> tuple[str, str, dict[str, Any]] 
     }
 
 
-def _contact_state_from_sensor_data(sensor_data: int) -> int | None:
-    """Map official HAL states: closed=0, open/timeout-not-close=1."""
-    hal_state = (sensor_data >> 1) & 0x03
+def _contact_state_from_hal_state(hal_state: int) -> int | None:
+    """Map Contact Sensor HAL states: closed=0, open/timeout-not-close=1."""
     if hal_state == 0:
         return 0
     if hal_state in (1, 2):
         return 1
     return None
+
+
+def _contact_state_from_sensor_data(sensor_data: int) -> int | None:
+    """Extract the service-data HAL state from bits 1..2."""
+    return _contact_state_from_hal_state((sensor_data >> 1) & 0x03)
 
 
 def _decode_contact_service_data(data: bytes | None) -> tuple[str, str, dict[str, Any]] | None:
@@ -261,14 +265,15 @@ def _decode_contact_manufacturer_data(data: bytes) -> tuple[str, str, dict[str, 
     # classifier condition.
     if data[CONTACT_RESERVED_INDEX] != 0 or data[10] != 0:
         return None
-    # The manufacturer packet's status byte is the current contact state in
-    # the Pi captures. Its lower nibble remains 0xc. The state itself is bit
-    # 4: 0x4c/0xcc are closed and 0x5c/0xdc are open. The other status bits,
-    # and the following counter/time bytes, are not state classifiers.
+    # Manufacturer bits 4..5 carry the same HAL state meaning as service
+    # data: 0x4c/0xcc => closed, 0x5c/0xdc => open, 0x6c =>
+    # timeout-not-close (still physically open). Bits 6..7 are not state.
     status = data[CONTACT_MANUFACTURER_STATUS_INDEX]
     if (status & 0x0F) != 0x0C:
         return None
-    state = 1 if status & 0x10 else 0
+    state = _contact_state_from_hal_state((status >> 4) & 0x03)
+    if state is None:
+        return None
     return "contact_sensor", "contact", {"contact_state": state}
 
 

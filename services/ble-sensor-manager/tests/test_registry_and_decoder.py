@@ -964,10 +964,22 @@ def test_contact_sensor_decodes_official_service_data_and_manufacturer_layouts()
         ("d3b204e2312520cc00040000c0", 0),
         ("d3b204e2312521dc0007000040", 1),
         ("d3b204e2312522cc000e000140", 0),
+        ("d3b204e23125f26c00cd009480", 1),  # timeout-not-close; still open
     ):
         decoded = decode("D3:B2:04:E2:31:25", -31, {SWITCHBOT_COMPANY_ID: bytes.fromhex(packet)}, {}, "now")
         assert decoded is not None and decoded.model == "contact_sensor"
         assert decoded.values == {"contact_state": expected_state}
+
+
+def test_contact_timeout_not_close_manufacturer_packet_matches_service_hal_state() -> None:
+    decoded = decode(
+        "D3:B2:04:E2:31:25", -31,
+        {SWITCHBOT_COMPANY_ID: bytes.fromhex("d3b204e23125f26c00cd009480")},
+        {METER_SERVICE_UUID: bytes.fromhex("644064030004000780")}, "now",
+    )
+    assert decoded is not None
+    assert decoded.model == "contact_sensor"
+    assert decoded.values == {"contact_state": 1}
 
 
 def test_contact_prefers_current_manufacturer_state_over_stale_service_data() -> None:
