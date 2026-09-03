@@ -23,7 +23,8 @@
 #define OMK_MQTT_BROKER_URI "mqtt://192.168.50.1:1883"
 #define OMK_MQTT_TOPIC_SIZE 80
 #define OMK_MQTT_PAYLOAD_SIZE 128
-#define OMK_MQTT_RELAY_ENVIRONMENT_PAYLOAD_SIZE 256
+/* Two 31-byte advertisement fragments rendered as hex plus fixed JSON fields. */
+#define OMK_MQTT_BLE_RELAY_PAYLOAD_SIZE 512
 #define OMK_MQTT_SEN66_PAYLOAD_SIZE 768
 #define OMK_MQTT_MESH_STATUS_PAYLOAD_SIZE 640
 #define OMK_REGISTRATION_PAYLOAD_SIZE 192
@@ -60,12 +61,6 @@ static bool is_lower_hex_identifier(const char *value, size_t length) {
         }
     }
     return true;
-}
-
-static bool relay_device_key_is_valid(const char *device_key) {
-    static const char prefix[] = "switchbot:";
-    return device_key != NULL && strncmp(device_key, prefix, sizeof(prefix) - 1) == 0 &&
-           is_lower_hex_identifier(device_key + sizeof(prefix) - 1, 12);
 }
 
 static bool registration_is_persisted(void) {
@@ -512,14 +507,14 @@ esp_err_t mqtt_registration_publish_environment(const char *sensor_id,
     return message_id < 0 ? ESP_FAIL : ESP_OK;
 }
 
-esp_err_t mqtt_registration_publish_relay_environment(const char *device_key,
-                                                       float temperature_c,
-                                                       uint8_t relative_humidity_percent,
-                                                       const char *relay_node_id) {
-    if (!relay_device_key_is_valid(device_key) ||
-        !is_lower_hex_identifier(relay_node_id, OMK_NODE_ID_HEX_LENGTH) ||
-        relative_humidity_percent > 100 || temperature_c < -20.0f ||
-        temperature_c > 60.0f) {
+esp_err_t mqtt_registration_publish_ble_relay(const char *relay_node_id, const char *ble_address, int rssi,
+                                              const uint8_t *manufacturer_data, size_t manufacturer_length,
+                                              const uint8_t *service_data, size_t service_length) {
+    if (!is_lower_hex_identifier(relay_node_id, OMK_NODE_ID_HEX_LENGTH) ||
+        !is_lower_hex_identifier(ble_address, 12) || rssi < -127 || rssi > 20 ||
+        manufacturer_length > 31 || service_length > 31 ||
+        (manufacturer_length > 0 && manufacturer_data == NULL) ||
+        (service_length > 0 && service_data == NULL)) {
         return ESP_ERR_INVALID_ARG;
     }
     if (client == NULL || !client_connected) {
@@ -527,20 +522,48 @@ esp_err_t mqtt_registration_publish_relay_environment(const char *device_key,
     }
 
     char topic[OMK_MQTT_TOPIC_SIZE];
-    char payload[OMK_MQTT_RELAY_ENVIRONMENT_PAYLOAD_SIZE];
-    int written = snprintf(topic, sizeof(topic), "omk-relay/%s/ble/environment", relay_node_id);
+    char payload[OMK_MQTT_BLE_RELAY_PAYLOAD_SIZE];
+    int written = snprintf(topic, sizeof(topic), "omk-relay/%s/ble/raw", relay_node_id);
     if (written < 0 || written >= (int)sizeof(topic)) {
         return ESP_ERR_INVALID_SIZE;
     }
+    size_t offset = 0;
     written = snprintf(payload, sizeof(payload),
-                       "{\"device_key\":\"%s\",\"quality\":\"normal\","
-                       "\"temperature_c\":%.1f,\"relative_humidity_percent\":%u,"
-                       "\"source\":\"relay\",\"relay_node_id\":\"%s\"}",
-                       device_key, (double)temperature_c,
-                       relative_humidity_percent, relay_node_id);
-    if (written < 0 || written >= (int)sizeof(payload)) {
-        return ESP_ERR_INVALID_SIZE;
+                       "{\"protocol_version\":1,\"relay_node_id\":\"%s\",\"ble_address\":\"%s\",\"rssi\":%d,\"manufacturer_data\":[",
+                       relay_node_id, ble_address, rssi);
+    if (written < 0 || written >= (int)sizeof(payload)) return ESP_ERR_INVALID_SIZE;
+    offset = (size_t)written;
+    if (manufacturer_length > 0) {
+        written = snprintf(payload + offset, sizeof(payload) - offset, "{\"company_id\":2409,\"data\":\"");
+        if (written < 0 || (size_t)written >= sizeof(payload) - offset) return ESP_ERR_INVALID_SIZE;
+        offset += (size_t)written;
+        for (size_t i = 0; i < manufacturer_length; ++i) {
+            written = snprintf(payload + offset, sizeof(payload) - offset, "%02x", manufacturer_data[i]);
+            if (written < 0 || (size_t)written >= sizeof(payload) - offset) return ESP_ERR_INVALID_SIZE;
+            offset += (size_t)written;
+        }
+        written = snprintf(payload + offset, sizeof(payload) - offset, "\"}");
+        if (written < 0 || (size_t)written >= sizeof(payload) - offset) return ESP_ERR_INVALID_SIZE;
+        offset += (size_t)written;
     }
+    written = snprintf(payload + offset, sizeof(payload) - offset, "],\"service_data\":[");
+    if (written < 0 || (size_t)written >= sizeof(payload) - offset) return ESP_ERR_INVALID_SIZE;
+    offset += (size_t)written;
+    if (service_length > 0) {
+        written = snprintf(payload + offset, sizeof(payload) - offset, "{\"uuid\":\"0000fd3d-0000-1000-8000-00805f9b34fb\",\"data\":\"");
+        if (written < 0 || (size_t)written >= sizeof(payload) - offset) return ESP_ERR_INVALID_SIZE;
+        offset += (size_t)written;
+        for (size_t i = 0; i < service_length; ++i) {
+            written = snprintf(payload + offset, sizeof(payload) - offset, "%02x", service_data[i]);
+            if (written < 0 || (size_t)written >= sizeof(payload) - offset) return ESP_ERR_INVALID_SIZE;
+            offset += (size_t)written;
+        }
+        written = snprintf(payload + offset, sizeof(payload) - offset, "\"}");
+        if (written < 0 || (size_t)written >= sizeof(payload) - offset) return ESP_ERR_INVALID_SIZE;
+        offset += (size_t)written;
+    }
+    written = snprintf(payload + offset, sizeof(payload) - offset, "]}");
+    if (written < 0 || (size_t)written >= sizeof(payload) - offset) return ESP_ERR_INVALID_SIZE;
 
     int message_id = esp_mqtt_client_enqueue(client, topic, payload, 0, 0, 0, true);
     return message_id < 0 ? ESP_FAIL : ESP_OK;

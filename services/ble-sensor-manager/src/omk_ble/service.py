@@ -113,19 +113,21 @@ class BleManager:
             # A malformed packet must not prevent later BlueZ callbacks.
             LOGGER.exception("Ignoring malformed BLE advertisement")
 
-    def record_advertisement(self, decoded: DecodedAdvertisement) -> None:
+    def record_advertisement(self, decoded: DecodedAdvertisement, *, source: str = "direct",
+                             relay_node_id: str | None = None) -> None:
         """Record an advertisement without ever reordering setup candidates."""
-        self.observations[decoded.device_key] = decoded
-        if decoded.model == "omk_node":
+        if source == "direct":
+            self.observations[decoded.device_key] = decoded
+        if source == "direct" and decoded.model == "omk_node":
             self.node_observations[decoded.values["node_id"]] = decoded
         registered_keys = {sensor.device_key for sensor in self.registry.list()}
-        if self.scanning and decoded.device_key not in registered_keys:
+        if source == "direct" and self.scanning and decoded.device_key not in registered_keys:
             if decoded.device_key not in self.setup_candidates:
                 self._setup_candidate_order.append(decoded.device_key)
             # Always replace the complete snapshot: RSSI, receive time, values,
             # raw packet, and visual highlighting all use the latest packet.
             self.setup_candidates[decoded.device_key] = decoded
-        self._publish_if_registered(decoded)
+        self._publish_if_registered(decoded, source=source, relay_node_id=relay_node_id)
 
     def node_list(self) -> list[dict[str, Any]]:
         persisted = self.node_registry.list() if self.node_registry else {}
@@ -267,9 +269,12 @@ class BleManager:
         return {"node_id": node_id, "status": "removed"}
 
     def handle_relay_mqtt(self, topic: str, payload: bytes) -> None:
-        """Resolve a Node relay observation through the existing BLE registry."""
+        """Reconstruct a raw observation and use the normal SwitchBot decoder."""
+        if len(payload) > 512:
+            LOGGER.warning("Ignoring oversized relay MQTT payload topic=%s", topic)
+            return
         parts = topic.split("/")
-        if len(parts) != 4 or parts[0] != "omk-relay" or parts[2:] != ["ble", "environment"]:
+        if len(parts) != 4 or parts[0] != "omk-relay" or parts[2:] != ["ble", "raw"]:
             return
         relay_node_id = parts[1]
         if not self._node_id_valid(relay_node_id):
@@ -283,36 +288,49 @@ class BleManager:
         if not isinstance(value, dict):
             LOGGER.warning("Ignoring non-object relay MQTT payload topic=%s", topic)
             return
-        if self.node_registry:
-            self.node_registry.update(relay_node_id, relay_last_seen_at=now_iso())
-        device_key = value.get("device_key")
-        temperature_c = value.get("temperature_c")
-        humidity = value.get("relative_humidity_percent")
-        if (not self._switchbot_device_key_valid(device_key) or
-                value.get("source") != "relay" or value.get("relay_node_id") != relay_node_id or
-                not self._environment_values_valid(temperature_c, humidity)):
+        observation = self._parse_relay_observation(value, relay_node_id)
+        if observation is None:
             LOGGER.warning("Ignoring invalid relay MQTT fields topic=%s", topic)
             return
-        try:
-            sensor = next((item for item in self.registry.list() if item.device_key == device_key), None)
-        except Exception as error:
-            LOGGER.error("Ignoring relay observation because registry cannot be read: %s", error)
+        address, rssi, manufacturer_data, service_data = observation
+        decoded = decode(address, rssi, manufacturer_data, service_data, now_iso())
+        if decoded is None or decoded.sensor_type == "unknown":
+            LOGGER.debug("Ignoring unknown SwitchBot raw relay packet from node_id=%s", relay_node_id)
             return
-        if sensor is None:
-            LOGGER.debug("Ignoring relay observation for unregistered BLE device_key=%s", device_key)
-            return
-        if not sensor.enabled or sensor.sensor_type != "environment" or not self._mqtt:
-            return
-        canonical = {
-            "device_id": sensor.sensor_id,
-            "measured_at": now_iso(),
-            "quality": "normal",
-            "temperature_c": temperature_c,
-            "relative_humidity_percent": humidity,
-            "source": "relay",
-            "relay_node_id": relay_node_id,
-        }
-        self._mqtt.publish(f"omk/{sensor.sensor_id}/environment", json.dumps(canonical), qos=0, retain=False)
+        if self.node_registry:
+            self.node_registry.update(relay_node_id, relay_last_seen_at=now_iso())
+        self.record_advertisement(decoded, source="relay", relay_node_id=relay_node_id)
+
+    @staticmethod
+    def _parse_relay_observation(value: dict[str, Any], relay_node_id: str) -> tuple[str, int, dict[int, bytes], dict[str, bytes]] | None:
+        if value.get("protocol_version") != 1 or value.get("relay_node_id") != relay_node_id:
+            return None
+        address, rssi = value.get("ble_address"), value.get("rssi")
+        if (not isinstance(address, str) or len(address) != 12 or any(char not in "0123456789abcdef" for char in address) or
+                isinstance(rssi, bool) or not isinstance(rssi, int) or not -127 <= rssi <= 20):
+            return None
+        manufacturer_values, service_values = value.get("manufacturer_data"), value.get("service_data")
+        if not isinstance(manufacturer_values, list) or not isinstance(service_values, list) or len(manufacturer_values) > 4 or len(service_values) > 4:
+            return None
+        manufacturer_data: dict[int, bytes] = {}
+        service_data: dict[str, bytes] = {}
+        def parse_hex(raw: Any, maximum: int = 31) -> bytes | None:
+            if not isinstance(raw, str) or len(raw) > maximum * 2 or len(raw) % 2 or any(char not in "0123456789abcdef" for char in raw): return None
+            try: return bytes.fromhex(raw)
+            except ValueError: return None
+        for item in manufacturer_values:
+            if not isinstance(item, dict) or isinstance(item.get("company_id"), bool) or not isinstance(item.get("company_id"), int) or not 0 <= item["company_id"] <= 0xffff:
+                return None
+            data = parse_hex(item.get("data"))
+            if data is None or item["company_id"] in manufacturer_data: return None
+            manufacturer_data[item["company_id"]] = data
+        for item in service_values:
+            uuid = item.get("uuid") if isinstance(item, dict) else None
+            data = parse_hex(item.get("data")) if isinstance(item, dict) else None
+            if not isinstance(uuid, str) or uuid.lower() != "0000fd3d-0000-1000-8000-00805f9b34fb" or data is None or uuid in service_data: return None
+            service_data[uuid.lower()] = data
+        if not manufacturer_data and not service_data: return None
+        return address, rssi, manufacturer_data, service_data
 
     @staticmethod
     def _switchbot_device_key_valid(value: Any) -> bool:
@@ -414,7 +432,8 @@ class BleManager:
         """Unregister a physical device without deleting observations or history."""
         return self.registry.delete(device_key)
 
-    def _publish_if_registered(self, advertisement: DecodedAdvertisement) -> None:
+    def _publish_if_registered(self, advertisement: DecodedAdvertisement, *, source: str,
+                               relay_node_id: str | None) -> None:
         try:
             sensor = next((item for item in self.registry.list() if item.device_key == advertisement.device_key), None)
         except Exception as error:
@@ -423,13 +442,13 @@ class BleManager:
         if not sensor or not advertisement.values:
             return
         if sensor.sensor_type == "motion":
-            self._publish_motion_change(sensor, advertisement)
+            self._publish_motion_change(sensor, advertisement, source, relay_node_id)
             return
         if sensor.sensor_type == "contact":
-            self._publish_contact_change(sensor, advertisement)
+            self._publish_contact_change(sensor, advertisement, source, relay_node_id)
             return
         if sensor.sensor_type == "power":
-            self._publish_power(sensor, advertisement)
+            self._publish_power(sensor, advertisement, source, relay_node_id)
             return
         if not sensor.enabled or not self._mqtt:
             return
@@ -444,13 +463,13 @@ class BleManager:
             "quality": "normal",
             **advertisement.values,
         }
-        if sensor.sensor_type == "environment":
-            payload["source"] = "direct"
+        payload["source"] = source
+        if relay_node_id: payload["relay_node_id"] = relay_node_id
         self._mqtt.publish(f"omk/{sensor.sensor_id}/{sensor.sensor_type}", json.dumps(payload), qos=0, retain=False)
         if sensor.sensor_type == "environment":
             self._last_environment_publish_at[sensor.device_key] = now
 
-    def _publish_power(self, sensor: RegisteredSensor, advertisement: DecodedAdvertisement) -> None:
+    def _publish_power(self, sensor: RegisteredSensor, advertisement: DecodedAdvertisement, source: str, relay_node_id: str | None) -> None:
         """Publish Plug power periodically, but switch transitions immediately."""
         switch_state = advertisement.values.get("switch_state")
         if switch_state not in (0, 1):
@@ -463,27 +482,28 @@ class BleManager:
         last = self._last_power_publish_at.get(sensor.device_key)
         if previous == switch_state and last is not None and now - last < POWER_PUBLISH_INTERVAL_SECONDS:
             return
-        payload = {"device_id": sensor.sensor_id, "measured_at": advertisement.received_at, "quality": "normal", **advertisement.values}
+        payload = {"device_id": sensor.sensor_id, "measured_at": advertisement.received_at, "quality": "normal", **advertisement.values, "source": source}
+        if relay_node_id: payload["relay_node_id"] = relay_node_id
         self._mqtt.publish(f"omk/{sensor.sensor_id}/power", json.dumps(payload), qos=0, retain=False)
         self._last_power_publish_at[sensor.device_key] = now
 
-    def _publish_motion_change(self, sensor: RegisteredSensor, advertisement: DecodedAdvertisement) -> None:
+    def _publish_motion_change(self, sensor: RegisteredSensor, advertisement: DecodedAdvertisement, source: str, relay_node_id: str | None) -> None:
         """Publish transitions immediately and the current state every 10 seconds."""
         state = advertisement.values.get("motion_state")
         if state not in (0, 1):
             return
         previous = self._previous_motion_state.get(sensor.device_key)
         self._previous_motion_state[sensor.device_key] = state
-        self._publish_periodic_state(sensor, advertisement, state, previous, "motion_state", "motion")
+        self._publish_periodic_state(sensor, advertisement, state, previous, "motion_state", "motion", source, relay_node_id)
 
-    def _publish_contact_change(self, sensor: RegisteredSensor, advertisement: DecodedAdvertisement) -> None:
+    def _publish_contact_change(self, sensor: RegisteredSensor, advertisement: DecodedAdvertisement, source: str, relay_node_id: str | None) -> None:
         """Publish transitions immediately and the current state every 10 seconds."""
         state = advertisement.values.get("contact_state")
         if state not in (0, 1):
             return
         previous = self._previous_contact_state.get(sensor.device_key)
         self._previous_contact_state[sensor.device_key] = state
-        self._publish_periodic_state(sensor, advertisement, state, previous, "contact_state", "contact")
+        self._publish_periodic_state(sensor, advertisement, state, previous, "contact_state", "contact", source, relay_node_id)
 
     def _publish_periodic_state(
         self,
@@ -493,6 +513,8 @@ class BleManager:
         previous: int | None,
         field: str,
         topic_kind: str,
+        source: str,
+        relay_node_id: str | None,
     ) -> None:
         if not sensor.enabled or not self._mqtt:
             return
@@ -504,6 +526,8 @@ class BleManager:
             "device_id": sensor.sensor_id,
             "measured_at": advertisement.received_at,
             **advertisement.values,
+            "source": source,
         }
+        if relay_node_id: payload["relay_node_id"] = relay_node_id
         self._mqtt.publish(f"omk/{sensor.sensor_id}/{topic_kind}", json.dumps(payload), qos=0, retain=False)
         self._last_state_publish_at[sensor.device_key] = now

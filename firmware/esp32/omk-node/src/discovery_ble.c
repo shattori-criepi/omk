@@ -45,32 +45,29 @@ static esp_err_t discovery_start_advertising(void) {
 
 static void log_switchbot_advertisement(const esp_ble_gap_cb_param_t *param) {
     const uint8_t *advertising_data = param->scan_rst.ble_adv;
-    uint8_t manufacturer_length = 0;
-    uint8_t *manufacturer_data = esp_ble_resolve_adv_data_by_type(
-        (uint8_t *)advertising_data, param->scan_rst.adv_data_len,
-        ESP_BLE_AD_MANUFACTURER_SPECIFIC_TYPE, &manufacturer_length);
-    if (manufacturer_data == NULL || manufacturer_length < 2 ||
-        manufacturer_data[0] != 0x69 || manufacturer_data[1] != 0x09) {
-        return;
+    const uint8_t *manufacturer_data = NULL, *service_data = NULL;
+    size_t manufacturer_length = 0, service_length = 0, offset = 0;
+    size_t advertising_length = param->scan_rst.adv_data_len + param->scan_rst.scan_rsp_len;
+    /* Parse AD structures once so that a combined manufacturer/service packet
+     * (notably Presence Sensor Pro) remains intact for the Gateway decoder. */
+    while (offset < advertising_length) {
+        uint8_t field_length = advertising_data[offset++];
+        if (field_length == 0 || offset + field_length > advertising_length) break;
+        uint8_t type = advertising_data[offset++];
+        const uint8_t *value = advertising_data + offset;
+        size_t value_length = field_length - 1;
+        if (type == ESP_BLE_AD_MANUFACTURER_SPECIFIC_TYPE && value_length >= 2 &&
+            value[0] == 0x69 && value[1] == 0x09) {
+            manufacturer_data = value + 2; manufacturer_length = value_length - 2;
+        } else if (type == 0x16 && value_length >= 2 && value[0] == 0x3d && value[1] == 0xfd) {
+            service_data = value + 2; service_length = value_length - 2;
+        }
+        offset += value_length;
     }
-
-    char payload_hex[ESP_BLE_ADV_DATA_LEN_MAX * 2 + 1] = {0};
-    size_t offset = 0;
-    for (uint8_t index = 0; index < manufacturer_length &&
-                            offset + 2 < sizeof(payload_hex); ++index) {
-        offset += (size_t)snprintf(payload_hex + offset,
-                                   sizeof(payload_hex) - offset,
-                                   "%02x", manufacturer_data[index]);
-    }
-    ESP_LOGD(TAG, "SwitchBot advertisement addr=" ESP_BD_ADDR_STR
-                  " rssi=%d len=%u data=%s",
-             ESP_BD_ADDR_HEX(param->scan_rst.bda), param->scan_rst.rssi,
-             manufacturer_length, payload_hex);
-
-    /* ESP-IDF returns the Company ID as the first two manufacturer bytes;
-     * the existing Gateway decoder receives the following device layout. */
-    switchbot_relay_handle_manufacturer_data(manufacturer_data + 2,
-                                             manufacturer_length - 2);
+    if (manufacturer_data == NULL && service_data == NULL) return;
+    switchbot_relay_handle_observation(param->scan_rst.bda, param->scan_rst.rssi,
+                                       manufacturer_data, manufacturer_length,
+                                       service_data, service_length);
 }
 
 static void gap_callback(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param) {

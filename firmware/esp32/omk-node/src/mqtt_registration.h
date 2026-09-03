@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "esp_err.h"
@@ -29,11 +30,11 @@ esp_err_t mqtt_registration_publish_environment(const char *sensor_id,
                                                 float temperature_c,
                                                 uint8_t relative_humidity_percent);
 
-/* Queues a relay-origin BLE observation for Gateway registry resolution. */
-esp_err_t mqtt_registration_publish_relay_environment(const char *device_key,
-                                                       float temperature_c,
-                                                       uint8_t relative_humidity_percent,
-                                                       const char *relay_node_id);
+/* Queues a raw SwitchBot BLE observation for Gateway decoding and registry resolution. */
+esp_err_t mqtt_registration_publish_ble_relay(const char *relay_node_id,
+                                              const char *ble_address, int rssi,
+                                              const uint8_t *manufacturer_data, size_t manufacturer_length,
+                                              const uint8_t *service_data, size_t service_length);
 
 /* Queues one non-retained SEN66 measurement through the established MQTT client. */
 esp_err_t mqtt_registration_publish_sen66(const char *sensor_id,

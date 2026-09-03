@@ -188,6 +188,15 @@ class CollectorTests(unittest.TestCase):
         ))
         self.assertTrue(should_store_record(environment("meter-004", "relay"), selector, 31.001))
 
+    def test_ble_route_selection_covers_all_switchbot_canonical_topics(self) -> None:
+        for kind in ("environment", "motion", "contact", "power"):
+            selector = BleRouteSelector()
+            direct = {"topic": f"omk/{kind}-001/{kind}", "payload": {"device_id": f"{kind}-001", "source": "direct"}}
+            relay = {"topic": f"omk/{kind}-001/{kind}", "payload": {"device_id": f"{kind}-001", "source": "relay"}}
+            self.assertTrue(should_store_record(direct, selector, 0.0))
+            self.assertFalse(should_store_record(relay, selector, 29.0))
+            self.assertTrue(should_store_record(relay, selector, 30.0))
+
 
 if __name__ == "__main__":
     unittest.main()

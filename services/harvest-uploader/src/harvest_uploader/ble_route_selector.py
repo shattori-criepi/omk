@@ -25,9 +25,9 @@ class BleRouteSelector:
 
 
 def should_aggregate_observation(topic: str, payload: dict[str, Any], selector: BleRouteSelector, received_monotonic: float) -> bool:
-    """Apply route selection only to well-formed BLE environment observations."""
+    """Apply route selection only to well-formed canonical BLE observations."""
     parts = topic.split("/")
-    if len(parts) != 3 or parts[0] != "omk" or parts[2] != "environment" or not parts[1]:
+    if len(parts) != 3 or parts[0] != "omk" or parts[2] not in {"environment", "motion", "contact", "power"} or not parts[1]:
         return True
     device_id = parts[1]
     if payload.get("device_id") != device_id:

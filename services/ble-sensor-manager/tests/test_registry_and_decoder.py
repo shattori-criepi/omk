@@ -592,7 +592,7 @@ def test_updated_sensor_id_is_used_for_next_mqtt_publish_and_disabled_sensor_is_
     assert len(publisher.messages) == 1
 
 
-def test_relay_environment_resolves_switchbot_device_key_to_registered_sensor_id(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_raw_relay_reuses_switchbot_decoder_and_resolves_registered_sensor_id(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     registry = SensorRegistry(tmp_path / "sensors.json")
     registry.register(RegisteredSensor(
         "switchbot:cf3941c7ed79", "th-001", "environment", "switchbot",
@@ -603,19 +603,19 @@ def test_relay_environment_resolves_switchbot_device_key_to_registered_sensor_id
     monkeypatch.setattr("omk_ble.service.now_iso", lambda: "2026-08-20T10:00:00+00:00")
 
     manager.handle_relay_mqtt(
-        "omk-relay/09dda0d5a8f2/ble/environment",
-        b'{"device_key":"switchbot:cf3941c7ed79","quality":"normal","temperature_c":24.4,'
-        b'"relative_humidity_percent":48,"source":"relay","relay_node_id":"09dda0d5a8f2"}',
+        "omk-relay/09dda0d5a8f2/ble/raw",
+        b'{"protocol_version":1,"relay_node_id":"09dda0d5a8f2","ble_address":"cf3941c7ed79","rssi":-42,'
+        b'"manufacturer_data":[{"company_id":2409,"data":"cf3941c7ed79f40304992c"}],"service_data":[]}',
     )
 
     assert publisher.messages == [("omk/th-001/environment", json.dumps({
         "device_id": "th-001", "measured_at": "2026-08-20T10:00:00+00:00", "quality": "normal",
-        "temperature_c": 24.4, "relative_humidity_percent": 48,
+        "temperature_c": 25.4, "relative_humidity_percent": 44,
         "source": "relay", "relay_node_id": "09dda0d5a8f2",
     }))]
 
 
-def test_relay_environment_does_not_publish_unregistered_or_disabled_devices(tmp_path: Path) -> None:
+def test_raw_relay_does_not_publish_unregistered_or_disabled_devices(tmp_path: Path) -> None:
     registry = SensorRegistry(tmp_path / "sensors.json")
     registry.register(RegisteredSensor(
         "switchbot:111111111111", "th-002", "environment", "switchbot",
@@ -624,17 +624,17 @@ def test_relay_environment_does_not_publish_unregistered_or_disabled_devices(tmp
     publisher = _MqttPublisher()
     manager = BleManager(registry, publisher)
 
-    def relay(device_key: str) -> None:
+    def relay(address: str) -> None:
         manager.handle_relay_mqtt(
-            "omk-relay/09dda0d5a8f2/ble/environment",
+            "omk-relay/09dda0d5a8f2/ble/raw",
             json.dumps({
-                "device_key": device_key, "quality": "normal", "temperature_c": 24.4,
-                "relative_humidity_percent": 48, "source": "relay", "relay_node_id": "09dda0d5a8f2",
+                "protocol_version": 1, "relay_node_id": "09dda0d5a8f2", "ble_address": address, "rssi": -42,
+                "manufacturer_data": [{"company_id": 2409, "data": address + "f40304992c"}], "service_data": [],
             }).encode(),
         )
 
-    relay("switchbot:cf3941c7ed79")
-    relay("switchbot:111111111111")
+    relay("cf3941c7ed79")
+    relay("111111111111")
     assert publisher.messages == []
 
 
@@ -869,7 +869,7 @@ def test_presence_sensor_pro_publishes_its_decoded_values_on_the_motion_topic(tm
     BleManager(registry, publisher).record_advertisement(advertisement)
     assert publisher.messages == [("omk/motion-001/motion", json.dumps({
         "device_id": "motion-001", "measured_at": "now", "motion_state": 0,
-        "battery_percent": 100, "light_level": 12,
+        "battery_percent": 100, "light_level": 12, "source": "direct",
     }))]
 
 
@@ -886,7 +886,7 @@ def test_motion_publishes_initial_and_state_transitions(tmp_path: Path) -> None:
         manager.record_advertisement(_motion_advertisement(state))
     assert [topic for topic, _payload in publisher.messages] == ["omk/motion-001/motion"] * 4
     assert [json.loads(payload)["motion_state"] for _topic, payload in publisher.messages] == [0, 1, 0, 1]
-    assert all(set(json.loads(payload)) == {"device_id", "measured_at", "motion_state"} for _topic, payload in publisher.messages)
+    assert all(set(json.loads(payload)) == {"device_id", "measured_at", "motion_state", "source"} for _topic, payload in publisher.messages)
 
 
 def test_motion_first_true_and_disabled_state_changes_do_not_publish(tmp_path: Path) -> None:
@@ -921,8 +921,8 @@ def test_motion_and_contact_publish_current_state_every_ten_seconds_or_on_change
     manager.record_advertisement(_motion_advertisement(1, "changed"))
     manager.record_advertisement(_contact_advertisement(1, "changed"))
     assert [json.loads(payload) for _topic, payload in publisher.messages[-2:]] == [
-        {"device_id": "motion-001", "measured_at": "changed", "motion_state": 1},
-        {"device_id": "contact-001", "measured_at": "changed", "contact_state": 1},
+            {"device_id": "motion-001", "measured_at": "changed", "motion_state": 1, "source": "direct"},
+            {"device_id": "contact-001", "measured_at": "changed", "contact_state": 1, "source": "direct"},
     ]
     clock[0] = 13.0
     manager.record_advertisement(_motion_advertisement(1, "periodic"))

@@ -45,7 +45,7 @@ def _on_mqtt_connect(client: mqtt.Client, userdata: Any, flags: Any, reason_code
         client.subscribe("omk/node/+/registration/status", qos=1)
         client.subscribe("omk/node/+/registration/ack", qos=1)
         client.subscribe("omk/+/sen66", qos=0)
-        client.subscribe("omk-relay/+/ble/environment", qos=0)
+        client.subscribe("omk-relay/+/ble/raw", qos=0)
 
 def _on_mqtt_message(client: mqtt.Client, userdata: Any, message: mqtt.MQTTMessage) -> None:
     if message.topic.startswith("omk-relay/"):
