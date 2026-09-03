@@ -16,7 +16,7 @@ from .models import DecodedAdvertisement, RegisteredSensor, now_iso
 from .node_registry import NodeRegistry
 from .omk_node import decode as decode_omk_node
 from .registry import SensorRegistry
-from .switchbot import decode
+from .switchbot import decode, device_key_for
 
 LOGGER = logging.getLogger(__name__)
 ENVIRONMENT_PUBLISH_INTERVAL_SECONDS = 10.0
@@ -109,7 +109,8 @@ class BleManager:
             received_at = now_iso()
             decoded = decode_omk_node(advertisement.rssi, advertisement.service_data, received_at, device.address)
             if decoded is None:
-                decoded = decode(device.address, advertisement.rssi, advertisement.manufacturer_data, advertisement.service_data, received_at)
+                decoded = decode(device.address, advertisement.rssi, advertisement.manufacturer_data, advertisement.service_data, received_at,
+                                 model_hint=self._registered_model_hint(device.address, advertisement.manufacturer_data))
             if decoded:
                 self.record_advertisement(decoded)
         except Exception:
@@ -296,7 +297,8 @@ class BleManager:
             LOGGER.warning("Ignoring invalid relay MQTT fields topic=%s", topic)
             return
         address, rssi, manufacturer_data, service_data = observation
-        decoded = decode(address, rssi, manufacturer_data, service_data, now_iso())
+        decoded = decode(address, rssi, manufacturer_data, service_data, now_iso(),
+                         model_hint=self._registered_model_hint(address, manufacturer_data))
         if decoded is None or decoded.sensor_type == "unknown":
             LOGGER.debug("Ignoring unknown SwitchBot raw relay packet from node_id=%s", relay_node_id)
             return
@@ -334,6 +336,16 @@ class BleManager:
             service_data[uuid.lower()] = data
         if not manufacturer_data and not service_data: return None
         return address, rssi, manufacturer_data, service_data
+
+    def _registered_model_hint(self, address: str, manufacturer_data: dict[int, bytes]) -> str | None:
+        """Use immutable registry metadata only after deriving the normal key."""
+        try:
+            device_key = device_key_for(address, manufacturer_data)
+            sensor = next((item for item in self.registry.list() if item.device_key == device_key), None)
+        except Exception as error:
+            LOGGER.error("Cannot read BLE registry for model hint: %s", error)
+            return None
+        return sensor.model if sensor else None
 
     @staticmethod
     def _switchbot_device_key_valid(value: Any) -> bool:

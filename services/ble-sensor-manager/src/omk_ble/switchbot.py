@@ -83,6 +83,13 @@ def _hex_map(values: dict[str, bytes]) -> dict[str, str]:
     return {key: value.hex() for key, value in values.items()}
 
 
+def device_key_for(address: str, manufacturer_data: dict[int, bytes]) -> str:
+    """Return the same stable physical key used by ``decode()``."""
+    company_data = manufacturer_data.get(SWITCHBOT_COMPANY_ID)
+    physical_id = company_data[:6].hex() if company_data and len(company_data) >= 6 else address.replace(":", "").lower()
+    return f"switchbot:{physical_id}"
+
+
 def _decode_service_data(data: bytes | None) -> tuple[str, str, dict[str, Any]] | None:
     """Decode the existing documented Meter service-data layout."""
     if not data or len(data) < 6 or data[0] not in MODEL_BY_TYPE:
@@ -286,7 +293,8 @@ def _decode_manufacturer_data(data: bytes | None) -> tuple[str, str, dict[str, A
     )
 
 
-def decode(address: str, rssi: int, manufacturer_data: dict[int, bytes], service_data: dict[str, bytes], received_at: str) -> DecodedAdvertisement | None:
+def decode(address: str, rssi: int, manufacturer_data: dict[int, bytes], service_data: dict[str, bytes], received_at: str,
+           model_hint: str | None = None) -> DecodedAdvertisement | None:
     """Identify SwitchBot and safely decode either supported advertisement form."""
     company_data = manufacturer_data.get(SWITCHBOT_COMPANY_ID)
     normalized = {key.lower(): value for key, value in service_data.items()}
@@ -316,12 +324,17 @@ def decode(address: str, rssi: int, manufacturer_data: dict[int, bytes], service
     plug_from_manufacturer = _decode_plug_manufacturer_data(
         company_data, require_marker=plug_from_service is None,
     ) if company_data else None
+    # A registered Plug's physical identity is sufficient to disambiguate the
+    # 12-byte manufacturer layout from Waterproof Sensor. Do not relax the
+    # generic classifier for unregistered advertisements.
+    hinted_plug = _decode_plug_manufacturer_data(company_data, require_marker=False) if company_data and model_hint == "plug_sensor" else None
     decoded = (
-        presence
+        hinted_plug
+        or presence
         or contact_from_manufacturer
         or contact_from_service
-        or waterproof_from_manufacturer
-        or waterproof_from_service
+        or (waterproof_from_manufacturer if model_hint != "plug_sensor" else None)
+        or (waterproof_from_service if model_hint != "plug_sensor" else None)
         or plug_from_manufacturer
         or plug_from_service
         or _decode_service_data(service_bytes)
@@ -331,8 +344,7 @@ def decode(address: str, rssi: int, manufacturer_data: dict[int, bytes], service
 
     # BlueZ's address and the observed SwitchBot manufacturer physical ID agree.
     # Prefer the latter when complete, preserving a stable physical identifier.
-    physical_id = company_data[:6].hex() if company_data and len(company_data) >= 6 else address.replace(":", "").lower()
     return DecodedAdvertisement(
-        device_key=f"switchbot:{physical_id}", vendor="switchbot", model=model,
+        device_key=device_key_for(address, manufacturer_data), vendor="switchbot", model=model,
         sensor_type=sensor_type, rssi=rssi, received_at=received_at, values=values, raw=raw,
     )

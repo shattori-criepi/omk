@@ -208,6 +208,22 @@ def test_plug_sensor_decodes_service_and_manufacturer_power_layouts() -> None:
     assert new_verified.values == {"power_w": 5.5, "switch_state": 1}
 
 
+def test_registered_plug_model_hint_decodes_ambiguous_manufacturer_only_packets() -> None:
+    packets = (
+        ("ac276e43269e96801032002a", {"switch_state": 1, "power_w": 4.2}),
+        ("ac276e43269e9c0010330029", {"switch_state": 0, "power_w": 4.1}),
+        ("ac276e43269e9d0010330000", {"switch_state": 0, "power_w": 0.0}),
+    )
+    for packet, values in packets:
+        hinted = decode("AC:27:6E:43:26:9E", -50, {SWITCHBOT_COMPANY_ID: bytes.fromhex(packet)}, {}, "now", model_hint="plug_sensor")
+        assert hinted is not None and hinted.model == "plug_sensor" and hinted.values == values
+
+    # Without registration metadata this collision remains conservatively
+    # non-Plug; the last packet can otherwise match Waterproof's 12-byte form.
+    unhinted = decode("AC:27:6E:43:26:9E", -50, {SWITCHBOT_COMPANY_ID: bytes.fromhex(packets[-1][0])}, {}, "now")
+    assert unhinted is not None and unhinted.model != "plug_sensor"
+
+
 def test_short_and_unknown_manufacturer_packets_remain_raw_unknown_candidates() -> None:
     for packet in (b"", bytes.fromhex("cf3941c7ed79f40304"), bytes.fromhex("cf3941c7ed79000004992c")):
         decoded = decode("CF:39:41:C7:ED:79", -50, {SWITCHBOT_COMPANY_ID: packet}, {}, "now")
@@ -334,7 +350,7 @@ def test_latest_advertisement_replaces_all_candidate_data_without_reordering(tmp
 def test_callback_updates_candidate_after_stop_and_new_scan_session(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     manager = BleManager(SensorRegistry(tmp_path / "sensors.json"))
     decoded = iter((_candidate("switchbot:a", rssi=-70, values={"temperature_c": 20.0}), _candidate("switchbot:a", rssi=-20, values={"temperature_c": 21.0})))
-    monkeypatch.setattr("omk_ble.service.decode", lambda *_args: next(decoded))
+    monkeypatch.setattr("omk_ble.service.decode", lambda *_args, **_kwargs: next(decoded))
     device = type("Device", (), {"address": "AA:BB:CC:DD:EE:FF"})()
     advertisement = type("Advertisement", (), {"rssi": -1, "manufacturer_data": {}, "service_data": {}})()
 
@@ -636,6 +652,28 @@ def test_raw_relay_does_not_publish_unregistered_or_disabled_devices(tmp_path: P
     relay("cf3941c7ed79")
     relay("111111111111")
     assert publisher.messages == []
+
+
+def test_registered_plug_model_hint_is_used_for_direct_and_raw_relay(tmp_path: Path) -> None:
+    registry = SensorRegistry(tmp_path / "sensors.json")
+    registry.register(RegisteredSensor("switchbot:ac276e43269e", "plug-001", "power", "switchbot", "plug_sensor", "", "プラグ"))
+    packet = "ac276e43269e9d0010330000"
+    direct_publisher = _MqttPublisher()
+    direct_manager = BleManager(registry, direct_publisher)
+    device = type("Device", (), {"address": "AC:27:6E:43:26:9E"})()
+    advertisement = type("Advertisement", (), {"rssi": -50, "manufacturer_data": {SWITCHBOT_COMPANY_ID: bytes.fromhex(packet)}, "service_data": {}})()
+    direct_manager._on_detection(device, advertisement)
+    assert json.loads(direct_publisher.messages[-1][1])["power_w"] == 0.0
+
+    relay_publisher = _MqttPublisher()
+    relay_manager = BleManager(registry, relay_publisher)
+    relay_manager.handle_relay_mqtt(
+        "omk-relay/09dda0d5a8f2/ble/raw",
+        json.dumps({"protocol_version": 1, "relay_node_id": "09dda0d5a8f2", "ble_address": "ac276e43269e", "rssi": -50,
+                    "manufacturer_data": [{"company_id": 2409, "data": packet}], "service_data": []}).encode(),
+    )
+    relay_payload = json.loads(relay_publisher.messages[-1][1])
+    assert relay_payload["source"] == "relay" and relay_payload["power_w"] == 0.0
 
 
 def test_environment_direct_route_suppresses_relay_then_falls_back_and_recovers(tmp_path: Path) -> None:
