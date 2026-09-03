@@ -1013,10 +1013,19 @@ def test_contact_sensor_decodes_official_service_data_and_manufacturer_layouts()
         ("d3b204e2312521dc0007000040", 1),
         ("d3b204e2312522cc000e000140", 0),
         ("d3b204e23125f26c00cd009480", 1),  # timeout-not-close; still open
+        # Bytes 8 and 10 are elapsed-time/counter fields, not reserved zeroes.
+        ("d3b204e23125066c02a80260c0", 1),
     ):
         decoded = decode("D3:B2:04:E2:31:25", -31, {SWITCHBOT_COMPANY_ID: bytes.fromhex(packet)}, {}, "now")
         assert decoded is not None and decoded.model == "contact_sensor"
         assert decoded.values == {"contact_state": expected_state}
+
+    for packet in (
+        "d3b204e23125066d02a80260c0",  # status low nibble is not 0x0c
+        "d3b204e23125067c02a80260c0",  # HAL state 3 is reserved
+    ):
+        decoded = decode("D3:B2:04:E2:31:25", -31, {SWITCHBOT_COMPANY_ID: bytes.fromhex(packet)}, {}, "now")
+        assert decoded is not None and decoded.model == "unknown_switchbot"
 
 
 def test_contact_timeout_not_close_manufacturer_packet_matches_service_hal_state() -> None:
@@ -1045,7 +1054,7 @@ def test_contact_decoder_does_not_misclassify_existing_sensor_layouts() -> None:
     co2 = decode("B0:E9:FE:58:15:CC", -40, {SWITCHBOT_COMPANY_ID: bytes.fromhex("b0e9fe5815ccf6e405982e0024020e00")}, {}, "now")
     motion = decode("CF:FC:6A:48:DB:15", -40, {SWITCHBOT_COMPANY_ID: bytes.fromhex("cffc6a48db150c6c0000")}, {}, "now")
     malformed = decode("D3:B2:04:E2:31:25", -40, {}, {METER_SERVICE_UUID: bytes.fromhex("64")}, "now")
-    unrelated = decode("D3:B2:04:E2:31:25", -40, {SWITCHBOT_COMPANY_ID: bytes.fromhex("d3b204e23125704c01530051c1")}, {}, "now")
+    unrelated = decode("D3:B2:04:E2:31:25", -40, {SWITCHBOT_COMPANY_ID: bytes.fromhex("d3b204e23125707c01530051c1")}, {}, "now")
     assert meter is not None and meter.model == "temperature_humidity_sensor"
     assert co2 is not None and co2.model == "co2_sensor"
     assert motion is not None and motion.model == "motion_sensor"

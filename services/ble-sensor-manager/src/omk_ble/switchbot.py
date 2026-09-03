@@ -58,7 +58,6 @@ MOTION_STATUS_LOW_BITS = 0x2C
 
 CONTACT_SERVICE_DEVICE_TYPE = 0x64
 CONTACT_MANUFACTURER_LENGTH = 13
-CONTACT_RESERVED_INDEX = 8
 CONTACT_MANUFACTURER_STATUS_INDEX = 7
 
 # Plug Mini layout: <physical id 6> <sequence> <switch state> <variable>
@@ -260,14 +259,11 @@ def _decode_contact_manufacturer_data(data: bytes) -> tuple[str, str, dict[str, 
     """Decode the observed manufacturer-only Contact Sensor layout safely."""
     if len(data) != CONTACT_MANUFACTURER_LENGTH:
         return None
-    # Captures show bytes 8 and 10 are reserved zeroes. The trailer varies
-    # (for example 0x40, 0x80, 0xc0, 0x41, and 0xc1), so it is not a
-    # classifier condition.
-    if data[CONTACT_RESERVED_INDEX] != 0 or data[10] != 0:
-        return None
     # Manufacturer bits 4..5 carry the same HAL state meaning as service
     # data: 0x4c/0xcc => closed, 0x5c/0xdc => open, 0x6c =>
-    # timeout-not-close (still physically open). Bits 6..7 are not state.
+    # timeout-not-close (still physically open). The other bytes include
+    # time/counter fields and vary in long-running observations, so they are
+    # intentionally not classifier conditions.
     status = data[CONTACT_MANUFACTURER_STATUS_INDEX]
     if (status & 0x0F) != 0x0C:
         return None
