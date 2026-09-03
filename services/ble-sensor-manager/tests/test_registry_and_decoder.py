@@ -638,6 +638,54 @@ def test_raw_relay_does_not_publish_unregistered_or_disabled_devices(tmp_path: P
     assert publisher.messages == []
 
 
+def test_environment_direct_route_suppresses_relay_then_falls_back_and_recovers(tmp_path: Path) -> None:
+    registry = SensorRegistry(tmp_path / "sensors.json")
+    registry.register(RegisteredSensor("switchbot:meter", "th-001", "environment", "switchbot", "temperature_humidity_sensor", "", "温湿度計"))
+    clock = [0.0]
+    publisher = _MqttPublisher()
+    manager = BleManager(registry, publisher, monotonic_provider=lambda: clock[0])
+
+    def observation(value: float, received_at: str) -> DecodedAdvertisement:
+        return DecodedAdvertisement("switchbot:meter", "switchbot", "temperature_humidity_sensor", "environment", -40, received_at, {"temperature_c": value, "relative_humidity_percent": 50}, {})
+
+    manager.record_advertisement(observation(20.0, "direct-first"))
+    manager.record_advertisement(observation(30.0, "relay-fresh"), source="relay", relay_node_id="09dda0d5a8f2")
+    clock[0] = 1.0
+    manager.record_advertisement(observation(20.0, "direct-rate-limited"))
+    clock[0] = 30.9
+    manager.record_advertisement(observation(30.0, "relay-29.9"), source="relay", relay_node_id="09dda0d5a8f2")
+    assert [json.loads(payload)["source"] for _, payload in publisher.messages] == ["direct"]
+
+    clock[0] = 31.0
+    manager.record_advertisement(observation(30.0, "relay-fallback"), source="relay", relay_node_id="09dda0d5a8f2")
+    assert json.loads(publisher.messages[-1][1])["source"] == "relay"
+    clock[0] = 31.1
+    manager.record_advertisement(observation(30.0, "direct-recovered"))
+    assert json.loads(publisher.messages[-1][1])["source"] == "direct"
+    assert json.loads(publisher.messages[-1][1])["temperature_c"] == 30.0
+    clock[0] = 31.2
+    manager.record_advertisement(observation(99.0, "relay-after-recovery"), source="relay", relay_node_id="09dda0d5a8f2")
+    assert len(publisher.messages) == 3
+
+
+def test_contact_direct_recovery_forces_same_state_source_switch(tmp_path: Path) -> None:
+    registry = SensorRegistry(tmp_path / "sensors.json")
+    registry.register(RegisteredSensor("switchbot:contact", "contact-001", "contact", "switchbot", "contact_sensor", "", "ドア"))
+    clock = [0.0]
+    publisher = _MqttPublisher()
+    manager = BleManager(registry, publisher, monotonic_provider=lambda: clock[0])
+
+    def observation(received_at: str) -> DecodedAdvertisement:
+        return DecodedAdvertisement("switchbot:contact", "switchbot", "contact_sensor", "contact", -40, received_at, {"contact_state": 1}, {})
+
+    manager.record_advertisement(observation("direct-first"))
+    clock[0] = 30.0
+    manager.record_advertisement(observation("relay-fallback"), source="relay", relay_node_id="09dda0d5a8f2")
+    clock[0] = 30.1
+    manager.record_advertisement(observation("direct-recovered"))
+    assert [json.loads(payload)["source"] for _, payload in publisher.messages] == ["direct", "relay", "direct"]
+
+
 def test_environment_publish_is_rate_limited_per_device_with_latest_values(tmp_path: Path) -> None:
     registry = SensorRegistry(tmp_path / "sensors.json")
     registry.register(RegisteredSensor("switchbot:th", "th-001", "environment", "switchbot", "temperature_humidity_sensor", "", "温湿度計"))
