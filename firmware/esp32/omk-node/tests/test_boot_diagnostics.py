@@ -72,3 +72,15 @@ def test_registration_payload_capacity_is_unchanged():
     source = (SOURCE / "mqtt_registration.c").read_text()
     assert "#define OMK_REGISTRATION_PAYLOAD_SIZE 192" in source
     assert "#define OMK_MQTT_MESH_STATUS_PAYLOAD_SIZE 640" in source
+
+
+def test_switchbot_scan_is_active_and_joins_advertisement_and_scan_response_fragments():
+    discovery = (SOURCE / "discovery_ble.c").read_text()
+    relay = (SOURCE / "switchbot_relay.c").read_text()
+    assert ".scan_type = BLE_SCAN_TYPE_ACTIVE" in discovery
+    assert "Active SwitchBot scan" in discovery
+    assert "never connects to or" in discovery and "pairs with the observed devices" in discovery
+    assert "adv_data_len + param->scan_rst.scan_rsp_len" in discovery
+    assert "SWITCHBOT_FRAGMENT_JOIN_WINDOW_US" in relay
+    assert "Active scan can report ADV and SCAN_RSP separately" in relay
+    assert "slot->manufacturer_data" in relay and "slot->service_data" in relay

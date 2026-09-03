@@ -23,11 +23,10 @@ static esp_ble_adv_params_t discovery_adv_params = {
     .channel_map = ADV_CHNL_ALL,
     .adv_filter_policy = ADV_FILTER_ALLOW_SCAN_ANY_CON_ANY,
 };
-/* Use ESP-IDF's documented default interval/window (10 ms each) for a
- * continuous passive observation window. This Node never connects to or
- * pairs with the observed devices. */
+/* Active scanning sends scan requests only to obtain scan responses.  This
+ * Node never connects to or pairs with the observed devices. */
 static esp_ble_scan_params_t switchbot_scan_params = {
-    .scan_type = BLE_SCAN_TYPE_PASSIVE,
+    .scan_type = BLE_SCAN_TYPE_ACTIVE,
     .own_addr_type = BLE_ADDR_TYPE_PUBLIC,
     .scan_filter_policy = BLE_SCAN_FILTER_ALLOW_ALL,
     .scan_interval = 0x0010,
@@ -79,7 +78,7 @@ static void gap_callback(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *p
         if (param->adv_start_cmpl.status == ESP_BT_STATUS_SUCCESS) {
             esp_err_t err = esp_ble_gap_set_scan_params(&switchbot_scan_params);
             if (err != ESP_OK) {
-                ESP_LOGE(TAG, "Failed to configure passive SwitchBot scan: %s",
+                ESP_LOGE(TAG, "Failed to configure active SwitchBot scan: %s",
                          esp_err_to_name(err));
             }
         }
@@ -87,22 +86,22 @@ static void gap_callback(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *p
         ESP_LOGI(TAG, "Discovery advertising stop complete status=%d", param->adv_stop_cmpl.status);
     } else if (event == ESP_GAP_BLE_SCAN_PARAM_SET_COMPLETE_EVT) {
         if (param->scan_param_cmpl.status != ESP_BT_STATUS_SUCCESS) {
-            ESP_LOGE(TAG, "Passive SwitchBot scan configuration failed status=%d",
+            ESP_LOGE(TAG, "Active SwitchBot scan configuration failed status=%d",
                      param->scan_param_cmpl.status);
             return;
         }
         esp_err_t err = esp_ble_gap_start_scanning(0);
         if (err != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to start passive SwitchBot scan: %s",
+            ESP_LOGE(TAG, "Failed to start active SwitchBot scan: %s",
                      esp_err_to_name(err));
             return;
         }
     } else if (event == ESP_GAP_BLE_SCAN_START_COMPLETE_EVT) {
         scan_started = param->scan_start_cmpl.status == ESP_BT_STATUS_SUCCESS;
-        ESP_LOGI(TAG, "Passive SwitchBot scan start complete status=%d",
+        ESP_LOGI(TAG, "Active SwitchBot scan start complete status=%d",
                  param->scan_start_cmpl.status);
     } else if (event == ESP_GAP_BLE_SCAN_STOP_COMPLETE_EVT) {
-        ESP_LOGI(TAG, "Passive SwitchBot scan stop complete status=%d",
+        ESP_LOGI(TAG, "Active SwitchBot scan stop complete status=%d",
                  param->scan_stop_cmpl.status);
     } else if (event == ESP_GAP_BLE_SCAN_RESULT_EVT &&
                param->scan_rst.search_evt == ESP_GAP_SEARCH_INQ_RES_EVT) {
