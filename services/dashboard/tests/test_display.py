@@ -410,6 +410,29 @@ console.log(JSON.stringify({reloads}));
     assert json.loads(completed.stdout) == {"reloads": 1}
 
 
+@pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is required for display rotation tests")
+def test_demo_rotation_cycles_all_saved_display_modes_and_ui_avoids_fixture_jargon() -> None:
+    javascript_path = Path(__file__).parents[1] / "app" / "static" / "display.js"
+    harness = r'''
+const fs = require("fs"), vm = require("vm");
+global.document = {body: {dataset: {demoEnabled: "false", demoMode: ""}}, documentElement: {classList: {add() {}}}, querySelector() { return null; }};
+global.window = {setInterval() {}};
+global.fetch = async () => ({ok: true, json: async () => ({})});
+vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8") + "\nglobalThis.__displayTest = { nextDemoMode };");
+console.log(JSON.stringify(["custom", "clock", "recommended", "custom"].map(__displayTest.nextDemoMode)));
+'''
+    completed = subprocess.run(["node", "-e", harness, str(javascript_path)], check=True, capture_output=True, text=True)
+
+    assert json.loads(completed.stdout) == ["clock", "recommended", "custom", "clock"]
+    user_html = "\n".join(
+        (Path(__file__).parents[1] / "app" / "templates" / name).read_text(encoding="utf-8")
+        for name in ("display.html", "admin_display.html")
+    )
+    user_javascript = javascript_path.read_text(encoding="utf-8")
+    assert "fixture" not in user_html.lower()
+    assert "fixture" not in user_javascript.lower()
+
+
 def _write_instantaneous_data(
     root: Path,
     *,

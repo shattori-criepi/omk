@@ -16,6 +16,11 @@ const demoEnabled = document.body?.dataset.demoEnabled === "true";
 const demoModes = ["custom", "clock", "recommended"];
 let demoModeIndex = Math.max(0, demoModes.indexOf(document.body?.dataset.demoMode));
 
+function nextDemoMode(mode) {
+  const index = demoModes.indexOf(mode);
+  return demoModes[(index + 1 + demoModes.length) % demoModes.length];
+}
+
 function updateCurrentDatetime() {
   if (!currentDatetime && !clockDate && !clockTime) return;
 
@@ -81,6 +86,8 @@ function updateSourceStatus(sectionId, badgeId, freshness) {
 }
 
 function renderedDisplayMode() {
+  const savedMode = document.body?.dataset.dashboardMode;
+  if (["custom", "clock", "recommended"].includes(savedMode)) return savedMode;
   if (document.querySelector("#clock-supplemental")) return "clock";
   if (document.querySelector("#display-blocks")) return "blocks";
   if (document.querySelector("#power-section")) return "legacy";
@@ -89,7 +96,7 @@ function renderedDisplayMode() {
 
 function responseDisplayMode(data) {
   if (data.mode === "clock" && Array.isArray(data.supplemental)) return "clock";
-  if (["standard", "custom", "recommended"].includes(data.mode) && Array.isArray(data.blocks)) return "blocks";
+  if (["standard", "custom", "recommended"].includes(data.mode) && Array.isArray(data.blocks)) return data.mode;
   return "legacy";
 }
 
@@ -236,6 +243,6 @@ async function refreshDisplay() {
 updateCurrentDatetime();
 window.setInterval(updateCurrentDatetime, 1_000);
 window.setInterval(() => {
-  if (demoEnabled) demoModeIndex = (demoModeIndex + 1) % demoModes.length;
+  if (demoEnabled) demoModeIndex = demoModes.indexOf(nextDemoMode(demoModes[demoModeIndex]));
   refreshDisplay();
 }, DISPLAY_POLL_INTERVAL_MS);

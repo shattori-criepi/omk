@@ -594,3 +594,20 @@ html.admin-document::-webkit-scrollbar-thumb { border: 3px solid #0b1220; border
 .export-management-page .export-dataset-option {
   min-height: 58px;
 }
+
+/* The exhibition indicator deliberately sits outside dashboard layout flow. */
+.demo-mode-notice {
+  position: fixed;
+  z-index: 10;
+  top: max(8px, env(safe-area-inset-top));
+  left: max(8px, env(safe-area-inset-left));
+  margin: 0;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, .82);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
+  pointer-events: none;
+}
