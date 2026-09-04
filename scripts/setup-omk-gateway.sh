@@ -262,6 +262,55 @@ validate_prepared_ap_profile() {
     fail 'Prepared AP verification failed: omk-ap WPA2 PSK is missing.'
 }
 
+ssh_uses_ap_interface() {
+  local ssh_peer ssh_route
+  [[ -n "${SSH_CONNECTION:-}" ]] || return 1
+  ssh_peer="${SSH_CONNECTION%% *}"
+  ssh_route="$(ip route get "${ssh_peer}" 2>/dev/null || true)"
+  [[ "${ssh_route}" == *' dev wlan0 '* ]]
+}
+
+show_ap_credentials_before_wlan0_handoff() {
+  local ssid psk answer credential_tty credential_input
+  ssh_uses_ap_interface || return 0
+
+  ssid="$(nmcli -g 802-11-wireless.ssid connection show omk-ap 2>/dev/null | head -n 1)"
+  [[ -n "${ssid}" ]] || fail 'Cannot read the prepared OMK AP SSID before wlan0 activation.'
+  log 'This SSH session routes through wlan0; offering OMK AP credentials before final activation.'
+
+  # Secrets deliberately bypass stdout/stderr, which may be tee-backed to a
+  # persistent setup log. The test-only paths let the shell regression test
+  # exercise this boundary without changing the production /dev/tty contract.
+  credential_tty="${OMK_TEST_CREDENTIAL_TTY:-/dev/tty}"
+  credential_input="${OMK_TEST_CREDENTIAL_INPUT:-${credential_tty}}"
+  if [[ -z "${OMK_TEST_CREDENTIAL_TTY:-}" ]] && [[ ! -c "${credential_tty}" ]]; then
+    fail 'Cannot securely display the OMK AP password without a controlling terminal. Re-run from an interactive SSH terminal before activating wlan0.'
+  fi
+  [[ -r "${credential_input}" && -w "${credential_tty}" ]] ||
+    fail 'Cannot securely display the OMK AP password without a readable and writable controlling terminal.'
+
+  {
+    printf '\nOMK AP is ready for its final activation.\n'
+    printf 'SSID: %s\n' "${ssid}"
+    printf 'Activating wlan0 as the OMK AP will disconnect this SSH session.\n'
+    printf 'After activation, connect your PC to this SSID and open http://192.168.50.1:8000/.\n'
+    printf 'Show the OMK AP password now? [y/N] '
+  } >"${credential_tty}"
+  IFS= read -r answer <"${credential_input}" || answer=''
+  if [[ "${answer}" =~ ^[Yy]([Ee][Ss])?$ ]]; then
+    if ((EUID == 0)); then
+      psk="$(nmcli --show-secrets -g 802-11-wireless-security.psk connection show omk-ap 2>/dev/null | head -n 1)"
+    else
+      psk="$(sudo -n nmcli --show-secrets -g 802-11-wireless-security.psk connection show omk-ap 2>/dev/null | head -n 1)"
+    fi
+    [[ -n "${psk}" ]] || fail 'Cannot read the prepared OMK AP password from NetworkManager.'
+    printf '\nOMK AP password: %s\n' "${psk}" >"${credential_tty}"
+    unset psk
+  else
+    printf '\nOMK AP password was not displayed. Retrieve it before disconnecting if needed.\n' >"${credential_tty}"
+  fi
+}
+
 final_pre_activation_check() {
 log 'Final pre-activation Gateway health check:'
 systemctl is-active --quiet omk-system-manager.service || fail 'system-manager is not active.'
@@ -295,6 +344,7 @@ log 'Final step: activating the OMK AP. The current SSH session may disconnect i
 
 preflight_before_ap_activation
 final_pre_activation_check
+show_ap_credentials_before_wlan0_handoff
 if ! run_step 'setup-wifi-access-point.sh --activate' 'Final OMK AP activation; may disconnect wlan0 SSH'; then
   fail 'OMK AP profile is prepared but final activation was not completed.'
 fi

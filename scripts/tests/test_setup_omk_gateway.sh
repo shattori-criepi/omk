@@ -113,13 +113,18 @@ cat > "${TEMP_DIR}/bin/curl" <<'EOF'
 EOF
 cat > "${TEMP_DIR}/bin/ip" <<'EOF'
 #!/usr/bin/env bash
-printf '%s\n' 'inet 192.168.50.1/24'
+if [[ "${1:-}" == route && "${2:-}" == get ]]; then
+  printf '%s\n' "${2} via 192.0.2.1 dev ${TEST_SSH_ROUTE_DEV:-eth0} src 192.0.2.2"
+else
+  printf '%s\n' 'inet 192.168.50.1/24'
+fi
 EOF
 cat > "${TEMP_DIR}/bin/nmcli" <<'EOF'
 #!/usr/bin/env bash
 if [[ "$*" == *'connection show omk-ap'* && "$*" == *'--show-secrets'* ]]; then printf '%s\n' test-psk; exit 0; fi
 if [[ "$*" == *'connection show omk-ap'* && "$*" == *'-g '* ]]; then
   case "$*" in
+    *802-11-wireless.ssid*) printf '%s\n' OMK-TEST ;;
     *connection.interface-name*) printf '%s\n' wlan0 ;;
     *802-11-wireless.mode*) printf '%s\n' ap ;;
     *connection.autoconnect*) printf '%s\n' yes ;;
@@ -129,6 +134,11 @@ if [[ "$*" == *'connection show omk-ap'* && "$*" == *'-g '* ]]; then
   esac
 fi
 exit 0
+EOF
+cat > "${TEMP_DIR}/bin/sudo" <<'EOF'
+#!/usr/bin/env bash
+[[ "${1:-}" == -n ]] && shift
+exec "$@"
 EOF
 cat > "${TEMP_DIR}/bin/find" <<'EOF'
 #!/usr/bin/env bash
@@ -273,6 +283,53 @@ CALL_LOG="${TEMP_DIR}/calls" PATH="${TEMP_DIR}/bin:${PATH}" \
 [[ "$(line_number 'setup-dashboard-kiosk.sh --prepare')" -lt "$(line_number 'setup-wifi-access-point.sh')" ]]
 normal_kiosk_line="$(grep -n -E 'setup-dashboard-kiosk\.sh $' "${TEMP_DIR}/calls" | cut -d: -f1)"
 [[ "$(line_number 'setup-wifi-access-point.sh')" -lt "${normal_kiosk_line}" ]]
+
+# A wlan0-routed SSH session receives the SSID handoff and can explicitly
+# choose whether to display the PSK. The PSK is written only to the simulated
+# controlling TTY, never the regular (potentially persistent) setup output.
+credential_tty="${TEMP_DIR}/credential-tty"
+credential_input="${TEMP_DIR}/credential-input"
+: >"${credential_tty}"
+printf 'y\n' >"${credential_input}"
+rm -f -- "${TEMP_DIR}/calls"
+SSH_CONNECTION='198.51.100.10 40000 192.0.2.2 22' TEST_SSH_ROUTE_DEV=wlan0 \
+  OMK_TEST_CREDENTIAL_TTY="${credential_tty}" OMK_TEST_CREDENTIAL_INPUT="${credential_input}" \
+  CALL_LOG="${TEMP_DIR}/calls" PATH="${TEMP_DIR}/bin:${PATH}" \
+  "${TEMP_DIR}/scripts/setup-omk-gateway.sh" >"${TEMP_DIR}/wlan0-credential.log"
+grep -Fq 'This SSH session routes through wlan0; offering OMK AP credentials before final activation.' "${TEMP_DIR}/wlan0-credential.log"
+[[ "$(grep -n -F 'offering OMK AP credentials' "${TEMP_DIR}/wlan0-credential.log" | cut -d: -f1)" -lt "$(grep -n -F 'Starting: Final OMK AP activation' "${TEMP_DIR}/wlan0-credential.log" | cut -d: -f1)" ]]
+grep -Fq 'SSID: OMK-TEST' "${credential_tty}"
+grep -Fq 'OMK AP password: test-psk' "${credential_tty}"
+! grep -Fq 'test-psk' "${TEMP_DIR}/wlan0-credential.log"
+
+# Declining the optional display leaves the secret out of both output streams.
+: >"${credential_tty}"
+printf 'n\n' >"${credential_input}"
+rm -f -- "${TEMP_DIR}/calls"
+SSH_CONNECTION='198.51.100.10 40000 192.0.2.2 22' TEST_SSH_ROUTE_DEV=wlan0 \
+  OMK_TEST_CREDENTIAL_TTY="${credential_tty}" OMK_TEST_CREDENTIAL_INPUT="${credential_input}" \
+  CALL_LOG="${TEMP_DIR}/calls" PATH="${TEMP_DIR}/bin:${PATH}" \
+  "${TEMP_DIR}/scripts/setup-omk-gateway.sh" >"${TEMP_DIR}/wlan0-no-password.log"
+grep -Fq 'password was not displayed' "${credential_tty}"
+! grep -Fq 'test-psk' "${credential_tty}"
+! grep -Fq 'test-psk' "${TEMP_DIR}/wlan0-no-password.log"
+
+# A Napter/ethernet-like route does not force an AP credential prompt.
+: >"${credential_tty}"
+rm -f -- "${TEMP_DIR}/calls"
+SSH_CONNECTION='198.51.100.10 40000 192.0.2.2 22' TEST_SSH_ROUTE_DEV=eth0 \
+  OMK_TEST_CREDENTIAL_TTY="${credential_tty}" OMK_TEST_CREDENTIAL_INPUT="${credential_input}" \
+  CALL_LOG="${TEMP_DIR}/calls" PATH="${TEMP_DIR}/bin:${PATH}" \
+  "${TEMP_DIR}/scripts/setup-omk-gateway.sh" >"${TEMP_DIR}/non-wlan0.log"
+[[ ! -s "${credential_tty}" ]]
+! grep -Fq 'offering OMK AP credentials' "${TEMP_DIR}/non-wlan0.log"
+
+# Dry-run prints no secret even when its environment resembles wlan0 SSH.
+dry_run_output="$(SSH_CONNECTION='198.51.100.10 40000 192.0.2.2 22' TEST_SSH_ROUTE_DEV=wlan0 \
+  OMK_TEST_CREDENTIAL_TTY="${credential_tty}" OMK_TEST_CREDENTIAL_INPUT="${credential_input}" \
+  PATH="${TEMP_DIR}/bin:${PATH}" "${TEMP_DIR}/scripts/setup-omk-gateway.sh" --dry-run)"
+! grep -Fq 'test-psk' <<<"${dry_run_output}"
+! grep -Fq 'Show the OMK AP password' <<<"${dry_run_output}"
 
 rm -f -- "${TEMP_DIR}/calls"
 CALL_LOG="${TEMP_DIR}/calls" PATH="${TEMP_DIR}/bin:${PATH}" \
