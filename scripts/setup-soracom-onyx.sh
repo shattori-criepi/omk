@@ -35,7 +35,7 @@ log() {
 redact_modem_identifiers() {
   sed -E \
     -e '/(imei|imsi|iccid)/I s/(:[[:space:]]*).*/\1[REDACTED]/' \
-    -e '/(equipment id|subscriber identity)/I s/(:[[:space:]]*).*/\1[REDACTED]/'
+    -e '/(equipment id|subscriber identity|device id|own)/I s/(:[[:space:]]*).*/\1[REDACTED]/'
 }
 
 show_diagnostics() {
@@ -238,24 +238,25 @@ MODEM_DETAILS="$(mmcli -m "${MODEM_PATH}" 2>&1 || true)"
 log "Initial modem status:"
 printf '%s\n' "${MODEM_DETAILS}" | redact_modem_identifiers
 
-log "Downloading SORACOM's official setup_eg25.sh to a temporary directory."
-TEMP_DIR="$(mktemp -d)"
-cleanup() { rm -rf -- "${TEMP_DIR}"; }
-trap cleanup EXIT
-OFFICIAL_SCRIPT="${TEMP_DIR}/setup_eg25.sh"
-curl --fail --location --silent --show-error \
-  'https://soracom-files.s3.amazonaws.com/connect/setup_eg25.sh' \
-  --output "${OFFICIAL_SCRIPT}" || fail "${EXIT_GENERAL}" "Could not download SORACOM's official setup script."
-[[ -s "${OFFICIAL_SCRIPT}" ]] || fail "${EXIT_GENERAL}" "Downloaded SORACOM setup script is empty."
-chmod 0700 "${OFFICIAL_SCRIPT}"
-
-log "Running SORACOM's official setup script."
-# The official script's documented ordinary-SIM invocation has no APN argument.
-# Custom APNs are applied to the resulting NetworkManager profile below.
-OFFICIAL_OUTPUT="$("${SUDO[@]}" "${OFFICIAL_SCRIPT}" 2>&1)" || OFFICIAL_STATUS=$?
-OFFICIAL_STATUS="${OFFICIAL_STATUS:-0}"
-printf '%s\n' "${OFFICIAL_OUTPUT}" | redact_modem_identifiers
-log "Official script exit status: ${OFFICIAL_STATUS}; independent validation will determine the result."
+if nmcli connection show soracom >/dev/null 2>&1 && [[ -e /etc/NetworkManager/dispatcher.d/90.soracom_route ]]; then
+  log 'Existing soracom profile and route dispatcher are available; skipping the official setup script to preserve the current cellular connection.'
+else
+  log "Downloading SORACOM's official setup_eg25.sh to a temporary directory."
+  TEMP_DIR="$(mktemp -d)"
+  cleanup() { rm -rf -- "${TEMP_DIR}"; }
+  trap cleanup EXIT
+  OFFICIAL_SCRIPT="${TEMP_DIR}/setup_eg25.sh"
+  curl --fail --location --silent --show-error \
+    'https://soracom-files.s3.amazonaws.com/connect/setup_eg25.sh' \
+    --output "${OFFICIAL_SCRIPT}" || fail "${EXIT_GENERAL}" "Could not download SORACOM's official setup script."
+  [[ -s "${OFFICIAL_SCRIPT}" ]] || fail "${EXIT_GENERAL}" "Downloaded SORACOM setup script is empty."
+  chmod 0700 "${OFFICIAL_SCRIPT}"
+  log "Running SORACOM's official setup script."
+  OFFICIAL_OUTPUT="$("${SUDO[@]}" "${OFFICIAL_SCRIPT}" 2>&1)" || OFFICIAL_STATUS=$?
+  OFFICIAL_STATUS="${OFFICIAL_STATUS:-0}"
+  printf '%s\n' "${OFFICIAL_OUTPUT}" | redact_modem_identifiers
+  log "Official script exit status: ${OFFICIAL_STATUS}; independent validation will determine the result."
+fi
 
 if ! nmcli connection show soracom >/dev/null 2>&1; then
   fail "${EXIT_GENERAL}" "The official script did not create the required NetworkManager profile: soracom."
@@ -276,9 +277,13 @@ if [[ -e /etc/NetworkManager/dispatcher.d/90.soracom_route ]]; then
   log "Existing SORACOM route dispatcher rule is present; preserving it."
 fi
 
-log "Activating the soracom connection (NetworkManager may continue connecting after its command timeout)."
-if ! timeout "${CONNECTION_WAIT_SECONDS}" "${SUDO[@]}" nmcli connection up soracom; then
-  log "nmcli connection up did not complete within ${CONNECTION_WAIT_SECONDS}s or returned an error; checking the final state."
+if nmcli -g NAME connection show --active | grep -Fxq soracom; then
+  log 'The soracom connection is already active; preserving the current cellular connection.'
+else
+  log "Activating the inactive soracom connection (NetworkManager may continue connecting after its command timeout)."
+  if ! timeout "${CONNECTION_WAIT_SECONDS}" "${SUDO[@]}" nmcli connection up soracom; then
+    log "nmcli connection up did not complete within ${CONNECTION_WAIT_SECONDS}s or returned an error; checking the final state."
+  fi
 fi
 sleep 5
 ACTIVE_CONNECTIONS="$(nmcli connection show --active 2>&1 || true)"
@@ -296,7 +301,9 @@ SIM_PATH="$(printf '%s\n' "${MODEM_KV}" | mmcli_kv_value modem.generic.sim)"
 [[ "${SIM_PATH}" == /org/freedesktop/ModemManager1/SIM/* ]] || fail "${EXIT_SIM_NOT_FOUND}" 'No SIM object was detected.'
 modem_is_connected "${MODEM_KV}" || fail "${EXIT_NETWORK_NOT_REGISTERED}" 'Cellular state is not connected/registered/attached.'
 nmcli -g NAME connection show --active | grep -Fxq soracom || fail "${EXIT_GENERAL}" 'The soracom profile is not active.'
-nmcli -g GENERAL.STATE device show wwan0 2>/dev/null | grep -Eq '^100 \(connected\)$|^connected$' || fail "${EXIT_GENERAL}" 'The wwan0 device is not connected.'
+NM_DEVICE="$(nmcli -g GENERAL.DEVICES connection show soracom 2>/dev/null | head -n 1)"
+[[ -n "${NM_DEVICE}" && "${NM_DEVICE}" != -- ]] || fail "${EXIT_GENERAL}" 'The active soracom connection has no NetworkManager device.'
+nmcli -g GENERAL.STATE device show "${NM_DEVICE}" 2>/dev/null | grep -Eq '^100 \(connected\)$|^connected$' || fail "${EXIT_GENERAL}" "The soracom NetworkManager device is not connected: ${NM_DEVICE}."
 
 IPV4_STATUS="$(ip -4 address show wwan0 2>&1 || true)"
 log "wwan0 IPv4 status:"

@@ -6,6 +6,7 @@ SCRIPT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)/setup-soracom-
 # Load production parsing functions without entering the host-mutating main flow.
 source <(sed -n '/^mmcli_kv_value()/,/^}$/p' "${SCRIPT}")
 source <(sed -n '/^modem_is_connected()/,/^}$/p' "${SCRIPT}")
+source <(sed -n '/^redact_modem_identifiers()/,/^}$/p' "${SCRIPT}")
 
 valid_kv() {
   cat <<EOF
@@ -28,5 +29,13 @@ grep -Fq -- '--output-keyvalue' "${SCRIPT}"
 grep -Fq 'ping -I wwan0 -c 4 pong.soracom.io' "${SCRIPT}"
 grep -Fq 'udevadm trigger --action=add --path' "${SCRIPT}"
 grep -Fq 'nmcli -g NAME connection show --active' "${SCRIPT}"
+grep -Fq 'GENERAL.DEVICES connection show soracom' "${SCRIPT}"
+grep -Fq 'ping -I wwan0 -c 4 pong.soracom.io' "${SCRIPT}"
+grep -Fq 'already active; preserving the current cellular connection' "${SCRIPT}"
+redacted="$(printf '%s\n' 'device id: 123456' 'Numbers | own: +819012345678' 'imei: 123' 'operator name: SORACOM' | redact_modem_identifiers)"
+grep -Fq 'device id: [REDACTED]' <<<"${redacted}"
+grep -Fq 'own: [REDACTED]' <<<"${redacted}"
+grep -Fq 'imei: [REDACTED]' <<<"${redacted}"
+grep -Fq 'operator name: SORACOM' <<<"${redacted}"
 
 echo 'PASS: SORACOM Onyx state validation is machine-readable and interface-bound.'
