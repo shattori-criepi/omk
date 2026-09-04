@@ -11,7 +11,7 @@ import httpx
 import qrcode
 import qrcode.image.svg
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -208,6 +208,12 @@ def _clock_supplemental(item_ids: tuple[str, ...], candidates: list[DisplayItem]
     priority = {"grid_power": 0, "temperature": 1, "humidity": 2, "co2": 3}
     selected = [(index, current[item_id]) for index, item_id in enumerate(item_ids) if item_id in current]
     return [item for _index, item in sorted(selected, key=lambda entry: (priority.get(entry[1].semantic_role, 99), entry[0]))]
+
+
+@app.get("/", include_in_schema=False)
+async def root() -> RedirectResponse:
+    """Send browser users from the Gateway URL to the display."""
+    return RedirectResponse(url="/display", status_code=307)
 
 
 @app.get("/display", response_class=HTMLResponse)

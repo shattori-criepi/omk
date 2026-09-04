@@ -1105,6 +1105,17 @@ def test_health_returns_ok() -> None:
     assert response.json() == {"status": "ok"}
 
 
+def test_root_redirects_to_dashboard_display() -> None:
+    redirect = client.get("/", follow_redirects=False)
+
+    assert redirect.status_code == 307
+    assert redirect.headers["location"] == "/display"
+
+    display = client.get("/")
+    assert display.status_code == 200
+    assert "<title>OMK ダッシュボード</title>" in display.text
+
+
 def test_generic_catalog_candidates_group_and_format_values(tmp_path: Path) -> None:
     broute_id = _write_generic_item(tmp_path, "a", topic="omk/broute-001/power", device_id="broute-001", field="net_power_w", value=1234)
     plug_id = _write_generic_item(tmp_path, "b", topic="omk/plug-001/power", device_id="plug-001", field="power_w", value=12.3)
