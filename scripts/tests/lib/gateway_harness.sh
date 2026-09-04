@@ -6,7 +6,7 @@
 gateway_harness_create() {
   GATEWAY_HARNESS_ROOT="$(mktemp -d)"
   export GATEWAY_HARNESS_ROOT
-  mkdir -p "${GATEWAY_HARNESS_ROOT}"/{scripts/lib,bin,state,units,etc/omk,etc,proc/device-tree,sys/class/net/wlan0,services/system-manager,services/data-transformer,services/data-exporter,services/mosquitto/config,services/mosquitto/data,data/sensors,data/latest,data/processed,data/dashboard,data/harvest-uploader,data/errors/transform,logs}
+  mkdir -p "${GATEWAY_HARNESS_ROOT}"/{scripts/lib,bin,state,units,etc/omk,etc,proc/device-tree,sys/class/net/wlan0,services/system-manager,services/data-transformer,services/data-exporter,services/mosquitto/config,services/mosquitto/data,data/sensors,data/latest,data/processed,data/dashboard,data/harvest-uploader,data/errors/transform,logs,kiosk/default.target.wants}
   printf 'ID=debian\nVERSION_ID=12\n' >"${GATEWAY_HARNESS_ROOT}/etc/os-release"
   printf 'Raspberry Pi 4 Model B' >"${GATEWAY_HARNESS_ROOT}/proc/device-tree/model"
   cp "${GATEWAY_HARNESS_SOURCE_ROOT}/scripts/setup-omk-gateway.sh" "${GATEWAY_HARNESS_ROOT}/scripts/"
@@ -24,6 +24,10 @@ EOF
   export OMK_TEST_OS_RELEASE="${GATEWAY_HARNESS_ROOT}/etc/os-release"
   export OMK_TEST_DEVICE_MODEL="${GATEWAY_HARNESS_ROOT}/proc/device-tree/model"
   export OMK_TEST_SYS_CLASS_NET="${GATEWAY_HARNESS_ROOT}/sys/class/net"
+  touch "${GATEWAY_HARNESS_ROOT}/kiosk/omk-dashboard-kiosk.service"
+  ln -s ../omk-dashboard-kiosk.service "${GATEWAY_HARNESS_ROOT}/kiosk/default.target.wants/omk-dashboard-kiosk.service"
+  export OMK_KIOSK_UNIT_PATH="${GATEWAY_HARNESS_ROOT}/kiosk/omk-dashboard-kiosk.service"
+  export OMK_KIOSK_ENABLE_LINK="${GATEWAY_HARNESS_ROOT}/kiosk/default.target.wants/omk-dashboard-kiosk.service"
   export GW_CALL_LOG="${GATEWAY_HARNESS_ROOT}/calls"
   export GW_STATE_DIR="${GATEWAY_HARNESS_ROOT}/state"
   : >"${GW_CALL_LOG}"
@@ -134,8 +138,9 @@ case "$name" in
  setup-data-transformer.sh) mkdir -p "${GATEWAY_HARNESS_ROOT}/services/data-transformer/.venv/bin"; printf '%s\n' python >"${GATEWAY_HARNESS_ROOT}/services/data-transformer/.venv/bin/python"; chmod 755 "${GATEWAY_HARNESS_ROOT}/services/data-transformer/.venv/bin/python"; python -m venv transformer; pip install -r requirements; env "PYTHONPATH=${GATEWAY_HARNESS_ROOT}/services/data-transformer/src" "OMK_IMPORT_SMOKE_SRC=${GATEWAY_HARNESS_ROOT}/services/data-transformer/src" "OMK_IMPORT_SMOKE_MODULE=data_transformer" python -c 'import importlib'; systemctl daemon-reload; systemctl enable timer ;;
  setup-data-exporter.sh) mkdir -p "${GATEWAY_HARNESS_ROOT}/services/data-exporter/.venv/bin"; printf '%s\n' python >"${GATEWAY_HARNESS_ROOT}/services/data-exporter/.venv/bin/python"; chmod 755 "${GATEWAY_HARNESS_ROOT}/services/data-exporter/.venv/bin/python"; python -m venv exporter; pip install -r requirements; env "PYTHONPATH=${GATEWAY_HARNESS_ROOT}/services/data-exporter/src" "OMK_IMPORT_SMOKE_SRC=${GATEWAY_HARNESS_ROOT}/services/data-exporter/src" "OMK_IMPORT_SMOKE_MODULE=data_exporter" python -c 'import importlib'; visudo -cf exporter; printf '%s\n' helper >"${GW_STATE_DIR}/helper"; chmod 755 "${GW_STATE_DIR}/helper"; grep -Fqx 'state/helper|root|root|755' "${GW_STATE_DIR}/owner-mode" || printf '%s\n' 'state/helper|root|root|755' >>"${GW_STATE_DIR}/owner-mode" ;;
  setup-wifi-access-point.sh) checkpoint pre-ap; [[ -e "${GW_STATE_DIR}/ap_psk" ]] || { printf 'psk\n' >"${GW_STATE_DIR}/ap_psk"; chmod 600 "${GW_STATE_DIR}/ap_psk"; grep -Fqx 'state/ap_psk|root|root|600' "${GW_STATE_DIR}/owner-mode" || printf '%s\n' 'state/ap_psk|root|root|600' >>"${GW_STATE_DIR}/owner-mode"; }; [[ ! -e "${GW_STATE_DIR}/network-profile" ]] || chmod u+w "${GW_STATE_DIR}/network-profile"; printf '%s\n' omk-ap >"${GW_STATE_DIR}/network-profile"; chmod 600 "${GW_STATE_DIR}/network-profile"; grep -Fqx 'state/network-profile|root|root|600' "${GW_STATE_DIR}/owner-mode" || printf '%s\n' 'state/network-profile|root|root|600' >>"${GW_STATE_DIR}/owner-mode"; nmcli connection up omk-ap; nft -f rules ;;
+ setup-dashboard-kiosk.sh) : ;;
 esac
 EOF
   chmod +x "${GATEWAY_HARNESS_ROOT}/scripts/gw-step"
-  for step in setup-raspberry-pi.sh setup-system-manager.sh setup-data-collection.sh setup-data-transformer.sh setup-data-exporter.sh setup-wifi-access-point.sh; do ln -s gw-step "${GATEWAY_HARNESS_ROOT}/scripts/${step}"; done
+  for step in setup-raspberry-pi.sh setup-system-manager.sh setup-data-collection.sh setup-data-transformer.sh setup-data-exporter.sh setup-wifi-access-point.sh setup-dashboard-kiosk.sh; do ln -s gw-step "${GATEWAY_HARNESS_ROOT}/scripts/${step}"; done
 }

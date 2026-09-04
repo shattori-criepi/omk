@@ -11,7 +11,7 @@ source "${SCRIPT_DIR}/lib/apt-helpers.sh"
 WITH_SORACOM=false
 WITH_BLE=false
 WITH_BROUTE=false
-WITH_KIOSK=false
+WITH_KIOSK=true
 WITH_BASE=false
 DRY_RUN=false
 PREBASE_MIN_FREE_KIB="${OMK_PREBASE_MIN_FREE_KIB:-8388608}"
@@ -32,7 +32,7 @@ Options:
   --with-soracom  Configure SORACOM Onyx after the base host setup.
   --with-ble      Install the optional BLE sensor-manager host service.
   --with-broute   Install the optional B-route meter host service.
-  --with-kiosk    Install the Dashboard kiosk (only in an active GUI login).
+  --no-kiosk      Do not configure the standard Dashboard kiosk.
   --dry-run       Print the selected sequence without making changes.
   -h, --help      Show this help.
 
@@ -53,7 +53,7 @@ while (($#)); do
     --with-soracom) WITH_SORACOM=true ;;
     --with-ble) WITH_BLE=true ;;
     --with-broute) WITH_BROUTE=true ;;
-    --with-kiosk) WITH_KIOSK=true ;;
+    --no-kiosk) WITH_KIOSK=false ;;
     --dry-run) DRY_RUN=true ;;
     -h|--help) usage; exit 0 ;;
     *) usage >&2; fail "Unknown option: $1" ;;
@@ -75,12 +75,12 @@ steps+=(
 )
 "${WITH_BLE}" && steps+=('setup-ble-sensor-manager.sh|Optional BLE host service')
 "${WITH_BROUTE}" && steps+=('setup-broute-meter.sh|Optional B-route host service')
-"${WITH_KIOSK}" && steps+=('setup-dashboard-kiosk.sh --prepare|Optional kiosk package preparation before AP activation')
+"${WITH_KIOSK}" && steps+=('setup-dashboard-kiosk.sh --prepare|Standard kiosk package preparation before AP activation')
 steps+=(
   'setup-wifi-access-point.sh --activate|Required OMK AP (automatic PSK; may disconnect SSH)'
   'setup-data-collection.sh|Required Docker collection and Dashboard services'
 )
-"${WITH_KIOSK}" && steps+=('setup-dashboard-kiosk.sh|Optional GUI kiosk (local Dashboard is now available)')
+"${WITH_KIOSK}" && steps+=('setup-dashboard-kiosk.sh|Standard Dashboard kiosk configuration (local Dashboard is now available)')
 
 log "Repository root: ${OMK_ROOT}"
 if ! "${WITH_BASE}"; then
@@ -252,5 +252,18 @@ ip -4 addr show wlan0 | grep -Fq '192.168.50.1/' || fail 'OMK AP address is not 
 if "${WITH_BROUTE}" && ! systemctl is-active --quiet omk-broute-meter.service; then
   log 'WARN: B-route meter is installed and enabled but not active. This is expected until its adapter and credentials are ready.'
 fi
+if "${WITH_KIOSK}"; then
+  kiosk_user="${SUDO_USER:-$(id -un)}"
+  kiosk_home="$(getent passwd "${kiosk_user}" | cut -d: -f6)"
+  kiosk_unit="${OMK_KIOSK_UNIT_PATH:-${kiosk_home}/.config/systemd/user/omk-dashboard-kiosk.service}"
+  kiosk_enable_link="${OMK_KIOSK_ENABLE_LINK:-${kiosk_home}/.config/systemd/user/default.target.wants/omk-dashboard-kiosk.service}"
+  if [[ -S "/run/user/$(id -u)/${DASHBOARD_KIOSK_WAYLAND_DISPLAY:-wayland-0}" ]]; then
+    systemctl --user is-active --quiet omk-dashboard-kiosk.service || fail 'Dashboard kiosk service is not active in the current Wayland session.'
+  else
+    [[ -f "${kiosk_unit}" ]] || fail "Dashboard kiosk unit is missing: ${kiosk_unit}"
+    [[ -L "${kiosk_enable_link}" ]] || fail "Dashboard kiosk unit is not enabled: ${kiosk_enable_link}"
+    log 'Dashboard kiosk runtime verification is deferred because no active Wayland GUI session is present.'
+  fi
+fi
 log 'SUCCESS: required Gateway services are healthy.'
-log 'Optional services were installed only when their --with-* option was specified.'
+log 'SORACOM, BLE, and B-route services were installed only when their --with-* option was specified.'

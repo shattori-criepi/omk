@@ -7,8 +7,9 @@ ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 SETUP="${ROOT_DIR}/scripts/setup-omk-gateway.sh"
 
 bash -n "${SETUP}"
-output="$("${SETUP}" --dry-run --with-soracom --with-ble --with-broute --with-kiosk)"
+output="$("${SETUP}" --dry-run --with-soracom --with-ble --with-broute)"
 base_output="$("${SETUP}" --dry-run --with-base)"
+no_kiosk_output="$("${SETUP}" --dry-run --no-kiosk)"
 
 grep -Fq 'Base setup: skipped' <<<"${output}"
 ! grep -Fq 'setup-raspberry-pi.sh' <<<"${output}"
@@ -21,6 +22,8 @@ grep -Fq 'setup-data-transformer.sh' <<<"${output}"
 grep -Fq 'setup-ble-sensor-manager.sh' <<<"${output}"
 grep -Fq 'setup-broute-meter.sh' <<<"${output}"
 grep -Fq 'setup-dashboard-kiosk.sh' <<<"${output}"
+grep -Fq 'setup-dashboard-kiosk.sh --prepare' <<<"${base_output}"
+! grep -Fq 'setup-dashboard-kiosk.sh' <<<"${no_kiosk_output}"
 ! grep -Fq 'setup-ichijo-energy-node.sh' <<<"${output}"
 
 system_manager_line="$(grep -n -F 'setup-system-manager.sh' <<<"${output}" | cut -d: -f1)"
@@ -47,7 +50,7 @@ mkdir -p "${TEMP_DIR}/scripts/lib" "${TEMP_DIR}/bin" \
   "${TEMP_DIR}/data/sensors" "${TEMP_DIR}/data/latest" \
   "${TEMP_DIR}/data/processed" "${TEMP_DIR}/data/dashboard" \
   "${TEMP_DIR}/data/harvest-uploader" "${TEMP_DIR}/data/errors/transform" "${TEMP_DIR}/etc/omk" \
-  "${TEMP_DIR}/units"
+  "${TEMP_DIR}/units" "${TEMP_DIR}/kiosk/default.target.wants"
 cp "${SETUP}" "${TEMP_DIR}/scripts/setup-omk-gateway.sh"
 cp "${ROOT_DIR}/scripts/lib/apt-helpers.sh" "${TEMP_DIR}/scripts/lib/apt-helpers.sh"
 touch "${TEMP_DIR}/compose.yaml" \
@@ -59,8 +62,12 @@ touch "${TEMP_DIR}/compose.yaml" \
   "${TEMP_DIR}/units/omk-data-transformer.service" \
   "${TEMP_DIR}/units/omk-data-transformer.timer"
 chmod +x "${TEMP_DIR}/services/system-manager/.venv/bin/python" "${TEMP_DIR}/services/data-transformer/.venv/bin/python"
+touch "${TEMP_DIR}/kiosk/omk-dashboard-kiosk.service"
+ln -s ../omk-dashboard-kiosk.service "${TEMP_DIR}/kiosk/default.target.wants/omk-dashboard-kiosk.service"
 export OMK_PREFLIGHT_SYSTEMD_UNIT_DIR="${TEMP_DIR}/units"
 export OMK_PREFLIGHT_DASHBOARD_ENV_FILE="${TEMP_DIR}/etc/omk/dashboard-system-manager.env"
+export OMK_KIOSK_UNIT_PATH="${TEMP_DIR}/kiosk/omk-dashboard-kiosk.service"
+export OMK_KIOSK_ENABLE_LINK="${TEMP_DIR}/kiosk/default.target.wants/omk-dashboard-kiosk.service"
 export OMK_SKIP_PREBASE_PREFLIGHT=true
 for script in setup-raspberry-pi.sh setup-soracom-onyx.sh setup-wifi-access-point.sh setup-system-manager.sh setup-data-collection.sh setup-data-transformer.sh setup-data-exporter.sh setup-ble-sensor-manager.sh setup-broute-meter.sh setup-dashboard-kiosk.sh; do
 cat > "${TEMP_DIR}/scripts/${script}" <<'EOF'
@@ -139,7 +146,7 @@ grep -Fq 'setup-raspberry-pi.sh ' "${TEMP_DIR}/calls"
 ! grep -Fq 'setup-wifi-access-point.sh' "${TEMP_DIR}/calls"
 
 rm -f -- "${TEMP_DIR}/calls"
-CALL_LOG="${TEMP_DIR}/calls" PATH="${TEMP_DIR}/bin:${PATH}" "${TEMP_DIR}/scripts/setup-omk-gateway.sh" --with-soracom --with-ble --with-broute --with-kiosk
+CALL_LOG="${TEMP_DIR}/calls" PATH="${TEMP_DIR}/bin:${PATH}" "${TEMP_DIR}/scripts/setup-omk-gateway.sh" --with-soracom --with-ble --with-broute
 line_number() { grep -n -F "$1" "${TEMP_DIR}/calls" | head -n 1 | cut -d: -f1; }
 ap_line="$(line_number 'setup-wifi-access-point.sh')"
 for script in \
@@ -210,9 +217,14 @@ grep -Fq 'required post-AP command is unavailable: docker' "${TEMP_DIR}/missing-
 # activation; its normal GUI work remains after local Compose startup.
 rm -f -- "${TEMP_DIR}/calls"
 CALL_LOG="${TEMP_DIR}/calls" PATH="${TEMP_DIR}/bin:${PATH}" \
-  "${TEMP_DIR}/scripts/setup-omk-gateway.sh" --with-kiosk
+  "${TEMP_DIR}/scripts/setup-omk-gateway.sh"
 [[ "$(line_number 'setup-dashboard-kiosk.sh --prepare')" -lt "$(line_number 'setup-wifi-access-point.sh')" ]]
 normal_kiosk_line="$(grep -n -E 'setup-dashboard-kiosk\.sh $' "${TEMP_DIR}/calls" | cut -d: -f1)"
 [[ "$(line_number 'setup-wifi-access-point.sh')" -lt "${normal_kiosk_line}" ]]
+
+rm -f -- "${TEMP_DIR}/calls"
+CALL_LOG="${TEMP_DIR}/calls" PATH="${TEMP_DIR}/bin:${PATH}" \
+  "${TEMP_DIR}/scripts/setup-omk-gateway.sh" --no-kiosk
+! grep -Fq 'setup-dashboard-kiosk.sh' "${TEMP_DIR}/calls"
 
 echo 'PASS: Gateway orchestrator orders scripts correctly and skips base setup unless explicitly requested.'

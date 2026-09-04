@@ -42,6 +42,7 @@ SUDO=()
 UNIT_CHANGED=false
 KANSHI_CONFIG_CHANGED=false
 CHROMIUM_POLICY_CHANGED=false
+WAYLAND_SESSION_ACTIVE=false
 
 log() { printf '[%s] %s\n' "$(date --iso-8601=seconds)" "$*"; }
 fail() { log "ERROR: $*"; exit 1; }
@@ -140,6 +141,11 @@ resolve_wayland_display() {
   if [[ -n "${WAYLAND_DISPLAY}" ]]; then
     return
   fi
+  if [[ ! -S "/run/user/${TARGET_UID}/bus" ]]; then
+    WAYLAND_DISPLAY=wayland-0
+    log "No user systemd bus is active; using persistent-unit fallback WAYLAND_DISPLAY=${WAYLAND_DISPLAY}."
+    return
+  fi
   manager_display="$(user_systemctl show-environment | sed -n 's/^WAYLAND_DISPLAY=//p' | head -n 1)"
   WAYLAND_DISPLAY="${manager_display:-wayland-0}"
   if [[ -n "${manager_display}" ]]; then
@@ -147,6 +153,26 @@ resolve_wayland_display() {
   else
     log "WARN: User manager has no WAYLAND_DISPLAY; using fallback: ${WAYLAND_DISPLAY}"
   fi
+}
+
+enable_kiosk_unit_persistently() {
+  local wants_directory wants_link
+  if [[ -S "/run/user/${TARGET_UID}/bus" ]]; then
+    user_systemctl daemon-reload
+    user_systemctl enable "${UNIT_NAME}"
+    return
+  fi
+  wants_directory="${USER_HOME}/.config/systemd/user/default.target.wants"
+  wants_link="${wants_directory}/${UNIT_NAME}"
+  "${AS_TARGET[@]}" mkdir -p "${wants_directory}"
+  if [[ -L "${wants_link}" ]]; then
+    [[ "$(readlink "${wants_link}")" == "../${UNIT_NAME}" ]] || fail "Kiosk unit enable link has an unexpected target: ${wants_link}"
+  elif [[ -e "${wants_link}" ]]; then
+    fail "Kiosk unit enable path exists but is not a symlink: ${wants_link}"
+  else
+    "${AS_TARGET[@]}" ln -s "../${UNIT_NAME}" "${wants_link}"
+  fi
+  log "Enabled ${UNIT_NAME} persistently; it will start with the next graphical user session."
 }
 
 render_unit() {
@@ -658,11 +684,8 @@ fi
 if "${DRY_RUN}"; then
   WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-wayland-0}"
   print_plan
-  if [[ "${CHROMIUM_PATH}" == "not found" ]]; then
-    log "WARN: Chromium is not installed or not on PATH; a real run would stop."
-  fi
-  if [[ "${WTYPE_PATH}" == "not found" || "${KANSHI_PATH}" == "not found" ]]; then
-    log 'Would install required kiosk packages: wtype kanshi'
+  if [[ "${CHROMIUM_PATH}" == "not found" || "${WTYPE_PATH}" == "not found" || "${KANSHI_PATH}" == "not found" ]]; then
+    log 'Would install required standard kiosk packages before AP activation: chromium wtype kanshi'
   fi
   log "Would update only the DSI-1 output in ${KANSHI_CONFIG} to transform 90 and add a non-duplicated kanshi launch to ${LABWC_AUTOSTART}."
   log "Would install ${CHROMIUM_POLICY_FILE} as a root-owned managed policy and create ${KIOSK_PROFILE_DIRECTORY} for Chromium kiosk state."
@@ -673,21 +696,25 @@ if "${DRY_RUN}"; then
 fi
 
 if "${PREPARE}"; then
-  if [[ "${WTYPE_PATH}" == "not found" || ! -x "${WTYPE_PATH}" || "${KANSHI_PATH}" == "not found" || ! -x "${KANSHI_PATH}" ]]; then
-    command -v apt-get >/dev/null 2>&1 || fail "wtype or kanshi is unavailable and apt-get was not found. Install them before kiosk setup."
+  if [[ "${CHROMIUM_PATH}" == "not found" || ! -x "${CHROMIUM_PATH}" || "${WTYPE_PATH}" == "not found" || ! -x "${WTYPE_PATH}" || "${KANSHI_PATH}" == "not found" || ! -x "${KANSHI_PATH}" ]]; then
+    command -v apt-get >/dev/null 2>&1 || fail "Chromium, wtype, or kanshi is unavailable and apt-get was not found. Install them before kiosk setup."
     if ((EUID != 0)); then
       command -v sudo >/dev/null 2>&1 || fail "sudo is required to install kiosk packages when they are missing."
       SUDO=(sudo)
     fi
-    log 'Installing required kiosk packages before OMK AP activation: wtype kanshi'
+    log 'Installing required kiosk packages before OMK AP activation: chromium wtype kanshi'
     omk_apt "${SUDO[@]}" apt-get update
-    omk_apt "${SUDO[@]}" apt-get install -y wtype kanshi
+    omk_apt "${SUDO[@]}" apt-get install -y chromium wtype kanshi
+    if [[ -z "${DASHBOARD_KIOSK_CHROMIUM_PATH:-}" ]]; then
+      CHROMIUM_PATH="$(command -v chromium || true)"
+    fi
     WTYPE_PATH="$(command -v wtype || true)"
     KANSHI_PATH="$(command -v kanshi || true)"
   fi
+  [[ -n "${CHROMIUM_PATH}" && "${CHROMIUM_PATH}" != "not found" && -x "${CHROMIUM_PATH}" ]] || fail "Chromium installation did not provide an executable."
   [[ -n "${WTYPE_PATH}" && -x "${WTYPE_PATH}" ]] || fail "wtype installation did not provide an executable."
   [[ -n "${KANSHI_PATH}" && -x "${KANSHI_PATH}" ]] || fail "kanshi installation did not provide an executable."
-  log "SUCCESS: kiosk package preparation is complete: ${WTYPE_PATH}, ${KANSHI_PATH}"
+  log "SUCCESS: kiosk package preparation is complete: ${CHROMIUM_PATH}, ${WTYPE_PATH}, ${KANSHI_PATH}"
   exit 0
 fi
 
@@ -701,12 +728,10 @@ if [[ "${WTYPE_PATH}" == "not found" || ! -x "${WTYPE_PATH}" ]]; then
 fi
 [[ -n "${WTYPE_PATH}" && -x "${WTYPE_PATH}" ]] || fail "wtype installation did not provide an executable."
 [[ "${KANSHI_PATH}" != "not found" && -x "${KANSHI_PATH}" ]] || fail "kanshi is unavailable. Run scripts/setup-dashboard-kiosk.sh --prepare before OMK AP activation."
-command -v pgrep >/dev/null 2>&1 || fail 'pgrep is required to avoid starting duplicate kanshi processes.'
-
-[[ -S "/run/user/${TARGET_UID}/bus" ]] || fail "No user systemd bus for ${TARGET_USER}. Log into the graphical session first."
-[[ -d "/run/user/${TARGET_UID}" ]] || fail "Runtime directory is unavailable for ${TARGET_USER}. Log into the graphical session first."
 resolve_wayland_display
-[[ -S "/run/user/${TARGET_UID}/${WAYLAND_DISPLAY}" ]] || fail "Wayland socket is unavailable. Confirm a Wayland GUI session and DASHBOARD_KIOSK_WAYLAND_DISPLAY."
+if [[ -S "/run/user/${TARGET_UID}/bus" && -d "/run/user/${TARGET_UID}" && -S "/run/user/${TARGET_UID}/${WAYLAND_DISPLAY}" ]]; then
+  WAYLAND_SESSION_ACTIVE=true
+fi
 
 install_chromium_policy
 ensure_kiosk_profile_directory
@@ -716,9 +741,6 @@ CONFIG_DIRECTORY="${USER_HOME}/.config/systemd/user"
 update_kanshi_config
 update_labwc_autostart
 update_labwc_config
-reconfigure_labwc
-ensure_kanshi_running
-verify_kanshi_transform || fail 'kanshi did not apply DSI-1 Transform: 90 in the active Wayland session.'
 
 TEMP_UNIT="$(mktemp)"
 trap 'rm -f -- "${TEMP_UNIT}"' EXIT
@@ -745,19 +767,31 @@ elif [[ -e "${OLD_WANTS_LINK}" ]]; then
   log "WARN: Obsolete target entry is not a symlink; leaving it unchanged: ${OLD_WANTS_LINK}"
 fi
 
+grep -q '<labwc_config' "${USER_HOME}/.config/labwc/rc.xml" || fail "labwc configuration does not have a labwc_config root."
+grep -q 'name="HideCursor"' "${USER_HOME}/.config/labwc/rc.xml" || fail "labwc HideCursor action is missing."
+grep -q 'name="WarpCursor"' "${USER_HOME}/.config/labwc/rc.xml" || fail "labwc WarpCursor action is missing."
+grep -Fq 'ExecStartPost=/bin/sh -c' "${UNIT_DESTINATION}" || fail "Kiosk unit does not contain the wtype ExecStartPost command."
+grep -Fq 'TranslateEnabled' "${CHROMIUM_POLICY_FILE}" || fail "Chromium managed policy is missing TranslateEnabled=false."
+grep -Fq 'TranslateEnabled": false' "${CHROMIUM_POLICY_FILE}" || fail "Chromium managed policy does not disable translation."
+enable_kiosk_unit_persistently
+
+if ! "${WAYLAND_SESSION_ACTIVE}"; then
+  log 'No active Wayland GUI session; kiosk persistent configuration is complete.'
+  log 'The kiosk will take effect on the next graphical session/reboot.'
+  exit 0
+fi
+
+command -v pgrep >/dev/null 2>&1 || fail 'pgrep is required to avoid starting duplicate kanshi processes.'
+reconfigure_labwc
+ensure_kanshi_running
+verify_kanshi_transform || fail 'kanshi did not apply DSI-1 Transform: 90 in the active Wayland session.'
 curl --fail --silent --show-error "${DASHBOARD_URL}health" >/dev/null || fail "Dashboard health endpoint is unavailable: ${DASHBOARD_URL}health"
-user_systemctl daemon-reload
-user_systemctl enable "${UNIT_NAME}"
 if [[ "${UNIT_CHANGED}" == true || "${CHROMIUM_POLICY_CHANGED}" == true ]] && user_systemctl is-active --quiet "${UNIT_NAME}"; then
   user_systemctl restart "${UNIT_NAME}"
 else
   user_systemctl start "${UNIT_NAME}"
 fi
 user_systemctl is-active --quiet "${UNIT_NAME}" || fail "Kiosk service did not become active."
-grep -q '<labwc_config' "${USER_HOME}/.config/labwc/rc.xml" || fail "labwc configuration does not have a labwc_config root."
-grep -q 'name="HideCursor"' "${USER_HOME}/.config/labwc/rc.xml" || fail "labwc HideCursor action is missing."
-grep -q 'name="WarpCursor"' "${USER_HOME}/.config/labwc/rc.xml" || fail "labwc WarpCursor action is missing."
-grep -Fq 'ExecStartPost=/bin/sh -c' "${UNIT_DESTINATION}" || fail "Kiosk unit does not contain the wtype ExecStartPost command."
 log "wtype is available: ${WTYPE_PATH}"
 WTYPE_POST_RESULT="$(user_systemctl show "${UNIT_NAME}" --property=ExecStartPost --value)"
 if [[ "${WTYPE_POST_RESULT}" == *"status=0"* ]]; then

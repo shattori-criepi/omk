@@ -104,4 +104,16 @@ fi
 grep -Fq '"${CHROMIUM_POLICY_CHANGED}" == true' "${SCRIPT_PATH}"
 grep -Fq 'user_systemctl restart "${UNIT_NAME}"' "${SCRIPT_PATH}"
 
+# Persistent configuration must not require a currently running GUI session:
+# without a user bus, the production helper creates the normal default.target
+# enable link and the main flow exits successfully after static validation.
+grep -Fq 'default.target.wants' "${SCRIPT_PATH}"
+grep -Fq 'No active Wayland GUI session; kiosk persistent configuration is complete.' "${SCRIPT_PATH}"
+grep -Fq 'The kiosk will take effect on the next graphical session/reboot.' "${SCRIPT_PATH}"
+grep -Fq 'enable_kiosk_unit_persistently' "${SCRIPT_PATH}"
+if grep -Fq 'No user systemd bus for ${TARGET_USER}. Log into the graphical session first.' "${SCRIPT_PATH}"; then
+  echo 'Kiosk setup still requires an active user bus before persistent configuration.' >&2
+  exit 1
+fi
+
 echo 'PASS: Chromium kiosk managed policy, dedicated profile, and rerun contract are defined.'
