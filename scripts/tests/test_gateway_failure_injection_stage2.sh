@@ -25,7 +25,7 @@ run_case docker 'compose pull' always 1 no
 run_case docker 'compose build' always 1 no
 run_case python '-m venv' always 1 no
 run_case pip 'install' always 1 no
-run_case python "-c import omk_system_manager" always 1 no
+run_case env 'OMK_IMPORT_SMOKE_MODULE=omk_system_manager' always 1 no
 run_case systemctl daemon-reload always 1 no
 run_case systemctl enable always 1 no
 run_case visudo -cf always 1 no

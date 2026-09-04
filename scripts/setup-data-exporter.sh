@@ -6,6 +6,8 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 OMK_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd -P)"
 # shellcheck source=lib/apt-helpers.sh
 source "${SCRIPT_DIR}/lib/apt-helpers.sh"
+# shellcheck source=lib/python-src-import-smoke.sh
+source "${SCRIPT_DIR}/lib/python-src-import-smoke.sh"
 TARGET_USER="${SUDO_USER:-$(id -un)}"
 TARGET_UID="$(id -u "${TARGET_USER}")"
 TARGET_GID="$(id -g "${TARGET_USER}")"
@@ -48,7 +50,8 @@ VENV="${OMK_ROOT}/services/data-exporter/.venv"
 [[ -d "${VENV}" ]] || "${AS_TARGET[@]}" python3 -m venv "${VENV}"
 "${AS_TARGET[@]}" "${VENV}/bin/python" -m pip install --upgrade pip
 "${AS_TARGET[@]}" "${VENV}/bin/python" -m pip install -r "${OMK_ROOT}/services/data-exporter/requirements.txt"
-"${AS_TARGET[@]}" "${VENV}/bin/python" -c 'import data_exporter' || { echo 'ERROR: data-exporter import smoke test failed.' >&2; exit 1; }
+omk_python_src_import_smoke "${OMK_ROOT}/services/data-exporter/src" data_exporter "${VENV}/bin/python" "${AS_TARGET[@]}" ||
+  { echo 'ERROR: data-exporter import smoke test failed.' >&2; exit 1; }
 temporary_helper="$(mktemp)"
 temporary_sudoers="$(mktemp)"
 trap 'rm -f -- "${temporary_helper}" "${temporary_sudoers}"' EXIT

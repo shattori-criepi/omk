@@ -7,6 +7,8 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 OMK_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd -P)"
 # shellcheck source=lib/apt-helpers.sh
 source "${SCRIPT_DIR}/lib/apt-helpers.sh"
+# shellcheck source=lib/python-src-import-smoke.sh
+source "${SCRIPT_DIR}/lib/python-src-import-smoke.sh"
 TARGET_USER="${SUDO_USER:-$(id -un)}"
 TARGET_GROUP="$(id -gn "${TARGET_USER}")"
 LOG_DIR="${OMK_ROOT}/logs/setup"
@@ -135,7 +137,8 @@ fi
 log "Installing runtime dependencies from requirements.txt (not requirements-dev.txt)."
 "${AS_TARGET[@]}" "${VENV}/bin/python" -m pip install --upgrade pip
 "${AS_TARGET[@]}" "${VENV}/bin/python" -m pip install -r "${OMK_ROOT}/services/data-transformer/requirements.txt"
-"${AS_TARGET[@]}" "${VENV}/bin/python" -c 'import data_transformer' || { log 'ERROR: data-transformer import smoke test failed.'; exit 1; }
+omk_python_src_import_smoke "${OMK_ROOT}/services/data-transformer/src" data_transformer "${VENV}/bin/python" "${AS_TARGET[@]}" ||
+  { log 'ERROR: data-transformer import smoke test failed.'; exit 1; }
 
 install_unit() {
   local source="$1"
