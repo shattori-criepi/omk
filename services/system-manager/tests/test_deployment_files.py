@@ -52,3 +52,10 @@ def test_setup_preserves_and_validates_a_root_only_existing_token() -> None:
     assert 'install -o root -g "${TARGET_GROUP}" -m 0640 "${ENV_FILE}" "${DASHBOARD_ENV_FILE}"' in setup
     assert '%s reboot, %s poweroff' in setup
     assert '"${TARGET_USER}" "${SYSTEMCTL_PATH}" "${SYSTEMCTL_PATH}" "${SYSTEMCTL_PATH}" "${SYSTEMCTL_PATH}"' in setup
+
+
+def test_setup_installs_the_host_mqtt_client_used_for_usb_node_provisioning() -> None:
+    setup = (REPOSITORY_ROOT / "scripts/setup-system-manager.sh").read_text(
+        encoding="utf-8"
+    )
+    assert "network-manager mosquitto-clients" in setup

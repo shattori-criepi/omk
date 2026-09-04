@@ -10,7 +10,6 @@ import httpx
 from omk_system_manager.site_uuid import (
     InvalidSiteUUIDError,
     MetadataServiceError,
-    SiteUUIDError,
     SoracomMetadataClient,
     read_local_site_uuid,
     resolve_site_uuid,
@@ -53,13 +52,15 @@ def test_matching_local_and_soracom_values_are_used_without_writes(tmp_path: Pat
     assert "一致しました" in caplog.text
 
 
-def test_soracom_value_is_restored_to_missing_local_storage(tmp_path: Path, caplog) -> None:
-    value = new_uuid()
+def test_missing_local_value_is_generated_and_reflected_to_soracom(tmp_path: Path, caplog) -> None:
     path = tmp_path / "site_uuid"
+    metadata = MetadataStub(new_uuid())
     with caplog.at_level(logging.INFO):
-        assert resolve_site_uuid(path, MetadataStub(value)) == value
-    assert read_local_site_uuid(path) == value
-    assert "復元しました" in caplog.text
+        result = resolve_site_uuid(path, metadata)
+    assert uuid.UUID(result).version == 4
+    assert read_local_site_uuid(path) == result
+    assert metadata.saved == [result]
+    assert "ローカルに生成" in caplog.text
 
 
 def test_local_value_is_saved_when_soracom_tag_is_missing(tmp_path: Path) -> None:
@@ -71,28 +72,28 @@ def test_local_value_is_saved_when_soracom_tag_is_missing(tmp_path: Path) -> Non
     assert metadata.saved == [value]
 
 
-def test_missing_values_generate_v4_and_save_both(tmp_path: Path, caplog) -> None:
+def test_missing_local_value_generates_without_soracom(tmp_path: Path, caplog) -> None:
     path = tmp_path / "site_uuid"
-    metadata = MetadataStub(None)
+    metadata = MetadataStub(None, get_error=MetadataServiceError("timeout"))
     with caplog.at_level(logging.INFO):
         result = resolve_site_uuid(path, metadata)
     assert uuid.UUID(result).version == 4
     assert read_local_site_uuid(path) == result
-    assert metadata.saved == [result]
-    assert "生成しました" in caplog.text
+    assert metadata.saved == []
+    assert "ローカルに生成" in caplog.text
 
 
-def test_mismatched_values_fail_without_overwriting_either(tmp_path: Path, caplog) -> None:
+def test_mismatched_values_keep_local_value_and_reflect_it_to_soracom(tmp_path: Path, caplog) -> None:
     path = tmp_path / "site_uuid"
     local = new_uuid()
     remote = new_uuid()
     write_local_site_uuid_atomically(path, local)
     metadata = MetadataStub(remote)
-    with caplog.at_level(logging.ERROR), pytest.raises(SiteUUIDError, match="不一致"):
-        resolve_site_uuid(path, metadata)
+    with caplog.at_level(logging.WARNING):
+        assert resolve_site_uuid(path, metadata) == local
     assert read_local_site_uuid(path) == local
-    assert metadata.saved == []
-    assert local in caplog.text and remote in caplog.text
+    assert metadata.saved == [local]
+    assert "不一致" in caplog.text
 
 
 @pytest.mark.parametrize("local, remote", [(None, "not-a-uuid"), ("not-a-uuid", None)])
@@ -114,17 +115,18 @@ def test_metadata_timeout_uses_existing_local_value(tmp_path: Path, caplog) -> N
     assert "接続できません" in caplog.text
 
 
-def test_initial_setup_fails_when_metadata_is_unavailable(tmp_path: Path) -> None:
-    with pytest.raises(MetadataServiceError):
-        resolve_site_uuid(tmp_path / "site_uuid", MetadataStub(None, get_error=MetadataServiceError("timeout")))
+def test_metadata_unavailable_uses_existing_local_value(tmp_path: Path) -> None:
+    path = tmp_path / "site_uuid"
+    value = new_uuid()
+    write_local_site_uuid_atomically(path, value)
+    assert resolve_site_uuid(path, MetadataStub(None, get_error=MetadataServiceError("timeout"))) == value
 
 
-def test_soracom_write_failure_is_reported_and_local_value_remains(tmp_path: Path) -> None:
+def test_soracom_write_failure_is_nonfatal_and_local_value_remains(tmp_path: Path) -> None:
     value = new_uuid()
     path = tmp_path / "site_uuid"
     write_local_site_uuid_atomically(path, value)
-    with pytest.raises(MetadataServiceError):
-        resolve_site_uuid(path, MetadataStub(None, put_error=MetadataServiceError("write failed")))
+    assert resolve_site_uuid(path, MetadataStub(None, put_error=MetadataServiceError("write failed"))) == value
     assert read_local_site_uuid(path) == value
 
 

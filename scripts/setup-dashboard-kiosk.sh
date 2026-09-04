@@ -23,6 +23,7 @@ KANSHI_CONFIG=""
 KANSHI_DSI_OUTPUT='output DSI-1 enable scale 1.000000 mode 720x1280@60.038 position 0,0 transform 90'
 DRY_RUN=false
 PRINT_UNIT=false
+PREPARE=false
 AS_TARGET=()
 USER_SYSTEMD_ENV=()
 SUDO=()
@@ -33,7 +34,7 @@ fail() { log "ERROR: $*"; exit 1; }
 
 usage() {
   cat <<'EOF'
-Usage: scripts/setup-dashboard-kiosk.sh [--dry-run|--print-unit]
+Usage: scripts/setup-dashboard-kiosk.sh [--dry-run|--print-unit|--prepare]
 
 Installs Chromium as the OMK dashboard user systemd service. Run it while the
 target user is logged into the Raspberry Pi's Wayland graphical session.
@@ -41,6 +42,7 @@ target user is logged into the Raspberry Pi's Wayland graphical session.
 Options:
   --dry-run     Show the resolved user, unit, Chromium, wtype and Wayland settings only.
   --print-unit  Render the resolved unit without writing user configuration.
+  --prepare     Install and verify wtype only, before OMK AP activation.
   -h, --help    Show this help.
 
 Environment overrides:
@@ -56,6 +58,7 @@ while (($#)); do
   case "$1" in
     --dry-run) DRY_RUN=true ;;
     --print-unit) PRINT_UNIT=true ;;
+    --prepare) PREPARE=true ;;
     --help|-h) usage; exit 0 ;;
     *) usage >&2; exit 2 ;;
   esac
@@ -333,21 +336,30 @@ if "${DRY_RUN}"; then
   exit 0
 fi
 
+if "${PREPARE}"; then
+  if [[ "${WTYPE_PATH}" == "not found" || ! -x "${WTYPE_PATH}" ]]; then
+    command -v apt-get >/dev/null 2>&1 || fail "wtype is unavailable and apt-get was not found. Install wtype or set DASHBOARD_KIOSK_WTYPE_PATH."
+    if ((EUID != 0)); then
+      command -v sudo >/dev/null 2>&1 || fail "sudo is required to install wtype when it is missing."
+      SUDO=(sudo)
+    fi
+    log "Installing required package before OMK AP activation: wtype"
+    "${SUDO[@]}" apt-get update
+    "${SUDO[@]}" apt-get install -y wtype
+    WTYPE_PATH="$(command -v wtype || true)"
+  fi
+  [[ -n "${WTYPE_PATH}" && -x "${WTYPE_PATH}" ]] || fail "wtype installation did not provide an executable."
+  log "SUCCESS: kiosk package preparation is complete: ${WTYPE_PATH}"
+  exit 0
+fi
+
 [[ "${CHROMIUM_PATH}" != "not found" && -x "${CHROMIUM_PATH}" ]] || fail "Chromium is unavailable. Install chromium or set DASHBOARD_KIOSK_CHROMIUM_PATH."
 command -v curl >/dev/null 2>&1 || fail "curl is required to wait for the dashboard health endpoint."
 command -v systemctl >/dev/null 2>&1 || fail "systemctl is required."
 command -v python3 >/dev/null 2>&1 || fail "python3 is required to update the labwc XML configuration."
 
 if [[ "${WTYPE_PATH}" == "not found" || ! -x "${WTYPE_PATH}" ]]; then
-  command -v apt-get >/dev/null 2>&1 || fail "wtype is unavailable and apt-get was not found. Install wtype or set DASHBOARD_KIOSK_WTYPE_PATH."
-  if ((EUID != 0)); then
-    command -v sudo >/dev/null 2>&1 || fail "sudo is required to install wtype when it is missing."
-    SUDO=(sudo)
-  fi
-  log "Installing required package: wtype"
-  "${SUDO[@]}" apt-get update
-  "${SUDO[@]}" apt-get install -y wtype
-  WTYPE_PATH="$(command -v wtype || true)"
+  fail "wtype is unavailable. Run scripts/setup-dashboard-kiosk.sh --prepare before OMK AP activation."
 fi
 [[ -n "${WTYPE_PATH}" && -x "${WTYPE_PATH}" ]] || fail "wtype installation did not provide an executable."
 

@@ -369,13 +369,17 @@ ensure_service_state() {
   if "${SUDO[@]}" systemctl is-active --quiet "${SERVICE}"; then
     if "${UNIT_CHANGED}"; then
       log "Restarting active service after unit update: ${SERVICE}"
-      "${SUDO[@]}" systemctl restart "${SERVICE}"
+      if ! "${SUDO[@]}" systemctl restart "${SERVICE}"; then
+        warn "Could not restart ${SERVICE}. Installation remains complete; check the adapter, B-route credentials, and: sudo systemctl status ${SERVICE} --no-pager"
+      fi
     else
       log "Service is already active; preserving it: ${SERVICE}"
     fi
   else
     log "Starting inactive service: ${SERVICE}"
-    "${SUDO[@]}" systemctl start "${SERVICE}"
+    if ! "${SUDO[@]}" systemctl start "${SERVICE}"; then
+      warn "${SERVICE} did not start yet. This is expected until the B-route adapter and credentials are ready; installation remains complete."
+    fi
   fi
 }
 
@@ -393,9 +397,10 @@ verify_installation() {
       fail "Credentials file owner or mode is incorrect."
   fi
   if ! "${SUDO[@]}" systemctl is-active --quiet "${SERVICE}"; then
+    warn "${SERVICE} is enabled but not active. The B-route adapter, B-route ID/PASS, or network may not be ready yet."
     log "Check: sudo systemctl status ${SERVICE} --no-pager"
     log "Check: sudo journalctl -u ${SERVICE} -n 100 --no-pager"
-    fail "Service is not active: ${SERVICE}"
+    return 0
   fi
   log "PASS: ${SERVICE} is enabled and active."
 }

@@ -31,6 +31,7 @@ PRINT_CONFIG=false
 PULL=false
 BUILD=false
 RESTART=false
+PREPARE=false
 LOG_FILE=""
 DOCKER_CMD=()
 
@@ -47,6 +48,8 @@ Options:
   --pull          Pull Mosquitto; with --build, also refresh build base images.
   --build         Build local application services.
   --restart       Explicitly restart only the production services after startup.
+  --prepare       Fetch and build production images without requiring the OMK AP
+                  address or starting containers.
   -h, --help      Show this help.
 EOF
 }
@@ -120,7 +123,7 @@ print_config() {
     "Mosquitto bind address: ${MOSQUITTO_BIND_ADDRESS}" "MQTT port: ${MQTT_PORT}" \
     "Dashboard port: ${DASHBOARD_PORT}" "Harvest endpoint: ${HARVEST_ENDPOINT}" \
     "Harvest queue host path: ${HARVEST_QUEUE_HOST_PATH}" "Harvest queue container path: ${HARVEST_QUEUE_CONTAINER_PATH}" \
-    "dry-run=${DRY_RUN} pull=${PULL} build=${BUILD} restart=${RESTART}"
+    "dry-run=${DRY_RUN} pull=${PULL} build=${BUILD} restart=${RESTART} prepare=${PREPARE}"
   printf 'Required directories:\n'
   for directory in "${REQUIRED_DIRECTORIES[@]}"; do printf '  %s\n' "${OMK_ROOT}/${directory}"; done
 }
@@ -264,7 +267,7 @@ check_harvest_uploader() {
 while (($#)); do
   case "$1" in
     --dry-run) DRY_RUN=true ;; --print-config) PRINT_CONFIG=true ;; --pull) PULL=true ;;
-    --build) BUILD=true ;; --restart) RESTART=true ;; -h|--help) usage; exit 0 ;;
+    --build) BUILD=true ;; --restart) RESTART=true ;; --prepare) PREPARE=true; PULL=true; BUILD=true ;; -h|--help) usage; exit 0 ;;
     *) printf 'Unknown option: %s\n' "$1" >&2; usage >&2; exit 2 ;;
   esac
   shift
@@ -285,9 +288,9 @@ print_config
 
 if "${DRY_RUN}"; then
   for directory in "${REQUIRED_DIRECTORIES[@]}"; do check_directory "${directory}"; done
-  if command -v ip >/dev/null 2>&1; then
+  if ! "${PREPARE}" && command -v ip >/dev/null 2>&1; then
     check_bind_address
-  else
+  elif ! "${PREPARE}"; then
     warn "ip is unavailable, so the Mosquitto bind address cannot be checked in this dry run."
   fi
   if command -v curl >/dev/null 2>&1; then
@@ -300,7 +303,11 @@ if "${DRY_RUN}"; then
   else
     warn "docker is unavailable; this is permitted for a dry run only."
   fi
-  log "Would check Docker, validate compose config, verify ${MOSQUITTO_BIND_ADDRESS}, and run: docker compose up -d ${PRODUCTION_SERVICES[*]}"
+  if "${PREPARE}"; then
+    log "Would check Docker, validate compose config, pull Mosquitto, and build ${BUILD_SERVICES[*]} without requiring ${MOSQUITTO_BIND_ADDRESS} or starting containers."
+  else
+    log "Would check Docker, validate compose config, verify ${MOSQUITTO_BIND_ADDRESS}, and run: docker compose up -d ${PRODUCTION_SERVICES[*]}"
+  fi
   "${PULL}" && log "Would run: docker compose pull mosquitto"
   if "${BUILD}"; then
     if "${PULL}"; then
@@ -310,19 +317,27 @@ if "${DRY_RUN}"; then
     fi
   fi
   "${RESTART}" && log "Would run: docker compose restart ${PRODUCTION_SERVICES[*]}"
-  log "Would verify container mounts after startup: sensor-collector write /app/data/sensors and /app/data/latest; dashboard read /app/data/processed and read-only /app/data/latest; mosquitto write /mosquitto/data; harvest-uploader write /app/data/harvest-uploader."
-  log "Would inspect harvest-uploader MQTT and Harvest retry logs, and queue.sqlite3 metadata without reading payloads."
-  log "Would check ${MOSQUITTO_BIND_ADDRESS}:${MQTT_PORT}, http://127.0.0.1:${DASHBOARD_PORT}/health, /display, and /api/display."
+  if ! "${PREPARE}"; then
+    log "Would verify container mounts after startup: sensor-collector write /app/data/sensors and /app/data/latest; dashboard read /app/data/processed and read-only /app/data/latest; mosquitto write /mosquitto/data; harvest-uploader write /app/data/harvest-uploader."
+    log "Would inspect harvest-uploader MQTT and Harvest retry logs, and queue.sqlite3 metadata without reading payloads."
+    log "Would check ${MOSQUITTO_BIND_ADDRESS}:${MQTT_PORT}, http://127.0.0.1:${DASHBOARD_PORT}/health, /display, and /api/display."
+  fi
   exit 0
 fi
 
 configure_docker_command
+docker_compose config --quiet || fail "Compose configuration validation failed."
+for directory in "${REQUIRED_DIRECTORIES[@]}"; do check_directory "${directory}"; done
+if "${PREPARE}"; then
+  docker_compose pull mosquitto
+  docker_compose build --pull "${BUILD_SERVICES[@]}"
+  log "SUCCESS: production images are prepared; activate OMK AP before starting containers."
+  exit 0
+fi
 command -v curl >/dev/null 2>&1 || fail "curl is required for Dashboard health checks."
 command -v ip >/dev/null 2>&1 || fail "ip is required to verify the Mosquitto bind address."
 command -v ss >/dev/null 2>&1 || fail "ss is required to verify the Mosquitto listener."
-docker_compose config --quiet || fail "Compose configuration validation failed."
 check_bind_address
-for directory in "${REQUIRED_DIRECTORIES[@]}"; do check_directory "${directory}"; done
 "${PULL}" && docker_compose pull mosquitto
 if "${BUILD}"; then
   if "${PULL}"; then

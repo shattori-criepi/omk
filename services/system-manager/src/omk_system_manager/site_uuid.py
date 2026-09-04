@@ -126,45 +126,37 @@ def _resolve_site_uuid(path: Path, metadata: SoracomMetadataClient) -> str:
     """Implementation separated so invalid values receive one clear log record."""
 
     local_uuid = read_local_site_uuid(path)
+    if local_uuid is None:
+        local_uuid = str(uuid.uuid4())
+        write_local_site_uuid_atomically(path, local_uuid)
+        LOGGER.info("新しいsite_uuidをローカルに生成しました: %s", local_uuid)
+
+    # The durable Gateway value is authoritative. SORACOM is an optional
+    # mirror, so an unavailable modem or Metadata Service cannot stop OMK.
     try:
         soracom_value = metadata.get_site_uuid()
     except MetadataServiceError:
-        LOGGER.warning("Metadata Serviceへ接続できません")
-        if local_uuid is not None:
-            return local_uuid
-        raise
+        LOGGER.warning("Metadata Serviceへ接続できません。ローカルsite_uuidを継続利用します")
+        return local_uuid
 
     soracom_uuid = validate_site_uuid(soracom_value, source="SORACOM") if soracom_value is not None else None
 
-    if local_uuid is not None and soracom_uuid is not None:
-        if local_uuid != soracom_uuid:
-            LOGGER.error("ローカルとSORACOMのsite_uuidが不一致です: local=%s soracom=%s", local_uuid, soracom_uuid)
-            raise SiteUUIDError("ローカルとSORACOMのsite_uuidが不一致です")
+    if soracom_uuid == local_uuid:
         LOGGER.info("ローカルとSORACOMのsite_uuidが一致しました")
         return local_uuid
 
     if soracom_uuid is not None:
-        write_local_site_uuid_atomically(path, soracom_uuid)
-        LOGGER.info("SORACOMからsite_uuidを復元しました: %s", soracom_uuid)
-        return soracom_uuid
-
-    if local_uuid is not None:
-        _save_to_soracom(metadata, local_uuid)
-        return local_uuid
-
-    generated = str(uuid.uuid4())
-    LOGGER.info("新しいsite_uuidを生成しました: %s", generated)
-    write_local_site_uuid_atomically(path, generated)
-    _save_to_soracom(metadata, generated)
-    return generated
+        LOGGER.warning("ローカルとSORACOMのsite_uuidが不一致です。ローカル値をSORACOMへ反映します")
+    _save_to_soracom(metadata, local_uuid)
+    return local_uuid
 
 
 def _save_to_soracom(metadata: SoracomMetadataClient, value: str) -> None:
     try:
         metadata.put_site_uuid(value)
     except MetadataServiceError:
-        LOGGER.error("SORACOM Tagへsite_uuidを保存できません")
-        raise
+        LOGGER.warning("SORACOM Tagへsite_uuidを保存できません。ローカルsite_uuidを継続利用します")
+        return
     LOGGER.info("SORACOM Tagへsite_uuidを保存しました: %s", value)
 
 

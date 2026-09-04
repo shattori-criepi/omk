@@ -165,11 +165,13 @@ BASE_PACKAGES=(
   curl
   git
   htop
+  iproute2
   jq
   nano
   tree
   unzip
   vim
+  wtype
 )
 log "Installing base packages: ${BASE_PACKAGES[*]}"
 "${SUDO[@]}" apt-get install -y "${BASE_PACKAGES[@]}"

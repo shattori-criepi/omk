@@ -34,7 +34,7 @@ if ((EUID != 0)); then
 fi
 command -v apt-get >/dev/null 2>&1 || fail 'apt-get is required to install direct dependencies.'
 missing_packages=()
-for package in python3 python3-venv python3-pip network-manager; do
+for package in python3 python3-venv python3-pip network-manager mosquitto-clients; do
   dpkg-query -W -f='${db:Status-Abbrev}' "${package}" 2>/dev/null | grep -q '^ii' || missing_packages+=("${package}")
 done
 if ((${#missing_packages[@]})); then

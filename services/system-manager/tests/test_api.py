@@ -337,6 +337,29 @@ def test_missing_environment_token_prevents_application_start(monkeypatch: pytes
             pass
 
 
+def test_application_starts_with_generated_local_uuid_when_soracom_is_unavailable(tmp_path: Path) -> None:
+    import asyncio
+    from omk_system_manager.site_uuid import MetadataServiceError, read_local_site_uuid
+
+    class UnavailableMetadata:
+        def get_site_uuid(self) -> None:
+            raise MetadataServiceError("unavailable")
+
+        def put_site_uuid(self, _: str) -> None:
+            raise AssertionError("sync must not be attempted when metadata cannot be read")
+
+    site_uuid_path = tmp_path / "site_uuid"
+    app = create_app(
+        Settings(TOKEN, tmp_path / "credentials.yaml", "/usr/bin/systemctl", site_uuid_path=site_uuid_path),
+        site_uuid_metadata=UnavailableMetadata(),
+    )
+    async def start_and_check() -> None:
+        async with app.router.lifespan_context(app):
+            assert app.state.site_uuid == read_local_site_uuid(site_uuid_path)
+
+    asyncio.run(start_and_check())
+
+
 def test_status_never_returns_password_or_raw_id(tmp_path: Path) -> None:
     with client_for(tmp_path) as client:
         client.app.state.controller = ActiveController(active=False)
