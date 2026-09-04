@@ -6,10 +6,14 @@ TEST_DIRECTORY="$(mktemp -d)"
 trap 'rm -rf -- "${TEST_DIRECTORY}"' EXIT
 KANSHI_AUTOSTART_MARKER='# OMK: start kanshi for DSI-1 kiosk rotation'
 KANSHI_AUTOSTART_COMMAND='kanshi >/dev/null 2>&1 &'
+SYSTEM_AUTOSTART="${TEST_DIRECTORY}/etc-xdg-labwc-autostart"
+: >"${SYSTEM_AUTOSTART}"
 
 # Load pure autostart rendering and runtime helpers without kiosk main flow.
 # shellcheck disable=SC1090
 source <(awk '/^render_labwc_autostart\(\)/ {printing=1} printing {print} printing && /^}$/ {exit}' "${SCRIPT_PATH}")
+# shellcheck disable=SC1090
+source <(awk '/^update_labwc_autostart\(\)/ {printing=1} printing {print} printing && /^}$/ {exit}' "${SCRIPT_PATH}")
 # shellcheck disable=SC1090
 source <(awk '/^kanshi_is_running\(\)/ {printing=1} /^render_labwc_config\(\)/ {exit} printing {print}' "${SCRIPT_PATH}")
 
@@ -17,8 +21,8 @@ render_autostart_twice() {
   local source="$1"
   local rendered="${source}.rendered"
   local rerun="${source}.rerun"
-  render_labwc_autostart "${source}" "${rendered}"
-  render_labwc_autostart "${rendered}" "${rerun}"
+  render_labwc_autostart "${source}" "${rendered}" "${SYSTEM_AUTOSTART}"
+  render_labwc_autostart "${rendered}" "${rerun}" "${SYSTEM_AUTOSTART}"
   cmp -s "${rendered}" "${rerun}"
 }
 
@@ -38,6 +42,55 @@ render_autostart_twice "${TEST_DIRECTORY}/existing-autostart"
 grep -Fxq 'exec swayidle -w' "${TEST_DIRECTORY}/existing-autostart.rendered"
 grep -Fxq 'custom-command --keep' "${TEST_DIRECTORY}/existing-autostart.rendered"
 grep -Fxq "${KANSHI_AUTOSTART_COMMAND}" "${TEST_DIRECTORY}/existing-autostart.rendered"
+
+# Raspberry Pi OS 13's system-wide launcher has priority. It prevents an OMK
+# user launcher from being added, including the /usr/bin/kanshi form observed
+# in /etc/xdg/labwc/autostart.
+printf '%s\n' '/usr/bin/kanshi &' >"${SYSTEM_AUTOSTART}"
+printf '%s\n' 'exec swayidle -w' >"${TEST_DIRECTORY}/system-wide-autostart"
+render_autostart_twice "${TEST_DIRECTORY}/system-wide-autostart"
+cmp -s "${TEST_DIRECTORY}/system-wide-autostart" "${TEST_DIRECTORY}/system-wide-autostart.rendered"
+if grep -Fq "${KANSHI_AUTOSTART_MARKER}" "${TEST_DIRECTORY}/system-wide-autostart.rendered"; then
+  echo 'OMK added a user launcher despite the system-wide kanshi launcher.' >&2
+  exit 1
+fi
+
+# A previous OMK block is removed when the system-wide launcher is present;
+# unrelated user commands survive and the result is idempotent.
+cat >"${TEST_DIRECTORY}/system-wide-removal-autostart" <<EOF
+before-omk
+${KANSHI_AUTOSTART_MARKER}
+${KANSHI_AUTOSTART_COMMAND}
+after-omk
+EOF
+render_autostart_twice "${TEST_DIRECTORY}/system-wide-removal-autostart"
+grep -Fxq 'before-omk' "${TEST_DIRECTORY}/system-wide-removal-autostart.rendered"
+grep -Fxq 'after-omk' "${TEST_DIRECTORY}/system-wide-removal-autostart.rendered"
+if grep -Fq "${KANSHI_AUTOSTART_MARKER}" "${TEST_DIRECTORY}/system-wide-removal-autostart.rendered" || grep -Fq "${KANSHI_AUTOSTART_COMMAND}" "${TEST_DIRECTORY}/system-wide-removal-autostart.rendered"; then
+  echo 'OMK managed launcher remained despite a system-wide launcher.' >&2
+  exit 1
+fi
+printf '%s\nkanshi\n' "${KANSHI_AUTOSTART_MARKER}" >"${TEST_DIRECTORY}/system-wide-legacy-omk"
+render_autostart_twice "${TEST_DIRECTORY}/system-wide-legacy-omk"
+[[ ! -s "${TEST_DIRECTORY}/system-wide-legacy-omk.rendered" ]]
+
+# The installer must not leave an empty user autostart file that could alter
+# labwc's system-wide autostart behaviour after removing the OMK-only block.
+USER_HOME="${TEST_DIRECTORY}/managed-user"
+LABWC_AUTOSTART="${USER_HOME}/.config/labwc/autostart"
+LABWC_SYSTEM_AUTOSTART="${SYSTEM_AUTOSTART}"
+AS_TARGET=()
+SUDO=()
+log() { :; }
+fail() { echo "unexpected autostart update failure: $*" >&2; return 1; }
+install_for_target_user() { install -m 0644 "$1" "$2"; }
+mkdir -p "$(dirname -- "${LABWC_AUTOSTART}")"
+printf '%s\n%s\n' "${KANSHI_AUTOSTART_MARKER}" "${KANSHI_AUTOSTART_COMMAND}" >"${LABWC_AUTOSTART}"
+update_labwc_autostart
+[[ ! -e "${LABWC_AUTOSTART}" ]]
+
+# Restore the no-system-wide baseline for user-launcher and OMK migration tests.
+: >"${SYSTEM_AUTOSTART}"
 
 # A legacy OMK foreground entry upgrades in place.  A user-supplied launcher,
 # including common background and wrapper forms, is preserved without an OMK

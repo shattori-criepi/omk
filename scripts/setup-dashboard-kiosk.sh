@@ -29,6 +29,7 @@ KANSHI_DIRECTORY=""
 KANSHI_CONFIG=""
 KANSHI_STARTUP_LOG=""
 LABWC_AUTOSTART=""
+LABWC_SYSTEM_AUTOSTART='/etc/xdg/labwc/autostart'
 KANSHI_AUTOSTART_MARKER='# OMK: start kanshi for DSI-1 kiosk rotation'
 KANSHI_AUTOSTART_COMMAND='kanshi >/dev/null 2>&1 &'
 KANSHI_DSI_OUTPUT='output DSI-1 enable scale 1.000000 mode 720x1280@60.038 position 0,0 transform 90'
@@ -320,32 +321,44 @@ update_kanshi_config() {
 render_labwc_autostart() {
   local source_path="$1"
   local destination_path="$2"
+  local system_autostart_path="$3"
 
-  python3 - "${source_path}" "${destination_path}" "${KANSHI_AUTOSTART_MARKER}" "${KANSHI_AUTOSTART_COMMAND}" <<'PY'
+  python3 - "${source_path}" "${destination_path}" "${system_autostart_path}" "${KANSHI_AUTOSTART_MARKER}" "${KANSHI_AUTOSTART_COMMAND}" <<'PY'
 from pathlib import Path
 import re
 import sys
 
-source, destination = map(Path, sys.argv[1:3])
-marker = sys.argv[3]
-omk_command = sys.argv[4]
+source, destination, system_autostart = map(Path, sys.argv[1:4])
+marker = sys.argv[4]
+omk_command = sys.argv[5]
 lines = source.read_text(encoding="utf-8").splitlines(keepends=True) if source.exists() else []
+system_lines = system_autostart.read_text(encoding="utf-8").splitlines(keepends=True) if system_autostart.exists() else []
 kanshi_command = re.compile(
     r"^\s*(?:(?:exec|command|nohup|setsid)\s+|env(?:\s+[A-Za-z_][A-Za-z0-9_]*=[^\s]+)*\s+)?"
     r"(?:[A-Za-z_][A-Za-z0-9_]*=[^\s]+\s+)*(?:[^\s]*/)?kanshi(?:\s|$)"
 )
-has_marker = any(line.rstrip("\n") == marker for line in lines)
-has_kanshi = any(not line.lstrip().startswith("#") and kanshi_command.match(line) for line in lines)
 
-if has_marker:
-    marker_index = next(index for index, line in enumerate(lines) if line.rstrip("\n") == marker)
+def is_kanshi_launcher(line: str) -> bool:
+    return not line.lstrip().startswith("#") and bool(kanshi_command.match(line))
+
+has_system_kanshi = any(is_kanshi_launcher(line) for line in system_lines)
+has_user_kanshi = any(is_kanshi_launcher(line) for line in lines)
+marker_index = next((index for index, line in enumerate(lines) if line.rstrip("\n") == marker), None)
+
+if has_system_kanshi:
+    # Raspberry Pi OS starts kanshi from /etc/xdg/labwc/autostart. Remove only
+    # the marker and the immediately following OMK-managed launcher, retaining
+    # all user entries (including a separately configured user kanshi line).
+    if marker_index is not None and marker_index + 1 < len(lines) and is_kanshi_launcher(lines[marker_index + 1]):
+        del lines[marker_index:marker_index + 2]
+elif marker_index is not None:
     # Upgrade the legacy OMK foreground line in place.  Other existing launch
     # forms are user configuration and deliberately remain untouched.
     if marker_index + 1 < len(lines) and lines[marker_index + 1].strip() == "kanshi":
         lines[marker_index + 1] = f"{omk_command}\n"
-    elif not has_kanshi:
+    elif not has_user_kanshi:
         lines.insert(marker_index + 1, f"{omk_command}\n")
-elif not has_kanshi:
+elif not has_user_kanshi:
     if lines and not lines[-1].endswith("\n"):
         lines[-1] += "\n"
     lines.extend((f"{marker}\n", f"{omk_command}\n"))
@@ -358,12 +371,25 @@ update_labwc_autostart() {
   local labwc_directory="${USER_HOME}/.config/labwc"
   local candidate backup
 
-  "${AS_TARGET[@]}" mkdir -p "${labwc_directory}"
   candidate="$(mktemp)"
-  if ! render_labwc_autostart "${LABWC_AUTOSTART}" "${candidate}"; then
+  if ! render_labwc_autostart "${LABWC_AUTOSTART}" "${candidate}" "${LABWC_SYSTEM_AUTOSTART}"; then
     rm -f -- "${candidate}"
     fail "Could not render labwc autostart: ${LABWC_AUTOSTART}"
   fi
+  # Do not create an empty user autostart file merely because Raspberry Pi OS
+  # already starts kanshi from the system-wide autostart. If an OMK-only file
+  # became empty after removal, remove it for the same reason.
+  if [[ ! -s "${candidate}" ]]; then
+    rm -f -- "${candidate}"
+    if [[ -e "${LABWC_AUTOSTART}" ]]; then
+      "${AS_TARGET[@]}" rm -f -- "${LABWC_AUTOSTART}"
+      log "Removed empty OMK labwc autostart after selecting the system-wide kanshi launcher."
+    else
+      log "Using the existing system-wide kanshi launcher; no user autostart file was created."
+    fi
+    return
+  fi
+  "${AS_TARGET[@]}" mkdir -p "${labwc_directory}"
   if [[ -f "${LABWC_AUTOSTART}" ]] && cmp -s "${candidate}" "${LABWC_AUTOSTART}"; then
     rm -f -- "${candidate}"
     log "labwc kanshi autostart is unchanged: ${LABWC_AUTOSTART}"
