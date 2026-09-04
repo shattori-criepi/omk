@@ -24,6 +24,8 @@ RUN_USER="${SUDO_USER:-$(id -un)}"
 RUN_HOME="$(getent passwd "${RUN_USER}" | cut -d: -f6 || true)"
 LOG_FILE=""
 MODEM_DETAILS=""
+MODEM_PATH=""
+USB_SYSFS_ROOT="${SORACOM_USB_SYSFS_ROOT:-/sys/bus/usb/devices}"
 
 log() {
   printf '[%s] %s\n' "$(date --iso-8601=seconds)" "$*"
@@ -55,7 +57,7 @@ show_diagnostics() {
 has_quectel_usb_id() {
   local vendor_file product_file
 
-  for vendor_file in /sys/bus/usb/devices/*/idVendor; do
+  for vendor_file in "${USB_SYSFS_ROOT}"/*/idVendor; do
     [[ -r "${vendor_file}" ]] || continue
     product_file="${vendor_file%/idVendor}/idProduct"
     if [[ -r "${product_file}" ]] && [[ "$(<"${vendor_file}")" == "2c7c" ]] &&
@@ -64,6 +66,50 @@ has_quectel_usb_id() {
     fi
   done
   return 1
+}
+
+quectel_usb_paths() {
+  local vendor_file product_file
+  for vendor_file in "${USB_SYSFS_ROOT}"/*/idVendor; do
+    [[ -r "${vendor_file}" ]] || continue
+    product_file="${vendor_file%/idVendor}/idProduct"
+    if [[ -r "${product_file}" ]] && [[ "$(<"${vendor_file}")" == 2c7c ]] && [[ "$(<"${product_file}")" == 0125 ]]; then
+      printf '%s\n' "${vendor_file%/idVendor}"
+    fi
+  done
+}
+
+modem_path_from_list() {
+  sed -n 's|.*\(/org/freedesktop/ModemManager1/Modem/[0-9][0-9]*\).*|\1|p' | head -n 1
+}
+
+mmcli_kv_value() {
+  local key="$1" value
+  value="$(sed -n "s/^${key}[[:space:]]*[:=][[:space:]]*//p" | head -n 1)"
+  value="${value#\"}"; value="${value%\"}"
+  value="${value#\'}"; value="${value%\'}"
+  printf '%s\n' "${value}"
+}
+
+modem_is_connected() {
+  local kv state sim registration packet
+  kv="$1"
+  state="$(printf '%s\n' "${kv}" | mmcli_kv_value modem.generic.state)"
+  sim="$(printf '%s\n' "${kv}" | mmcli_kv_value modem.generic.sim)"
+  registration="$(printf '%s\n' "${kv}" | mmcli_kv_value modem.3gpp.registration-state)"
+  packet="$(printf '%s\n' "${kv}" | mmcli_kv_value modem.3gpp.packet-service-state)"
+  [[ "${state}" == connected && "${sim}" == /org/freedesktop/ModemManager1/SIM/* && ( "${registration}" == home || "${registration}" == roaming ) && "${packet}" == attached ]]
+}
+
+replay_quectel_udev_events() {
+  local path child
+  command -v udevadm >/dev/null 2>&1 || return 0
+  while IFS= read -r path; do
+    [[ -n "${path}" ]] || continue
+    "${SUDO[@]}" udevadm trigger --action=add --path "${path}"
+    while IFS= read -r child; do "${SUDO[@]}" udevadm trigger --action=add --path "${child}"; done < <(find "${path}" -mindepth 1 -type d 2>/dev/null)
+  done < <(quectel_usb_paths)
+  "${SUDO[@]}" udevadm settle
 }
 
 fail() {
@@ -168,21 +214,27 @@ systemctl is-active --quiet ModemManager || fail "${EXIT_GENERAL}" "ModemManager
 log "NetworkManager: $(systemctl is-active NetworkManager); ModemManager: $(systemctl is-active ModemManager)"
 log "ModemManager enabled state: $(systemctl is-enabled ModemManager 2>&1 || true)"
 
+MODEM_LIST="$(mmcli -L 2>&1 || true)"
+if ! grep -q '/Modem/' <<<"${MODEM_LIST}" && has_quectel_usb_id; then
+  log 'Quectel modem is already attached but not yet known to ModemManager.'
+  log 'Replaying udev events for the detected Onyx device.'
+  replay_quectel_udev_events
+fi
 log "Waiting up to ${MODEM_WAIT_SECONDS}s for ModemManager to recognize the modem."
 deadline=$((SECONDS + MODEM_WAIT_SECONDS))
 while ((SECONDS < deadline)); do
-  if MODEM_LIST="$(mmcli -L 2>&1)" && grep -q '/Modem/' <<<"${MODEM_LIST}"; then
-    break
-  fi
+  MODEM_LIST="$(mmcli -L 2>&1 || true)"
+  MODEM_PATH="$(printf '%s\n' "${MODEM_LIST}" | modem_path_from_list)"
+  [[ -n "${MODEM_PATH}" ]] && break
   sleep 3
 done
-if ! grep -q '/Modem/' <<<"${MODEM_LIST:-}"; then
+if [[ -z "${MODEM_PATH:-}" ]]; then
   log "ModemManager did not recognize a modem within ${MODEM_WAIT_SECONDS}s."
   show_diagnostics
   exit "${EXIT_MODEM_NOT_FOUND}"
 fi
 log "Recognized modem: $(printf '%s\n' "${MODEM_LIST}" | redact_modem_identifiers)"
-MODEM_DETAILS="$(mmcli -m any 2>&1 || true)"
+MODEM_DETAILS="$(mmcli -m "${MODEM_PATH}" 2>&1 || true)"
 log "Initial modem status:"
 printf '%s\n' "${MODEM_DETAILS}" | redact_modem_identifiers
 
@@ -231,7 +283,7 @@ fi
 sleep 5
 ACTIVE_CONNECTIONS="$(nmcli connection show --active 2>&1 || true)"
 DEVICE_STATUS="$(nmcli device status 2>&1 || true)"
-MODEM_DETAILS="$(mmcli -m any 2>&1 || true)"
+MODEM_DETAILS="$(mmcli -m "${MODEM_PATH}" 2>&1 || true)"
 log "Active NetworkManager connections:"
 printf '%s\n' "${ACTIVE_CONNECTIONS}" | redact_modem_identifiers
 log "NetworkManager devices:"
@@ -239,24 +291,12 @@ printf '%s\n' "${DEVICE_STATUS}" | redact_modem_identifiers
 log "ModemManager status:"
 printf '%s\n' "${MODEM_DETAILS}" | redact_modem_identifiers
 
-if ! grep -Eq '^soracom([[:space:]]|$)' <<<"${ACTIVE_CONNECTIONS}" || \
-  ! grep -Eq '^(cdc-wdm0|wwan0)[[:space:]].*connected' <<<"${DEVICE_STATUS}"; then
-  if ! grep -Eqi 'SIM[[:space:]]*\|.*(/SIM/|sim)' <<<"${MODEM_DETAILS}"; then
-    fail "${EXIT_SIM_NOT_FOUND}" "No SIM was detected. Check SIM insertion and use 'mmcli -i 0' for local diagnostics."
-  fi
-  if grep -Eqi "registration:[[:space:]]*'?((searching)|(denied))'?|packet service state:[[:space:]]*'?detached'?" <<<"${MODEM_DETAILS}"; then
-    log "The modem is not registered/attached. Confirm the SIM is activated, not suspended or terminated, and that the APN matches its plan. For plan-DU use --apn du.soracom.io."
-    log "Run 'mmcli -i 0' locally if further SIM diagnostics are required; do not copy ICCID/IMSI values into tickets or logs."
-    exit "${EXIT_NETWORK_NOT_REGISTERED}"
-  fi
-  fail "${EXIT_GENERAL}" "The soracom profile or modem device is not connected."
-fi
-
-if ! grep -Eqi "registration:[[:space:]]*'?(home|roaming)'?" <<<"${MODEM_DETAILS}" || \
-  ! grep -Eqi "packet service state:[[:space:]]*'?attached'?" <<<"${MODEM_DETAILS}" || \
-  ! grep -Eqi "state:[[:space:]]*'?connected'?" <<<"${MODEM_DETAILS}"; then
-  fail "${EXIT_NETWORK_NOT_REGISTERED}" "The modem is connected but cellular registration or packet attachment is incomplete."
-fi
+MODEM_KV="$(mmcli -m "${MODEM_PATH}" --output-keyvalue 2>/dev/null || mmcli -m "${MODEM_PATH}" -K 2>/dev/null || true)"
+SIM_PATH="$(printf '%s\n' "${MODEM_KV}" | mmcli_kv_value modem.generic.sim)"
+[[ "${SIM_PATH}" == /org/freedesktop/ModemManager1/SIM/* ]] || fail "${EXIT_SIM_NOT_FOUND}" 'No SIM object was detected.'
+modem_is_connected "${MODEM_KV}" || fail "${EXIT_NETWORK_NOT_REGISTERED}" 'Cellular state is not connected/registered/attached.'
+nmcli -g NAME connection show --active | grep -Fxq soracom || fail "${EXIT_GENERAL}" 'The soracom profile is not active.'
+nmcli -g GENERAL.STATE device show wwan0 2>/dev/null | grep -Eq '^100 \(connected\)$|^connected$' || fail "${EXIT_GENERAL}" 'The wwan0 device is not connected.'
 
 IPV4_STATUS="$(ip -4 address show wwan0 2>&1 || true)"
 log "wwan0 IPv4 status:"
@@ -265,7 +305,7 @@ if ! grep -Eq 'inet[[:space:]]+[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' <<<"${IPV4_STATUS
   fail "${EXIT_NO_IPV4}" "wwan0 has no IPv4 address."
 fi
 
-if ! ping -c 4 pong.soracom.io; then
+if ! ping -I wwan0 -c 4 pong.soracom.io; then
   fail "${EXIT_SORACOM_UNREACHABLE}" "SORACOM reachability check (pong.soracom.io) failed."
 fi
 log "SORACOM reachability check succeeded."

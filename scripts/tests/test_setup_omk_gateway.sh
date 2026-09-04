@@ -30,13 +30,15 @@ system_manager_line="$(grep -n -F 'setup-system-manager.sh' <<<"${output}" | cut
 collection_line="$(grep -n -F 'setup-data-collection.sh --prepare' <<<"${output}" | cut -d: -f1)"
 transformer_line="$(grep -n -F 'setup-data-transformer.sh' <<<"${output}" | cut -d: -f1)"
 exporter_line="$(grep -n -F 'setup-data-exporter.sh' <<<"${output}" | cut -d: -f1)"
-ap_line="$(grep -n -F 'setup-wifi-access-point.sh --activate' <<<"${output}" | cut -d: -f1)"
+ap_prepare_line="$(grep -n -F 'setup-wifi-access-point.sh — Required OMK AP profile' <<<"${output}" | cut -d: -f1)"
+ap_activation_line="$(grep -n -F 'setup-wifi-access-point.sh --activate' <<<"${output}" | cut -d: -f1)"
 start_collection_line="$(grep -n -F 'setup-data-collection.sh — Required Docker collection' <<<"${output}" | cut -d: -f1)"
 [[ "${system_manager_line}" -lt "${collection_line}" ]]
 [[ "${collection_line}" -lt "${transformer_line}" ]]
 [[ "${transformer_line}" -lt "${exporter_line}" ]]
-[[ "${exporter_line}" -lt "${ap_line}" ]]
-[[ "${ap_line}" -lt "${start_collection_line}" ]]
+[[ "${exporter_line}" -lt "${ap_prepare_line}" ]]
+[[ "${ap_prepare_line}" -lt "${start_collection_line}" ]]
+[[ "${start_collection_line}" -lt "${ap_activation_line}" ]]
 
 # Run in a disposable copy with no-op setup scripts to verify the actual call
 # decision, rather than only the displayed dry-run plan.
@@ -73,7 +75,7 @@ for script in setup-raspberry-pi.sh setup-soracom-onyx.sh setup-wifi-access-poin
 cat > "${TEMP_DIR}/scripts/${script}" <<'EOF'
 #!/usr/bin/env bash
 printf '%s %s\n' "$(basename "$0")" "$*" >> "${CALL_LOG}"
-if [[ -n "${FAIL_SETUP:-}" && "$(basename "$0")" == "${FAIL_SETUP}" ]]; then
+if [[ -n "${FAIL_SETUP:-}" && "$(basename "$0")" == "${FAIL_SETUP}" && ( -z "${FAIL_SETUP_ARGS:-}" || "$*" == *"${FAIL_SETUP_ARGS}"* ) ]]; then
   exit 42
 fi
 EOF
@@ -105,11 +107,26 @@ esac
 EOF
 cat > "${TEMP_DIR}/bin/curl" <<'EOF'
 #!/usr/bin/env bash
-exit 0
+[[ "${FAIL_HEALTH:-false}" != true ]]
 EOF
 cat > "${TEMP_DIR}/bin/ip" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' 'inet 192.168.50.1/24'
+EOF
+cat > "${TEMP_DIR}/bin/nmcli" <<'EOF'
+#!/usr/bin/env bash
+if [[ "$*" == *'connection show omk-ap'* && "$*" == *'--show-secrets'* ]]; then printf '%s\n' test-psk; exit 0; fi
+if [[ "$*" == *'connection show omk-ap'* && "$*" == *'-g '* ]]; then
+  case "$*" in
+    *connection.interface-name*) printf '%s\n' wlan0 ;;
+    *802-11-wireless.mode*) printf '%s\n' ap ;;
+    *connection.autoconnect*) printf '%s\n' yes ;;
+    *ipv4.method*) printf '%s\n' shared ;;
+    *ipv4.addresses*) printf '%s\n' 192.168.50.1/24 ;;
+    *ipv6.method*) printf '%s\n' disabled ;;
+  esac
+fi
+exit 0
 EOF
 cat > "${TEMP_DIR}/bin/find" <<'EOF'
 #!/usr/bin/env bash
@@ -180,6 +197,36 @@ if FAIL_SETUP=setup-data-collection.sh CALL_LOG="${TEMP_DIR}/calls" PATH="${TEMP
 fi
 grep -Fq 'setup-data-collection.sh --prepare' "${TEMP_DIR}/calls"
 ! grep -Fq 'setup-wifi-access-point.sh' "${TEMP_DIR}/calls"
+
+# Full Dashboard/kiosk and health failures must stop before final activation.
+for failure_setup in setup-dashboard-kiosk.sh setup-data-collection.sh; do
+  rm -f -- "${TEMP_DIR}/calls"
+  if FAIL_SETUP="${failure_setup}" FAIL_SETUP_ARGS='' CALL_LOG="${TEMP_DIR}/calls" PATH="${TEMP_DIR}/bin:${PATH}" \
+    "${TEMP_DIR}/scripts/setup-omk-gateway.sh" >"${TEMP_DIR}/${failure_setup}.log" 2>&1; then
+    echo "Gateway setup accepted failed ${failure_setup}." >&2
+    exit 1
+  fi
+  ! grep -Fq 'setup-wifi-access-point.sh --activate' "${TEMP_DIR}/calls"
+done
+rm -f -- "${TEMP_DIR}/calls"
+if FAIL_HEALTH=true CALL_LOG="${TEMP_DIR}/calls" PATH="${TEMP_DIR}/bin:${PATH}" \
+  "${TEMP_DIR}/scripts/setup-omk-gateway.sh" >"${TEMP_DIR}/health-failed.log" 2>&1; then
+  echo 'Gateway setup accepted failed Dashboard health.' >&2
+  exit 1
+fi
+! grep -Fq 'setup-wifi-access-point.sh --activate' "${TEMP_DIR}/calls"
+
+# Failure of the last activation remains incomplete rather than a false
+# overall SUCCESS; the non-activate profile preparation has already run.
+rm -f -- "${TEMP_DIR}/calls"
+if FAIL_SETUP=setup-wifi-access-point.sh FAIL_SETUP_ARGS=--activate CALL_LOG="${TEMP_DIR}/calls" PATH="${TEMP_DIR}/bin:${PATH}" \
+  "${TEMP_DIR}/scripts/setup-omk-gateway.sh" >"${TEMP_DIR}/activation-failed.log" 2>&1; then
+  echo 'Gateway setup accepted failed final AP activation.' >&2
+  exit 1
+fi
+grep -Fq 'setup-wifi-access-point.sh ' "${TEMP_DIR}/calls"
+grep -Fq 'setup-wifi-access-point.sh --activate' "${TEMP_DIR}/calls"
+grep -Fq 'final activation was not completed' "${TEMP_DIR}/activation-failed.log"
 
 # Every preflight failure is before wlan0 is handed to the AP script.
 for failure in FAIL_PREFLIGHT_CONFIG FAIL_PREFLIGHT_IMAGE FAIL_PREFLIGHT_SYSTEMD; do

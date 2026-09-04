@@ -99,6 +99,14 @@ case "$name" in
   getent) printf '%s\n' '192.0.2.2 STREAM deb.debian.org' ;;
   date) printf '%s\n' 1735689600 ;;
   iw) printf '%s\n' ' * AP' ;;
+  nmcli)
+    if [[ "$*" == *'--show-secrets'* ]]; then printf '%s\n' test-psk
+    elif [[ "$*" == *'connection.interface-name'* ]]; then printf '%s\n' wlan0
+    elif [[ "$*" == *'802-11-wireless.mode'* ]]; then printf '%s\n' ap
+    elif [[ "$*" == *'connection.autoconnect'* ]]; then printf '%s\n' yes
+    elif [[ "$*" == *'ipv4.method'* ]]; then printf '%s\n' shared
+    elif [[ "$*" == *'ipv4.addresses'* ]]; then printf '%s\n' 192.168.50.1/24
+    elif [[ "$*" == *'ipv6.method'* ]]; then printf '%s\n' disabled; fi ;;
   sudo) if [[ "${1:-}" == apt-get ]]; then shift; exec apt-get "$@"; fi ;;
   env) while [[ "${1:-}" == *=* ]]; do export "$1"; shift; done; exec "$@" ;;
   id) [[ "${1:-}" == -nG ]] && printf '%s\n' docker || printf '%s\n' omkdev ;;
@@ -137,7 +145,7 @@ case "$name" in
  setup-data-collection.sh) if [[ "${1:-}" == --prepare ]]; then docker compose config --quiet; docker compose pull mosquitto; checkpoint docker-pull; docker compose build; checkpoint docker-build; touch "${GW_STATE_DIR}/images"; else docker compose up -d; for attempt in 1 2 3; do curl --fail http://127.0.0.1:8000/health && break; [[ "$attempt" == 3 ]] && exit 1; sleep 0; done; fi ;;
  setup-data-transformer.sh) mkdir -p "${GATEWAY_HARNESS_ROOT}/services/data-transformer/.venv/bin"; printf '%s\n' python >"${GATEWAY_HARNESS_ROOT}/services/data-transformer/.venv/bin/python"; chmod 755 "${GATEWAY_HARNESS_ROOT}/services/data-transformer/.venv/bin/python"; python -m venv transformer; pip install -r requirements; env "PYTHONPATH=${GATEWAY_HARNESS_ROOT}/services/data-transformer/src" "OMK_IMPORT_SMOKE_SRC=${GATEWAY_HARNESS_ROOT}/services/data-transformer/src" "OMK_IMPORT_SMOKE_MODULE=data_transformer" python -c 'import importlib'; systemctl daemon-reload; systemctl enable timer ;;
  setup-data-exporter.sh) mkdir -p "${GATEWAY_HARNESS_ROOT}/services/data-exporter/.venv/bin"; printf '%s\n' python >"${GATEWAY_HARNESS_ROOT}/services/data-exporter/.venv/bin/python"; chmod 755 "${GATEWAY_HARNESS_ROOT}/services/data-exporter/.venv/bin/python"; python -m venv exporter; pip install -r requirements; env "PYTHONPATH=${GATEWAY_HARNESS_ROOT}/services/data-exporter/src" "OMK_IMPORT_SMOKE_SRC=${GATEWAY_HARNESS_ROOT}/services/data-exporter/src" "OMK_IMPORT_SMOKE_MODULE=data_exporter" python -c 'import importlib'; visudo -cf exporter; printf '%s\n' helper >"${GW_STATE_DIR}/helper"; chmod 755 "${GW_STATE_DIR}/helper"; grep -Fqx 'state/helper|root|root|755' "${GW_STATE_DIR}/owner-mode" || printf '%s\n' 'state/helper|root|root|755' >>"${GW_STATE_DIR}/owner-mode" ;;
- setup-wifi-access-point.sh) checkpoint pre-ap; [[ -e "${GW_STATE_DIR}/ap_psk" ]] || { printf 'psk\n' >"${GW_STATE_DIR}/ap_psk"; chmod 600 "${GW_STATE_DIR}/ap_psk"; grep -Fqx 'state/ap_psk|root|root|600' "${GW_STATE_DIR}/owner-mode" || printf '%s\n' 'state/ap_psk|root|root|600' >>"${GW_STATE_DIR}/owner-mode"; }; [[ ! -e "${GW_STATE_DIR}/network-profile" ]] || chmod u+w "${GW_STATE_DIR}/network-profile"; printf '%s\n' omk-ap >"${GW_STATE_DIR}/network-profile"; chmod 600 "${GW_STATE_DIR}/network-profile"; grep -Fqx 'state/network-profile|root|root|600' "${GW_STATE_DIR}/owner-mode" || printf '%s\n' 'state/network-profile|root|root|600' >>"${GW_STATE_DIR}/owner-mode"; nmcli connection up omk-ap; nft -f rules ;;
+ setup-wifi-access-point.sh) checkpoint pre-ap; [[ -e "${GW_STATE_DIR}/ap_psk" ]] || { printf 'psk\n' >"${GW_STATE_DIR}/ap_psk"; chmod 600 "${GW_STATE_DIR}/ap_psk"; grep -Fqx 'state/ap_psk|root|root|600' "${GW_STATE_DIR}/owner-mode" || printf '%s\n' 'state/ap_psk|root|root|600' >>"${GW_STATE_DIR}/owner-mode"; }; [[ ! -e "${GW_STATE_DIR}/network-profile" ]] || chmod u+w "${GW_STATE_DIR}/network-profile"; printf '%s\n' omk-ap >"${GW_STATE_DIR}/network-profile"; chmod 600 "${GW_STATE_DIR}/network-profile"; grep -Fqx 'state/network-profile|root|root|600' "${GW_STATE_DIR}/owner-mode" || printf '%s\n' 'state/network-profile|root|root|600' >>"${GW_STATE_DIR}/owner-mode"; [[ "${1:-}" == --activate ]] && nmcli connection up omk-ap; nft -f rules ;;
  setup-dashboard-kiosk.sh) : ;;
 esac
 EOF
