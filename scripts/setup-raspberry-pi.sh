@@ -5,6 +5,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 OMK_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd -P)"
+# shellcheck source=lib/apt-helpers.sh
+source "${SCRIPT_DIR}/lib/apt-helpers.sh"
 CURRENT_USER="${SUDO_USER:-$(id -un)}"
 LOG_DIR="${OMK_ROOT}/logs/setup"
 RUN_STARTED_AT="$(date --iso-8601=seconds)"
@@ -15,6 +17,7 @@ REBOOT_REQUIRED="no"
 RELOGIN_REQUIRED="no"
 REBOOT_REQUIRED_FILE="/var/run/reboot-required"
 KERNEL_MODULES_DIR="/lib/modules"
+DOCKER_DAEMON_TIMEOUT_SECONDS="${OMK_DOCKER_DAEMON_TIMEOUT_SECONDS:-60}"
 
 log() {
   printf '[%s] %s\n' "$(date --iso-8601=seconds)" "$*"
@@ -63,6 +66,24 @@ package_is_installed() {
 
   package_status="$(dpkg-query -W -f='${db:Status-Abbrev}' "$1" 2>/dev/null || true)"
   [[ "${package_status}" == ii* ]]
+}
+
+wait_for_docker_daemon() {
+  local started_at="${SECONDS}" elapsed
+
+  [[ "${DOCKER_DAEMON_TIMEOUT_SECONDS}" =~ ^[1-9][0-9]*$ ]] || {
+    log 'ERROR: OMK_DOCKER_DAEMON_TIMEOUT_SECONDS must be a positive integer.'
+    return 1
+  }
+  while ! "${SUDO[@]}" docker info >/dev/null 2>&1; do
+    elapsed="$((SECONDS - started_at))"
+    if ((elapsed >= DOCKER_DAEMON_TIMEOUT_SECONDS)); then
+      log "ERROR: Docker daemon did not become ready within ${DOCKER_DAEMON_TIMEOUT_SECONDS}s. Check: sudo systemctl status docker --no-pager"
+      return 1
+    fi
+    log "Docker daemon is starting; waiting 2s (${elapsed}s/${DOCKER_DAEMON_TIMEOUT_SECONDS}s)."
+    sleep 2
+  done
 }
 
 finish() {
@@ -156,9 +177,9 @@ fi
 
 # Update Raspberry Pi OS and install reusable command-line tools.
 log "Updating OS package indexes."
-"${SUDO[@]}" apt-get update
+omk_apt "${SUDO[@]}" apt-get update
 log "Applying available OS package upgrades."
-"${SUDO[@]}" apt-get full-upgrade -y
+omk_apt "${SUDO[@]}" apt-get full-upgrade -y
 
 BASE_PACKAGES=(
   ca-certificates
@@ -174,7 +195,7 @@ BASE_PACKAGES=(
   wtype
 )
 log "Installing base packages: ${BASE_PACKAGES[*]}"
-"${SUDO[@]}" apt-get install -y "${BASE_PACKAGES[@]}"
+omk_apt "${SUDO[@]}" apt-get install -y "${BASE_PACKAGES[@]}"
 
 # Install Docker from its official Debian repository only when components are missing.
 if command -v docker >/dev/null 2>&1 &&
@@ -233,7 +254,7 @@ else
     } | "${SUDO[@]}" tee /etc/apt/sources.list.d/docker.sources >/dev/null
   fi
 
-  "${SUDO[@]}" apt-get update
+  omk_apt "${SUDO[@]}" apt-get update
   DOCKER_PACKAGES=(
     containerd.io
     docker-buildx-plugin
@@ -242,7 +263,7 @@ else
     docker-compose-plugin
   )
   log "Installing Docker packages: ${DOCKER_PACKAGES[*]}"
-  "${SUDO[@]}" apt-get install -y "${DOCKER_PACKAGES[@]}"
+  omk_apt "${SUDO[@]}" apt-get install -y "${DOCKER_PACKAGES[@]}"
 fi
 
 if command -v systemctl >/dev/null 2>&1; then
@@ -254,6 +275,7 @@ if ! command -v docker >/dev/null 2>&1; then
   log "ERROR: Docker Engine is unavailable after installation."
   exit 1
 fi
+wait_for_docker_daemon
 if ! docker compose version >/dev/null 2>&1; then
   log "ERROR: Docker Compose plugin is unavailable after installation."
   exit 1

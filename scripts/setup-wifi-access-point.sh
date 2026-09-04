@@ -30,6 +30,8 @@ LOG_FILE=""
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 OMK_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd -P)"
+# shellcheck source=lib/apt-helpers.sh
+source "${SCRIPT_DIR}/lib/apt-helpers.sh"
 RUN_USER="${SUDO_USER:-$(id -un)}"
 SUDO=()
 
@@ -238,8 +240,8 @@ ensure_direct_dependencies() {
   done
   if ((${#missing[@]})); then
     log "Installing direct AP dependencies: ${missing[*]}"
-    "${SUDO[@]}" apt-get update
-    "${SUDO[@]}" apt-get install -y "${missing[@]}"
+    omk_apt "${SUDO[@]}" apt-get update
+    omk_apt "${SUDO[@]}" apt-get install -y "${missing[@]}"
   else
     log "Direct AP dependencies are already installed."
   fi

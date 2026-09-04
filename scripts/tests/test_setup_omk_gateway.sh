@@ -39,7 +39,7 @@ start_collection_line="$(grep -n -F 'setup-data-collection.sh — Required Docke
 # decision, rather than only the displayed dry-run plan.
 TEMP_DIR="$(mktemp -d)"
 trap 'rm -rf -- "${TEMP_DIR}"' EXIT
-mkdir -p "${TEMP_DIR}/scripts" "${TEMP_DIR}/bin" \
+mkdir -p "${TEMP_DIR}/scripts/lib" "${TEMP_DIR}/bin" \
   "${TEMP_DIR}/services/system-manager/.venv/bin" \
   "${TEMP_DIR}/services/data-transformer/.venv/bin" \
   "${TEMP_DIR}/services/mosquitto/config" \
@@ -49,6 +49,7 @@ mkdir -p "${TEMP_DIR}/scripts" "${TEMP_DIR}/bin" \
   "${TEMP_DIR}/data/harvest-uploader" "${TEMP_DIR}/data/errors/transform" "${TEMP_DIR}/etc/omk" \
   "${TEMP_DIR}/units"
 cp "${SETUP}" "${TEMP_DIR}/scripts/setup-omk-gateway.sh"
+cp "${ROOT_DIR}/scripts/lib/apt-helpers.sh" "${TEMP_DIR}/scripts/lib/apt-helpers.sh"
 touch "${TEMP_DIR}/compose.yaml" \
   "${TEMP_DIR}/services/mosquitto/config/mosquitto.conf" \
   "${TEMP_DIR}/services/system-manager/.venv/bin/python" \
@@ -60,6 +61,7 @@ touch "${TEMP_DIR}/compose.yaml" \
 chmod +x "${TEMP_DIR}/services/system-manager/.venv/bin/python" "${TEMP_DIR}/services/data-transformer/.venv/bin/python"
 export OMK_PREFLIGHT_SYSTEMD_UNIT_DIR="${TEMP_DIR}/units"
 export OMK_PREFLIGHT_DASHBOARD_ENV_FILE="${TEMP_DIR}/etc/omk/dashboard-system-manager.env"
+export OMK_SKIP_PREBASE_PREFLIGHT=true
 for script in setup-raspberry-pi.sh setup-soracom-onyx.sh setup-wifi-access-point.sh setup-system-manager.sh setup-data-collection.sh setup-data-transformer.sh setup-data-exporter.sh setup-ble-sensor-manager.sh setup-broute-meter.sh setup-dashboard-kiosk.sh; do
 cat > "${TEMP_DIR}/scripts/${script}" <<'EOF'
 #!/usr/bin/env bash
@@ -124,6 +126,17 @@ SUDO_USER=omkdev CALL_LOG="${TEMP_DIR}/calls" PATH="${TEMP_DIR}/bin:${PATH}" \
   "${TEMP_DIR}/scripts/setup-omk-gateway.sh" --with-base >"${TEMP_DIR}/relogin-required.log"
 grep -Fq 'Docker group membership needs a new login session.' "${TEMP_DIR}/relogin-required.log"
 ! grep -Fq 'setup-system-manager.sh' "${TEMP_DIR}/calls"
+
+# A base setup failure, including an exhausted apt/dpkg lock timeout, must not
+# let the top-level orchestrator reach AP activation.
+rm -f -- "${TEMP_DIR}/calls"
+if FAIL_SETUP=setup-raspberry-pi.sh CALL_LOG="${TEMP_DIR}/calls" PATH="${TEMP_DIR}/bin:${PATH}" \
+  "${TEMP_DIR}/scripts/setup-omk-gateway.sh" --with-base >"${TEMP_DIR}/base-failed.log" 2>&1; then
+  echo 'Gateway setup accepted a failed base setup.' >&2
+  exit 1
+fi
+grep -Fq 'setup-raspberry-pi.sh ' "${TEMP_DIR}/calls"
+! grep -Fq 'setup-wifi-access-point.sh' "${TEMP_DIR}/calls"
 
 rm -f -- "${TEMP_DIR}/calls"
 CALL_LOG="${TEMP_DIR}/calls" PATH="${TEMP_DIR}/bin:${PATH}" "${TEMP_DIR}/scripts/setup-omk-gateway.sh" --with-soracom --with-ble --with-broute --with-kiosk

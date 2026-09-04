@@ -4,6 +4,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 OMK_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd -P)"
+# shellcheck source=lib/apt-helpers.sh
+source "${SCRIPT_DIR}/lib/apt-helpers.sh"
 TARGET_USER="${SUDO_USER:-$(id -un)}"
 TARGET_GROUP="$(id -gn "${TARGET_USER}")"
 SERVICE_NAME="omk-system-manager.service"
@@ -39,8 +41,8 @@ for package in python3 python3-venv python3-pip network-manager mosquitto-client
 done
 if ((${#missing_packages[@]})); then
   log "Installing direct system-manager dependencies: ${missing_packages[*]}"
-  "${SUDO[@]}" apt-get update
-  "${SUDO[@]}" apt-get install -y "${missing_packages[@]}"
+  omk_apt "${SUDO[@]}" apt-get update
+  omk_apt "${SUDO[@]}" apt-get install -y "${missing_packages[@]}"
 else
   log 'Direct system-manager dependencies are already installed.'
 fi
@@ -104,6 +106,7 @@ log 'Creating or reusing Python virtual environment.'
 log 'Installing system-manager requirements.'
 "${AS_TARGET[@]}" "${VENV_PATH}/bin/pip" install --upgrade pip
 "${AS_TARGET[@]}" "${VENV_PATH}/bin/pip" install -r "${OMK_ROOT}/services/system-manager/requirements.txt"
+"${AS_TARGET[@]}" "${VENV_PATH}/bin/python" -c 'import omk_system_manager' || fail 'system-manager import smoke test failed.'
 ensure_token_file
 sync_dashboard_token_file
 

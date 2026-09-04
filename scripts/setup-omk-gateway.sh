@@ -6,12 +6,18 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 OMK_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd -P)"
+# shellcheck source=lib/apt-helpers.sh
+source "${SCRIPT_DIR}/lib/apt-helpers.sh"
 WITH_SORACOM=false
 WITH_BLE=false
 WITH_BROUTE=false
 WITH_KIOSK=false
 WITH_BASE=false
 DRY_RUN=false
+PREBASE_MIN_FREE_KIB="${OMK_PREBASE_MIN_FREE_KIB:-8388608}"
+PREBASE_OS_RELEASE_PATH="${OMK_TEST_OS_RELEASE:-/etc/os-release}"
+PREBASE_DEVICE_MODEL_PATH="${OMK_TEST_DEVICE_MODEL:-/proc/device-tree/model}"
+PREBASE_SYS_CLASS_NET_PATH="${OMK_TEST_SYS_CLASS_NET:-/sys/class/net}"
 
 usage() {
   cat <<'EOF'
@@ -98,6 +104,48 @@ run_step() {
   "${SCRIPT_DIR}/${argv[0]}" "${argv[@]:1}"
 }
 
+preflight_before_base_setup() {
+  local os_id os_version free_kib now_epoch model
+  [[ "${OMK_SKIP_PREBASE_PREFLIGHT:-false}" == true ]] && { log 'WARN: pre-base preflight skipped by explicit test override.'; return 0; }
+  log 'Preflight before base setup: validating a clean Raspberry Pi host before OS changes.'
+  command -v dpkg >/dev/null 2>&1 || fail 'Pre-base preflight failed: dpkg is unavailable.'
+  [[ "$(dpkg --print-architecture)" == arm64 ]] || fail "Pre-base preflight failed: 64-bit Debian arm64 userland is required (got $(dpkg --print-architecture))."
+  [[ "$(getconf LONG_BIT)" == 64 ]] || fail 'Pre-base preflight failed: a 64-bit userland is required.'
+  [[ -r "${PREBASE_OS_RELEASE_PATH}" ]] || fail 'Pre-base preflight failed: /etc/os-release is unavailable.'
+  # shellcheck disable=SC1091
+  source "${PREBASE_OS_RELEASE_PATH}"
+  os_id="${ID:-}"; os_version="${VERSION_ID:-unknown}"
+  [[ "${os_id}" == debian || "${os_id}" == raspbian ]] || fail "Pre-base preflight failed: Raspberry Pi OS/Debian is required (got ${os_id:-unknown} ${os_version})."
+  [[ -r "${PREBASE_DEVICE_MODEL_PATH}" ]] || fail 'Pre-base preflight failed: Raspberry Pi hardware model is unavailable.'
+  model="$(tr -d '\0' <"${PREBASE_DEVICE_MODEL_PATH}")"
+  [[ "${model}" == *'Raspberry Pi 4'* ]] || fail "Pre-base preflight failed: Raspberry Pi 4 is required (got ${model})."
+  free_kib="$(df -Pk "${OMK_ROOT}" | awk 'NR==2 {print $4}')"
+  [[ "${free_kib}" =~ ^[0-9]+$ ]] || fail 'Pre-base preflight failed: could not determine free disk space.'
+  ((free_kib >= PREBASE_MIN_FREE_KIB)) || fail "Pre-base preflight failed: free disk is ${free_kib} KiB; at least ${PREBASE_MIN_FREE_KIB} KiB is required for OS update and Docker builds."
+  ((EUID != 0)) || fail 'Pre-base preflight failed: run the standard setup as the normal user, not root.'
+  command -v sudo >/dev/null 2>&1 || fail 'Pre-base preflight failed: sudo is unavailable.'
+  sudo -v || fail 'Pre-base preflight failed: sudo authorization failed.'
+  now_epoch="$(date +%s)"
+  ((now_epoch >= 1704067200)) || fail 'Pre-base preflight failed: system clock predates 2024-01-01; correct time before HTTPS package access.'
+  command -v ip >/dev/null 2>&1 && ip route show default | grep -q . || fail 'Pre-base preflight failed: no default network route is available.'
+  getent ahosts deb.debian.org >/dev/null 2>&1 || fail 'Pre-base preflight failed: DNS cannot resolve deb.debian.org.'
+  getent ahosts archive.raspberrypi.com >/dev/null 2>&1 || fail 'Pre-base preflight failed: DNS cannot resolve archive.raspberrypi.com.'
+  [[ -d "${PREBASE_SYS_CLASS_NET_PATH}/wlan0" ]] || fail 'Pre-base preflight failed: wlan0 is unavailable.'
+  if command -v iw >/dev/null 2>&1; then
+    iw list 2>/dev/null | grep -Eq '^[[:space:]]*\* AP$' || fail 'Pre-base preflight failed: wlan0 hardware/driver does not report AP-mode support.'
+  else
+    log 'WARN: iw is not installed yet; AP-mode capability will be checked again by setup-wifi-access-point.sh before activation.'
+  fi
+  if command -v timedatectl >/dev/null 2>&1 && [[ "$(timedatectl show -p NTPSynchronized --value 2>/dev/null || true)" == no ]]; then
+    log 'WARN: NTP is not synchronized yet; clock range is valid, but allow time sync before package HTTPS access.'
+  fi
+  if dpkg --audit | grep -q .; then
+    fail 'Pre-base preflight failed: dpkg reports unfinished package configuration. Do not remove locks; allow the existing package task to finish, then rerun setup.'
+  fi
+  omk_apt sudo apt-get check >/dev/null || fail 'Pre-base preflight failed: apt package state is inconsistent; repair it deliberately, then rerun setup.'
+  log 'PASS: pre-base host prerequisites are ready.'
+}
+
 preflight_before_ap_activation() {
   local systemd_unit_dir="${OMK_PREFLIGHT_SYSTEMD_UNIT_DIR:-/etc/systemd/system}"
   local dashboard_env_file="${OMK_PREFLIGHT_DASHBOARD_ENV_FILE:-/etc/omk/dashboard-system-manager.env}"
@@ -165,6 +213,7 @@ base_reboot_is_required() {
 }
 
 if "${WITH_BASE}"; then
+  preflight_before_base_setup
   run_step 'setup-raspberry-pi.sh' 'Base OS, Docker, and runtime directories'
   if base_reboot_is_required; then
     log 'A reboot is required. Reboot, reconnect, then rerun this command without --with-base to resume.'

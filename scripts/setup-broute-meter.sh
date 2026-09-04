@@ -5,6 +5,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 OMK_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd -P)"
+# shellcheck source=lib/apt-helpers.sh
+source "${SCRIPT_DIR}/lib/apt-helpers.sh"
 TARGET_USER="${SUDO_USER:-$(id -un)}"
 TARGET_GROUP=""
 SERVICE='omk-broute-meter.service'
@@ -96,8 +98,8 @@ ensure_python_runtime() {
   done
   if ((${#missing[@]})); then
     log "Installing direct B-route dependencies: ${missing[*]}"
-    "${SUDO[@]}" apt-get update
-    "${SUDO[@]}" apt-get install -y "${missing[@]}"
+    omk_apt "${SUDO[@]}" apt-get update
+    omk_apt "${SUDO[@]}" apt-get install -y "${missing[@]}"
   else
     log "Direct B-route dependencies are already installed."
   fi

@@ -18,6 +18,8 @@ readonly CONNECTION_WAIT_SECONDS=30
 APN="${SORACOM_APN:-${DEFAULT_APN}}"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 OMK_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd -P)"
+# shellcheck source=lib/apt-helpers.sh
+source "${SCRIPT_DIR}/lib/apt-helpers.sh"
 RUN_USER="${SUDO_USER:-$(id -un)}"
 RUN_HOME="$(getent passwd "${RUN_USER}" | cut -d: -f6 || true)"
 LOG_FILE=""
@@ -152,8 +154,8 @@ fi
 
 PACKAGES=(network-manager modemmanager usb-modeswitch usbutils curl ca-certificates)
 log "Updating package indexes and installing: ${PACKAGES[*]}"
-"${SUDO[@]}" apt-get update
-"${SUDO[@]}" apt-get install -y "${PACKAGES[@]}"
+omk_apt "${SUDO[@]}" apt-get update
+omk_apt "${SUDO[@]}" apt-get install -y "${PACKAGES[@]}"
 
 command -v nmcli >/dev/null 2>&1 || fail "${EXIT_GENERAL}" "nmcli is unavailable after installing network-manager."
 command -v mmcli >/dev/null 2>&1 || fail "${EXIT_GENERAL}" "mmcli is unavailable after installing modemmanager."

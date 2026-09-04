@@ -5,6 +5,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 OMK_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd -P)"
+# shellcheck source=lib/apt-helpers.sh
+source "${SCRIPT_DIR}/lib/apt-helpers.sh"
 TARGET_USER="${SUDO_USER:-$(id -un)}"
 TARGET_GROUP="$(id -gn "${TARGET_USER}")"
 LOG_DIR="${OMK_ROOT}/logs/setup"
@@ -97,8 +99,8 @@ for package in "${REQUIRED_PACKAGES[@]}"; do
 done
 if ((${#MISSING_PACKAGES[@]} > 0)); then
   log "Installing required packages: ${MISSING_PACKAGES[*]}"
-  "${SUDO[@]}" apt-get update
-  "${SUDO[@]}" apt-get install -y "${MISSING_PACKAGES[@]}"
+  omk_apt "${SUDO[@]}" apt-get update
+  omk_apt "${SUDO[@]}" apt-get install -y "${MISSING_PACKAGES[@]}"
 else
   log "Required OS packages are already installed."
 fi
@@ -133,6 +135,7 @@ fi
 log "Installing runtime dependencies from requirements.txt (not requirements-dev.txt)."
 "${AS_TARGET[@]}" "${VENV}/bin/python" -m pip install --upgrade pip
 "${AS_TARGET[@]}" "${VENV}/bin/python" -m pip install -r "${OMK_ROOT}/services/data-transformer/requirements.txt"
+"${AS_TARGET[@]}" "${VENV}/bin/python" -c 'import data_transformer' || { log 'ERROR: data-transformer import smoke test failed.'; exit 1; }
 
 install_unit() {
   local source="$1"

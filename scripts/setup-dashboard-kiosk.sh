@@ -5,6 +5,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 OMK_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd -P)"
+# shellcheck source=lib/apt-helpers.sh
+source "${SCRIPT_DIR}/lib/apt-helpers.sh"
 TARGET_USER="${SUDO_USER:-$(id -un)}"
 TARGET_UID=""
 TARGET_GROUP=""
@@ -344,8 +346,8 @@ if "${PREPARE}"; then
       SUDO=(sudo)
     fi
     log "Installing required package before OMK AP activation: wtype"
-    "${SUDO[@]}" apt-get update
-    "${SUDO[@]}" apt-get install -y wtype
+    omk_apt "${SUDO[@]}" apt-get update
+    omk_apt "${SUDO[@]}" apt-get install -y wtype
     WTYPE_PATH="$(command -v wtype || true)"
   fi
   [[ -n "${WTYPE_PATH}" && -x "${WTYPE_PATH}" ]] || fail "wtype installation did not provide an executable."

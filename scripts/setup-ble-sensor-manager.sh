@@ -3,6 +3,8 @@
 set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 OMK_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd -P)"
+# shellcheck source=lib/apt-helpers.sh
+source "${SCRIPT_DIR}/lib/apt-helpers.sh"
 TARGET_USER="${SUDO_USER:-$(id -un)}"
 SERVICE_NAME=omk-ble-sensor-manager.service
 SERVICE_SOURCE="${OMK_ROOT}/systemd/${SERVICE_NAME}.in"
@@ -23,8 +25,8 @@ for package in bluez rfkill python3 python3-venv python3-pip; do
 done
 if ((${#missing_packages[@]})); then
   log "Installing direct BLE manager dependencies: ${missing_packages[*]}"
-  "${SUDO[@]}" apt-get update
-  "${SUDO[@]}" apt-get install -y "${missing_packages[@]}"
+  omk_apt "${SUDO[@]}" apt-get update
+  omk_apt "${SUDO[@]}" apt-get install -y "${missing_packages[@]}"
 else
   log 'Direct BLE manager dependencies are already installed.'
 fi

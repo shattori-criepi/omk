@@ -5,6 +5,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 OMK_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd -P)"
+# shellcheck source=lib/apt-helpers.sh
+source "${SCRIPT_DIR}/lib/apt-helpers.sh"
 TARGET_USER="${SUDO_USER:-$(id -un)}"
 TARGET_GROUP=""
 SERVICE_NAME='omk-ichijo-energy-node.service'
@@ -181,8 +183,8 @@ ensure_packages() {
     log 'Required OS packages are already installed.'
   else
     log "Installing required packages: ${MISSING_PACKAGES[*]}"
-    "${SUDO[@]}" apt-get update
-    "${SUDO[@]}" apt-get install -y "${MISSING_PACKAGES[@]}"
+    omk_apt "${SUDO[@]}" apt-get update
+    omk_apt "${SUDO[@]}" apt-get install -y "${MISSING_PACKAGES[@]}"
   fi
   command -v python3 >/dev/null 2>&1 || fail 'python3 is unavailable after package installation.'
   python3 -m venv --help >/dev/null 2>&1 || fail 'python3 cannot create virtual environments after package installation.'

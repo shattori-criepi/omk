@@ -6,8 +6,9 @@ SETUP="${ROOT_DIR}/scripts/setup-wifi-access-point.sh"
 TEMP_DIR="$(mktemp -d)"
 trap 'rm -rf -- "${TEMP_DIR}"' EXIT
 
-mkdir -p "${TEMP_DIR}/scripts" "${TEMP_DIR}/bin"
+mkdir -p "${TEMP_DIR}/scripts/lib" "${TEMP_DIR}/bin"
 cp "${SETUP}" "${TEMP_DIR}/scripts/setup-wifi-access-point.sh"
+cp "${ROOT_DIR}/scripts/lib/apt-helpers.sh" "${TEMP_DIR}/scripts/lib/apt-helpers.sh"
 chmod +x "${TEMP_DIR}/scripts/setup-wifi-access-point.sh"
 
 cat > "${TEMP_DIR}/bin/dpkg-query" <<'EOF'
