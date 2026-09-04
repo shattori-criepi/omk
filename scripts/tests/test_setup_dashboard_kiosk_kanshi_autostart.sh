@@ -89,6 +89,7 @@ USER_SYSTEMD_ENV=()
 WAYLAND_DISPLAY='wayland-0'
 KANSHI_PATH="${TEST_DIRECTORY}/kanshi"
 WLR_RANDR_PATH="${TEST_DIRECTORY}/wlr-randr"
+KANSHI_STARTUP_LOG="${TEST_DIRECTORY}/kanshi-startup.log"
 touch "${KANSHI_PATH}" "${WLR_RANDR_PATH}"
 chmod +x "${KANSHI_PATH}" "${WLR_RANDR_PATH}"
 log() { :; }
@@ -129,5 +130,32 @@ if verify_kanshi_transform; then
   echo 'Transform normal was incorrectly accepted.' >&2
   exit 1
 fi
+
+# A stale Transform: 90 report is not enough when kanshi itself has exited.
+run_in_wayland_session() { printf '%s\n' 'DSI-1' '  Transform: 90'; }
+rm -f "${PROCESS_STATE}"
+if verify_kanshi_transform; then
+  echo 'Transform 90 was accepted after kanshi exited.' >&2
+  exit 1
+fi
+
+# A process that exits immediately exposes its captured stderr instead of
+# silently discarding a kanshi parser error.
+rm -f "${PROCESS_STATE}" "${KANSHI_STARTUP_LOG}"
+RUNTIME_LOG="${TEST_DIRECTORY}/runtime.log"
+log() { printf '%s\n' "$*" >>"${RUNTIME_LOG}"; }
+fail() { return 1; }
+run_in_wayland_session() {
+  if [[ "$1" == sh ]]; then
+    printf '%s\n' "unknown directive 'output'" 'failed to parse config file' >"$6"
+    return 0
+  fi
+  printf '%s\n' 'DSI-1' '  Transform: 90'
+}
+if ensure_kanshi_running; then
+  echo 'A kanshi process that exits immediately was incorrectly accepted.' >&2
+  exit 1
+fi
+grep -Fq "unknown directive 'output'" "${RUNTIME_LOG}"
 
 echo 'PASS: kanshi labwc autostart and active-session rotation are non-duplicating and verified.'

@@ -27,6 +27,7 @@ CHROMIUM_POLICY_DIRECTORY='/etc/chromium/policies/managed'
 CHROMIUM_POLICY_FILE='/etc/chromium/policies/managed/omk-kiosk.json'
 KANSHI_DIRECTORY=""
 KANSHI_CONFIG=""
+KANSHI_STARTUP_LOG=""
 LABWC_AUTOSTART=""
 KANSHI_AUTOSTART_MARKER='# OMK: start kanshi for DSI-1 kiosk rotation'
 KANSHI_AUTOSTART_COMMAND='kanshi >/dev/null 2>&1 &'
@@ -91,6 +92,7 @@ UNIT_DESTINATION="${USER_HOME}/.config/systemd/user/${UNIT_NAME}"
 KIOSK_PROFILE_DIRECTORY="${USER_HOME}/.config/omk-chromium-kiosk"
 KANSHI_DIRECTORY="${USER_HOME}/.config/kanshi"
 KANSHI_CONFIG="${KANSHI_DIRECTORY}/config"
+KANSHI_STARTUP_LOG="${USER_HOME}/.cache/omk/kanshi-startup.log"
 LABWC_AUTOSTART="${USER_HOME}/.config/labwc/autostart"
 
 if [[ -z "${CHROMIUM_PATH}" ]]; then
@@ -222,22 +224,72 @@ source = Path(sys.argv[1])
 destination = Path(sys.argv[2])
 desired = sys.argv[3]
 lines = source.read_text(encoding="utf-8").splitlines(keepends=True) if source.exists() else []
-dsi_output = re.compile(r"^\s*output\s+DSI-1(?:\s|$)")
-rendered = []
-replaced = False
 
-for line in lines:
-    if dsi_output.match(line):
-        if not replaced:
-            rendered.append(f"{desired}\n")
+profile_start = re.compile(r"^\s*profile\s+omk-kiosk\s*\{")
+any_profile_start = re.compile(r"^\s*profile\s+[^\s{]+\s*\{")
+dsi_output = re.compile(r"^(?P<indent>\s*)output\s+DSI-1(?:\s|$)")
+
+def brace_delta(line: str) -> int:
+    # kanshi comments begin with '#'; braces there do not belong to a profile.
+    code = line.split("#", 1)[0]
+    return code.count("{") - code.count("}")
+
+def render_omk_profile(block: list[str]) -> list[str]:
+    """Update just DSI-1 in the managed profile while retaining its other lines."""
+    rendered: list[str] = []
+    replaced = False
+    closing_index = next((index for index in range(len(block) - 1, -1, -1) if "}" in block[index]), None)
+    if closing_index is None:
+        raise ValueError("profile omk-kiosk is missing its closing brace")
+    for index, line in enumerate(block):
+        match = dsi_output.match(line)
+        if match:
+            if not replaced:
+                rendered.append(f"{match.group('indent')}{desired}\n")
+                replaced = True
+            continue
+        if index == closing_index and not replaced:
+            rendered.append(f"    {desired}\n")
             replaced = True
+        rendered.append(line)
+    return rendered
+
+rendered: list[str] = []
+managed_profile_seen = False
+index = 0
+while index < len(lines):
+    line = lines[index]
+    if any_profile_start.match(line):
+        block = [line]
+        depth = brace_delta(line)
+        index += 1
+        while depth > 0 and index < len(lines):
+            block.append(lines[index])
+            depth += brace_delta(lines[index])
+            index += 1
+        if depth != 0:
+            raise ValueError("profile is missing its closing brace")
+        if not profile_start.match(line):
+            rendered.extend(block)
+            continue
+        if not managed_profile_seen:
+            rendered.extend(render_omk_profile(block))
+            managed_profile_seen = True
+        # A second omk-kiosk profile is a duplicate managed block. Drop it
+        # rather than leaving ambiguous DSI-1 configuration behind.
+        continue
+    # This is the legacy OMK top-level directive.  Trixie kanshi rejects it;
+    # user profiles are handled above and remain unchanged.
+    if dsi_output.match(line):
+        index += 1
         continue
     rendered.append(line)
+    index += 1
 
-if not replaced:
+if not managed_profile_seen:
     if rendered and not rendered[-1].endswith("\n"):
         rendered[-1] += "\n"
-    rendered.append(f"{desired}\n")
+    rendered.extend(("profile omk-kiosk {\n", f"    {desired}\n", "}\n"))
 
 destination.write_text("".join(rendered), encoding="utf-8")
 PY
@@ -342,6 +394,18 @@ reload_kanshi() {
   done < <(pgrep -u "${TARGET_USER}" -x kanshi)
 }
 
+report_kanshi_startup_error() {
+  local line
+  if [[ -s "${KANSHI_STARTUP_LOG}" ]]; then
+    log "ERROR: kanshi exited shortly after startup. Recent stderr (${KANSHI_STARTUP_LOG}):"
+    while IFS= read -r line || [[ -n "${line}" ]]; do
+      log "  ${line}"
+    done <"${KANSHI_STARTUP_LOG}"
+  else
+    log "ERROR: kanshi exited shortly after startup without writing stderr: ${KANSHI_STARTUP_LOG}"
+  fi
+}
+
 ensure_kanshi_running() {
   local attempt
 
@@ -350,15 +414,22 @@ ensure_kanshi_running() {
     if "${KANSHI_CONFIG_CHANGED}" && ! reload_kanshi; then
       fail 'Could not reload the running kanshi process after updating its configuration.'
     fi
+    if "${KANSHI_CONFIG_CHANGED}"; then
+      sleep 1
+      kanshi_is_running || fail 'kanshi exited after reloading its updated configuration.'
+    fi
     return
   fi
 
-  run_in_wayland_session sh -c 'nohup "$1" >/dev/null 2>&1 &' sh "${KANSHI_PATH}" ||
+  "${AS_TARGET[@]}" mkdir -p "$(dirname -- "${KANSHI_STARTUP_LOG}")"
+  "${AS_TARGET[@]}" sh -c ': > "$1"' sh "${KANSHI_STARTUP_LOG}"
+  run_in_wayland_session sh -c 'nohup "$1" >/dev/null 2>"$2" &' sh "${KANSHI_PATH}" "${KANSHI_STARTUP_LOG}" ||
     fail 'Could not start kanshi in the active Wayland session.'
   for attempt in 1 2 3 4 5; do
     kanshi_is_running && { log 'Started kanshi in the active Wayland session.'; return; }
     sleep 1
   done
+  report_kanshi_startup_error
   fail 'kanshi did not remain running in the active Wayland session.'
 }
 
@@ -370,6 +441,10 @@ verify_kanshi_transform() {
     return
   fi
   for attempt in 1 2 3 4 5 6 7 8 9 10; do
+    if ! kanshi_is_running; then
+      log 'ERROR: kanshi is no longer running while waiting for DSI-1 Transform: 90.'
+      return 1
+    fi
     output="$(run_in_wayland_session "${WLR_RANDR_PATH}" --output DSI-1 2>&1)" || {
       log "ERROR: wlr-randr could not query DSI-1: ${output}"
       return 1
