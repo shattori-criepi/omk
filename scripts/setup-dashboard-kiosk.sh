@@ -203,23 +203,61 @@ update_kanshi_config() {
   log "Updated kanshi DSI-1 rotation to transform 90: ${KANSHI_CONFIG}"
 }
 
-update_labwc_config() {
-  local labwc_directory="${USER_HOME}/.config/labwc"
-  local labwc_config="${labwc_directory}/rc.xml"
-  local candidate backup
+render_labwc_config() {
+  local source_path="$1"
+  local destination_path="$2"
 
-  "${AS_TARGET[@]}" mkdir -p "${labwc_directory}"
-  candidate="$(mktemp)"
-  if ! python3 - "${labwc_config}" "${candidate}" <<'PY'
+  python3 - "${source_path}" "${destination_path}" <<'PY'
 from pathlib import Path
 import sys
 import xml.etree.ElementTree as ET
 
+OPENBOX_NAMESPACE = "http://openbox.org/3.4/rc"
 source, destination = map(Path, sys.argv[1:])
+
+
+def namespace_declarations(path: Path) -> dict[str, str]:
+    declarations: dict[str, str] = {}
+    for _, namespace in ET.iterparse(path, events=("start-ns",)):
+        prefix, uri = namespace
+        declarations[prefix] = uri
+    return declarations
+
+
+def split_tag(tag: object) -> tuple[str | None, str]:
+    if not isinstance(tag, str):
+        return None, ""
+    if tag.startswith("{"):
+        namespace, local_name = tag[1:].split("}", 1)
+        return namespace, local_name
+    return None, tag
+
+
+def strip_openbox_namespace(element: ET.Element) -> None:
+    namespace, local_name = split_tag(element.tag)
+    if namespace == OPENBOX_NAMESPACE:
+        element.tag = local_name
+    for name, value in list(element.attrib.items()):
+        namespace, local_name = split_tag(name)
+        if namespace == OPENBOX_NAMESPACE:
+            del element.attrib[name]
+            element.attrib[local_name] = value
+    for child in element:
+        strip_openbox_namespace(child)
+
+
 if source.exists():
-    tree = ET.parse(source)
+    for prefix, uri in namespace_declarations(source).items():
+        if uri != OPENBOX_NAMESPACE:
+            ET.register_namespace(prefix, uri)
+    parser = ET.XMLParser(target=ET.TreeBuilder(insert_comments=True))
+    tree = ET.parse(source, parser=parser)
     root = tree.getroot()
+    root_namespace, root_name = split_tag(root.tag)
     if root.tag == "openbox_config":
+        root.tag = "labwc_config"
+    elif root_namespace == OPENBOX_NAMESPACE and root_name == "openbox_config":
+        strip_openbox_namespace(root)
         root.tag = "labwc_config"
     elif root.tag != "labwc_config":
         raise ValueError(f"unsupported labwc root element: {root.tag}")
@@ -246,10 +284,19 @@ if not any(
 ):
     ET.SubElement(keybind, "action", {"name": "WarpCursor", "x": "-1", "y": "-1"})
 
-ET.indent(tree, space="  ")
 tree.write(destination, encoding="utf-8", xml_declaration=True)
 ET.parse(destination)
 PY
+}
+
+update_labwc_config() {
+  local labwc_directory="${USER_HOME}/.config/labwc"
+  local labwc_config="${labwc_directory}/rc.xml"
+  local candidate backup
+
+  "${AS_TARGET[@]}" mkdir -p "${labwc_directory}"
+  candidate="$(mktemp)"
+  if ! render_labwc_config "${labwc_config}" "${candidate}"
   then
     rm -f -- "${candidate}"
     fail "labwc configuration is not valid XML or has an unsupported root element: ${labwc_config}"
