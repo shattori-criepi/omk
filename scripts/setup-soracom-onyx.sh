@@ -35,7 +35,8 @@ log() {
 redact_modem_identifiers() {
   sed -E \
     -e '/(imei|imsi|iccid)/I s/(:[[:space:]]*).*/\1[REDACTED]/' \
-    -e '/(equipment id|subscriber identity|device id|own)/I s/(:[[:space:]]*).*/\1[REDACTED]/'
+    -e '/(equipment id|subscriber identity|device id)/I s/(:[[:space:]]*).*/\1[REDACTED]/' \
+    -e '/^[[:space:]]*((Numbers[[:space:]]*)?\|[[:space:]]*)?own[[:space:]]*:/I s/(:[[:space:]]*).*/\1[REDACTED]/'
 }
 
 show_diagnostics() {
