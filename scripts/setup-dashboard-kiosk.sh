@@ -16,12 +16,20 @@ DASHBOARD_URL="${DASHBOARD_KIOSK_URL:-http://localhost:8000/}"
 DASHBOARD_HEALTH_URL=""
 CHROMIUM_PATH="${DASHBOARD_KIOSK_CHROMIUM_PATH:-}"
 WTYPE_PATH="${DASHBOARD_KIOSK_WTYPE_PATH:-}"
+KANSHI_PATH="${DASHBOARD_KIOSK_KANSHI_PATH:-}"
+WLR_RANDR_PATH="${DASHBOARD_KIOSK_WLR_RANDR_PATH:-}"
 LABWC_PID="${LABWC_PID:-}"
 UNIT_NAME="omk-dashboard-kiosk.service"
 UNIT_TEMPLATE="${OMK_ROOT}/systemd/omk-dashboard-kiosk.service.in"
 UNIT_DESTINATION=""
+KIOSK_PROFILE_DIRECTORY=""
+CHROMIUM_POLICY_DIRECTORY='/etc/chromium/policies/managed'
+CHROMIUM_POLICY_FILE='/etc/chromium/policies/managed/omk-kiosk.json'
 KANSHI_DIRECTORY=""
 KANSHI_CONFIG=""
+LABWC_AUTOSTART=""
+KANSHI_AUTOSTART_MARKER='# OMK: start kanshi for DSI-1 kiosk rotation'
+KANSHI_AUTOSTART_COMMAND='kanshi >/dev/null 2>&1 &'
 KANSHI_DSI_OUTPUT='output DSI-1 enable scale 1.000000 mode 720x1280@60.038 position 0,0 transform 90'
 DRY_RUN=false
 PRINT_UNIT=false
@@ -30,6 +38,8 @@ AS_TARGET=()
 USER_SYSTEMD_ENV=()
 SUDO=()
 UNIT_CHANGED=false
+KANSHI_CONFIG_CHANGED=false
+CHROMIUM_POLICY_CHANGED=false
 
 log() { printf '[%s] %s\n' "$(date --iso-8601=seconds)" "$*"; }
 fail() { log "ERROR: $*"; exit 1; }
@@ -44,7 +54,7 @@ target user is logged into the Raspberry Pi's Wayland graphical session.
 Options:
   --dry-run     Show the resolved user, unit, Chromium, wtype and Wayland settings only.
   --print-unit  Render the resolved unit without writing user configuration.
-  --prepare     Install and verify wtype only, before OMK AP activation.
+  --prepare     Install and verify wtype and kanshi, before OMK AP activation.
   -h, --help    Show this help.
 
 Environment overrides:
@@ -52,6 +62,8 @@ Environment overrides:
   DASHBOARD_KIOSK_URL              Dashboard base URL (default: http://localhost:8000/)
   DASHBOARD_KIOSK_CHROMIUM_PATH    Chromium executable path (default: detected chromium)
   DASHBOARD_KIOSK_WTYPE_PATH       wtype executable path (default: detected or installed)
+  DASHBOARD_KIOSK_KANSHI_PATH      kanshi executable path (default: detected or installed)
+  DASHBOARD_KIOSK_WLR_RANDR_PATH   wlr-randr executable path (default: detected)
   LABWC_PID                        Running labwc PID to use for --reconfigure (optional)
 EOF
 }
@@ -76,8 +88,10 @@ TARGET_GROUP="$(id -gn "${TARGET_USER}")"
 USER_HOME="$(getent passwd "${TARGET_USER}" | cut -d: -f6)"
 [[ -n "${USER_HOME}" && -d "${USER_HOME}" ]] || fail "Home directory is unavailable for ${TARGET_USER}."
 UNIT_DESTINATION="${USER_HOME}/.config/systemd/user/${UNIT_NAME}"
+KIOSK_PROFILE_DIRECTORY="${USER_HOME}/.config/omk-chromium-kiosk"
 KANSHI_DIRECTORY="${USER_HOME}/.config/kanshi"
 KANSHI_CONFIG="${KANSHI_DIRECTORY}/config"
+LABWC_AUTOSTART="${USER_HOME}/.config/labwc/autostart"
 
 if [[ -z "${CHROMIUM_PATH}" ]]; then
   CHROMIUM_PATH="$(command -v chromium || true)"
@@ -87,6 +101,15 @@ if [[ -z "${CHROMIUM_PATH}" ]]; then
 fi
 if [[ -z "${WTYPE_PATH}" ]]; then
   WTYPE_PATH="$(command -v wtype || true)"
+fi
+if [[ -z "${KANSHI_PATH}" ]]; then
+  KANSHI_PATH="$(command -v kanshi || true)"
+fi
+if [[ -z "${KANSHI_PATH}" ]]; then
+  KANSHI_PATH="not found"
+fi
+if [[ -z "${WLR_RANDR_PATH}" ]]; then
+  WLR_RANDR_PATH="$(command -v wlr-randr || true)"
 fi
 if [[ -z "${WTYPE_PATH}" ]]; then
   WTYPE_PATH="not found"
@@ -130,8 +153,46 @@ render_unit() {
     -e "s|@WTYPE_PATH@|${WTYPE_PATH}|g" \
     -e "s|@DASHBOARD_URL@|${DASHBOARD_URL}|g" \
     -e "s|@DASHBOARD_HEALTH_URL@|${DASHBOARD_HEALTH_URL}|g" \
+    -e "s|@KIOSK_PROFILE_DIRECTORY@|${KIOSK_PROFILE_DIRECTORY}|g" \
     -e "s|@WAYLAND_DISPLAY@|${WAYLAND_DISPLAY}|g" \
     "${UNIT_TEMPLATE}"
+}
+
+render_chromium_policy() {
+  cat <<'EOF'
+{
+  "TranslateEnabled": false
+}
+EOF
+}
+
+install_chromium_policy() {
+  local candidate
+
+  if ((EUID != 0)); then
+    command -v sudo >/dev/null 2>&1 || fail 'sudo is required to install the Chromium managed policy.'
+    SUDO=(sudo)
+    "${SUDO[@]}" -v
+  fi
+  candidate="$(mktemp)"
+  render_chromium_policy >"${candidate}"
+  "${SUDO[@]}" install -d -o root -g root -m 0755 "${CHROMIUM_POLICY_DIRECTORY}"
+  if "${SUDO[@]}" test -f "${CHROMIUM_POLICY_FILE}" && "${SUDO[@]}" cmp -s "${candidate}" "${CHROMIUM_POLICY_FILE}"; then
+    if [[ "$("${SUDO[@]}" stat -c '%u:%g:%a' "${CHROMIUM_POLICY_FILE}")" == '0:0:644' ]]; then
+      rm -f -- "${candidate}"
+      log "Chromium managed policy is unchanged: ${CHROMIUM_POLICY_FILE}"
+      return
+    fi
+    log "Chromium managed policy content is unchanged but ownership or mode will be repaired: ${CHROMIUM_POLICY_FILE}"
+  fi
+  "${SUDO[@]}" install -o root -g root -m 0644 "${candidate}" "${CHROMIUM_POLICY_FILE}"
+  rm -f -- "${candidate}"
+  CHROMIUM_POLICY_CHANGED=true
+  log "Installed Chromium managed policy: ${CHROMIUM_POLICY_FILE}"
+}
+
+ensure_kiosk_profile_directory() {
+  "${SUDO[@]}" install -d -o "${TARGET_USER}" -g "${TARGET_GROUP}" -m 0700 "${KIOSK_PROFILE_DIRECTORY}"
 }
 
 install_for_target_user() {
@@ -200,7 +261,127 @@ update_kanshi_config() {
 
   install_for_target_user "${candidate}" "${KANSHI_CONFIG}"
   rm -f -- "${candidate}"
+  KANSHI_CONFIG_CHANGED=true
   log "Updated kanshi DSI-1 rotation to transform 90: ${KANSHI_CONFIG}"
+}
+
+render_labwc_autostart() {
+  local source_path="$1"
+  local destination_path="$2"
+
+  python3 - "${source_path}" "${destination_path}" "${KANSHI_AUTOSTART_MARKER}" "${KANSHI_AUTOSTART_COMMAND}" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+source, destination = map(Path, sys.argv[1:3])
+marker = sys.argv[3]
+omk_command = sys.argv[4]
+lines = source.read_text(encoding="utf-8").splitlines(keepends=True) if source.exists() else []
+kanshi_command = re.compile(
+    r"^\s*(?:(?:exec|command|nohup|setsid)\s+|env(?:\s+[A-Za-z_][A-Za-z0-9_]*=[^\s]+)*\s+)?"
+    r"(?:[A-Za-z_][A-Za-z0-9_]*=[^\s]+\s+)*(?:[^\s]*/)?kanshi(?:\s|$)"
+)
+has_marker = any(line.rstrip("\n") == marker for line in lines)
+has_kanshi = any(not line.lstrip().startswith("#") and kanshi_command.match(line) for line in lines)
+
+if has_marker:
+    marker_index = next(index for index, line in enumerate(lines) if line.rstrip("\n") == marker)
+    # Upgrade the legacy OMK foreground line in place.  Other existing launch
+    # forms are user configuration and deliberately remain untouched.
+    if marker_index + 1 < len(lines) and lines[marker_index + 1].strip() == "kanshi":
+        lines[marker_index + 1] = f"{omk_command}\n"
+    elif not has_kanshi:
+        lines.insert(marker_index + 1, f"{omk_command}\n")
+elif not has_kanshi:
+    if lines and not lines[-1].endswith("\n"):
+        lines[-1] += "\n"
+    lines.extend((f"{marker}\n", f"{omk_command}\n"))
+
+destination.write_text("".join(lines), encoding="utf-8")
+PY
+}
+
+update_labwc_autostart() {
+  local labwc_directory="${USER_HOME}/.config/labwc"
+  local candidate backup
+
+  "${AS_TARGET[@]}" mkdir -p "${labwc_directory}"
+  candidate="$(mktemp)"
+  if ! render_labwc_autostart "${LABWC_AUTOSTART}" "${candidate}"; then
+    rm -f -- "${candidate}"
+    fail "Could not render labwc autostart: ${LABWC_AUTOSTART}"
+  fi
+  if [[ -f "${LABWC_AUTOSTART}" ]] && cmp -s "${candidate}" "${LABWC_AUTOSTART}"; then
+    rm -f -- "${candidate}"
+    log "labwc kanshi autostart is unchanged: ${LABWC_AUTOSTART}"
+    return
+  fi
+  if [[ -e "${LABWC_AUTOSTART}" ]]; then
+    backup="${LABWC_AUTOSTART}.bak.$(date '+%Y%m%d-%H%M%S')"
+    "${SUDO[@]}" cp -a "${LABWC_AUTOSTART}" "${backup}"
+    log "Backed up existing labwc autostart: ${backup}"
+  fi
+  install_for_target_user "${candidate}" "${LABWC_AUTOSTART}"
+  rm -f -- "${candidate}"
+  log "Installed labwc kanshi autostart: ${LABWC_AUTOSTART}"
+}
+
+kanshi_is_running() {
+  pgrep -u "${TARGET_USER}" -x kanshi >/dev/null 2>&1
+}
+
+run_in_wayland_session() {
+  "${AS_TARGET[@]}" "${USER_SYSTEMD_ENV[@]}" "WAYLAND_DISPLAY=${WAYLAND_DISPLAY}" "$@"
+}
+
+reload_kanshi() {
+  local pid
+  while IFS= read -r pid; do
+    "${AS_TARGET[@]}" kill -HUP "${pid}" || return 1
+  done < <(pgrep -u "${TARGET_USER}" -x kanshi)
+}
+
+ensure_kanshi_running() {
+  local attempt
+
+  if kanshi_is_running; then
+    log 'kanshi is already running; not starting a duplicate process.'
+    if "${KANSHI_CONFIG_CHANGED}" && ! reload_kanshi; then
+      fail 'Could not reload the running kanshi process after updating its configuration.'
+    fi
+    return
+  fi
+
+  run_in_wayland_session sh -c 'nohup "$1" >/dev/null 2>&1 &' sh "${KANSHI_PATH}" ||
+    fail 'Could not start kanshi in the active Wayland session.'
+  for attempt in 1 2 3 4 5; do
+    kanshi_is_running && { log 'Started kanshi in the active Wayland session.'; return; }
+    sleep 1
+  done
+  fail 'kanshi did not remain running in the active Wayland session.'
+}
+
+verify_kanshi_transform() {
+  local attempt output
+
+  if [[ -z "${WLR_RANDR_PATH}" || ! -x "${WLR_RANDR_PATH}" ]]; then
+    log 'WARN: wlr-randr is unavailable; kanshi was started but DSI-1 transform 90 could not be checked now. It will be applied at the next GUI session.'
+    return
+  fi
+  for attempt in 1 2 3 4 5 6 7 8 9 10; do
+    output="$(run_in_wayland_session "${WLR_RANDR_PATH}" --output DSI-1 2>&1)" || {
+      log "ERROR: wlr-randr could not query DSI-1: ${output}"
+      return 1
+    }
+    if grep -Eq '^[[:space:]]*Transform:[[:space:]]*90[[:space:]]*$' <<<"${output}"; then
+      log 'PASS: kanshi applied DSI-1 Transform: 90.'
+      return
+    fi
+    sleep 1
+  done
+  log "ERROR: kanshi is running but DSI-1 Transform did not become 90. Last wlr-randr output: ${output}"
+  return 1
 }
 
 render_labwc_config() {
@@ -350,13 +531,17 @@ print_plan() {
     "UID: ${TARGET_UID}" \
     "Chromium path: ${CHROMIUM_PATH}" \
     "wtype path: ${WTYPE_PATH}" \
+    "kanshi path: ${KANSHI_PATH}" \
     "Wayland display: ${WAYLAND_DISPLAY}" \
     "Dashboard URL: ${DASHBOARD_URL}" \
     "Unit destination: ${UNIT_DESTINATION}" \
+    "Chromium managed policy: ${CHROMIUM_POLICY_FILE}" \
+    "Chromium kiosk profile: ${KIOSK_PROFILE_DIRECTORY}" \
     "kanshi config: ${KANSHI_CONFIG}" \
     "labwc config: ${USER_HOME}/.config/labwc/rc.xml" \
     "Planned action: daemon-reload, enable, and start/restart ${UNIT_NAME}" \
-    "Planned action: set only the DSI-1 kanshi output to transform 90" \
+    "Planned action: install the OMK Chromium managed policy (TranslateEnabled=false) and use the dedicated kiosk profile" \
+    "Planned action: set only the DSI-1 kanshi output to transform 90 and start kanshi from labwc autostart" \
     "Planned action: update labwc HideCursor keybind and request labwc --reconfigure" \
     "Planned check: user systemd bus and /run/user/${TARGET_UID}/${WAYLAND_DISPLAY:-wayland-0}"
 }
@@ -375,10 +560,11 @@ if "${DRY_RUN}"; then
   if [[ "${CHROMIUM_PATH}" == "not found" ]]; then
     log "WARN: Chromium is not installed or not on PATH; a real run would stop."
   fi
-  if [[ "${WTYPE_PATH}" == "not found" ]]; then
-    log "Would install package: wtype"
+  if [[ "${WTYPE_PATH}" == "not found" || "${KANSHI_PATH}" == "not found" ]]; then
+    log 'Would install required kiosk packages: wtype kanshi'
   fi
-  log "Would update only the DSI-1 output in ${KANSHI_CONFIG} to transform 90; config.init and config.bak are untouched."
+  log "Would update only the DSI-1 output in ${KANSHI_CONFIG} to transform 90 and add a non-duplicated kanshi launch to ${LABWC_AUTOSTART}."
+  log "Would install ${CHROMIUM_POLICY_FILE} as a root-owned managed policy and create ${KIOSK_PROFILE_DIRECTORY} for Chromium kiosk state."
   log "Would back up and update ${USER_HOME}/.config/labwc/rc.xml when its cursor keybind changes."
   log "Would validate the labwc XML and request labwc --reconfigure (or apply it at the next GUI session)."
   log "Would read WAYLAND_DISPLAY from the active user manager and confirm its Wayland socket before changing the unit."
@@ -386,19 +572,21 @@ if "${DRY_RUN}"; then
 fi
 
 if "${PREPARE}"; then
-  if [[ "${WTYPE_PATH}" == "not found" || ! -x "${WTYPE_PATH}" ]]; then
-    command -v apt-get >/dev/null 2>&1 || fail "wtype is unavailable and apt-get was not found. Install wtype or set DASHBOARD_KIOSK_WTYPE_PATH."
+  if [[ "${WTYPE_PATH}" == "not found" || ! -x "${WTYPE_PATH}" || "${KANSHI_PATH}" == "not found" || ! -x "${KANSHI_PATH}" ]]; then
+    command -v apt-get >/dev/null 2>&1 || fail "wtype or kanshi is unavailable and apt-get was not found. Install them before kiosk setup."
     if ((EUID != 0)); then
-      command -v sudo >/dev/null 2>&1 || fail "sudo is required to install wtype when it is missing."
+      command -v sudo >/dev/null 2>&1 || fail "sudo is required to install kiosk packages when they are missing."
       SUDO=(sudo)
     fi
-    log "Installing required package before OMK AP activation: wtype"
+    log 'Installing required kiosk packages before OMK AP activation: wtype kanshi'
     omk_apt "${SUDO[@]}" apt-get update
-    omk_apt "${SUDO[@]}" apt-get install -y wtype
+    omk_apt "${SUDO[@]}" apt-get install -y wtype kanshi
     WTYPE_PATH="$(command -v wtype || true)"
+    KANSHI_PATH="$(command -v kanshi || true)"
   fi
   [[ -n "${WTYPE_PATH}" && -x "${WTYPE_PATH}" ]] || fail "wtype installation did not provide an executable."
-  log "SUCCESS: kiosk package preparation is complete: ${WTYPE_PATH}"
+  [[ -n "${KANSHI_PATH}" && -x "${KANSHI_PATH}" ]] || fail "kanshi installation did not provide an executable."
+  log "SUCCESS: kiosk package preparation is complete: ${WTYPE_PATH}, ${KANSHI_PATH}"
   exit 0
 fi
 
@@ -411,17 +599,25 @@ if [[ "${WTYPE_PATH}" == "not found" || ! -x "${WTYPE_PATH}" ]]; then
   fail "wtype is unavailable. Run scripts/setup-dashboard-kiosk.sh --prepare before OMK AP activation."
 fi
 [[ -n "${WTYPE_PATH}" && -x "${WTYPE_PATH}" ]] || fail "wtype installation did not provide an executable."
+[[ "${KANSHI_PATH}" != "not found" && -x "${KANSHI_PATH}" ]] || fail "kanshi is unavailable. Run scripts/setup-dashboard-kiosk.sh --prepare before OMK AP activation."
+command -v pgrep >/dev/null 2>&1 || fail 'pgrep is required to avoid starting duplicate kanshi processes.'
 
 [[ -S "/run/user/${TARGET_UID}/bus" ]] || fail "No user systemd bus for ${TARGET_USER}. Log into the graphical session first."
 [[ -d "/run/user/${TARGET_UID}" ]] || fail "Runtime directory is unavailable for ${TARGET_USER}. Log into the graphical session first."
 resolve_wayland_display
 [[ -S "/run/user/${TARGET_UID}/${WAYLAND_DISPLAY}" ]] || fail "Wayland socket is unavailable. Confirm a Wayland GUI session and DASHBOARD_KIOSK_WAYLAND_DISPLAY."
 
+install_chromium_policy
+ensure_kiosk_profile_directory
+
 CONFIG_DIRECTORY="${USER_HOME}/.config/systemd/user"
 "${AS_TARGET[@]}" mkdir -p "${CONFIG_DIRECTORY}"
 update_kanshi_config
+update_labwc_autostart
 update_labwc_config
 reconfigure_labwc
+ensure_kanshi_running
+verify_kanshi_transform || fail 'kanshi did not apply DSI-1 Transform: 90 in the active Wayland session.'
 
 TEMP_UNIT="$(mktemp)"
 trap 'rm -f -- "${TEMP_UNIT}"' EXIT
@@ -451,7 +647,7 @@ fi
 curl --fail --silent --show-error "${DASHBOARD_URL}health" >/dev/null || fail "Dashboard health endpoint is unavailable: ${DASHBOARD_URL}health"
 user_systemctl daemon-reload
 user_systemctl enable "${UNIT_NAME}"
-if "${UNIT_CHANGED}" && user_systemctl is-active --quiet "${UNIT_NAME}"; then
+if [[ "${UNIT_CHANGED}" == true || "${CHROMIUM_POLICY_CHANGED}" == true ]] && user_systemctl is-active --quiet "${UNIT_NAME}"; then
   user_systemctl restart "${UNIT_NAME}"
 else
   user_systemctl start "${UNIT_NAME}"
