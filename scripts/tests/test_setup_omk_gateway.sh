@@ -31,6 +31,7 @@ collection_line="$(grep -n -F 'setup-data-collection.sh --prepare' <<<"${output}
 transformer_line="$(grep -n -F 'setup-data-transformer.sh' <<<"${output}" | cut -d: -f1)"
 exporter_line="$(grep -n -F 'setup-data-exporter.sh' <<<"${output}" | cut -d: -f1)"
 ap_prepare_line="$(grep -n -F 'setup-wifi-access-point.sh — Required OMK AP profile' <<<"${output}" | cut -d: -f1)"
+health_check_line="$(grep -n -F 'final-pre-activation-check — Final local Gateway health verification' <<<"${output}" | cut -d: -f1)"
 ap_activation_line="$(grep -n -F 'setup-wifi-access-point.sh --activate' <<<"${output}" | cut -d: -f1)"
 start_collection_line="$(grep -n -F 'setup-data-collection.sh — Required Docker collection' <<<"${output}" | cut -d: -f1)"
 [[ "${system_manager_line}" -lt "${collection_line}" ]]
@@ -38,7 +39,8 @@ start_collection_line="$(grep -n -F 'setup-data-collection.sh — Required Docke
 [[ "${transformer_line}" -lt "${exporter_line}" ]]
 [[ "${exporter_line}" -lt "${ap_prepare_line}" ]]
 [[ "${ap_prepare_line}" -lt "${start_collection_line}" ]]
-[[ "${start_collection_line}" -lt "${ap_activation_line}" ]]
+[[ "${start_collection_line}" -lt "${health_check_line}" ]]
+[[ "${health_check_line}" -lt "${ap_activation_line}" ]]
 
 # Run in a disposable copy with no-op setup scripts to verify the actual call
 # decision, rather than only the displayed dry-run plan.
@@ -180,6 +182,9 @@ start_collection_line="$(grep -n -E 'setup-data-collection\.sh $' "${TEMP_DIR}/c
 [[ "${ap_line}" -lt "${start_collection_line}" ]]
 normal_kiosk_line="$(grep -n -E 'setup-dashboard-kiosk\.sh $' "${TEMP_DIR}/calls" | cut -d: -f1)"
 [[ "${start_collection_line}" -lt "${normal_kiosk_line}" ]]
+activation_line="$(line_number 'setup-wifi-access-point.sh --activate')"
+[[ "${normal_kiosk_line}" -lt "${activation_line}" ]]
+[[ "$(tail -n 1 "${TEMP_DIR}/calls")" == 'setup-wifi-access-point.sh --activate' ]]
 
 # A missing B-route adapter or credentials must not turn a completed Gateway
 # installation into an overall failure when the optional service is inactive.
@@ -273,5 +278,14 @@ rm -f -- "${TEMP_DIR}/calls"
 CALL_LOG="${TEMP_DIR}/calls" PATH="${TEMP_DIR}/bin:${PATH}" \
   "${TEMP_DIR}/scripts/setup-omk-gateway.sh" --no-kiosk
 ! grep -Fq 'setup-dashboard-kiosk.sh' "${TEMP_DIR}/calls"
+[[ "$(tail -n 1 "${TEMP_DIR}/calls")" == 'setup-wifi-access-point.sh --activate' ]]
+
+# A rerun keeps the same profile-prepare, local-startup, health, and final
+# activation decision sequence; it does not activate earlier on the second run.
+cp "${TEMP_DIR}/calls" "${TEMP_DIR}/calls.no-kiosk.first"
+rm -f -- "${TEMP_DIR}/calls"
+CALL_LOG="${TEMP_DIR}/calls" PATH="${TEMP_DIR}/bin:${PATH}" \
+  "${TEMP_DIR}/scripts/setup-omk-gateway.sh" --no-kiosk
+cmp "${TEMP_DIR}/calls.no-kiosk.first" "${TEMP_DIR}/calls"
 
 echo 'PASS: Gateway orchestrator orders scripts correctly and skips base setup unless explicitly requested.'

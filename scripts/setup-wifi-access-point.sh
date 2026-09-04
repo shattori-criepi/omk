@@ -20,6 +20,7 @@ IPV4_ADDRESS="${OMK_AP_IPV4_ADDRESS:-${DEFAULT_IPV4_ADDRESS}}"
 SSID="${OMK_AP_SSID:-}"
 PSK="${OMK_AP_PSK:-}"
 ACTIVATE="${OMK_AP_ACTIVATE:-no}"
+ACTIVATION_REQUESTED="${ACTIVATE}"
 DRY_RUN=no
 PRINT_CONFIG=no
 ASSUME_YES="${OMK_AP_CONFIRM:-no}"
@@ -300,7 +301,7 @@ while (($# > 0)); do
   case "$1" in
     --dry-run) DRY_RUN=yes ;;
     --print-config) PRINT_CONFIG=yes ;;
-    --activate) ACTIVATE=yes ;;
+    --activate) ACTIVATE=yes; ACTIVATION_REQUESTED=yes ;;
     --yes) ASSUME_YES=yes ;;
     --help|-h) usage; exit 0 ;;
     *) usage >&2; fail "Unknown option: $1" ;;
@@ -437,7 +438,7 @@ install_ap_dns_isolation
 
 if is_yes "${ACTIVATE}"; then
   show_wan_reference
-  confirm "Activate ${CONNECTION_NAME} now? This can disconnect SSH" || { log "Profile is saved but was not activated."; ACTIVATE=no; }
+  confirm "Activate ${CONNECTION_NAME} now? This can disconnect SSH" || { log "Profile is saved but final activation was declined."; ACTIVATE=no; }
   if is_yes "${ACTIVATE}"; then
     if is_active; then
       log "Restarting the active AP so its DHCP/DNS isolation configuration is reloaded."
@@ -456,3 +457,6 @@ printf '  Enable AP: sudo nmcli connection up %q\n' "${CONNECTION_NAME}"
 printf '  Status:    nmcli connection show --active; nmcli device status\n'
 printf '  Disable:   sudo nmcli connection down %q\n' "${CONNECTION_NAME}"
 printf '  Delete:    sudo nmcli connection delete %q  # displayed only; not run automatically\n' "${CONNECTION_NAME}"
+if is_yes "${ACTIVATION_REQUESTED}" && ! is_yes "${ACTIVATE}"; then
+  exit 3
+fi

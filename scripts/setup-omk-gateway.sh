@@ -77,10 +77,14 @@ steps+=(
 "${WITH_BROUTE}" && steps+=('setup-broute-meter.sh|Optional B-route host service')
 "${WITH_KIOSK}" && steps+=('setup-dashboard-kiosk.sh --prepare|Standard kiosk package preparation before AP activation')
 steps+=(
-  'setup-wifi-access-point.sh --activate|Required OMK AP (automatic PSK; may disconnect SSH)'
+  'setup-wifi-access-point.sh|Required OMK AP profile/isolation preparation; does not switch wlan0'
   'setup-data-collection.sh|Required Docker collection and Dashboard services'
 )
 "${WITH_KIOSK}" && steps+=('setup-dashboard-kiosk.sh|Standard Dashboard kiosk configuration (local Dashboard is now available)')
+steps+=(
+  'final-pre-activation-check|Final local Gateway health verification before AP activation'
+  'setup-wifi-access-point.sh --activate|Final OMK AP activation; may disconnect wlan0 SSH'
+)
 
 log "Repository root: ${OMK_ROOT}"
 if ! "${WITH_BASE}"; then
@@ -233,13 +237,33 @@ for index in "${!steps[@]}"; do
     continue
   fi
   IFS='|' read -r command description <<<"${steps[index]}"
-  if [[ "${command}" == 'setup-wifi-access-point.sh --activate' ]]; then
-    preflight_before_ap_activation
-  fi
+  [[ "${command}" == 'final-pre-activation-check' || "${command}" == 'setup-wifi-access-point.sh --activate' ]] && continue
   run_step "${command}" "${description}"
 done
 
-log 'Final Gateway health check:'
+validate_prepared_ap_profile() {
+  local property value
+  command -v nmcli >/dev/null 2>&1 || fail 'Prepared AP verification failed: nmcli is unavailable.'
+  nmcli connection show omk-ap >/dev/null 2>&1 || fail 'Prepared AP verification failed: omk-ap NetworkManager profile is missing.'
+  local -a expected=(
+    'connection.interface-name|wlan0'
+    '802-11-wireless.mode|ap'
+    'connection.autoconnect|yes'
+    'ipv4.method|shared'
+    'ipv4.addresses|192.168.50.1/24'
+    'ipv6.method|disabled'
+  )
+  for property in "${expected[@]}"; do
+    IFS='|' read -r property value <<<"${property}"
+    [[ "$(nmcli -g "${property}" connection show omk-ap 2>/dev/null | head -n 1)" == "${value}" ]] ||
+      fail "Prepared AP verification failed: omk-ap ${property} is not ${value}."
+  done
+  [[ -n "$(nmcli --show-secrets -g 802-11-wireless-security.psk connection show omk-ap 2>/dev/null | head -n 1)" ]] ||
+    fail 'Prepared AP verification failed: omk-ap WPA2 PSK is missing.'
+}
+
+final_pre_activation_check() {
+log 'Final pre-activation Gateway health check:'
 systemctl is-active --quiet omk-system-manager.service || fail 'system-manager is not active.'
 systemctl is-active --quiet omk-data-transformer.timer || fail 'data-transformer timer is not active.'
 systemctl is-active --quiet omk-ap-isolation.service || fail 'OMK AP isolation service is not active.'
@@ -247,11 +271,11 @@ for service in mosquitto sensor-collector dashboard harvest-uploader; do
   docker compose -f "${OMK_ROOT}/compose.yaml" ps --status running --services | grep -Fxq "${service}" || fail "${service} container is not running."
 done
 curl --fail --silent --show-error http://127.0.0.1:8000/health >/dev/null || fail 'Dashboard health check failed.'
-ip -4 addr show wlan0 | grep -Fq '192.168.50.1/' || fail 'OMK AP address is not assigned to wlan0.'
 "${WITH_BLE}" && systemctl is-active --quiet omk-ble-sensor-manager.service || ! "${WITH_BLE}" || fail 'BLE sensor-manager is not active.'
 if "${WITH_BROUTE}" && ! systemctl is-active --quiet omk-broute-meter.service; then
   log 'WARN: B-route meter is installed and enabled but not active. This is expected until its adapter and credentials are ready.'
 fi
+validate_prepared_ap_profile
 if "${WITH_KIOSK}"; then
   kiosk_user="${SUDO_USER:-$(id -un)}"
   kiosk_home="$(getent passwd "${kiosk_user}" | cut -d: -f6)"
@@ -265,5 +289,12 @@ if "${WITH_KIOSK}"; then
     log 'Dashboard kiosk runtime verification is deferred because no active Wayland GUI session is present.'
   fi
 fi
-log 'SUCCESS: required Gateway services are healthy.'
-log 'SORACOM, BLE, and B-route services were installed only when their --with-* option was specified.'
+log 'PASS: all Gateway services and OMK AP configuration are ready.'
+log 'Final step: activating the OMK AP. The current SSH session may disconnect if it uses wlan0.'
+}
+
+preflight_before_ap_activation
+final_pre_activation_check
+if ! run_step 'setup-wifi-access-point.sh --activate' 'Final OMK AP activation; may disconnect wlan0 SSH'; then
+  fail 'OMK AP profile is prepared but final activation was not completed.'
+fi
