@@ -17,6 +17,10 @@ esp_err_t mqtt_registration_publish_mesh_status(const char *payload);
 
 /* Counts MQTT_EVENT_DISCONNECTED events for mesh diagnostics. */
 uint32_t mqtt_registration_get_disconnect_count(void);
+bool mqtt_registration_is_connected(void);
+bool mqtt_registration_is_started(void);
+uint32_t mqtt_registration_get_last_connected_uptime_s(void);
+uint32_t mqtt_registration_get_disconnected_duration_s(void);
 
 /* Updates the retained Node registration status with physically detected SEN66 state. */
 void mqtt_registration_set_sen66_connected(bool connected);

@@ -12,6 +12,7 @@
 #include "esp_log.h"
 #include "esp_netif_ip_addr.h"
 #include "esp_wifi.h"
+#include "esp_timer.h"
 #include "mqtt_client.h"
 #include "nvs.h"
 #include "node_registration.h"
@@ -26,7 +27,7 @@
 /* Two 31-byte advertisement fragments rendered as hex plus fixed JSON fields. */
 #define OMK_MQTT_BLE_RELAY_PAYLOAD_SIZE 512
 #define OMK_MQTT_SEN66_PAYLOAD_SIZE 768
-#define OMK_MQTT_MESH_STATUS_PAYLOAD_SIZE 640
+#define OMK_MQTT_MESH_STATUS_PAYLOAD_SIZE 1152
 #define OMK_REGISTRATION_PAYLOAD_SIZE 192
 #define OMK_MQTT_CLIENT_ID_SIZE 32
 static const char *TAG = "omk-mqtt";
@@ -34,6 +35,8 @@ static esp_mqtt_client_handle_t client;
 static bool client_started;
 static volatile bool client_connected;
 static uint32_t mqtt_disconnect_count;
+static int64_t mqtt_last_connected_us;
+static int64_t mqtt_disconnected_since_us;
 static bool ip_handler_registered;
 static char registration_topic[OMK_MQTT_TOPIC_SIZE];
 static char registration_config_topic[OMK_MQTT_TOPIC_SIZE];
@@ -279,6 +282,8 @@ static void mqtt_event_handler(void *arg, esp_event_base_t event_base,
     switch ((esp_mqtt_event_id_t)event_id) {
     case MQTT_EVENT_CONNECTED:
         client_connected = true;
+        mqtt_last_connected_us = esp_timer_get_time();
+        mqtt_disconnected_since_us = 0;
         mesh_network_log_diagnostics("MQTT connected", 0);
         ESP_LOGI(TAG, "MQTT connected");
         if (esp_mqtt_client_subscribe(client, registration_config_topic, 1) < 0) {
@@ -292,6 +297,7 @@ static void mqtt_event_handler(void *arg, esp_event_base_t event_base,
         break;
     case MQTT_EVENT_DISCONNECTED:
         client_connected = false;
+        if (mqtt_disconnected_since_us == 0) mqtt_disconnected_since_us = esp_timer_get_time();
         mqtt_disconnect_count++;
         mesh_network_log_diagnostics("MQTT disconnected", 0);
         ESP_LOGW(TAG, "MQTT disconnected: count=%" PRIu32 "; automatic reconnect pending",
@@ -318,6 +324,21 @@ static void mqtt_event_handler(void *arg, esp_event_base_t event_base,
 
 uint32_t mqtt_registration_get_disconnect_count(void) {
     return mqtt_disconnect_count;
+}
+
+bool mqtt_registration_is_connected(void) { return client_connected; }
+
+bool mqtt_registration_is_started(void) { return client_started; }
+
+uint32_t mqtt_registration_get_last_connected_uptime_s(void) {
+    return mqtt_last_connected_us > 0 ? (uint32_t)(mqtt_last_connected_us / 1000000) : 0;
+}
+
+uint32_t mqtt_registration_get_disconnected_duration_s(void) {
+    if (client_connected || !client_started) return 0;
+    int64_t now_us = esp_timer_get_time();
+    if (mqtt_disconnected_since_us == 0) mqtt_disconnected_since_us = now_us;
+    return (uint32_t)((now_us - mqtt_disconnected_since_us) / 1000000);
 }
 
 void mqtt_registration_set_sen66_connected(bool connected) {

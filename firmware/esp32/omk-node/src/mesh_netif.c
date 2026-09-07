@@ -7,6 +7,7 @@
 #include "esp_log.h"
 #include "esp_mesh.h"
 #include "esp_netif.h"
+#include "esp_timer.h"
 #include "esp_wifi.h"
 #include "esp_wifi_netif.h"
 #include "freertos/FreeRTOS.h"
@@ -31,6 +32,21 @@ static esp_netif_t *station_netif;
 static esp_netif_t *mesh_ap_netif;
 static bool receive_task_running;
 static mesh_addr_t routing_table[CONFIG_MESH_ROUTE_TABLE_SIZE];
+static mesh_netif_diagnostics_t diagnostics;
+
+static uint32_t uptime_seconds(void) {
+    return (uint32_t)(esp_timer_get_time() / 1000000);
+}
+
+static esp_err_t record_mesh_send_result(esp_err_t err) {
+    if (err == ESP_OK) {
+        diagnostics.tx_success_count++;
+        diagnostics.last_tx_success_uptime_s = uptime_seconds();
+    } else {
+        diagnostics.tx_failure_count++;
+    }
+    return err;
+}
 
 static const char *dhcp_status_name(esp_netif_dhcp_status_t status) {
     switch (status) {
@@ -57,14 +73,15 @@ static esp_err_t transmit_root_ap(void *handle, void *buffer, size_t length) {
     mesh_data_t data = {.data = buffer, .size = length, .proto = MESH_PROTO_STA, .tos = MESH_TOS_P2P};
     memcpy(destination.addr, buffer, MESH_MAC_LENGTH);
     if (memcmp(destination.addr, broadcast, MESH_MAC_LENGTH) != 0) {
-        return esp_mesh_send(&destination, &data, MESH_DATA_P2P, NULL, 0);
+        return record_mesh_send_result(esp_mesh_send(&destination, &data, MESH_DATA_P2P, NULL, 0));
     }
     int count = 0;
     esp_err_t result = esp_mesh_get_routing_table(routing_table, sizeof(routing_table), &count);
     if (result != ESP_OK) return result;
     for (int index = 0; index < count; ++index) {
         if (memcmp(routing_table[index].addr, driver->station_mac, MESH_MAC_LENGTH) != 0) {
-            (void)esp_mesh_send(&routing_table[index], &data, MESH_DATA_P2P, NULL, 0);
+            (void)record_mesh_send_result(esp_mesh_send(&routing_table[index], &data,
+                                                        MESH_DATA_P2P, NULL, 0));
         }
     }
     return ESP_OK;
@@ -78,8 +95,7 @@ static esp_err_t transmit_root_ap_wrap(void *handle, void *buffer, size_t length
 static esp_err_t transmit_child_sta(void *handle, void *buffer, size_t length) {
     (void)handle;
     mesh_data_t data = {.data = buffer, .size = length, .proto = MESH_PROTO_AP, .tos = MESH_TOS_P2P};
-    esp_err_t err = esp_mesh_send(NULL, &data, MESH_DATA_TODS, NULL, 0);
-    return err;
+    return record_mesh_send_result(esp_mesh_send(NULL, &data, MESH_DATA_TODS, NULL, 0));
 }
 
 static esp_err_t transmit_child_sta_wrap(void *handle, void *buffer, size_t length, void *netstack_buffer) {
@@ -129,6 +145,8 @@ static void receive_task(void *argument) {
         int flag = 0;
         esp_err_t err = esp_mesh_recv(&from, &data, portMAX_DELAY, &flag, NULL, 0);
         if (err != ESP_OK) continue;
+        diagnostics.rx_success_count++;
+        diagnostics.last_rx_success_uptime_s = uptime_seconds();
         if (esp_mesh_is_root() && data.proto == MESH_PROTO_AP && mesh_ap_netif != NULL) {
             esp_netif_receive(mesh_ap_netif, data.data, data.size, NULL);
         } else if (!esp_mesh_is_root() && data.proto == MESH_PROTO_STA && station_netif != NULL) {
@@ -331,4 +349,8 @@ esp_err_t mesh_netif_start_root_ap(bool is_root, uint32_t dns_addr) {
     ip_napt_enable(mesh_subnet.ip.addr, 1);
     ESP_LOGI(TAG, "Root internal NAPT enabled for 10.0.0.1");
     return ESP_OK;
+}
+
+void mesh_netif_get_diagnostics(mesh_netif_diagnostics_t *result) {
+    if (result != NULL) *result = diagnostics;
 }

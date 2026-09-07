@@ -40,7 +40,7 @@ def test_boot_counter_is_best_effort_nvs_and_persisted():
 
 def test_node_status_has_boot_and_heap_diagnostics_with_capacity():
     source = (SOURCE / "mesh_network.c").read_text()
-    assert "#define OMK_MESH_STATUS_PAYLOAD_SIZE 640" in source
+    assert "#define OMK_MESH_STATUS_PAYLOAD_SIZE 1152" in source
     for field in (
         "minimum_free_heap_bytes",
         "reset_reason",
@@ -65,13 +65,13 @@ def test_node_status_has_boot_and_heap_diagnostics_with_capacity():
         "reset_reason": "interrupt_watchdog", "reset_reason_code": 4294967295,
         "boot_count": 4294967295,
     }
-    assert len(json.dumps(payload, separators=(",", ":"))) < 640
+    assert len(json.dumps(payload, separators=(",", ":"))) < 1152
 
 
 def test_registration_payload_capacity_is_unchanged():
     source = (SOURCE / "mqtt_registration.c").read_text()
     assert "#define OMK_REGISTRATION_PAYLOAD_SIZE 192" in source
-    assert "#define OMK_MQTT_MESH_STATUS_PAYLOAD_SIZE 640" in source
+    assert "#define OMK_MQTT_MESH_STATUS_PAYLOAD_SIZE 1152" in source
 
 
 def test_switchbot_scan_is_active_and_joins_advertisement_and_scan_response_fragments():

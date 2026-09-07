@@ -17,13 +17,14 @@
 #include "boot_diagnostics.h"
 #include "gateway_credentials.h"
 #include "mesh_credentials.h"
+#include "mesh_liveness.h"
 #include "mesh_netif.h"
 #include "mqtt_registration.h"
 #include "node_identity.h"
 
 #define OMK_MESH_STATUS_INTERVAL_MS 30000
 #define OMK_MESH_AP_MAX_CONNECTIONS 6
-#define OMK_MESH_STATUS_PAYLOAD_SIZE 640
+#define OMK_MESH_STATUS_PAYLOAD_SIZE 1152
 
 static const char *TAG = "omk-mesh";
 static uint8_t parent_bssid[6];
@@ -38,7 +39,9 @@ static bool is_rootless;
 static bool root_role_known;
 static bool previous_is_root;
 static bool started;
+static bool parent_connected;
 static esp_ip4_addr_t current_ip;
+static int64_t mqtt_liveness_since_us;
 
 static esp_err_t configure_parent_rssi_thresholds(void) {
     const mesh_rssi_threshold_t configured = {
@@ -82,13 +85,54 @@ static uint32_t uptime_seconds(void) {
 }
 
 void mesh_network_log_diagnostics(const char *event, uint32_t reason) {
+    wifi_ap_record_t ap_info = {0};
+    bool rssi_valid = esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK;
+    char ip_text[16];
+    snprintf(ip_text, sizeof(ip_text), IPSTR, IP2STR(&current_ip));
     ESP_LOGI(TAG,
-             "%s: uptime=%" PRIu32 "s layer=%d is_root=%s parent_bssid=%02x:%02x:%02x:%02x:%02x:%02x reason=%" PRIu32
-             " parent_disconnect_count=%" PRIu32 " mqtt_disconnect_count=%" PRIu32 " free_heap=%u min_free_heap=%u",
+             "%s: uptime=%" PRIu32 "s layer=%d is_root=%s parent_bssid=%02x:%02x:%02x:%02x:%02x:%02x"
+             " rssi_dbm=%d rssi_valid=%s ip=%s rootless=%s reason=%" PRIu32
+             " parent_disconnect_count=%" PRIu32 " mqtt_disconnect_count=%" PRIu32
+             " mqtt_connected=%s mqtt_disconnected_duration_s=%" PRIu32
+             " free_heap=%u min_free_heap=%u",
              event, uptime_seconds(), esp_mesh_get_layer(), esp_mesh_is_root() ? "true" : "false",
              parent_bssid[0], parent_bssid[1], parent_bssid[2], parent_bssid[3], parent_bssid[4], parent_bssid[5],
+             rssi_valid ? ap_info.rssi : 0, rssi_valid ? "true" : "false", ip_text,
+             is_rootless ? "true" : "false",
              reason, parent_disconnect_count, mqtt_registration_get_disconnect_count(),
+             mqtt_registration_is_connected() ? "true" : "false",
+             mqtt_registration_get_disconnected_duration_s(),
              esp_get_free_heap_size(), esp_get_minimum_free_heap_size());
+}
+
+static void check_mqtt_liveness(void) {
+    omk_mesh_mqtt_liveness_state_t state = {
+        .mesh_started = started,
+        .parent_connected = parent_connected,
+        .rootless = is_rootless,
+        .has_ip = current_ip.addr != 0,
+        /* MQTT initialization confirms that normal network operation reached
+         * the point at which an MQTT connection is expected. */
+        .normal_operation = mqtt_registration_is_started(),
+        .mqtt_connected = mqtt_registration_is_connected(),
+        .mqtt_disconnected_duration_s = 0,
+    };
+    bool eligible_while_disconnected = state.mesh_started && state.parent_connected &&
+                                       !state.rootless && state.has_ip &&
+                                       state.normal_operation && !state.mqtt_connected;
+    if (!eligible_while_disconnected) {
+        mqtt_liveness_since_us = 0;
+        return;
+    }
+    int64_t now_us = esp_timer_get_time();
+    if (mqtt_liveness_since_us == 0) mqtt_liveness_since_us = now_us;
+    state.mqtt_disconnected_duration_s =
+        (uint32_t)((now_us - mqtt_liveness_since_us) / 1000000);
+    if (!mesh_mqtt_liveness_should_recover(&state)) return;
+
+    mesh_network_log_diagnostics("mesh_mqtt_liveness_timeout: software restart", 0);
+    boot_diagnostics_record_restart_reason("mesh_mqtt_liveness_timeout");
+    esp_restart();
 }
 
 /* The first observed role is boot-time election, not a root switch.  Later
@@ -121,6 +165,9 @@ static void publish_status(void *argument) {
     char payload[OMK_MESH_STATUS_PAYLOAD_SIZE];
     uint32_t uptime_s = uptime_seconds();
     uint32_t rootless_duration_s = is_rootless ? uptime_s - rootless_since_s : 0;
+    mesh_netif_diagnostics_t netif_diagnostics;
+    mesh_netif_get_diagnostics(&netif_diagnostics);
+    uint32_t mqtt_disconnected_duration_s = mqtt_registration_get_disconnected_duration_s();
     int written = snprintf(payload, sizeof(payload),
                            "{\"node_id\":\"%012" PRIx64 "\",\"mesh_layer\":%d,"
                            "\"is_root\":%s,\"parent_bssid\":\"%02x:%02x:%02x:%02x:%02x:%02x\","
@@ -132,10 +179,19 @@ static void publish_status(void *argument) {
                            "\"last_wifi_disconnect_reason\":%" PRIu32 ","
                            "\"root_switch_count\":%" PRIu32 ","
                            "\"mqtt_disconnect_count\":%" PRIu32 ","
+                           "\"mqtt_connected\":%s,\"mqtt_disconnected_duration_s\":%" PRIu32 ","
+                           "\"mqtt_last_connected_uptime_s\":%" PRIu32 ","
+                           "\"mesh_rx_success_count\":%" PRIu32 ","
+                           "\"mesh_tx_success_count\":%" PRIu32 ","
+                           "\"mesh_tx_failure_count\":%" PRIu32 ","
+                           "\"mesh_last_rx_success_uptime_s\":%" PRIu32 ","
+                           "\"mesh_last_tx_success_uptime_s\":%" PRIu32 ","
                            "\"uptime_s\":%" PRIu32 ",\"free_heap_bytes\":%" PRIu32 ","
                            "\"minimum_free_heap_bytes\":%" PRIu32 ","
                            "\"reset_reason\":\"%s\",\"reset_reason_code\":%" PRIu32 ","
-                           "\"boot_count\":%" PRIu32 "}",
+                           "\"boot_count\":%" PRIu32 ","
+                           "\"last_omk_restart_reason\":\"%s\","
+                           "\"mesh_mqtt_liveness_restart_count\":%" PRIu32 "}",
                            node_id, esp_mesh_get_layer(), esp_mesh_is_root() ? "true" : "false",
                            parent_bssid[0], parent_bssid[1], parent_bssid[2], parent_bssid[3],
                            parent_bssid[4], parent_bssid[5], rssi, rssi_valid ? "true" : "false", ip_text,
@@ -144,12 +200,22 @@ static void publish_status(void *argument) {
                            last_parent_disconnect_reason, last_wifi_disconnect_reason,
                            root_switch_count,
                            mqtt_registration_get_disconnect_count(),
+                           mqtt_registration_is_connected() ? "true" : "false",
+                           mqtt_disconnected_duration_s,
+                           mqtt_registration_get_last_connected_uptime_s(),
+                           netif_diagnostics.rx_success_count, netif_diagnostics.tx_success_count,
+                           netif_diagnostics.tx_failure_count,
+                           netif_diagnostics.last_rx_success_uptime_s,
+                           netif_diagnostics.last_tx_success_uptime_s,
                            uptime_s, esp_get_free_heap_size(), esp_get_minimum_free_heap_size(),
                            boot_diagnostics_reset_reason(), boot_diagnostics_reset_reason_code(),
-                           boot_diagnostics_boot_count());
+                           boot_diagnostics_boot_count(),
+                           boot_diagnostics_last_omk_restart_reason(),
+                           boot_diagnostics_mesh_mqtt_liveness_restart_count());
     if (written > 0 && written < (int)sizeof(payload)) {
         (void)mqtt_registration_publish_mesh_status(payload);
     }
+    check_mqtt_liveness();
 }
 
 static void ip_event_handler(void *argument, esp_event_base_t base, int32_t id, void *data) {
@@ -189,6 +255,7 @@ static void mesh_event_handler(void *argument, esp_event_base_t base, int32_t id
             memcpy(previous_parent_bssid, event->connected.bssid, sizeof(parent_bssid));
         }
         memcpy(parent_bssid, event->connected.bssid, sizeof(parent_bssid));
+        parent_connected = true;
         is_rootless = false;
         rootless_since_s = 0;
         mesh_network_log_diagnostics("Mesh parent connected", 0);
@@ -202,6 +269,7 @@ static void mesh_event_handler(void *argument, esp_event_base_t base, int32_t id
     case MESH_EVENT_PARENT_DISCONNECTED: {
         const mesh_event_disconnected_t *event = data;
         parent_disconnect_count++;
+        parent_connected = false;
         if (event != NULL) {
             last_parent_disconnect_reason = event->reason;
             /* ESP-IDF defines mesh_event_disconnected_t as the Wi-Fi STA
@@ -223,6 +291,7 @@ static void mesh_event_handler(void *argument, esp_event_base_t base, int32_t id
         if (event->is_rootless && !is_rootless) rootless_since_s = uptime_seconds();
         if (!event->is_rootless) rootless_since_s = 0;
         is_rootless = event->is_rootless;
+        if (is_rootless) parent_connected = false;
         break;
     }
     case MESH_EVENT_ROOT_SWITCH_ACK:
