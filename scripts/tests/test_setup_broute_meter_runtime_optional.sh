@@ -23,6 +23,7 @@ UNIT_DEST="${TEMP_DIR}/omk-broute-meter.service"
 SERVICE_ACTIVE=false
 START_RESULT=1
 UNIT_CHANGED=false
+SYSTEMCTL_CALLS=()
 
 mkdir -p "${OMK_ROOT}/services/broute-meter/config"
 cp "${HELPER_SOURCE}" "${HELPER_DEST}"
@@ -32,6 +33,7 @@ printf '%s\n' "$(render_sudoers)" >"${SUDOERS_DEST}"
 render_unit >"${UNIT_DEST}"
 
 systemctl() {
+  SYSTEMCTL_CALLS+=("$*")
   case "$1" in
     is-enabled) return 0 ;;
     is-active) "${SERVICE_ACTIVE}" ;;
@@ -54,14 +56,36 @@ stat() {
 
 # The same nonzero systemctl start result represents both a missing adapter and
 # missing B-route credentials: neither is an installation failure.
+SYSTEMCTL_CALLS=()
 ensure_service_state
+[[ " ${SYSTEMCTL_CALLS[*]} " == *" start ${SERVICE} "* ]]
+[[ " ${SYSTEMCTL_CALLS[*]} " != *" restart ${SERVICE} "* ]]
 verify_installation
 
-# An active service remains a normal successful setup result.
+# Every normal setup installs the B-route package, so an active service must
+# restart even when its unit is unchanged.
 SERVICE_ACTIVE=true
 START_RESULT=0
+UNIT_CHANGED=false
+SYSTEMCTL_CALLS=()
 ensure_service_state
+[[ " ${SYSTEMCTL_CALLS[*]} " == *" restart ${SERVICE} "* ]]
+[[ " ${SYSTEMCTL_CALLS[*]} " != *" daemon-reload "* ]]
 verify_installation
+
+# A changed unit still reloads systemd before restarting the active service.
+UNIT_CHANGED=true
+SYSTEMCTL_CALLS=()
+ensure_service_state
+[[ " ${SYSTEMCTL_CALLS[*]} " == *" daemon-reload "* ]]
+[[ " ${SYSTEMCTL_CALLS[*]} " == *" restart ${SERVICE} "* ]]
+
+# Even if called directly, dry-run must not invoke systemctl.
+DRY_RUN=true
+SYSTEMCTL_CALLS=()
+ensure_service_state
+[[ ${#SYSTEMCTL_CALLS[@]} -eq 0 ]]
+DRY_RUN=false
 
 # A corrupted installed unit is still an installation failure.
 printf '%s\n' '# broken unit' >"${UNIT_DEST}"

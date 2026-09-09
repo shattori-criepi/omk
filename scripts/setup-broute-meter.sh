@@ -358,6 +358,10 @@ install_unit() {
 }
 
 ensure_service_state() {
+  if "${DRY_RUN}"; then
+    log "Would enable ${SERVICE} if needed, then restart it if active or start it if inactive to apply the installed B-route application."
+    return
+  fi
   if "${UNIT_CHANGED}"; then
     log "Reloading systemd after unit update."
     "${SUDO[@]}" systemctl daemon-reload
@@ -369,13 +373,9 @@ ensure_service_state() {
     log "Service is already enabled: ${SERVICE}"
   fi
   if "${SUDO[@]}" systemctl is-active --quiet "${SERVICE}"; then
-    if "${UNIT_CHANGED}"; then
-      log "Restarting active service after unit update: ${SERVICE}"
-      if ! "${SUDO[@]}" systemctl restart "${SERVICE}"; then
-        warn "Could not restart ${SERVICE}. Installation remains complete; check the adapter, B-route credentials, and: sudo systemctl status ${SERVICE} --no-pager"
-      fi
-    else
-      log "Service is already active; preserving it: ${SERVICE}"
+    log "Restarting active service to apply the installed B-route application: ${SERVICE}"
+    if ! "${SUDO[@]}" systemctl restart "${SERVICE}"; then
+      warn "Could not restart ${SERVICE}. Installation remains complete; check the adapter, B-route credentials, and: sudo systemctl status ${SERVICE} --no-pager"
     fi
   else
     log "Starting inactive service: ${SERVICE}"
@@ -477,7 +477,7 @@ main() {
     if [[ -f "${UNIT_TEMPLATE}" ]] && command -v sed >/dev/null 2>&1 && command -v cmp >/dev/null 2>&1; then
       if [[ -e "${UNIT_DEST}" ]] && compare_files <(render_unit) "${UNIT_DEST}"; then
         log "Would preserve identical systemd unit: ${UNIT_DEST}"
-        log "Would enable ${SERVICE} if needed; would start it only if inactive."
+        log "Would enable ${SERVICE} if needed, then restart it if active or start it if inactive to apply the installed B-route application."
       else
         comparison_status=$?
         if [[ -e "${UNIT_DEST}" && "${comparison_status}" == 2 ]]; then
