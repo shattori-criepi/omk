@@ -547,11 +547,9 @@ def _configure_adapter_with_usb_recovery(
     try:
         device = resetter.reset()
         logger.warning(
-            "RS-WSUHA-P USBリセット完了 vendor=%s product=%s serial=%s sysfs=%s",
+            "RS-WSUHA-P USBリセット完了 vendor=%s product=%s",
             device.vendor,
             device.product,
-            device.serial,
-            device.sysfs_path,
         )
         if stop_event.wait(ADAPTER_SETTLE_SECONDS):
             raise AdapterResponseTimeoutError(

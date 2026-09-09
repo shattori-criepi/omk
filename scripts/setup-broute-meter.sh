@@ -64,6 +64,8 @@ render_unit() {
 }
 
 render_sudoers() {
+  # A command without an argument clause permits arguments. The reset helper
+  # independently accepts exactly one validated serial, never a caller path.
   printf '%s ALL=(root) NOPASSWD: %s, %s\n' "${TARGET_USER}" "${HELPER_DEST}" "${VBUS_HELPER_DEST}"
 }
 

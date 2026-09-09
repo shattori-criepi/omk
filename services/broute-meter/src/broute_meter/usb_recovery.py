@@ -4,14 +4,17 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import stat
 import subprocess
+import time
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+# Additional guard for the observed transport, not an official RS-WSUHA-P VID/PID.
 RS_WSUHA_P_VENDOR = "0403"
 RS_WSUHA_P_PRODUCT = "6015"
-RS_WSUHA_P_SERIAL = "DM006AOS"
 STARTUP_RETRY_ATTEMPTS = 3
 USB_RESET_COOLDOWN = timedelta(minutes=20)
 VBUS_CYCLE_COOLDOWN = timedelta(hours=1)
@@ -21,7 +24,7 @@ VBUS_CYCLE_COOLDOWN = timedelta(hours=1)
 class UsbDevice:
     """Verified sysfs identity of the USB device eligible for recovery."""
 
-    by_id_path: Path
+    port_path: Path
     sysfs_path: Path
     vendor: str
     product: str
@@ -32,35 +35,67 @@ class UsbRecoveryError(RuntimeError):
     """A narrowly scoped RS-WSUHA-P recovery operation failed."""
 
 
+def _usb_parent(tty: Path, sys_root: Path) -> Path:
+    start = (tty / "device").resolve(strict=True)
+    if not start.is_relative_to(sys_root / "devices"):
+        raise UsbRecoveryError("Serial port sysfs path is outside USB devices.")
+    for candidate in (start, *start.parents):
+        if not candidate.is_relative_to(sys_root / "devices"):
+            break
+        if (candidate / "idVendor").is_file() and (candidate / "idProduct").is_file():
+            if not re.fullmatch(r"[0-9]+-[0-9]+(?:\.[0-9]+)*", candidate.name):
+                break
+            if (sys_root / "bus/usb/devices" / candidate.name).resolve(strict=True) != candidate:
+                break
+            return candidate
+    raise UsbRecoveryError("Could not resolve a USB parent for the configured serial port.")
+
+
+def _verify_tty_node(port: Path, tty: Path) -> None:
+    info = port.stat()
+    major, minor = map(int, (tty / "dev").read_text(encoding="ascii").strip().split(":"))
+    if not stat.S_ISCHR(info.st_mode) or info.st_rdev != os.makedev(major, minor):
+        raise UsbRecoveryError("Serial port is not the sysfs tty character device.")
+
+
 def resolve_rs_wsuha_p_usb(
-    by_id_path: Path,
+    port_path: Path,
     *,
     sys_class_tty: Path = Path("/sys/class/tty"),
+    dev_root: Path = Path("/dev"),
 ) -> UsbDevice:
-    """Resolve and verify the USB parent of a stable ``/dev/serial/by-id`` path."""
+    """Verify the selected port (explicit or automatic) before privileged recovery.
 
-    resolved_port = by_id_path.resolve(strict=True)
-    tty_name = resolved_port.name
-    start = (sys_class_tty / tty_name / "device").resolve(strict=True)
-    for candidate in (start, *start.parents):
-        vendor_file = candidate / "idVendor"
-        product_file = candidate / "idProduct"
-        serial_file = candidate / "serial"
-        if not (vendor_file.is_file() and product_file.is_file() and serial_file.is_file()):
-            continue
-        vendor = vendor_file.read_text(encoding="ascii").strip().lower()
-        product = product_file.read_text(encoding="ascii").strip().lower()
-        serial = serial_file.read_text(encoding="ascii").strip()
-        if (vendor, product, serial) != (
-            RS_WSUHA_P_VENDOR,
-            RS_WSUHA_P_PRODUCT,
-            RS_WSUHA_P_SERIAL,
-        ):
-            raise UsbRecoveryError(
-                "RS-WSUHA-P USB identity does not match the approved FTDI device."
-            )
-        return UsbDevice(by_id_path, candidate, vendor, product, serial)
-    raise UsbRecoveryError("Could not resolve a USB parent for the configured serial port.")
+    Linux pyserial reads USB product and serial from these same sysfs attributes.
+    Generic FTDI descriptors alone cannot establish the B-route model identity.
+    """
+    try:
+        resolved_port = port_path.resolve(strict=True)
+        if resolved_port.parent != dev_root or not re.fullmatch(r"ttyUSB[0-9]+", resolved_port.name):
+            raise UsbRecoveryError("Recovery requires a /dev/ttyUSB serial port.")
+        sys_root = sys_class_tty.parent.parent
+        tty = sys_class_tty / resolved_port.name
+        _verify_tty_node(resolved_port, tty)
+        candidate = _usb_parent(tty, sys_root)
+        vendor = (candidate / "idVendor").read_text(encoding="ascii").strip().lower()
+        product = (candidate / "idProduct").read_text(encoding="ascii").strip().lower()
+        serial = (candidate / "serial").read_text(encoding="ascii").rstrip("\n")
+        label = (candidate / "product").read_text(encoding="ascii").casefold()
+        if ((vendor, product) != (RS_WSUHA_P_VENDOR, RS_WSUHA_P_PRODUCT)
+                or "rs-wsuha-p" not in label
+                or not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}", serial)):
+            raise UsbRecoveryError("USB recovery model or transport identity is unverified.")
+        matches = set()
+        for entry in sys_class_tty.glob("ttyUSB*"):
+            parent = _usb_parent(entry, sys_root)
+            serial_file = parent / "serial"
+            if serial_file.is_file() and serial_file.read_text(encoding="ascii").rstrip("\n") == serial:
+                matches.add(parent)
+        if matches != {candidate}:
+            raise UsbRecoveryError("USB recovery serial identity is ambiguous.")
+        return UsbDevice(port_path, candidate, vendor, product, serial)
+    except (OSError, ValueError, UnicodeError) as exc:
+        raise UsbRecoveryError("Cannot verify USB recovery identity from the selected port.") from exc
 
 
 class RecoveryStateStore:
@@ -134,19 +169,33 @@ def usb_reset_allowed(
 
 
 class RsWsuhaPUsbResetter:
-    """Invoke the root-owned, no-argument reset helper after identity verification."""
+    """Pass only the verified serial to a helper that independently checks sysfs."""
 
-    def __init__(self, by_id_path: Path, command: Path) -> None:
-        self._by_id_path = by_id_path
+    def __init__(self, port_path: Path, command: Path) -> None:
+        self._port_path = port_path
         self._command = command
 
     def reset(self) -> UsbDevice:
-        device = resolve_rs_wsuha_p_usb(self._by_id_path)
+        device = resolve_rs_wsuha_p_usb(self._port_path)
         try:
-            subprocess.run(("sudo", "-n", str(self._command)), check=True, timeout=45)
+            subprocess.run(("sudo", "-n", str(self._command), device.serial), check=True, timeout=45)
         except (OSError, subprocess.SubprocessError) as exc:
             raise UsbRecoveryError("RS-WSUHA-P USB reset helper failed.") from exc
-        return device
+        # devtmpfs may expose the tty before udev recreates its by-id symlink.
+        # Wait only for missing nodes; never retry a different/ambiguous identity.
+        for attempt in range(15):
+            try:
+                returned = resolve_rs_wsuha_p_usb(self._port_path)
+                break
+            except UsbRecoveryError as exc:
+                if not isinstance(exc.__cause__, FileNotFoundError) or attempt == 14:
+                    raise
+                time.sleep(1)
+        if (returned.vendor, returned.product, returned.serial) != (
+            device.vendor, device.product, device.serial,
+        ):
+            raise UsbRecoveryError("USB identity changed after reset.")
+        return returned
 
 
 class GatewayVbusCycler:

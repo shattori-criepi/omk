@@ -1060,7 +1060,7 @@ def test_skreset_timeout_falls_through_to_usb_reset(monkeypatch: pytest.MonkeyPa
         def __init__(self, *_args: object) -> None:
             pass
         def reset(self) -> SimpleNamespace:
-            return SimpleNamespace(vendor="0403", product="6015", serial="DM006AOS", sysfs_path="/sys/test")
+            return SimpleNamespace(vendor="0403", product="6015", serial="TEST_ADAPTER_A", sysfs_path="/sys/test")
     monkeypatch.setattr(cli, "RsWsuhaPUsbResetter", Resetter)
     monkeypatch.setattr(cli, "_configure_after_usb_reset", lambda *_args: AdapterConfigurationResult({}, {}, {}, (), True))
     state = State()
@@ -1102,7 +1102,7 @@ def _vbus_recovery_inputs() -> tuple[object, object, object, object]:
             pass
 
         def reset(self) -> SimpleNamespace:
-            return SimpleNamespace(vendor="0403", product="6015", serial="DM006AOS", sysfs_path="/sys/test")
+            return SimpleNamespace(vendor="0403", product="6015", serial="TEST_ADAPTER_B", sysfs_path="/sys/test")
 
     return Adapter(), Stop(), State(), Resetter
 
