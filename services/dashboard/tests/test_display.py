@@ -1878,16 +1878,18 @@ global.window = {setInterval() {}, confirm() { return false; }};
 global.fetch = async () => ({ok: true, json: async () => ({sensors: [], nodes: []})});
 vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8"));
 const candidate = card({vendor: "switchbot", model: "presence_sensor", sensor_type: "motion", rssi: -42, identifier_suffix: "7fc8", received_at: "now", values: {motion_state: 1, battery_percent: 100, light_level: 12}}, true);
+const unknownCandidate = card({vendor: "switchbot", model: "unknown_switchbot", sensor_type: "unknown", rssi: -60, identifier_suffix: "abcd", received_at: "later", values: {}}, true);
 const registeredMarkup = registeredCard({device_key: "switchbot:b0e9fee87fc8", sensor_id: "motion-002", display_name: "玄関", location: "玄関", vendor: "switchbot", model: "presence_sensor", sensor_type: "motion", online: true, status: "normal", latest: {received_at: "now", rssi: -42, values: {motion_state: 0, battery_percent: 87, light_level: 7}}});
 const missingMarkup = registeredCard({device_key: "switchbot:b0e9fee87fc8", sensor_id: "motion-002", display_name: "玄関", location: "", vendor: "switchbot", model: "presence_sensor", sensor_type: "motion", online: false, status: "offline", latest: {received_at: "now", rssi: -42, values: {motion_state: 0}}});
 console.log(JSON.stringify({
   candidate: ["SwitchBot Presence Sensor Pro", "RSSI -42 dBm", "検出", "バッテリー: <strong>100%</strong>", "照度レベル: <strong>12</strong>", "このセンサを登録"].every(value => candidate.includes(value)),
+  unknown: ["未対応のSwitchBot機器", "この機器は現在OMKで対応していないため登録できません。", "RSSI -60 dBm", "ID …ABCD", "later"].every(value => unknownCandidate.includes(value)) && !unknownCandidate.includes("このセンサを登録") && !unknownCandidate.includes("値の仕様を確認中"),
   registered: ["motion-002", "玄関 · switchbot Presence Sensor Pro", "未検出", "バッテリー</span><strong>87</strong><small>%", "照度レベル</span><strong>7</strong>", "正常"].every(value => registeredMarkup.includes(value)),
   missing: missingMarkup.includes("未検出") && !missingMarkup.includes("undefined") && !missingMarkup.includes("NaN"),
 }));
 '''
     completed = subprocess.run(["node", "-e", harness, str(javascript_path)], check=True, capture_output=True, text=True)
-    assert json.loads(completed.stdout) == {"candidate": True, "registered": True, "missing": True}
+    assert json.loads(completed.stdout) == {"candidate": True, "unknown": True, "registered": True, "missing": True}
 
 
 def test_broute_status_proxy_returns_only_safe_status(monkeypatch: pytest.MonkeyPatch) -> None:

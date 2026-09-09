@@ -407,6 +407,8 @@ class BleManager:
             raise ValueError("device was not found in the current setup scan")
         if candidate.model == "omk_node":
             raise ValueError("OMK Nodeの登録とWi-Fi provisioningはまだ実装されていません")
+        if candidate.model == "unknown_switchbot" or candidate.sensor_type == "unknown":
+            raise ValueError("このSwitchBot機器は現在OMKで対応していないため登録できません")
         sensor = RegisteredSensor(
             device_key=candidate.device_key, sensor_id=request["sensor_id"], sensor_type=candidate.sensor_type,
             vendor=candidate.vendor, model=candidate.model, location=request.get("location", ""),
@@ -425,6 +427,8 @@ class BleManager:
             raise ValueError("device was not found in the current setup scan")
         if candidate.model == "omk_node":
             raise ValueError("OMK Nodeの登録とWi-Fi provisioningはまだ実装されていません")
+        if candidate.model == "unknown_switchbot" or candidate.sensor_type == "unknown":
+            raise ValueError("このSwitchBot機器は現在OMKで対応しているセンサではありません")
         prefix = {
             "temperature_humidity_sensor": "th", "waterproof_sensor": "th", "co2_sensor": "co2",
             "motion_sensor": "motion", "presence_sensor": "motion", "contact_sensor": "contact", "plug_sensor": "plug",

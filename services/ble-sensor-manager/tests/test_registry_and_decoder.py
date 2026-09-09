@@ -331,6 +331,24 @@ def test_setup_candidate_order_is_discovery_order_and_updates_in_place(tmp_path:
     assert candidates[0]["values"] == {"temperature_c": 22.0}
 
 
+def test_unknown_switchbot_candidate_remains_visible_but_cannot_be_registered(tmp_path: Path) -> None:
+    manager = BleManager(SensorRegistry(tmp_path / "sensors.json"))
+    manager.scanning = True
+    unknown = DecodedAdvertisement("switchbot:unknown", "switchbot", "unknown_switchbot", "unknown", -60, "now", {})
+    known = _candidate("switchbot:known")
+    manager.record_advertisement(unknown)
+    manager.record_advertisement(known)
+
+    assert [item["device_key"] for item in manager.candidate_list()] == ["switchbot:unknown", "switchbot:known"]
+    with pytest.raises(ValueError, match="対応していない"):
+        manager.register({"device_key": unknown.device_key, "sensor_id": "sensor-001", "display_name": "未対応"})
+    with pytest.raises(ValueError, match="対応しているセンサではありません"):
+        manager.suggested_sensor_id(unknown.device_key)
+
+    registered = manager.register({"device_key": known.device_key, "sensor_id": "th-001", "display_name": "対応済み"})
+    assert registered.device_key == known.device_key
+
+
 def test_latest_advertisement_replaces_all_candidate_data_without_reordering(tmp_path: Path) -> None:
     manager = BleManager(SensorRegistry(tmp_path / "sensors.json"))
     manager.scanning = True
