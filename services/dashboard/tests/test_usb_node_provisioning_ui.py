@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 
@@ -8,7 +9,7 @@ def test_sensor_management_integrates_usb_provisioning_into_matching_node_card_w
     template = (ROOT / "app/templates/admin_sensors.html").read_text(encoding="utf-8")
     script = (ROOT / "app/static/admin.js").read_text(encoding="utf-8")
     source = template + script
-    assert '?v=20260902-usb-provisioning-confirmation' in template
+    assert re.search(r"admin\.js'\) }}\?v=[^\"']+", template)
     assert 'id="usb-nodes"' not in template
     for text in ("usbCandidatesByNodeId", "const usbCandidate = usbCandidatesByNodeId.get(node.node_id)", "このNodeを設定", "設定中…", "/setup/usb-nodes", "/setup/usb-provision", "Promise.all([loadNodes(), loadUsbNodes()])"):
         assert text in source

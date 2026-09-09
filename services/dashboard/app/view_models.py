@@ -160,8 +160,8 @@ def get_display_view_model(
         grid_flow_label=grid_label,
         grid_flow_kw=grid_power,
         grid_flow=grid_direction,
-        purchased_today_kwh=f"{totals.import_energy_kwh:.1f}",
-        sold_today_kwh=f"{totals.export_energy_kwh:.1f}",
+        purchased_today_kwh=format_optional(totals.import_energy_kwh, 1),
+        sold_today_kwh=format_optional(totals.export_energy_kwh, 1),
         temperature_c=format_for_freshness(
             sen66.temperature_c if sen66 else None, 1, sen66_freshness
         ),

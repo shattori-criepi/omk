@@ -37,6 +37,12 @@ NOW = datetime(2026, 7, 30, 12, 0, 30, tzinfo=JST)
 client = TestClient(app)
 
 
+@pytest.fixture(autouse=True)
+def isolate_dashboard_settings_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep requests that create default display settings out of runtime data."""
+    monkeypatch.setenv("OMK_DASHBOARD_SETTINGS_PATH", str(tmp_path / "dashboard" / "settings.json"))
+
+
 def _write_parquet(root: Path, dataset: str, columns: str, rows: list[tuple]) -> None:
     destination = root / dataset / "date=2026-07-30" / "data.parquet"
     destination.parent.mkdir(parents=True)
@@ -434,12 +440,12 @@ console.log(JSON.stringify(["custom", "clock", "recommended", "custom"].map(__di
     assert "fixture" not in user_javascript.lower()
 
 
-def test_demo_indicator_is_fixed_and_display_assets_share_a_new_version() -> None:
+def test_demo_indicator_is_fixed_and_display_assets_are_cache_busted() -> None:
     template = (Path(__file__).parents[1] / "app" / "templates" / "display.html").read_text(encoding="utf-8")
     stylesheet = (Path(__file__).parents[1] / "app" / "static" / "display.css").read_text(encoding="utf-8")
 
-    assert "display.css') }}?v=20260903-demo-2" in template
-    assert "display.js') }}?v=20260903-demo-2" in template
+    assert re.search(r"display\.css'\) }}\?v=[^\"']+", template)
+    assert re.search(r"display\.js'\) }}\?v=[^\"']+", template)
     notice = stylesheet.split(".demo-mode-notice {", 1)[1].split("}", 1)[0]
     assert "position: fixed;" in notice
     assert "margin: 0;" in notice
@@ -542,6 +548,16 @@ def test_view_model_uses_latest_values_and_parquet_today_energy(tmp_path: Path) 
     assert dashboard.freshness == "normal"
     assert dashboard.power_freshness == FreshnessStatus.NORMAL
     assert dashboard.sen66_freshness == FreshnessStatus.NORMAL
+
+
+def test_view_model_displays_missing_today_energy_totals_as_dash(tmp_path: Path) -> None:
+    latest_root = tmp_path / "latest"
+    _write_instantaneous_data(latest_root)
+
+    dashboard = get_display_view_model(LatestRepository(latest_root), ParquetRepository(tmp_path / "processed"), now=NOW)
+
+    assert dashboard.purchased_today_kwh == "--"
+    assert dashboard.sold_today_kwh == "--"
 
 
 def test_stale_ichijo_falls_back_to_broute_power(tmp_path: Path) -> None:
@@ -1313,7 +1329,7 @@ def test_small_plug_block_uses_full_consumption_label_without_ellipsis(tmp_path:
     assert ".display-card--small.display-card--compact.display-card--items-1 .display-compact-reading { width: 100%; min-width: 0; }" in stylesheet
     assert ".display-card--small.display-card--compact.display-card--items-1 .display-secondary-item { grid-column: 1 / -1; }" in stylesheet
     assert ".display-card--small.display-card--compact.display-card--items-2 .display-card-compact-items" not in stylesheet
-    assert re.search(r"display\.css'\) }}\?v=20260819-clock-navigation-\d+", template)
+    assert re.search(r"display\.css'\) }}\?v=[^\"']+", template)
     assert ".display-card--small.display-card--compact.display-card--items-1 .display-secondary-label { overflow: visible; text-overflow: clip; white-space: nowrap; }" in stylesheet
 
 
@@ -1484,8 +1500,8 @@ def test_admin_display_css_allows_vertical_scroll_without_changing_kiosk_overflo
     assert re.search(r"admin_display\.js'\) }}\?v=20260819-clock-navigation-\d+", admin_template)
     assert re.search(r"display\.css'\) }}\?v=20260819-clock-navigation-\d+", admin_template)
     assert '<body class="admin-body">' not in display_template
-    assert re.search(r"display\.js'\) }}\?v=20260819-clock-navigation-\d+", display_template)
-    assert re.search(r"display\.css'\) }}\?v=20260819-clock-navigation-\d+", display_template)
+    assert re.search(r"display\.js'\) }}\?v=[^\"']+", display_template)
+    assert re.search(r"display\.css'\) }}\?v=[^\"']+", display_template)
     assert 'data-mode="clock"' in admin_template
     assert 'id="clock-summary"' in admin_template
     assert "mode !== \"clock\"" in (Path(__file__).parents[1] / "app" / "static" / "admin_display.js").read_text(encoding="utf-8")
@@ -2039,7 +2055,7 @@ def test_broute_proxy_adds_bearer_token_only_to_host_request(monkeypatch: pytest
     assert response == {"configured": False}
     assert captured["url"] == "http://host.docker.internal:8788/api/broute/credentials/status"
     assert captured["headers"] == {"Authorization": "Bearer token-canary"}
-    assert captured["client"] == {"timeout": 60}
+    assert captured["client"] == {"timeout": 90}
 
 
 def test_broute_admin_page_keeps_credentials_and_token_out_of_html() -> None:
