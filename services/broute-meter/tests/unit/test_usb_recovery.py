@@ -10,6 +10,7 @@ from broute_meter.usb_recovery import (
     RS_WSUHA_P_VENDOR,
     RecoveryStateStore,
     RsWsuhaPUsbResetter,
+    UsbDeviceAbsent,
     UsbRecoveryError,
     resolve_rs_wsuha_p_usb,
     usb_reset_allowed,
@@ -120,6 +121,7 @@ def test_resetter_checks_trust_and_calls_no_argument_helper(tmp_path, resolve, m
     port, _ = _usb_fixture(tmp_path)
     device = resolve(port)
     monkeypatch.setattr("broute_meter.usb_recovery.resolve_rs_wsuha_p_usb", lambda _: device)
+    monkeypatch.setattr("broute_meter.usb_recovery.resolve_trusted_usb", lambda *_: device)
     run = Mock()
     monkeypatch.setattr("broute_meter.usb_recovery.subprocess.run", run)
     assert RsWsuhaPUsbResetter(port, Path("/root/helper")).reset() == device
@@ -155,7 +157,9 @@ def test_resetter_rejects_changed_serial_after_helper(tmp_path, resolve, monkeyp
     port, _ = _usb_fixture(tmp_path)
     device = resolve(port)
     monkeypatch.setattr("broute_meter.usb_recovery.resolve_rs_wsuha_p_usb",
-                        Mock(side_effect=[device, replace(device, serial="TEST_OTHER")]))
+                        lambda _: device)
+    monkeypatch.setattr("broute_meter.usb_recovery.resolve_trusted_usb",
+                        lambda *_: replace(device, serial="TEST_OTHER"))
     monkeypatch.setattr("broute_meter.usb_recovery.subprocess.run", Mock())
     with pytest.raises(UsbRecoveryError, match="changed after"):
         RsWsuhaPUsbResetter(port, Path("/root/helper")).reset()
@@ -165,10 +169,11 @@ def test_resetter_rejects_changed_serial_after_helper(tmp_path, resolve, monkeyp
 def test_resetter_waits_boundedly_for_udev_by_id(tmp_path, resolve, monkeypatch, reappears):
     port, _ = _usb_fixture(tmp_path)
     device = resolve(port)
-    missing = UsbRecoveryError("Missing by-id")
+    missing = UsbDeviceAbsent("Missing USB tty")
     missing.__cause__ = FileNotFoundError()
-    results = [device, missing, device] if reappears else [device] + [missing] * 15
-    monkeypatch.setattr("broute_meter.usb_recovery.resolve_rs_wsuha_p_usb",
+    results = [missing, device] if reappears else [missing] * 15
+    monkeypatch.setattr("broute_meter.usb_recovery.resolve_rs_wsuha_p_usb", lambda _: device)
+    monkeypatch.setattr("broute_meter.usb_recovery.resolve_trusted_usb",
                         Mock(side_effect=results))
     monkeypatch.setattr("broute_meter.usb_recovery.subprocess.run", Mock())
     sleep = Mock()

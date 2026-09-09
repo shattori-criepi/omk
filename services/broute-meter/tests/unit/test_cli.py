@@ -1959,3 +1959,70 @@ def test_reconnect_failure_does_not_write_connected_runtime_status(
         "connection_error",
         "stopped",
     ]
+
+
+@pytest.mark.parametrize("attempted", [True, False])
+def test_vbus_escalation_after_failed_logical_attempt_only(monkeypatch, attempted):
+    from broute_meter.usb_recovery import UsbRecoveryError, UsbResetAttemptError
+    adapter, stop, state, resetter = _vbus_recovery_inputs()
+    error = (UsbResetAttemptError("failed attempt") if attempted
+             else UsbRecoveryError("unsafe identity"))
+    monkeypatch.setattr(resetter, "reset", Mock(side_effect=error))
+    cycler = Mock()
+    monkeypatch.setattr(cli, "RsWsuhaPUsbResetter", resetter)
+    monkeypatch.setattr(cli, "GatewayVbusCycler", lambda *_: cycler)
+    monkeypatch.setattr(cli, "_wait_for_vbus_device", lambda *_: True)
+    result = AdapterConfigurationResult({}, {}, {}, (), True)
+    configure = Mock(return_value=result)
+    monkeypatch.setattr(cli, "_configure_after_usb_reset", configure)
+    config = SimpleNamespace(adapter=SimpleNamespace(expected_settings={}, auto_configure=True))
+    if attempted:
+        assert cli._configure_adapter_with_usb_recovery(
+            adapter, config, "/dev/ttyUSB9", state, stop, logging.getLogger("test")) is result
+        cycler.cycle.assert_called_once()
+        configure.assert_called_once()
+    else:
+        with pytest.raises(AdapterResponseTimeoutError):
+            cli._configure_adapter_with_usb_recovery(
+                adapter, config, "/dev/ttyUSB9", state, stop, logging.getLogger("test"))
+        cycler.cycle.assert_not_called()
+        configure.assert_not_called()
+
+
+def test_run_refuses_unreadable_trust_before_opening_adapter(monkeypatch):
+    monkeypatch.setattr(cli, "_load_application_config", lambda *_args, **_kw: AppConfig())
+    monkeypatch.setattr(cli, "_configure_command_logging", lambda *_: logging.getLogger("test"))
+    monkeypatch.setattr(cli, "_log_runtime", lambda *_: None)
+    monkeypatch.setattr(cli, "_resolve_adapter_port", lambda *_: "/dev/ttyUSB9")
+    monkeypatch.setattr(cli, "TRUSTED_IDENTITY_PATH", SimpleNamespace(
+        lstat=Mock(side_effect=PermissionError("unsafe parent"))))
+    create = Mock()
+    monkeypatch.setattr(cli, "_create_rs_wsuha_p_adapter", create)
+    with pytest.raises(cli.UsbRecoveryError, match="inspect"):
+        cli._run(SimpleNamespace())
+    create.assert_not_called()
+
+
+def test_run_shares_pinned_identity_with_runtime_adapter(monkeypatch, tmp_path):
+    identity = tmp_path / "identity"
+    identity.write_text("TEST_ADAPTER_A\n")
+    monkeypatch.setattr(cli, "TRUSTED_IDENTITY_PATH", identity)
+    monkeypatch.setattr(
+        "broute_meter.usb_recovery.read_trusted_usb_serial", lambda: "TEST_ADAPTER_A"
+    )
+    monkeypatch.setattr(cli, "_load_application_config", lambda *_args, **_kw: AppConfig())
+    monkeypatch.setattr(cli, "_configure_command_logging", lambda *_: logging.getLogger("test"))
+    monkeypatch.setattr(cli, "_log_runtime", lambda *_: None)
+    monkeypatch.setattr(cli, "_resolve_adapter_port", lambda *_: "/dev/ttyUSB9")
+
+    class StopTest(Exception):
+        pass
+
+    def create(config, port):
+        assert isinstance(port, cli.TrustedUsbPort)
+        assert port.serial == "TEST_ADAPTER_A"
+        raise StopTest
+
+    monkeypatch.setattr(cli, "_create_rs_wsuha_p_adapter", create)
+    with pytest.raises(StopTest):
+        cli._run(SimpleNamespace())

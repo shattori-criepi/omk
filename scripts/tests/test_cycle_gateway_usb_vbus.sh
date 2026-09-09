@@ -3,6 +3,10 @@ set -euo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 # shellcheck source=/dev/null
 source "$ROOT/scripts/cycle-gateway-usb-vbus.sh"
+load_usb_guard() { :; }
+read_trusted_serial() { echo TEST_ADAPTER_A; }
+lock_recovery_state() { :; }
+authorize_vbus_recovery() { :; }
 UHUBCTL=/bin/true
 calls=()
 run_uhubctl() {
@@ -73,7 +77,11 @@ trap 'rm -f -- "$trace_file"' EXIT
 bash -c '
   source "$1"
   trace="$2"
-  UHUBCTL=/bin/true
+  load_usb_guard() { :; }
+read_trusted_serial() { echo TEST_ADAPTER_A; }
+lock_recovery_state() { :; }
+authorize_vbus_recovery() { :; }
+UHUBCTL=/bin/true
   is_root() { return 0; }
   read_model() { echo "Raspberry Pi 4 Model B"; }
   run_uhubctl() {
@@ -92,7 +100,11 @@ set +e
 bash -c '
   source "$1"
   trace="$2"
-  UHUBCTL=/bin/true
+  load_usb_guard() { :; }
+read_trusted_serial() { echo TEST_ADAPTER_A; }
+lock_recovery_state() { :; }
+authorize_vbus_recovery() { :; }
+UHUBCTL=/bin/true
   is_root() { return 0; }
   read_model() { echo "Raspberry Pi 4 Model B"; }
   run_uhubctl() {

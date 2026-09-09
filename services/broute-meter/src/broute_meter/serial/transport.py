@@ -103,6 +103,7 @@ class PySerialTransport:
         baudrate: シリアル通信速度。
         timeout_seconds: 読込みおよび書込みのタイムアウト秒数。
         serial_factory: テスト時に差し替え可能なpyserial互換ファクトリ。
+        port_resolver: open前後に現在のidentityを検証し、通信先を返す関数。
     """
 
     def __init__(
@@ -111,6 +112,7 @@ class PySerialTransport:
         baudrate: int,
         timeout_seconds: float,
         serial_factory: SerialFactory | None = None,
+        port_resolver: Callable[[], str] | None = None,
     ) -> None:
         if not port.strip():
             raise ValueError("port must not be empty")
@@ -120,6 +122,7 @@ class PySerialTransport:
             raise ValueError("timeout_seconds must be finite and greater than zero")
 
         self._port = port.strip()
+        self._port_resolver = port_resolver
         self._baudrate = baudrate
         self._timeout_seconds = timeout_seconds
         self._serial_factory: SerialFactory = (
@@ -147,6 +150,8 @@ class PySerialTransport:
                 return
             self._serial = None
 
+            if self._port_resolver is not None:
+                self._port = self._port_resolver()
             try:
                 connection = self._serial_factory(
                     port=self._port,
@@ -173,6 +178,13 @@ class PySerialTransport:
                     f"シリアルポートを開けませんでした: {self._port}"
                 ) from exc
 
+            if self._port_resolver is not None:
+                try:
+                    if self._port_resolver() != self._port:
+                        raise SerialOpenError("USB port changed while opening; retry required.")
+                except Exception:
+                    connection.close()
+                    raise
             self._serial = connection
 
     def close(self) -> None:

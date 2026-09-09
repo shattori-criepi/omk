@@ -53,11 +53,14 @@ from broute_meter.serial.port_detector import (
 from broute_meter.serial.transport import PySerialTransport, SerialTimeoutError, TransportError
 from broute_meter.storage import CsvMeasurementStorage, StorageError
 from broute_meter.usb_recovery import (
-    STARTUP_RETRY_ATTEMPTS,
+    TRUSTED_IDENTITY_PATH,
     GatewayVbusCycler,
     RecoveryStateStore,
     RsWsuhaPUsbResetter,
+    TrustedUsbPort,
+    UsbDeviceAbsent,
     UsbRecoveryError,
+    UsbResetAttemptError,
     register_trusted_usb_adapter,
     resolve_rs_wsuha_p_usb,
     usb_reset_allowed,
@@ -207,6 +210,14 @@ def _run(args: argparse.Namespace) -> int:
     logger = _configure_command_logging(config)
     _log_runtime(logger, "run")
     port = _resolve_adapter_port(config)
+    try:
+        TRUSTED_IDENTITY_PATH.lstat()
+    except FileNotFoundError:
+        pass  # Unregistered normal measurement remains supported.
+    except OSError as exc:
+        raise UsbRecoveryError("Cannot inspect trusted USB registration.") from exc
+    else:
+        port = TrustedUsbPort(port)
     logger.info("runに使用するポート: %s", port)
     adapter = _create_rs_wsuha_p_adapter(config, port)
     storage = CsvMeasurementStorage(config.storage.data_directory)
@@ -402,7 +413,7 @@ def _run(args: argparse.Namespace) -> int:
 def _configure_adapter_after_adapter_presence(
     adapter: RsWsuhaPAdapter,
     config: AppConfig,
-    port: str,
+    port: str | TrustedUsbPort,
     state: RecoveryStateStore,
     stop_event: threading.Event,
     logger: logging.Logger,
@@ -461,7 +472,7 @@ def _configure_adapter_after_adapter_presence(
 def _configure_adapter_with_usb_recovery(
     adapter: RsWsuhaPAdapter,
     config: AppConfig,
-    port: str,
+    port: str | TrustedUsbPort,
     state: RecoveryStateStore,
     stop_event: threading.Event,
     logger: logging.Logger,
@@ -552,17 +563,24 @@ def _configure_adapter_with_usb_recovery(
     )
     vbus_recovered = False
     try:
-        device = resetter.reset()
-        logger.warning(
-            "RS-WSUHA-P USBリセット完了 vendor=%s product=%s",
-            device.vendor,
-            device.product,
-        )
+        reset_error = None
+        try:
+            device = resetter.reset()
+        except (UsbResetAttemptError, UsbDeviceAbsent) as exc:
+            reset_error = exc
+        if reset_error is None:
+            logger.warning(
+                "RS-WSUHA-P USBリセット完了 vendor=%s product=%s",
+                device.vendor,
+                device.product,
+            )
         if stop_event.wait(ADAPTER_SETTLE_SECONDS):
             raise AdapterResponseTimeoutError(
                 "終了要求によりUSBリセット後の起動待機を中止しました。"
             )
         try:
+            if reset_error is not None:
+                raise reset_error
             result = _configure_after_usb_reset(adapter, config, stop_event)
         except (AdapterError, SerialTimeoutError, UsbRecoveryError) as post_reset_error:
             if getattr(state, "vbus_cooldown_active", lambda **_kwargs: False)(
@@ -606,8 +624,8 @@ def _configure_adapter_with_usb_recovery(
     return result
 
 
-def _wait_for_vbus_device(port: str, stop_event: threading.Event) -> bool:
-    """Wait a bounded interval for the stable RS-WSUHA-P by-id path."""
+def _wait_for_vbus_device(port: str | TrustedUsbPort, stop_event: threading.Event) -> bool:
+    """Wait for the runtime trusted identity (not the startup tty name)."""
     deadline = time.monotonic() + VBUS_DEVICE_REAPPEAR_TIMEOUT_SECONDS
     while not _adapter_device_present(port):
         remaining = deadline - time.monotonic()
@@ -659,7 +677,7 @@ def _connect_broute_until_ready(
     recovery_state: RecoveryStateStore | None = None,
     runtime_status: RuntimeStatusStore | None = None,
     retry_request: RetryRequestStore | None = None,
-    port: str | None = None,
+    port: str | TrustedUsbPort | None = None,
 ) -> BRouteConnection | None:
     """終了要求までBルート接続シーケンス全体を再試行する。
 
@@ -790,19 +808,22 @@ def _connection_retry_wait_seconds(configured_seconds: float, attempt: int) -> f
     return max(configured_seconds, EXTENDED_CONNECTION_RETRY_WAIT_SECONDS)
 
 
-def _adapter_device_present(port: str) -> bool:
+def _adapter_device_present(port: str | TrustedUsbPort) -> bool:
     """Return whether an absolute serial device path is currently present.
 
     Non-path port names remain supported for development platforms where a
     device node does not exist (for example ``COM5``).
     """
 
-    path = Path(port)
+    try:
+        path = Path(port)
+    except UsbDeviceAbsent:
+        return False
     return not path.is_absolute() or path.exists()
 
 
 def _wait_for_adapter_device(
-    port: str,
+    port: str | TrustedUsbPort,
     runtime_status: RuntimeStatusStore,
     stop_event: threading.Event,
     logger: logging.Logger,
@@ -1062,11 +1083,12 @@ def _resolve_adapter_port(config: AppConfig) -> str:
     return resolve_serial_port(None, find_rs_wsuha_p_ports(ports))
 
 
-def _create_rs_wsuha_p_adapter(config: AppConfig, port: str) -> RsWsuhaPAdapter:
+def _create_rs_wsuha_p_adapter(config: AppConfig, port: str | TrustedUsbPort) -> RsWsuhaPAdapter:
     """設定済みのpyserial通信路を持つRS-WSUHA-Pアダプターを作る。"""
 
     transport = PySerialTransport(
-        port=port,
+        port=str(port),
+        port_resolver=port.resolve if isinstance(port, TrustedUsbPort) else None,
         baudrate=config.serial.baudrate,
         timeout_seconds=config.serial.timeout_seconds,
     )

@@ -65,7 +65,7 @@ render_unit() {
 
 render_sudoers() {
   # Empty argument clause restricts reset to no arguments; registration is NOT granted.
-  printf '%s ALL=(root) NOPASSWD: %s "", %s\n' "${TARGET_USER}" "${HELPER_DEST}" "${VBUS_HELPER_DEST}"
+  printf '%s ALL=(root) NOPASSWD: %s "", %s ""\n' "${TARGET_USER}" "${HELPER_DEST}" "${VBUS_HELPER_DEST}"
 }
 
 preflight() {

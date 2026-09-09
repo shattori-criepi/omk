@@ -39,14 +39,19 @@ def fake(tmp_path):
     identity.parent.mkdir(parents=True)
     identity.write_text("TEST_ADAPTER_A\n")
     identity.chmod(0o644)
+    (tmp_path / "run").mkdir()
     return tmp_path
 
 
-def run(root, args=(), extra=""):
+def run(root, args=(), extra="", helper=HELPER):
     # Overrides exist only in this sourced test process, not the installed helper.
     return subprocess.run(
         ["bash", "-c", '''
 source "$1"
+main() { reset_main "$@"; }
+if [[ "$3" != "$1" ]]; then source "$3"; fi
+load_usb_guard() { :; }
+STATE_DIR="$2/run/omk-broute-usb"
 SYS_ROOT="$2/sys"
 DEV_ROOT="$2/dev"
 IDENTITY_FILE="$2/etc/omk/broute-usb-recovery.conf"
@@ -60,8 +65,8 @@ stat() {
 }
 is_root() { return 0; }
 pause() { :; }
-shift 2
-''' + extra + '\nmain "$@"', "test", str(HELPER), str(root), *args],
+shift 3
+''' + extra + '\nmain "$@"', "test", str(HELPER), str(root), str(helper), *args],
         capture_output=True, text=True, timeout=5,
     )
 

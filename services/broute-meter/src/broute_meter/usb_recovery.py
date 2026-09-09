@@ -152,17 +152,110 @@ def resolve_rs_wsuha_p_usb(
         if ((vendor, product) != (RS_WSUHA_P_VENDOR, RS_WSUHA_P_PRODUCT)
                 or not re.fullmatch(SERIAL_PATTERN, serial)):
             raise UsbRecoveryError("USB recovery transport identity is unverified.")
-        matches = set()
+        matches = []
         for entry in sys_class_tty.glob("ttyUSB*"):
             parent = _usb_parent(entry, sys_root)
             serial_file = parent / "serial"
             if serial_file.is_file() and serial_file.read_text(encoding="ascii").rstrip("\n") == serial:
-                matches.add(parent)
-        if matches != {candidate}:
+                matches.append(parent)
+        if (matches != [candidate]
+                or _matching_usb_parents(serial, sys_root) != [candidate]):
             raise UsbRecoveryError("USB recovery serial identity is ambiguous.")
         return UsbDevice(port_path, candidate, vendor, product, serial)
     except (OSError, ValueError, UnicodeError) as exc:
         raise UsbRecoveryError("Cannot verify USB recovery identity from the selected port.") from exc
+
+
+class UsbDeviceAbsent(UsbRecoveryError):
+    """No matching USB parent, or its tty has not reappeared yet."""
+
+
+class UsbResetAttemptError(UsbRecoveryError):
+    """The guarded logical reset was invoked but did not complete."""
+
+
+def _matching_usb_parents(serial: str, sys_root: Path) -> list[Path]:
+    parents = []
+    for entry in (sys_root / "bus/usb/devices").glob("*"):
+        if not re.fullmatch(r"[0-9]+-[0-9]+(?:\.[0-9]+)*", entry.name):
+            continue
+        serial_file = entry / "serial"
+        if serial_file.is_file() and serial_file.read_text(encoding="ascii").rstrip("\n") == serial:
+            parent = entry.resolve(strict=True)
+            if not parent.is_relative_to(sys_root / "devices") or parent.name != entry.name:
+                raise UsbRecoveryError("Trusted USB parent is not canonical.")
+            parents.append(parent)
+    return parents
+
+
+def resolve_trusted_usb(
+    serial: str,
+    preferred: Path,
+    *,
+    sys_class_tty: Path = Path("/sys/class/tty"),
+    dev_root: Path = Path("/dev"),
+) -> UsbDevice:
+    """Find one trusted parent AND one tty, independently of the old port name.
+
+    Count USB parents even without tty children: a duplicate serial must never
+    become invisible merely because its driver has not bound yet.
+    """
+    sys_root = sys_class_tty.parent.parent
+    try:
+        parents = _matching_usb_parents(serial, sys_root)
+        if not parents:
+            raise UsbDeviceAbsent("Trusted USB adapter is absent.")
+        if len(parents) != 1:
+            raise UsbRecoveryError("Trusted USB identity is ambiguous.")
+        parent = parents[0]
+        transport = tuple((parent / field).read_text(encoding="ascii").strip().lower()
+                          for field in ("idVendor", "idProduct"))
+        if transport != (RS_WSUHA_P_VENDOR, RS_WSUHA_P_PRODUCT):
+            raise UsbRecoveryError("Trusted USB transport guard mismatch.")
+        ttys = [entry for entry in sys_class_tty.glob("ttyUSB*")
+                if _usb_parent(entry, sys_root) == parent]
+        if not ttys:
+            raise UsbDeviceAbsent("Trusted USB tty has not reappeared.")
+        if len(ttys) != 1:
+            raise UsbRecoveryError("Trusted USB tty is ambiguous.")
+        port = dev_root / ttys[0].name
+        if not port.exists():
+            raise UsbDeviceAbsent("Trusted USB device node has not reappeared.")
+        device = resolve_rs_wsuha_p_usb(port, sys_class_tty=sys_class_tty, dev_root=dev_root)
+        if device.serial != serial or device.sysfs_path != parent:
+            raise UsbRecoveryError("Trusted USB identity changed during resolution.")
+        # Prefer only a verified by-id alias. A stale alias never selects a device.
+        aliases = [preferred] if preferred.parent == dev_root / "serial/by-id" else []
+        aliases += sorted((dev_root / "serial/by-id").glob("*"))
+        for alias in aliases:
+            if alias.is_symlink() and alias.resolve() == port:
+                return UsbDevice(alias, parent, device.vendor, device.product, serial)
+        return device
+    except (OSError, ValueError, UnicodeError) as exc:
+        raise UsbRecoveryError("Cannot verify trusted USB correspondence.") from exc
+
+
+class TrustedUsbPort(os.PathLike[str]):
+    """Runtime identity, pinned at startup; every path use resolves it anew.
+
+    This object is shared by presence waits and the transport's open callback,
+    so neither retries nor PANA reconnection can fall back to the original tty.
+    """
+
+    def __init__(self, preferred: str) -> None:
+        self.preferred = Path(preferred)
+        self.serial = read_trusted_usb_serial()
+
+    def __str__(self) -> str:
+        return str(self.preferred)
+
+    def __fspath__(self) -> str:
+        return self.resolve()
+
+    def resolve(self) -> str:
+        if read_trusted_usb_serial() != self.serial:
+            raise UsbRecoveryError("Trusted USB registration changed; restart required.")
+        return str(resolve_trusted_usb(self.serial, self.preferred).port_path)
 
 
 class RecoveryStateStore:
@@ -250,20 +343,16 @@ class RsWsuhaPUsbResetter:
         try:
             subprocess.run(("sudo", "-n", str(self._command)), check=True, timeout=45)
         except (OSError, subprocess.SubprocessError) as exc:
-            raise UsbRecoveryError("RS-WSUHA-P USB reset helper failed.") from exc
-        # devtmpfs may expose the tty before udev recreates its by-id symlink.
-        # Wait only for missing nodes; never retry a different/ambiguous identity.
+            raise UsbResetAttemptError("RS-WSUHA-P USB reset helper failed.") from exc
         for attempt in range(15):
             try:
-                returned = resolve_rs_wsuha_p_usb(self._port_path)
+                returned = resolve_trusted_usb(trusted_serial, self._port_path)
                 break
-            except UsbRecoveryError as exc:
-                if not isinstance(exc.__cause__, FileNotFoundError) or attempt == 14:
+            except UsbDeviceAbsent:
+                if attempt == 14:
                     raise
                 time.sleep(1)
-        if (returned.vendor, returned.product, returned.serial) != (
-            device.vendor, device.product, device.serial,
-        ):
+        if returned.serial != trusted_serial:
             raise UsbRecoveryError("USB identity changed after reset.")
         return returned
 

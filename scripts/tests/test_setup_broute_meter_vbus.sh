@@ -9,7 +9,7 @@ SETUP="$ROOT/scripts/setup-broute-meter.sh"
 source "$SETUP"
 
 sudoers="$(render_sudoers)"
-expected="${TARGET_USER} ALL=(root) NOPASSWD: ${HELPER_DEST} \"\", ${VBUS_HELPER_DEST}"
+expected="${TARGET_USER} ALL=(root) NOPASSWD: ${HELPER_DEST} \"\", ${VBUS_HELPER_DEST} \"\""
 [[ "$sudoers" == "$expected" ]]
 [[ "$sudoers" != *'/usr/sbin/uhubctl'* ]]
 
