@@ -1,6 +1,7 @@
 bleak==1.1.1
 cryptography==44.0.2
 fastapi==0.141.1
+pydantic==2.13.5
 paho-mqtt==2.1.0
 protobuf==5.29.4
 uvicorn[standard]==0.52.4
