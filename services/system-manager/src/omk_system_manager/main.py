@@ -128,6 +128,8 @@ USB_NODE_MESSAGES = {
     "node_not_available": "対象のUSB接続Nodeを確認できません。接続を確認して再読み込みしてください。",
     "gateway_credential_unavailable": "GatewayのWi-Fi設定を取得できませんでした。",
     "set_wifi_failed": "NodeへWi-Fi設定を送信できませんでした。",
+    "unsupported_usb_protocol": "Nodeのfirmwareを更新してからUSB設定をやり直してください。",
+    "ambiguous_node_identity": "複数のUSB機器が同じNode IDを返しました。接続を確認してください。",
     "node_identity_changed": "対象Nodeの確認に失敗しました。再読み込みしてやり直してください。",
     "mqtt_registration_timeout": "Nodeの再起動後のMQTT登録を確認できませんでした。",
 }
@@ -324,7 +326,11 @@ def create_app(
         # polling is cache-only and never opens the same serial device.
         if operation_lock.locked() or not serial_lock.acquire(blocking=False):
             return {"nodes": request.app.state.usb_node_candidates_cache, "busy": True}
-        candidates = scan_usb_candidates_with_serial_lock(serial_lock, usb_candidates)
+        try:
+            candidates = scan_usb_candidates_with_serial_lock(serial_lock, usb_candidates)
+        except ProvisioningError as error:
+            request.app.state.usb_node_candidates_cache = []
+            raise HTTPException(status_code=422, detail=USB_NODE_MESSAGES.get(error.code, "USB接続Nodeを確認できませんでした。")) from None
         request.app.state.usb_node_candidates_cache = candidates
         return {"nodes": candidates, "busy": False}
 

@@ -476,3 +476,40 @@ def test_retry_request_is_rejected_before_extended_retry_wait(tmp_path: Path) ->
 
     assert response.status_code == 409
     assert not (tmp_path / "retry-request").exists()
+
+
+def test_usb_duplicate_identity_clears_cache_and_releases_scan_lock(tmp_path, monkeypatch):
+    import omk_system_manager.main as manager_main
+    from omk_system_manager.node_provisioning import ProvisioningError
+    def ambiguous(): raise ProvisioningError("ambiguous_node_identity")
+    monkeypatch.setattr(manager_main, "usb_candidates", ambiguous)
+    with client_for(tmp_path) as client:
+        client.app.state.usb_node_candidates_cache = [{"device": "/dev/ttyACM0", "node_id": "020000000001"}]
+        response = client.get("/api/nodes/usb-candidates", headers=headers())
+        assert response.status_code == 422
+        assert client.app.state.usb_node_candidates_cache == []
+        assert client.app.state.usb_node_serial_access_lock.acquire(blocking=False)
+        client.app.state.usb_node_serial_access_lock.release()
+
+
+def test_dashboard_selected_identity_reaches_final_guard_before_send(tmp_path, monkeypatch):
+    from omk_system_manager import node_provisioning as core
+    selected = "020000000001"
+    device = "/dev/ttyACM0"
+    monkeypatch.setattr(core, "candidate_devices", lambda: [device])
+    monkeypatch.setattr(core, "usb_candidates", lambda: [{"device": device, "node_id": selected}])
+    monkeypatch.setattr(core, "read_gateway_wifi", lambda: ("OMK-TEST", "synthetic-secret"))
+    sent, saved = [], []
+    class Replacement:
+        def __init__(self, path): assert path == device
+        def request(self, request, timeout, matches):
+            sent.append(request)
+            if request["command"] == "set_wifi": saved.append(request)
+            return {"protocol_version": 2, "status": "ok", "node_id": "020000000002"}
+        def close(self): pass
+    monkeypatch.setattr(core, "SerialJson", Replacement)
+    with client_for(tmp_path) as client:
+        response = client.post("/api/nodes/usb-provision", headers=headers(), json={"device": device, "node_id": selected})
+    assert response.status_code == 422
+    assert saved == [] and sent == [{"command": "identify", "protocol_version": 2}]
+    assert "synthetic-secret" not in response.text

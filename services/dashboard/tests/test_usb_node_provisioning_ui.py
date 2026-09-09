@@ -26,3 +26,8 @@ def test_sensor_management_integrates_usb_provisioning_into_matching_node_card_w
     assert 'node.registration_state === "registered" ?' in script
     assert 'node.registration_state === "provisioned" ?' in script
     assert "OMK_SYSTEM_MANAGER_TOKEN" not in source and "Bearer " not in source
+
+
+def test_usb_provision_sends_card_identity_with_device():
+    script = (ROOT / "app/static/admin.js").read_text()
+    assert "JSON.stringify({device: button.dataset.device, node_id: button.dataset.nodeId})" in script

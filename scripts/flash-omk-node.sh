@@ -49,7 +49,9 @@ fi
 [[ -f "$esptool_py" ]] || fail "Cannot locate PlatformIO esptool.py after build: $esptool_py"
 esptool=("$platformio_python" "$esptool_py")
 
-mac="$("${esptool[@]}" --port "$port" read_mac | awk '/MAC:/{print $NF}')" || fail 'Cannot read ESP MAC.'
+# esptool may report the same MAC before and after starting its stub. Keep
+# unique values; multiple identities or any malformed line must fail below.
+mac="$("${esptool[@]}" --port "$port" read_mac | awk '/MAC:/ { if ($1 != "MAC:" || NF != 2) print "invalid"; else print tolower($2) }' | LC_ALL=C sort -u)" || fail 'Cannot read ESP MAC.'
 [[ "$mac" =~ ^([[:xdigit:]]{2}:){5}[[:xdigit:]]{2}$ ]] || fail 'Cannot read a valid ESP MAC.'
 node_id="$("$platformio_python" - "$mac" <<'PY'
 import sys

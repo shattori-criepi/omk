@@ -20,7 +20,11 @@ with open(os.environ["EVENTS"], "a") as log:
     if "read_mac" in args:
         log.write("mac\\n")
         if os.environ.get("FAIL_AT") == "mac": sys.exit(1)
-        print("MAC: " + os.environ.get("MAC_VALUE", "ac:a7:04:03:d7:f8"))
+        if "MAC_OUTPUT" in os.environ:
+            print(os.environ["MAC_OUTPUT"])
+        else:
+            print("MAC: " + os.environ.get("MAC_VALUE", "ac:a7:04:03:d7:f8"))
+        if os.environ.get("MAC_EXIT_FAILURE"): sys.exit(1)
     else:
         assert args[2:4] == ["write_flash", "0xf000"]
         record = pathlib.Path(args[4])
@@ -209,11 +213,54 @@ def test_failures_stop_at_the_expected_step_and_clean_up(flash, step, expected, 
     assert flash.credential.exists() == (step in {"factory", "upload"})
 
 
-@pytest.mark.parametrize("mac", ["", "not-a-mac", "aa:bb:cc:dd:ee", "aa:bb:cc:dd:ee:ff\nMAC: aa:bb:cc:dd:ee:ff"])
+@pytest.mark.parametrize("mac", ["", "not-a-mac", "aa:bb:cc:dd:ee"])
 def test_invalid_mac_stops_before_credential_creation(flash, mac):
     result = flash.run(MAC_VALUE=mac)
     assert result.returncode != 0
     assert "Cannot read a valid ESP MAC" in result.stderr
+    assert flash.events() == ["build", "resolve", "mac"]
+
+
+@pytest.mark.parametrize("copies", [1, 2, 3])
+def test_identical_mac_reports_allow_factory_write_and_upload(flash, copies):
+    # Locally administered synthetic MAC, never taken from a physical Node.
+    output = "\nUploading stub...\nRunning stub...\nStub running...\n".join(
+        ["MAC: 02:00:00:00:00:ab"] * copies)
+    result = flash.run(MAC_OUTPUT=output)
+    assert result.returncode == 0, result.stderr
+    assert flash.events() == ["build", "resolve", "mac", "secret", "factory", "upload"]
+    assert len(list(flash.credential.parent.glob("*.json"))) == 1
+
+
+def test_same_mac_with_different_hex_case_is_one_identity(flash):
+    result = flash.run(MAC_OUTPUT="MAC: 02:00:00:00:00:ab\nMAC: 02:00:00:00:00:AB")
+    assert result.returncode == 0, result.stderr
+    assert flash.events()[-2:] == ["factory", "upload"]
+
+
+@pytest.mark.parametrize("output", [
+    "Uploading stub...\nStub running...",  # No MAC report.
+    "MAC: 02:00:00:00:00:01\nMAC: 02:00:00:00:00:02",
+    "MAC: 02:00:00:00:00:02\nMAC: 02:00:00:00:00:01",
+    "MAC: malformed\nMAC: 02:00:00:00:00:01",
+    "MAC: 02:00:00:00:00:01\nMAC:",
+    "MAC: garbage 02:00:00:00:00:01",
+    "MAC: 02:00:00:00:00:gg",
+    "MAC: 02:00:00:00:00:01 extra",
+])
+def test_missing_ambiguous_or_malformed_mac_reports_stop_before_writes(flash, output):
+    result = flash.run(MAC_OUTPUT=output)
+    assert result.returncode != 0
+    assert "Cannot read a valid ESP MAC" in result.stderr
+    assert flash.events() == ["build", "resolve", "mac"]
+    assert not list(flash.credential.parent.glob("*.json"))
+
+
+def test_esptool_failure_is_not_hidden_by_valid_duplicate_mac_reports(flash):
+    result = flash.run(MAC_OUTPUT="MAC: 02:00:00:00:00:01\nMAC: 02:00:00:00:00:01",
+                       MAC_EXIT_FAILURE="1")
+    assert result.returncode != 0
+    assert "Cannot read ESP MAC" in result.stderr
     assert flash.events() == ["build", "resolve", "mac"]
 
 

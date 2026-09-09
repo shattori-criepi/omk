@@ -14,7 +14,7 @@ import termios
 import time
 from collections.abc import Callable
 
-PROTOCOL_VERSION = 1
+PROTOCOL_VERSION = 2
 DEFAULT_PROFILE = "omk-ap"
 DEFAULT_MQTT_BROKER = "127.0.0.1"
 # AtomS3 Lite exposes its supported USB provisioning interface as USB CDC ACM
@@ -43,6 +43,13 @@ def valid_node_id(value: object) -> bool:
 
 def is_protocol_response(message: object) -> bool:
     return isinstance(message, dict) and message.get("protocol_version") == PROTOCOL_VERSION and isinstance(message.get("status"), str) and valid_node_id(message.get("node_id"))
+
+
+def _is_usb_response(message: object) -> bool:
+    """Recognize legacy replies for inventory/errors, never authorize writes."""
+    return (isinstance(message, dict) and type(message.get("protocol_version")) is int
+            and message["protocol_version"] in {1, PROTOCOL_VERSION}
+            and isinstance(message.get("status"), str) and valid_node_id(message.get("node_id")))
 
 
 def profile_value(profile: str, field: str) -> str:
@@ -170,9 +177,11 @@ def identify(device: str, timeout: float = 10) -> dict[str, object] | None:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 return None
-            response = serial.request({"command": "identify", "protocol_version": PROTOCOL_VERSION},
+            # Read-only v1 discovery also counts old Nodes; they must not be
+            # silently excluded from the multiple-Node safety check.
+            response = serial.request({"command": "identify", "protocol_version": 1},
                                       min(IDENTIFY_ATTEMPT_TIMEOUT_SECONDS, remaining),
-                                      lambda message: is_protocol_response(message) and message["status"] == "ok")
+                                      lambda message: _is_usb_response(message) and message["status"] == "ok")
             return response
         except (OSError, termios.error, TimeoutError):
             if attempt + 1 == IDENTIFY_ATTEMPTS or time.monotonic() >= deadline:
@@ -189,38 +198,60 @@ def usb_candidates(timeout: float = 3) -> list[dict[str, str | bool]]:
     # is the stable by-id path when available, so aliases never cause a second
     # serial open or an unstable path in the UI.
     nodes: dict[str, dict[str, str | bool]] = {}
+    duplicate_identity = False
     for device, _canonical in physical_usb_devices():
         response = identify(device, timeout)
         if response is not None:
             node_id = str(response["node_id"])
-            nodes.setdefault(node_id, {"device": device, "node_id": node_id,
-                                        "wifi_configured": response.get("wifi_configured") is True})
+            if node_id in nodes:
+                # Aliases were already collapsed by realpath. Equal application
+                # IDs on distinct ports are ambiguous, never interchangeable.
+                duplicate_identity = True
+            nodes[node_id] = {"device": device, "node_id": node_id,
+                              "wifi_configured": response.get("wifi_configured") is True}
+    if duplicate_identity:
+        raise ProvisioningError("ambiguous_node_identity")
     return list(nodes.values())
 
 
-def provision(device: str, ssid: str, password: str, timeout: float = 10) -> str:
+def _change_wifi(device: str, expected_node_id: str, command: str,
+                 fields: dict[str, object], timeout: float) -> str:
+    """Identify and mutate on one open connection; never send secrets first."""
+    if not valid_node_id(expected_node_id):
+        raise ProvisioningError("node_identity_changed")
     serial = SerialJson(device)
     try:
-        response = serial.request({"command": "set_wifi", "protocol_version": PROTOCOL_VERSION, "ssid": ssid, "password": password}, timeout,
-                                  lambda message: is_protocol_response(message) and message["status"] in {"accepted", "invalid_request", "busy", "storage_error", "restart_error"})
+        identity = serial.request(
+            {"command": "identify", "protocol_version": PROTOCOL_VERSION}, timeout,
+            lambda message: _is_usb_response(message) and message["status"] in {"ok", "invalid_request"})
+        if identity["protocol_version"] != PROTOCOL_VERSION or identity["status"] != "ok":
+            raise ProvisioningError("unsupported_usb_protocol")
+        if identity["node_id"] != expected_node_id:
+            raise ProvisioningError("node_identity_changed")
+        response = serial.request(
+            {"command": command, "protocol_version": PROTOCOL_VERSION,
+             "expected_node_id": expected_node_id, **fields}, timeout,
+            lambda message: is_protocol_response(message) and message["status"] in {
+                "accepted", "invalid_request", "busy", "storage_error",
+                "restart_error", "node_identity_changed"})
+        if response["node_id"] != expected_node_id:
+            raise ProvisioningError("node_identity_changed")
+        if response["status"] != "accepted":
+            raise ProvisioningError(str(response["status"]))
+        return expected_node_id
     finally:
         serial.close()
-    if response.get("status") != "accepted":
-        raise ProvisioningError(str(response.get("status", "set_wifi_failed")))
-    return str(response["node_id"])
 
 
-def clear_wifi(device: str, timeout: float = 10) -> str:
-    """Development-only command; it never reads or handles the AP PSK."""
-    serial = SerialJson(device)
-    try:
-        response = serial.request({"command": "clear_wifi", "protocol_version": PROTOCOL_VERSION}, timeout,
-                                  lambda message: is_protocol_response(message) and message["status"] in {"accepted", "busy", "storage_error", "restart_error", "invalid_request"})
-    finally:
-        serial.close()
-    if response.get("status") != "accepted":
-        raise ProvisioningError(str(response.get("status", "clear_wifi_failed")))
-    return str(response["node_id"])
+def provision(device: str, ssid: str, password: str, timeout: float = 10,
+              *, expected_node_id: str) -> str:
+    return _change_wifi(device, expected_node_id, "set_wifi",
+                        {"ssid": ssid, "password": password}, timeout)
+
+
+def clear_wifi(device: str, timeout: float = 10, *, expected_node_id: str) -> str:
+    """Development-only command; uses the same pre-mutation identity guard."""
+    return _change_wifi(device, expected_node_id, "clear_wifi", {}, timeout)
 
 
 def wait_for_rebooted_identify(device: str, node_id: str, timeout: float = 60) -> None:
@@ -238,13 +269,10 @@ def wait_for_rebooted_identify(device: str, node_id: str, timeout: float = 60) -
 def find_usb_node_by_id(node_id: str, timeout: float = 3) -> tuple[str, str]:
     if not valid_node_id(node_id):
         raise RuntimeError("Invalid Node ID")
-    # Do not build a complete candidate list first: a requested Node can be
-    # used immediately and unrelated serial devices must not add their timeout.
-    for device, _canonical in physical_usb_devices():
-        response = identify(device, timeout)
-        if response is not None and response.get("node_id") == node_id:
-            return device, node_id
-    raise RuntimeError("Requested OMK Node was not uniquely identified on USB")
+    matches = [node for node in usb_candidates(timeout) if node["node_id"] == node_id]
+    if len(matches) != 1:
+        raise RuntimeError("Requested OMK Node was not uniquely identified on USB")
+    return str(matches[0]["device"]), node_id
 
 
 def wait_for_registration_status(node_id: str, broker: str = DEFAULT_MQTT_BROKER, timeout: float = 60) -> None:
@@ -274,7 +302,7 @@ def provision_selected_node(device: str, node_id: str) -> None:
         raise ProvisioningError("node_not_available")
     ssid, password = read_gateway_wifi()
     try:
-        provisioned_node_id = provision(matching["device"], ssid, password)
+        provisioned_node_id = provision(matching["device"], ssid, password, expected_node_id=node_id)
     except ProvisioningError:
         raise
     except (OSError, termios.error, TimeoutError):

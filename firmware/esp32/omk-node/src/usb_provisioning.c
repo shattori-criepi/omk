@@ -14,7 +14,7 @@
 #include "freertos/task.h"
 #include "wifi_station.h"
 
-#define USB_PROVISIONING_PROTOCOL_VERSION 1
+#define USB_PROVISIONING_PROTOCOL_VERSION 2
 #define USB_PROVISIONING_LINE_MAX 256
 #define USB_PROVISIONING_REBOOT_DELAY_MS 750
 
@@ -73,9 +73,12 @@ static void handle_line(char *line) {
     }
     const cJSON *version = cJSON_GetObjectItemCaseSensitive(root, "protocol_version");
     const cJSON *command = cJSON_GetObjectItemCaseSensitive(root, "command");
-    bool valid_header = cJSON_IsNumber(version) &&
-                        version->valuedouble == USB_PROVISIONING_PROTOCOL_VERSION &&
-                        cJSON_IsString(command) && command->valuestring != NULL;
+    bool valid_command = cJSON_IsString(command) && command->valuestring != NULL;
+    /* Keep v1 identify read-only so upgraded hosts can count legacy Nodes.
+     * Every state-changing command still requires protocol v2. */
+    bool valid_header = valid_command && cJSON_IsNumber(version) &&
+                        (version->valuedouble == USB_PROVISIONING_PROTOCOL_VERSION ||
+                         (version->valuedouble == 1 && strcmp(command->valuestring, "identify") == 0));
     if (!valid_header) {
         cJSON_Delete(root);
         write_status("invalid_request");
@@ -84,6 +87,19 @@ static void handle_line(char *line) {
     if (strcmp(command->valuestring, "identify") == 0) {
         cJSON_Delete(root);
         write_identify_status();
+        return;
+    }
+    /* All USB state changes must target this physical Node. Check before
+     * clear/save, including when the port name was reused by another Node. */
+    const cJSON *expected = cJSON_GetObjectItemCaseSensitive(root, "expected_node_id");
+    char own_node_id[13];
+    snprintf(own_node_id, sizeof(own_node_id), "%012" PRIx64,
+             provision_node_id & UINT64_C(0x0000ffffffffffff));
+    if (!cJSON_IsString(expected) || expected->valuestring == NULL ||
+        strlen(expected->valuestring) != 12 ||
+        strcmp(expected->valuestring, own_node_id) != 0) {
+        cJSON_Delete(root);
+        write_status("node_identity_changed");
         return;
     }
     if (reboot_scheduled) {
@@ -163,6 +179,7 @@ static void usb_provisioning_task(void *argument) {
             line[used] = '\0';
             if (used != 0) {
                 handle_line(line);
+                memset(line, 0, sizeof(line));
                 if (reboot_scheduled) {
                     vTaskDelay(pdMS_TO_TICKS(USB_PROVISIONING_REBOOT_DELAY_MS));
                     ESP_LOGI(TAG, "USB provisioning request accepted; restarting into normal boot");
