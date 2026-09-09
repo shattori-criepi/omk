@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
@@ -12,7 +14,6 @@ from .registry import RegistryError, SensorRegistry
 from .node_registry import NodeRegistry
 from .service import BleManager
 
-app = FastAPI(title="OMK BLE sensor manager")
 client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="omk-ble-sensor-manager")
 manager = BleManager(
     SensorRegistry(Path(os.getenv("OMK_BLE_REGISTRY", "/var/lib/omk/ble/sensors.json"))),
@@ -55,24 +56,28 @@ def _on_mqtt_message(client: mqtt.Client, userdata: Any, message: mqtt.MQTTMessa
     else:
         manager.handle_node_mqtt(message.topic, message.payload)
 
-@app.on_event("startup")
-async def startup() -> None:
-    client.on_connect = _on_mqtt_connect
-    client.on_message = _on_mqtt_message
-    client.connect_async(os.getenv("MQTT_HOST", "127.0.0.1"), int(os.getenv("MQTT_PORT", "1883")))
-    client.loop_start()
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
-        await manager.start_collection()
-    except RuntimeError as error:
-        # Absence of Bluetooth must not make the gateway service unhealthy.
-        import logging
-        logging.getLogger(__name__).warning("BLE passive collection unavailable: %s", error)
+        client.on_connect = _on_mqtt_connect
+        client.on_message = _on_mqtt_message
+        client.connect_async(os.getenv("MQTT_HOST", "127.0.0.1"), int(os.getenv("MQTT_PORT", "1883")))
+        client.loop_start()
+        try:
+            await manager.start_collection()
+        except RuntimeError as error:
+            # Absence of Bluetooth must not make the gateway service unhealthy.
+            import logging
+            logging.getLogger(__name__).warning("BLE passive collection unavailable: %s", error)
+        yield
+    finally:
+        try:
+            await manager.pause_collection()
+        finally:
+            client.loop_stop()
 
-@app.on_event("shutdown")
-async def shutdown() -> None:
-    if manager._scanner:
-        await manager._scanner.stop()
-    client.loop_stop()
+
+app = FastAPI(title="OMK BLE sensor manager", lifespan=lifespan)
 
 @app.post("/api/setup/scan")
 async def start_scan() -> dict[str, Any]:

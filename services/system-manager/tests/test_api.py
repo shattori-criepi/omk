@@ -52,6 +52,8 @@ class PowerController:
 
 def client_for(tmp_path: Path) -> TestClient:
     site_uuid = "123e4567-e89b-42d3-a456-426614174000"
+    # This fixture models an already provisioned Gateway with matching metadata.
+    (tmp_path / "site_uuid").write_text(site_uuid, encoding="utf-8")
 
     class MetadataStub:
         def get_site_uuid(self) -> str:
@@ -129,7 +131,7 @@ def test_usb_node_provision_rejects_unlisted_device_and_concurrent_request(tmp_p
     monkeypatch.setattr(manager_main, "provision_selected_node", lambda *_: (_ for _ in ()).throw(ProvisioningError("node_not_available")))
     with client_for(tmp_path) as client:
         invalid = client.post("/api/nodes/usb-provision", headers=headers(), json={"device": "/tmp/not-a-device", "node_id": "9af9509eb8b6"})
-        unavailable = client.post("/api/nodes/usb-provision", headers=headers(), json={"device": "/dev/ttyAC0", "node_id": "9af9509eb8b6"})
+        unavailable = client.post("/api/nodes/usb-provision", headers=headers(), json={"device": "/dev/ttyACM0", "node_id": "9af9509eb8b6"})
         client.app.state.usb_node_provision_operation_lock.acquire()
         busy = client.post("/api/nodes/usb-provision", headers=headers(), json={"device": "/dev/ttyACM0", "node_id": "9af9509eb8b6"})
         client.app.state.usb_node_provision_operation_lock.release()
