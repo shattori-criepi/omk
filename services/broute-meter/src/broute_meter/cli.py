@@ -58,6 +58,8 @@ from broute_meter.usb_recovery import (
     RecoveryStateStore,
     RsWsuhaPUsbResetter,
     UsbRecoveryError,
+    register_trusted_usb_adapter,
+    resolve_rs_wsuha_p_usb,
     usb_reset_allowed,
 )
 
@@ -135,6 +137,11 @@ def build_parser() -> argparse.ArgumentParser:
     setup_parser = subparsers.add_parser(
         "setup-adapter",
         help="アダプター設定を確認し必要時だけ変更する",
+    )
+    setup_parser.add_argument(
+        "--trust-usb-recovery",
+        action="store_true",
+        help="管理者専用: 実機との設定通信成功後、このUSB個体を復旧対象として登録する",
     )
     setup_parser.add_argument(
         "--mock",
@@ -972,12 +979,16 @@ def _test_connection(args: argparse.Namespace) -> int:
 
 
 def _setup_adapter(args: argparse.Namespace) -> int:
+    trust_usb = args.trust_usb_recovery
+    if trust_usb and (args.mock or os.geteuid() != 0):
+        raise UsbRecoveryError("Trust registration requires root and a real adapter; --mock is forbidden.")
     config = _load_application_config(
         args,
         require_credentials=False,
         include_credentials=False,
     )
-    logger = _configure_command_logging(config)
+    # Admin enrollment must not create root-owned files in the service log directory.
+    logger = logging.getLogger("broute_meter") if trust_usb else _configure_command_logging(config)
     _log_runtime(logger, "setup-adapter")
 
     if args.mock:
@@ -998,12 +1009,20 @@ def _setup_adapter(args: argparse.Namespace) -> int:
         logger.info("RS-WSUHA-P設定確認に使用するポート: %s", port)
         adapter = _create_rs_wsuha_p_adapter(config, port)
 
+        before = resolve_rs_wsuha_p_usb(Path(port)) if trust_usb else None
         adapter.open()
         try:
             result = adapter.configure(
                 config.adapter.expected_settings,
                 write_changes=config.adapter.auto_configure,
             )
+            if trust_usb and result.is_configured:
+                if not {"uart_mode", "output_mode"} <= result.initial_settings.keys():
+                    raise UsbRecoveryError("Trust requires successful reads of both adapter settings.")
+                after = resolve_rs_wsuha_p_usb(Path(port))
+                assert before is not None
+                register_trusted_usb_adapter(before, after)
+                print("通信確認済みUSB adapterをprivileged recovery対象として登録しました。")
         finally:
             adapter.close()
         display_target = f"使用ポート: {port}"
@@ -1161,6 +1180,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     except PortDetectionError as exc:
         print(f"ポート検出エラー: {exc}", file=sys.stderr)
         return 3
+    except UsbRecoveryError as exc:
+        print(f"USB recovery設定エラー: {exc}", file=sys.stderr)
+        return 1
     except (
         AdapterError,
         BRouteSessionError,

@@ -1,15 +1,33 @@
 #!/usr/bin/env bash
 
-# Root-owned helper: accept a USB serial, never a device or sysfs path.
+# Root-owned no-argument helper: only an administrator-established adapter.
 set -euo pipefail
 PATH=/usr/sbin:/usr/bin:/sbin:/bin
 export PATH LC_ALL=C
 SYS_ROOT=/sys
 DEV_ROOT=/dev
+IDENTITY_FILE=/etc/omk/broute-usb-recovery.conf
 
 is_root() { [[ $EUID -eq 0 ]]; }
 pause() { sleep "$1"; }
 error() { echo "$*" >&2; return 1; }
+
+read_trusted_serial() {
+  local directory="${IDENTITY_FILE%/*}" parent lines size
+  parent="${directory%/*}"
+  for directory in "$parent" "${IDENTITY_FILE%/*}"; do
+    [[ ! -L "$directory" && -d "$directory" ]] || return 1
+    [[ "$(stat -c '%u:%g:%a' "$directory")" == 0:0:755 ]] || return 1
+  done
+  [[ ! -L "$IDENTITY_FILE" && -f "$IDENTITY_FILE" ]] || return 1
+  [[ "$(stat -c '%u:%g:%a:%h' "$IDENTITY_FILE")" == 0:0:644:1 ]] || return 1
+  size="$(stat -c '%s' "$IDENTITY_FILE")" || return 1
+  [[ "$size" -ge 2 && "$size" -le 65 ]] || return 1
+  mapfile -t lines < "$IDENTITY_FILE"
+  [[ ${#lines[@]} -eq 1 && "${lines[0]}" =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$ ]] || return 1
+  [[ "$size" -eq $((${#lines[0]} + 1)) ]] || return 1
+  printf '%s\n' "${lines[0]}"
+}
 
 verify_tty_node() {
   local tty="$1" numbers major minor actual
@@ -22,7 +40,7 @@ verify_tty_node() {
 }
 
 verify_usb_identity() {
-  local device="$1" serial="$2" name vendor product actual_serial label bus_path
+  local device="$1" serial="$2" name vendor product actual_serial bus_path
   [[ "$device" == "$SYS_ROOT/devices/"* ]] || return 1
   name="${device##*/}"
   [[ "$name" =~ ^[0-9]+-[0-9]+(\.[0-9]+)*$ ]] || return 1
@@ -31,9 +49,8 @@ verify_usb_identity() {
   vendor="$(cat "$device/idVendor")" || return 1
   product="$(cat "$device/idProduct")" || return 1
   actual_serial="$(cat "$device/serial")" || return 1
-  label="$(cat "$device/product")" || return 1
   # Observed FTDI transport guard, NOT an official model VID/PID mapping.
-  [[ "${vendor,,}:${product,,}" == '0403:6015' && "$actual_serial" == "$serial" && "${label,,}" == *rs-wsuha-p* ]]
+  [[ "${vendor,,}:${product,,}" == '0403:6015' && "$actual_serial" == "$serial" ]]
 }
 
 resolve_target() {
@@ -67,12 +84,13 @@ resolve_target() {
 write_driver() { printf '%s' "$2" > "$SYS_ROOT/bus/usb/drivers/usb/$1"; }
 
 main() {
-  [[ $# -eq 1 && "$1" =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$ ]] || {
-    echo 'Exactly one USB serial (1-64 letters, digits, underscore or hyphen) is required.' >&2
+  [[ $# -eq 0 ]] || {
+    echo 'This helper accepts no arguments.' >&2
     return 2
   }
   is_root || { error 'Root privileges are required.'; return 1; }
-  local serial="$1" target checked name driver="$SYS_ROOT/bus/usb/drivers/usb"
+  local serial target checked name driver="$SYS_ROOT/bus/usb/drivers/usb"
+  serial="$(read_trusted_serial)" || { error 'Trusted USB identity is missing or unsafe; reset disabled.'; return 1; }
   target="$(resolve_target "$serial")" || { error 'USB recovery identity is absent, ambiguous or unverified.'; return 1; }
   [[ -w "$driver/unbind" && -w "$driver/bind" ]] || { error 'USB driver files are unavailable.'; return 1; }
   checked="$(resolve_target "$serial")" || return 1

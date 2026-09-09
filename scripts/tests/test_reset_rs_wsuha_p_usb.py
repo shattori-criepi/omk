@@ -14,7 +14,7 @@ def adapter(root, serial="TEST_ADAPTER_A", usb="1-1.2", tty="ttyUSB9"):
     interface = device / f"{usb}:1.0" / tty
     interface.mkdir(parents=True)
     for field, value in {"idVendor": "0403", "idProduct": "6015",
-                         "product": "RATOC RS-WSUHA-P", "serial": serial}.items():
+                         "product": "FT230X Basic UART", "serial": serial}.items():
         (device / field).write_text(value + "\n")
     entry = root / "sys/class/tty" / tty
     entry.mkdir(parents=True)
@@ -35,16 +35,29 @@ def fake(tmp_path):
     for action in ("unbind", "bind"):
         (driver / action).touch()
     adapter(tmp_path)
+    identity = tmp_path / "etc/omk/broute-usb-recovery.conf"
+    identity.parent.mkdir(parents=True)
+    identity.write_text("TEST_ADAPTER_A\n")
+    identity.chmod(0o644)
     return tmp_path
 
 
-def run(root, args=("TEST_ADAPTER_A",), extra=""):
+def run(root, args=(), extra=""):
     # Overrides exist only in this sourced test process, not the installed helper.
     return subprocess.run(
         ["bash", "-c", '''
 source "$1"
 SYS_ROOT="$2/sys"
 DEV_ROOT="$2/dev"
+IDENTITY_FILE="$2/etc/omk/broute-usb-recovery.conf"
+# Fake only ownership; real file type, link count and mode remain under test.
+stat() {
+    case "$2" in
+        '%u:%g:%a') printf '%s:%s:%s\n' "${TEST_UID:-0}" "${TEST_GID:-0}" "$(command stat -c '%a' "$3")" ;;
+        '%u:%g:%a:%h') printf '%s:%s:%s\n' "${TEST_UID:-0}" "${TEST_GID:-0}" "$(command stat -c '%a:%h' "$3")" ;;
+        *) command stat "$@" ;;
+    esac
+}
 is_root() { return 0; }
 pause() { :; }
 shift 2
@@ -61,15 +74,16 @@ def untouched(root):
 @pytest.mark.parametrize("serial", ["TEST_ADAPTER_A", "TEST_ADAPTER_B"])
 def test_dynamic_serial_resets_only_matching_parent(fake, serial):
     (fake / "sys/devices/1-1.2/serial").write_text(serial)
+    (fake / "etc/omk/broute-usb-recovery.conf").write_text(serial + "\n")
     adapter(fake, serial="TEST_OTHER", usb="1-1.3", tty="ttyUSB8")
-    result = run(fake, (serial,))
+    result = run(fake)
     assert result.returncode == 0, result.stderr
     for action in ("unbind", "bind"):
         assert (fake / "sys/bus/usb/drivers/usb" / action).read_text() == "1-1.2"
     assert serial not in result.stdout
 
 
-@pytest.mark.parametrize("args", [(), ("A", "B"), ("/dev/sda",), ("../A",),
+@pytest.mark.parametrize("args", [("TEST_ADAPTER_A",), ("A", "B"), ("/dev/sda",), ("../A",),
     ("A B",), ("A\nB",), ("A;id",), ("$(id)",), ("-A",), ("A" * 65,), ("",)])
 def test_malformed_arguments(fake, args):
     assert run(fake, args).returncode == 2
@@ -77,7 +91,7 @@ def test_malformed_arguments(fake, args):
 
 
 @pytest.mark.parametrize("field,value", [("serial", "TEST_OTHER"),
-    ("idVendor", "1234"), ("idProduct", "9999"), ("product", "FT230X Basic UART")])
+    ("idVendor", "1234"), ("idProduct", "9999"), ("serial", "")])
 def test_identity_mismatch(fake, field, value):
     (fake / "sys/devices/1-1.2" / field).write_text(value)
     assert run(fake).returncode != 0
@@ -114,6 +128,45 @@ def test_sysfs_escape(fake):
 
 def test_nonroot(fake):
     assert run(fake, extra="is_root() { return 1; }").returncode != 0
+    untouched(fake)
+
+
+@pytest.mark.parametrize("content", ["", "TEST_ADAPTER_A", "TEST_ADAPTER_A\n\n",
+    "SERIAL=TEST_ADAPTER_A\n", "TEST_ADAPTER_A\r\n", "../A\n", "$(id)\n", "A" * 65 + "\n"])
+def test_malformed_identity_file(fake, content):
+    (fake / "etc/omk/broute-usb-recovery.conf").write_text(content)
+    assert run(fake).returncode != 0
+    untouched(fake)
+
+
+@pytest.mark.parametrize("problem", ["missing", "symlink", "hardlink", "owner", "group",
+    "file_mode", "directory_mode", "parent_mode", "directory_symlink"])
+def test_unsafe_identity_file(fake, problem):
+    path = fake / "etc/omk/broute-usb-recovery.conf"
+    extra = ""
+    if problem == "missing":
+        path.unlink()
+    elif problem == "symlink":
+        target = path.with_suffix(".other")
+        path.rename(target)
+        path.symlink_to(target)
+    elif problem == "hardlink":
+        path.with_suffix(".other").hardlink_to(path)
+    elif problem == "owner":
+        extra = "TEST_UID=1000"
+    elif problem == "group":
+        extra = "TEST_GID=1000"
+    elif problem == "file_mode":
+        path.chmod(0o666)
+    elif problem == "directory_mode":
+        path.parent.chmod(0o777)
+    elif problem == "parent_mode":
+        path.parent.parent.chmod(0o777)
+    else:
+        target = path.parent.with_name("other")
+        path.parent.rename(target)
+        path.parent.symlink_to(target)
+    assert run(fake, extra=extra).returncode != 0
     untouched(fake)
 
 

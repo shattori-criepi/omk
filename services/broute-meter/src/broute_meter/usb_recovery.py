@@ -7,6 +7,7 @@ import os
 import re
 import stat
 import subprocess
+import tempfile
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -18,11 +19,13 @@ RS_WSUHA_P_PRODUCT = "6015"
 STARTUP_RETRY_ATTEMPTS = 3
 USB_RESET_COOLDOWN = timedelta(minutes=20)
 VBUS_CYCLE_COOLDOWN = timedelta(hours=1)
+TRUSTED_IDENTITY_PATH = Path("/etc/omk/broute-usb-recovery.conf")
+SERIAL_PATTERN = r"[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}"
 
 
 @dataclass(frozen=True, slots=True)
 class UsbDevice:
-    """Verified sysfs identity of the USB device eligible for recovery."""
+    """Verified transport identity; privileged recovery additionally requires trust."""
 
     port_path: Path
     sysfs_path: Path
@@ -33,6 +36,72 @@ class UsbDevice:
 
 class UsbRecoveryError(RuntimeError):
     """A narrowly scoped RS-WSUHA-P recovery operation failed."""
+
+
+def _check_root_owned(path: Path, *, directory: bool = False) -> None:
+    info = path.lstat()
+    valid_type = stat.S_ISDIR(info.st_mode) if directory else stat.S_ISREG(info.st_mode)
+    mode = stat.S_IMODE(info.st_mode)
+    valid_mode = mode == (0o755 if directory else 0o644)
+    if (not valid_type or not valid_mode or info.st_uid != 0 or info.st_gid != 0
+            or (not directory and info.st_nlink != 1)):
+        raise UsbRecoveryError("Trusted USB identity must be root:root, directory 0755/file 0644, without links.")
+
+
+def read_trusted_usb_serial() -> str:
+    """Read administrator-established trust; missing/unsafe identity disables reset."""
+    path = TRUSTED_IDENTITY_PATH
+    try:
+        _check_root_owned(path.parent.parent, directory=True)
+        _check_root_owned(path.parent, directory=True)
+        _check_root_owned(path)
+        with path.open("rb") as stream:
+            value = stream.read(66).decode("ascii")
+        if not re.fullmatch(SERIAL_PATTERN + r"\n", value):
+            raise UsbRecoveryError("Trusted USB identity has an invalid format.")
+        return value[:-1]
+    except (OSError, UnicodeError) as exc:
+        raise UsbRecoveryError("Trusted USB identity is unavailable; privileged USB reset is disabled.") from exc
+
+
+def register_trusted_usb_adapter(before: UsbDevice, after: UsbDevice) -> None:
+    """Admin-only commit after successful real protocol configuration, never via sudoers.
+
+    The CLI must obtain these snapshots before/after successful application-layer
+    verification. No serial/path registration argument is exposed to the service.
+    """
+    if os.geteuid() != 0:
+        raise UsbRecoveryError("Trust registration requires administrator privileges.")
+    if before != after or not re.fullmatch(SERIAL_PATTERN, after.serial):
+        raise UsbRecoveryError("USB identity changed during adapter verification.")
+    path = TRUSTED_IDENTITY_PATH
+    temporary = None
+    try:
+        _check_root_owned(path.parent.parent, directory=True)
+        if not path.parent.exists():
+            path.parent.mkdir(mode=0o755)
+            path.parent.chmod(0o755)
+            os.chown(path.parent, 0, 0)
+        _check_root_owned(path.parent, directory=True)
+        if path.exists() or path.is_symlink():
+            existing = read_trusted_usb_serial()
+            if existing != after.serial:
+                raise UsbRecoveryError("Another adapter is already trusted; administrator removal is required before replacement.")
+            return
+        fd, temporary = tempfile.mkstemp(prefix=".broute-usb-", dir=path.parent)
+        with os.fdopen(fd, "w", encoding="ascii") as stream:
+            os.fchown(stream.fileno(), 0, 0)
+            os.fchmod(stream.fileno(), 0o644)
+            stream.write(after.serial + "\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        # Exclusive publication: never overwrite a concurrently registered identity.
+        os.link(temporary, path)
+    except OSError as exc:
+        raise UsbRecoveryError("Could not register trusted USB identity.") from exc
+    finally:
+        if temporary is not None:
+            Path(temporary).unlink()
 
 
 def _usb_parent(tty: Path, sys_root: Path) -> Path:
@@ -64,7 +133,7 @@ def resolve_rs_wsuha_p_usb(
     sys_class_tty: Path = Path("/sys/class/tty"),
     dev_root: Path = Path("/dev"),
 ) -> UsbDevice:
-    """Verify the selected port (explicit or automatic) before privileged recovery.
+    """Resolve transport identity; this alone does NOT establish model trust.
 
     Linux pyserial reads USB product and serial from these same sysfs attributes.
     Generic FTDI descriptors alone cannot establish the B-route model identity.
@@ -80,11 +149,9 @@ def resolve_rs_wsuha_p_usb(
         vendor = (candidate / "idVendor").read_text(encoding="ascii").strip().lower()
         product = (candidate / "idProduct").read_text(encoding="ascii").strip().lower()
         serial = (candidate / "serial").read_text(encoding="ascii").rstrip("\n")
-        label = (candidate / "product").read_text(encoding="ascii").casefold()
         if ((vendor, product) != (RS_WSUHA_P_VENDOR, RS_WSUHA_P_PRODUCT)
-                or "rs-wsuha-p" not in label
-                or not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}", serial)):
-            raise UsbRecoveryError("USB recovery model or transport identity is unverified.")
+                or not re.fullmatch(SERIAL_PATTERN, serial)):
+            raise UsbRecoveryError("USB recovery transport identity is unverified.")
         matches = set()
         for entry in sys_class_tty.glob("ttyUSB*"):
             parent = _usb_parent(entry, sys_root)
@@ -169,16 +236,19 @@ def usb_reset_allowed(
 
 
 class RsWsuhaPUsbResetter:
-    """Pass only the verified serial to a helper that independently checks sysfs."""
+    """Check root-owned trust before invoking the no-argument privileged helper."""
 
     def __init__(self, port_path: Path, command: Path) -> None:
         self._port_path = port_path
         self._command = command
 
     def reset(self) -> UsbDevice:
+        trusted_serial = read_trusted_usb_serial()
         device = resolve_rs_wsuha_p_usb(self._port_path)
+        if device.serial != trusted_serial:
+            raise UsbRecoveryError("Selected adapter does not match trusted USB identity.")
         try:
-            subprocess.run(("sudo", "-n", str(self._command), device.serial), check=True, timeout=45)
+            subprocess.run(("sudo", "-n", str(self._command)), check=True, timeout=45)
         except (OSError, subprocess.SubprocessError) as exc:
             raise UsbRecoveryError("RS-WSUHA-P USB reset helper failed.") from exc
         # devtmpfs may expose the tty before udev recreates its by-id symlink.

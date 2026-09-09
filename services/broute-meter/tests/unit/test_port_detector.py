@@ -48,6 +48,18 @@ def _port(device: str, product: str | None = "RS-WSUHA-P") -> PortInfo:
     )
 
 
+@pytest.mark.parametrize("count", [1, 2])
+def test_actual_generic_ft230x_requires_explicit_port(count):
+    ports = [PortInfo(f"/dev/ttyUSB{i}", "FT230X Basic UART", "FTDI", 0x0403, 0x6015,
+                      f"TEST_ADAPTER_{i}") for i in range(count)]
+    candidates = find_rs_wsuha_p_ports(ports)
+    assert candidates == []
+    with pytest.raises(NoMatchingPortError):
+        resolve_serial_port(None, candidates)
+    path = "/dev/serial/by-id/usb-FTDI_FT230X_Basic_UART_TEST_ADAPTER_0-if00-port0"
+    assert resolve_serial_port(path, candidates) == path
+
+
 def test_list_serial_ports_normalizes_metadata_and_sorts_by_device() -> None:
     raw_ports = [
         _raw_port(

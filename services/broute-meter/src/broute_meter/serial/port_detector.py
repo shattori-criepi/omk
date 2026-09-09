@@ -10,8 +10,9 @@ from serial.tools import list_ports
 
 RS_WSUHA_P_PRODUCT_NAME = "RS-WSUHA-P"
 
-# TODO: 公式仕様書で確認できた場合に限り、RS-WSUHA-PのVID/PID照合を追加する。
-# 類似製品や実機観察だけから値を推測してはならない。
+# 実機は FT230X Basic UART / 0403:6015 として見えるが、他のFT230Xと
+# 区別できない。製品名による候補抽出はbest-effortであり、この実機では
+# stable by-idの明示設定を必要とする。VID/PIDだけで選択しない。
 
 
 class _SerialPortLike(Protocol):
@@ -51,7 +52,8 @@ class NoMatchingPortError(PortDetectionError):
     def __init__(self) -> None:
         super().__init__(
             "RS-WSUHA-Pの候補ポートが見つかりません。"
-            "シリアルポートを明示的に設定してください。"
+            "FT230XのUSB descriptorだけでは機種を確認できません。"
+            "シリアルポートを明示的に設定してください（stable by-id推奨）。"
         )
 
 
@@ -125,9 +127,10 @@ def format_vid_pid(value: int | None) -> str:
 
 
 def find_rs_wsuha_p_ports(ports: Iterable[PortInfo]) -> list[PortInfo]:
-    """公式製品名を含むポートだけをRS-WSUHA-P候補として返す。
+    """製品名を含む場合だけ候補を返す（実機全般の自動検出ではない）。
 
-    VID/PIDは公式情報を確認できていないため、この初期実装では使用しない。
+    汎用FT230X descriptorは機種の確証にならず、明示portが必要。
+    この候補抽出はprivileged recoveryのtrust確立には使用しない。
     """
 
     marker = RS_WSUHA_P_PRODUCT_NAME.casefold()

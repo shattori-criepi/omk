@@ -11,6 +11,7 @@ from decimal import Decimal
 from ipaddress import IPv6Address
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 
@@ -338,6 +339,75 @@ def test_setup_adapter_configures_without_reading_credentials(
     ]
     assert adapter.closed
     assert "設定エラー" not in captured.err
+
+
+@pytest.mark.parametrize("trust,outcome", [(False, "success"), (True, "success"),
+    (True, "mismatch"), (True, "timeout"), (True, "empty")])
+def test_trust_requires_successful_real_protocol_and_is_optional(monkeypatch, trust, outcome):
+    events = []
+    values = {"uart_mode": "80", "output_mode": "01"}
+    config = SimpleNamespace(adapter=SimpleNamespace(expected_settings=values, auto_configure=False))
+    load = Mock(return_value=config)
+    monkeypatch.setattr(cli, "_load_application_config", load)
+    configure_logging = Mock(return_value=logging.getLogger("test"))
+    monkeypatch.setattr(cli, "_configure_command_logging", configure_logging)
+    monkeypatch.setattr(cli, "_resolve_adapter_port", lambda _: "/dev/ttyUSB9")
+    monkeypatch.setattr(cli.os, "geteuid", lambda: 0)
+
+    class Adapter(_FakeSetupAdapter):
+        def configure(self, *_args, **_kwargs):
+            events.append("protocol")
+            if outcome == "timeout":
+                raise AdapterResponseTimeoutError("no response")
+            if outcome == "empty":
+                return AdapterConfigurationResult({}, {}, {}, (), False)
+            actual = values if outcome == "success" else {"uart_mode": "00", "output_mode": "01"}
+            return AdapterConfigurationResult(values, actual, actual, (), False)
+
+    adapter = Adapter()
+    monkeypatch.setattr(cli, "_create_rs_wsuha_p_adapter", lambda *_: adapter)
+
+    def snapshot(_):
+        events.append("snapshot")
+        return "verified transport"
+
+    monkeypatch.setattr(cli, "resolve_rs_wsuha_p_usb", snapshot)
+    monkeypatch.setattr(cli, "register_trusted_usb_adapter", lambda *_: events.append("register"))
+    args = ["setup-adapter"] + (["--trust-usb-recovery"] if trust else [])
+    code = cli.main(args)
+    if trust and outcome == "success":
+        assert events == ["snapshot", "protocol", "snapshot", "register"]
+    elif not trust:
+        assert events == ["protocol"]  # Missing identity never blocks ordinary setup/measurement.
+    else:
+        assert "register" not in events
+    assert code == (0 if outcome == "success" else 5 if outcome == "mismatch" else 1)
+    assert adapter.closed
+    assert load.call_args.kwargs == {"require_credentials": False, "include_credentials": False}
+    assert configure_logging.call_count == (0 if trust else 1)
+
+
+@pytest.mark.parametrize("uid,mock", [(1000, False), (0, True)])
+def test_trust_flag_rejects_unprivileged_or_mock_before_io(monkeypatch, uid, mock):
+    monkeypatch.setattr(cli.os, "geteuid", lambda: uid)
+    load = Mock(side_effect=AssertionError("Must not load config or open USB"))
+    monkeypatch.setattr(cli, "_load_application_config", load)
+    args = ["setup-adapter", "--trust-usb-recovery"] + (["--mock"] if mock else [])
+    assert cli.main(args) == 1
+    load.assert_not_called()
+
+
+def test_normal_service_startup_does_not_require_trusted_identity(monkeypatch):
+    resetter = Mock(side_effect=AssertionError("Normal communication must not require trust"))
+    monkeypatch.setattr(cli, "RsWsuhaPUsbResetter", resetter)
+    result = _adapter_result(initial="80", final="80")
+    adapter = _FakeSetupAdapter(result)
+    config = SimpleNamespace(adapter=SimpleNamespace(expected_settings={"uart_mode": "80"}, auto_configure=True))
+    state = SimpleNamespace(write=lambda *_args, **_kwargs: None)
+    assert cli._configure_adapter_with_usb_recovery(
+        adapter, config, "/dev/ttyUSB9", state, threading.Event(), logging.getLogger("test"),
+    ) == result
+    resetter.assert_not_called()
 
 
 def test_setup_adapter_reports_mismatch_when_auto_configure_is_disabled(

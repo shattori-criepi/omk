@@ -26,7 +26,7 @@ def _usb_fixture(tmp_path: Path, *, vendor: str = RS_WSUHA_P_VENDOR,
         ("idVendor", vendor),
         ("idProduct", RS_WSUHA_P_PRODUCT),
         ("serial", serial),
-        ("product", "RATOC RS-WSUHA-P"),
+        ("product", "FT230X Basic UART"),
     ):
         (device / name).write_text(value + "\n", encoding="ascii")
     resolved_port = tmp_path / "dev" / tty_name
@@ -49,6 +49,7 @@ def resolve(monkeypatch, tmp_path):
     # Fake files cannot be mknod'ed on an unprivileged test host. The real
     # character-device guard is tested separately below, not removed in production.
     monkeypatch.setattr("broute_meter.usb_recovery._verify_tty_node", lambda *_: None)
+    monkeypatch.setattr("broute_meter.usb_recovery.read_trusted_usb_serial", lambda: "TEST_ADAPTER_A")
     return lambda port: resolve_rs_wsuha_p_usb(
         port, sys_class_tty=tmp_path / "sys/class/tty", dev_root=tmp_path / "dev",
     )
@@ -56,7 +57,7 @@ def resolve(monkeypatch, tmp_path):
 
 @pytest.mark.parametrize("serial", ["TEST_ADAPTER_A", "TEST_ADAPTER_B"])
 @pytest.mark.parametrize("explicit", [False, True])
-def test_resolves_verified_model_and_dynamic_serial(tmp_path, resolve, serial, explicit):
+def test_resolves_observed_transport_and_dynamic_serial(tmp_path, resolve, serial, explicit):
     by_id, _ = _usb_fixture(tmp_path, serial=serial)
 
     result = resolve(by_id.resolve() if explicit else by_id)
@@ -74,7 +75,7 @@ def test_rejects_non_matching_usb_identity(tmp_path: Path, resolve) -> None:
 
 
 @pytest.mark.parametrize("field,value", [
-    ("idProduct", "9999"), ("product", "FT230X Basic UART"),
+    ("idProduct", "9999"), ("idVendor", "9999"),
     ("serial", "../bad"), ("serial", ""),
 ])
 def test_explicit_port_does_not_bypass_identity(tmp_path, resolve, field, value):
@@ -115,7 +116,7 @@ def test_character_device_guard(tmp_path):
         _verify_tty_node(Path("/dev/null"), tmp_path)
 
 
-def test_resetter_passes_verified_serial_and_checks_returned_identity(tmp_path, resolve, monkeypatch):
+def test_resetter_checks_trust_and_calls_no_argument_helper(tmp_path, resolve, monkeypatch):
     port, _ = _usb_fixture(tmp_path)
     device = resolve(port)
     monkeypatch.setattr("broute_meter.usb_recovery.resolve_rs_wsuha_p_usb", lambda _: device)
@@ -123,11 +124,12 @@ def test_resetter_passes_verified_serial_and_checks_returned_identity(tmp_path, 
     monkeypatch.setattr("broute_meter.usb_recovery.subprocess.run", run)
     assert RsWsuhaPUsbResetter(port, Path("/root/helper")).reset() == device
     run.assert_called_once_with(
-        ("sudo", "-n", "/root/helper", "TEST_ADAPTER_A"), check=True, timeout=45,
+        ("sudo", "-n", "/root/helper"), check=True, timeout=45,
     )
 
 
 def test_unverified_port_never_invokes_privileged_helper(monkeypatch):
+    monkeypatch.setattr("broute_meter.usb_recovery.read_trusted_usb_serial", lambda: "TEST_ADAPTER_A")
     monkeypatch.setattr("broute_meter.usb_recovery.resolve_rs_wsuha_p_usb",
                         Mock(side_effect=UsbRecoveryError("Unverified model")))
     run = Mock()
