@@ -47,13 +47,12 @@ WATERPROOF_HUMIDITY_INDEX = 10
 WATERPROOF_RESERVED_INDEX = 11
 
 # Pi captures of the Motion Sensor manufacturer advertisement:
-# <physical id 6> <variable> <PIR status> 00 <counter>. The official Motion
-# Sensor specification defines PIR state at status bit 6. The known status
-# structure has lower six bits 0x2c; paired with the length and reserved byte
-# this avoids treating existing Meter/CO2 layouts as Motion Sensor packets.
+# <physical id 6> <variable> <PIR status> <variable> <counter>. The official
+# Motion Sensor specification defines PIR state at status bit 6. The known
+# status structure has lower six bits 0x2c. Index 8 was initially observed as
+# zero, but varies in later captures, so it is not a classifier condition.
 MOTION_MANUFACTURER_LENGTH = 10
 MOTION_STATUS_INDEX = 7
-MOTION_RESERVED_INDEX = 8
 MOTION_STATUS_LOW_BITS = 0x2C
 
 CONTACT_SERVICE_DEVICE_TYPE = 0x64
@@ -254,7 +253,7 @@ def _decode_plug_manufacturer_data(
 
 def _decode_motion_manufacturer_data(data: bytes) -> tuple[str, str, dict[str, Any]] | None:
     """Decode the verified Motion Sensor manufacturer advertisement layout."""
-    if len(data) != MOTION_MANUFACTURER_LENGTH or data[MOTION_RESERVED_INDEX] != 0:
+    if len(data) != MOTION_MANUFACTURER_LENGTH:
         return None
     status = data[MOTION_STATUS_INDEX]
     if (status & 0x3F) != MOTION_STATUS_LOW_BITS:

@@ -843,11 +843,21 @@ def test_disabled_waterproof_sensor_updates_latest_without_publishing(tmp_path: 
 
 
 def test_motion_manufacturer_packets_decode_only_motion_state() -> None:
-    false = decode("CF:FC:6A:48:DB:15", -40, {SWITCHBOT_COMPANY_ID: bytes.fromhex("cffc6a48db150b2c0087")}, {}, "now")
-    true = decode("CF:FC:6A:48:DB:15", -40, {SWITCHBOT_COMPANY_ID: bytes.fromhex("cffc6a48db150c6c0000")}, {}, "now")
-    assert false is not None and false.model == "motion_sensor" and false.sensor_type == "motion"
-    assert false.values == {"motion_state": 0}
-    assert true is not None and true.values == {"motion_state": 1}
+    fixtures = (
+        ("cffc6a48db15362c0059", 0),
+        ("cffc6a48db15376c0001", 1),
+        # Index 8 is variable data, not a reserved zero byte.
+        ("cffc6a48db15172cda59", 0),
+    )
+    for packet, motion_state in fixtures:
+        decoded = decode(
+            "CF:FC:6A:48:DB:15", -40,
+            {SWITCHBOT_COMPANY_ID: bytes.fromhex(packet)}, {}, "now",
+        )
+        assert decoded is not None
+        assert decoded.model == "motion_sensor"
+        assert decoded.sensor_type == "motion"
+        assert decoded.values == {"motion_state": motion_state}
 
 
 def test_motion_decoder_does_not_classify_existing_or_unrelated_switchbot_layouts() -> None:
