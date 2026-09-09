@@ -44,7 +44,7 @@ class Config:
         device_id = os.getenv("ICHJO_DEVICE_ID", "ichijo-001")
         target_ip = os.getenv("ICHJO_ECHONET_TARGET_IP", "192.168.8.182")
         interface = os.getenv("ICHJO_ECHONET_INTERFACE", "eth0")
-        mqtt_host = os.getenv("MQTT_HOST", "192.168.50.1")
+        mqtt_host = os.getenv("MQTT_HOST", "127.0.0.1")
         if not all((device_id, target_ip, interface, mqtt_host)):
             raise ValueError("device ID, target IP, interface, and MQTT host must not be empty")
         try:

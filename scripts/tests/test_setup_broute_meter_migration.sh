@@ -43,7 +43,7 @@ output="$(migrate_legacy_runtime_config)"
 grep -Fxq '  data_directory: "../../data/broute-meter"' "${current_config}/settings.yaml"
 grep -Fxq '  directory: "../../logs/broute-meter"' "${current_config}/settings.yaml"
 grep -Fxq '  port: /dev/ttyUSB0' "${current_config}/settings.yaml"
-! grep -Fq "${legacy_secret}" <<<"${output}"
+if grep -Fq "${legacy_secret}" <<<"${output}"; then echo "Forbidden text or operation detected." >&2; exit 1; fi
 
 cat > "${current_config}/credentials.yaml" <<'EOF'
 b_route:
@@ -56,7 +56,7 @@ EOF
 output="$(migrate_legacy_runtime_config)"
 grep -Fqx '  id: "NEW-CREDENTIALS-MUST-STAY"' "${current_config}/credentials.yaml"
 grep -Fqx '  data_directory: "/current/data"' "${current_config}/settings.yaml"
-! grep -Fq "${legacy_secret}" <<<"${output}"
+if grep -Fq "${legacy_secret}" <<<"${output}"; then echo "Forbidden text or operation detected." >&2; exit 1; fi
 
 rm -f -- "${current_config}/settings.yaml"
 cat > "${legacy_config}/settings.yaml" <<'EOF'

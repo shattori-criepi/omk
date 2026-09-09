@@ -16,8 +16,8 @@ gateway_harness_create
 printf 'Raspberry Pi 5 Model B' >"${OMK_TEST_DEVICE_MODEL}"
 if gateway_harness_run --with-base >"${GATEWAY_HARNESS_ROOT}/t2.log" 2>&1; then exit 1; fi
 grep -Fq 'Raspberry Pi 4 is required' "${GATEWAY_HARNESS_ROOT}/t2.log"
-! grep -Fq 'apt-get update' "${GW_CALL_LOG}"
-! grep -Fq 'setup-wifi-access-point.sh' "${GW_CALL_LOG}"
+if grep -Fq 'apt-get update' "${GW_CALL_LOG}"; then echo "Forbidden text or operation detected." >&2; exit 1; fi
+if grep -Fq 'setup-wifi-access-point.sh' "${GW_CALL_LOG}"; then echo "Forbidden text or operation detected." >&2; exit 1; fi
 gateway_harness_destroy
 
 # T3: df is a PATH stub, so a low-space fixture fails production preflight.
@@ -30,7 +30,7 @@ EOF
 chmod +x "${GATEWAY_HARNESS_ROOT}/bin/df"
 if gateway_harness_run --with-base >"${GATEWAY_HARNESS_ROOT}/t3.log" 2>&1; then exit 1; fi
 grep -Fq 'free disk is 100 KiB' "${GATEWAY_HARNESS_ROOT}/t3.log"
-! grep -Fq 'apt-get update' "${GW_CALL_LOG}"
-! grep -Fq 'setup-wifi-access-point.sh' "${GW_CALL_LOG}"
+if grep -Fq 'apt-get update' "${GW_CALL_LOG}"; then echo "Forbidden text or operation detected." >&2; exit 1; fi
+if grep -Fq 'setup-wifi-access-point.sh' "${GW_CALL_LOG}"; then echo "Forbidden text or operation detected." >&2; exit 1; fi
 gateway_harness_destroy
 echo 'PASS: pre-base preflight uses fixture paths and PATH commands without a skip override.'

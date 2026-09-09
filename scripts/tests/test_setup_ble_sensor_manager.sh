@@ -9,4 +9,4 @@ grep -Fq 'ProtectSystem=strict' "$unit"
 grep -Fq 'install -d -o "${TARGET_USER}"' "$setup"
 grep -Fq 'systemctl daemon-reload' "$setup"
 grep -Fq 'systemctl restart "${SERVICE_NAME}"' "$setup"
-! grep -Eqi 'network_provisioning|esp_prov|omk_ap_psk|systemd-creds|nmcli' "$setup"
+if grep -Eqi 'network_provisioning|esp_prov|omk_ap_psk|systemd-creds|nmcli' "$setup"; then echo "Forbidden text or operation detected." >&2; exit 1; fi

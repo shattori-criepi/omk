@@ -213,7 +213,8 @@ ensure_environment_file() {
     [[ -f "${ENV_DESTINATION}" ]] || fail "Environment file path is not a regular file: ${ENV_DESTINATION}"
     mode="$(stat -c '%a' "${ENV_DESTINATION}")"
     if environment_mode_has_group_or_world_permissions "${mode}"; then warn "Existing environment file has group/world permissions (${mode}); preserving it without reading or changing it."; fi
-    log "Environment file exists; preserving it without reading: ${ENV_DESTINATION}"
+    "${SUDO[@]}" python3 "${SCRIPT_DIR}/lib/check-host-mqtt-config.py" "${ENV_DESTINATION}" || fail "Migrate the legacy MQTT_HOST before restarting the service."
+    log "Environment file exists; preserving it: ${ENV_DESTINATION}"
     return
   fi
   log "Creating environment file from example with mode 0600: ${ENV_DESTINATION}"

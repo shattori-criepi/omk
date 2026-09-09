@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# Add missing SORACOM routes only after validating the active data interface.
+set -euo pipefail
+[[ "${2:-}" == up ]] || exit 0
+[[ -z "${CONNECTION_ID:-}" || "${CONNECTION_ID}" == soracom ]] || exit 0
+exec python3 - "$@" <<'PY'
+import ipaddress
+import json
+import subprocess
+import sys
+
+
+def run(*args):
+    return subprocess.check_output(args, text=True, timeout=10).strip()
+
+
+def routes(*args):
+    return json.loads(run('ip', '-j', '-4', 'route', 'show', 'table', 'main', *args))
+
+
+try:
+    devices = run('nmcli', '-g', 'GENERAL.DEVICES', 'connection', 'show', 'soracom').split(',')
+    if len(devices) != 1 or not devices[0] or devices[0] == '--':
+        raise ValueError('cannot identify one active SORACOM device')
+    device = devices[0]
+    uuid = run('nmcli', '-g', 'connection.uuid', 'connection', 'show', 'soracom')
+    if not uuid or run('nmcli', '-g', 'GENERAL.CON-UUID', 'device', 'show', device) != uuid:
+        raise ValueError('SORACOM does not own the active device')
+    interface = run('nmcli', '-g', 'GENERAL.IP-IFACE', 'device', 'show', device)
+    if not interface or interface == '--' or sys.argv[1] not in (device, interface):
+        raise ValueError('dispatcher interface is not the SORACOM data interface')
+    defaults = routes('default', 'dev', interface)
+    gateways = {r.get('gateway') for r in defaults if r.get('dev') == interface}
+    if len(gateways) != 1 or None in gateways:
+        raise ValueError('cannot establish an unambiguous SORACOM IPv4 gateway')
+    gateway = str(ipaddress.IPv4Address(gateways.pop()))
+    missing = []
+    for destination in ('100.127.0.0/16', '54.250.252.67/32', '54.250.252.99/32'):
+        existing = routes('exact', destination)
+        expected = ipaddress.ip_network(destination)
+        if not existing:
+            missing.append(destination)
+        elif not all(ipaddress.ip_network(r['dst']) == expected and r.get('dev') == interface
+                     and r.get('gateway') == gateway and r.get('type', 'unicast') == 'unicast'
+                     and not r.get('multipath') for r in existing):
+            raise ValueError(f'conflicting existing SORACOM route: {destination}')
+    # All conflicts/gateway checks precede the first mutation. "add" never replaces.
+    for destination in missing:
+        if run('nmcli', '-g', 'GENERAL.CON-UUID', 'device', 'show', device) != uuid:
+            raise ValueError('SORACOM connection changed during repair')
+        subprocess.run(['ip', '-4', 'route', 'add', destination, 'via', gateway,
+                        'dev', interface, 'metric', '0'], check=True, timeout=10)
+    print(f'SORACOM routes verified on {interface}; added {len(missing)} missing routes.')
+except (ValueError, KeyError, OSError, subprocess.SubprocessError) as error:
+    print(f'FAIL: SORACOM route repair: {error}', file=sys.stderr)
+    sys.exit(1)
+PY

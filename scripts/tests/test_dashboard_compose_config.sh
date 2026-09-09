@@ -12,8 +12,7 @@ DASHBOARD_SECTION="$(sed -n '/^  dashboard:/,/^  sensor-collector:/p' "${COMPOSE
 grep -Fq 'OMK_SYSTEM_MANAGER_URL: http://host.docker.internal:8788' <<<"${DASHBOARD_SECTION}"
 grep -Fq -- '- /etc/omk/dashboard-system-manager.env' <<<"${DASHBOARD_SECTION}"
 grep -Fq '127.0.0.1:8000:8000' <<<"${DASHBOARD_SECTION}"
-grep -Fq '192.168.50.1:8000:8000' <<<"${DASHBOARD_SECTION}"
-if grep -Fq '"8000:8000"' <<<"${DASHBOARD_SECTION}"; then
+if grep -Eq '192\.168\.50\.1:8000:8000|"8000:8000"|0\.0\.0\.0:8000:8000' <<<"${DASHBOARD_SECTION}"; then
   echo 'Dashboard must not expose the admin API on every host interface.' >&2
   exit 1
 fi
@@ -22,4 +21,4 @@ if grep -Fq 'credentials.yaml' <<<"${DASHBOARD_SECTION}"; then
   exit 1
 fi
 
-echo 'PASS: Dashboard Compose configuration keeps credentials out of the container.'
+echo 'PASS: Dashboard Compose configuration keeps credentials out and publishes only IPv4 loopback.'

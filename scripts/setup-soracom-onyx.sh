@@ -20,12 +20,16 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 OMK_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd -P)"
 # shellcheck source=lib/apt-helpers.sh
 source "${SCRIPT_DIR}/lib/apt-helpers.sh"
+# shellcheck source=lib/soracom-preservation-policy.sh
+source "${SCRIPT_DIR}/lib/soracom-preservation-policy.sh"
 RUN_USER="${SUDO_USER:-$(id -un)}"
 RUN_HOME="$(getent passwd "${RUN_USER}" | cut -d: -f6 || true)"
 LOG_FILE=""
 MODEM_DETAILS=""
 MODEM_PATH=""
 USB_SYSFS_ROOT="${SORACOM_USB_SYSFS_ROOT:-/sys/bus/usb/devices}"
+USB_SYSFS_ALLOWED_ROOT="${SORACOM_USB_SYSFS_ALLOWED_ROOT:-/sys/devices}"
+SORACOM_DISPATCHER_PATH="${SORACOM_DISPATCHER_PATH:-/etc/NetworkManager/dispatcher.d/90.soracom_route}"
 
 log() {
   printf '[%s] %s\n' "$(date --iso-8601=seconds)" "$*"
@@ -69,13 +73,18 @@ has_quectel_usb_id() {
   return 1
 }
 
-quectel_usb_paths() {
-  local vendor_file product_file
+quectel_usb_syspaths() {
+  local vendor_file product_file candidate resolved
   for vendor_file in "${USB_SYSFS_ROOT}"/*/idVendor; do
     [[ -r "${vendor_file}" ]] || continue
     product_file="${vendor_file%/idVendor}/idProduct"
     if [[ -r "${product_file}" ]] && [[ "$(<"${vendor_file}")" == 2c7c ]] && [[ "$(<"${product_file}")" == 0125 ]]; then
-      printf '%s\n' "${vendor_file%/idVendor}"
+      candidate="${vendor_file%/idVendor}"
+      resolved="$(readlink -e -- "${candidate}" 2>/dev/null || true)"
+      [[ -n "${resolved}" && ( "${resolved}" == "${USB_SYSFS_ALLOWED_ROOT}" || "${resolved}" == "${USB_SYSFS_ALLOWED_ROOT}"/* ) ]] || continue
+      [[ -r "${resolved}/idVendor" && -r "${resolved}/idProduct" ]] || continue
+      [[ "$(<"${resolved}/idVendor")" == 2c7c && "$(<"${resolved}/idProduct")" == 0125 ]] || continue
+      printf '%s\n' "${resolved}"
     fi
   done
 }
@@ -103,14 +112,50 @@ modem_is_connected() {
 }
 
 replay_quectel_udev_events() {
-  local path child
+  local syspath
   command -v udevadm >/dev/null 2>&1 || return 0
-  while IFS= read -r path; do
-    [[ -n "${path}" ]] || continue
-    "${SUDO[@]}" udevadm trigger --action=add --path "${path}"
-    while IFS= read -r child; do "${SUDO[@]}" udevadm trigger --action=add --path "${child}"; done < <(find "${path}" -mindepth 1 -type d 2>/dev/null)
-  done < <(quectel_usb_paths)
-  "${SUDO[@]}" udevadm settle
+  while IFS= read -r syspath; do
+    [[ -n "${syspath}" ]] || continue
+    timeout 30 "${SUDO[@]}" udevadm trigger --type=devices --action=add --parent-match="${syspath}" --settle
+  done < <(quectel_usb_syspaths)
+}
+
+install_soracom_dispatcher() {
+  local dispatcher_dir source="${SCRIPT_DIR}/soracom-route-dispatcher" metadata temporary
+  [[ -f "${source}" ]] || return 1
+  if [[ -e "${SORACOM_DISPATCHER_PATH}" ]]; then
+    log 'Existing SORACOM route dispatcher is present; preserving it.'
+    return 0
+  fi
+  dispatcher_dir="${SORACOM_DISPATCHER_PATH%/*}"
+  "${SUDO[@]}" install -d -o root -g root -m 0755 "${dispatcher_dir}" || return 1
+  temporary="$("${SUDO[@]}" mktemp "${dispatcher_dir}/.omk-soracom.XXXXXX")" || return 1
+  if ! "${SUDO[@]}" install -o root -g root -m 0755 "${source}" "${temporary}"; then
+    "${SUDO[@]}" rm -f -- "${temporary}" || true
+    return 1
+  fi
+  metadata="$(stat -c '%u:%g:%a' "${temporary}")" || metadata=''
+  if [[ ! -f "${temporary}" || -L "${temporary}" || ! -x "${temporary}" || "${metadata}" != 0:0:755 ]] || ! cmp -s "${source}" "${temporary}"; then
+    "${SUDO[@]}" rm -f -- "${temporary}" || true
+    return 1
+  fi
+  # Publish only a fully validated file; never overwrite a concurrently installed hook.
+  if ! "${SUDO[@]}" mv -T --no-clobber "${temporary}" "${SORACOM_DISPATCHER_PATH}" || [[ -e "${temporary}" ]]; then
+    "${SUDO[@]}" rm -f -- "${temporary}" || true
+    return 1
+  fi
+  [[ -f "${SORACOM_DISPATCHER_PATH}" && -x "${SORACOM_DISPATCHER_PATH}" ]] || return 1
+  log 'Installed and verified the SORACOM route dispatcher without cycling cellular.'
+}
+
+repair_dispatcher_routes_without_reconnect() {
+  local cellular_active="$1" dispatcher_installed="$2" device interface
+  [[ "${cellular_active}" == yes && "${dispatcher_installed}" == yes ]] || return 0
+  device="$(nmcli -g GENERAL.DEVICES connection show soracom)" || return 1
+  [[ -n "${device}" && "${device}" != -- && "${device}" != *,* ]] || return 1
+  interface="$(nmcli -g GENERAL.IP-IFACE device show "${device}")" || return 1
+  [[ -n "${interface}" && "${interface}" != -- ]] || return 1
+  "${SUDO[@]}" "${SORACOM_DISPATCHER_PATH}" "${interface}" up || return 1
 }
 
 fail() {
@@ -187,6 +232,29 @@ log "Architecture: ${ARCH}"
 log "Requested APN: ${APN}"
 log "Log file: ${LOG_FILE}"
 
+# Dispatcher-only repair must precede package installation and every service operation.
+# If NM exists but cannot be queried, do not risk updating a live transport.
+if command -v nmcli >/dev/null 2>&1; then
+  ACTIVE_CONNECTIONS="$(nmcli -g NAME connection show --active)" ||
+    fail "${EXIT_GENERAL}" 'Cannot establish active connections before package changes.'
+  if grep -Fxq soracom <<<"${ACTIVE_CONNECTIONS}"; then
+    if [[ ! -e "${SORACOM_DISPATCHER_PATH}" ]]; then
+      [[ "${APN}" == *soracom.io ]] || fail "${EXIT_GENERAL}" 'Dispatcher repair requires a SORACOM APN.'
+      install_soracom_dispatcher || fail "${EXIT_GENERAL}" 'Dispatcher installation failed.'
+    fi
+    # An existing file is not proof that route repair ever completed. Only run
+    # our exact, validated hook; never execute or replace an unknown dispatcher.
+    if [[ ! -f "${SORACOM_DISPATCHER_PATH}" || -L "${SORACOM_DISPATCHER_PATH}" || ! -x "${SORACOM_DISPATCHER_PATH}" ]] ||
+       [[ "$(stat -c '%u:%g:%a' "${SORACOM_DISPATCHER_PATH}")" != 0:0:755 ]] ||
+       ! cmp -s "${SCRIPT_DIR}/soracom-route-dispatcher" "${SORACOM_DISPATCHER_PATH}"; then
+      fail "${EXIT_GENERAL}" 'Existing dispatcher is not verified OMK-managed code; preserved without execution. Review it before repairing routes.'
+    fi
+    repair_dispatcher_routes_without_reconnect yes yes || fail "${EXIT_GENERAL}" 'Dispatcher route repair failed; existing routes were not replaced.'
+    log 'Active soracom preserved: no package, service, profile or reconnect operations performed.'
+    exit 0
+  fi
+fi
+
 USB_INFO="$(lsusb 2>&1 || true)"
 if grep -Eqi '2c7c:0125|Quectel|EC25|EG25' <<<"${USB_INFO}" || \
   [[ -e /dev/cdc-wdm0 || -e /sys/class/net/wwan0 ]] || \
@@ -239,8 +307,23 @@ MODEM_DETAILS="$(mmcli -m "${MODEM_PATH}" 2>&1 || true)"
 log "Initial modem status:"
 printf '%s\n' "${MODEM_DETAILS}" | redact_modem_identifiers
 
-if nmcli connection show soracom >/dev/null 2>&1 && [[ -e /etc/NetworkManager/dispatcher.d/90.soracom_route ]]; then
-  log 'Existing soracom profile and route dispatcher are available; skipping the official setup script to preserve the current cellular connection.'
+SORACOM_PROFILE_EXISTS=no
+SORACOM_ACTIVE=no
+nmcli connection show soracom >/dev/null 2>&1 && SORACOM_PROFILE_EXISTS=yes
+nmcli -g NAME connection show --active 2>/dev/null | grep -Fxq soracom && SORACOM_ACTIVE=yes || true
+DISPATCHER_INSTALLED=no
+if [[ "${APN}" == *soracom.io && ! -e "${SORACOM_DISPATCHER_PATH}" ]]; then
+  install_soracom_dispatcher || fail "${EXIT_GENERAL}" 'Dispatcher installation failed.'
+  DISPATCHER_INSTALLED=yes
+fi
+repair_dispatcher_routes_without_reconnect "${SORACOM_ACTIVE}" "${DISPATCHER_INSTALLED}" || fail "${EXIT_GENERAL}" 'Dispatcher route repair failed.'
+
+DISPATCHER_EXISTS=no
+[[ -e "${SORACOM_DISPATCHER_PATH}" ]] && DISPATCHER_EXISTS=yes
+OFFICIAL_REQUIRED="$(soracom_official_setup_required "${SORACOM_PROFILE_EXISTS}" "${SORACOM_ACTIVE}" "${DISPATCHER_EXISTS}")" ||
+  fail "${EXIT_GENERAL}" 'Inconsistent active cellular state: active soracom has no profile.'
+if [[ "${OFFICIAL_REQUIRED}" == no ]]; then
+  log 'Existing soracom profile is available; skipping the official setup script to preserve the current cellular connection.'
 else
   log "Downloading SORACOM's official setup_eg25.sh to a temporary directory."
   TEMP_DIR="$(mktemp -d)"
@@ -274,7 +357,7 @@ if [[ "${CURRENT_AUTOCONNECT}" != "yes" ]]; then
   log "Enabling automatic connection for the soracom profile (was: ${CURRENT_AUTOCONNECT:-unset})."
   "${SUDO[@]}" nmcli connection modify soracom connection.autoconnect yes
 fi
-if [[ -e /etc/NetworkManager/dispatcher.d/90.soracom_route ]]; then
+if [[ -e "${SORACOM_DISPATCHER_PATH}" ]]; then
   log "Existing SORACOM route dispatcher rule is present; preserving it."
 fi
 

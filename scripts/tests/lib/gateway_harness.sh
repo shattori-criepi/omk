@@ -11,9 +11,29 @@ gateway_harness_create() {
   printf 'Raspberry Pi 4 Model B' >"${GATEWAY_HARNESS_ROOT}/proc/device-tree/model"
   cp "${GATEWAY_HARNESS_SOURCE_ROOT}/scripts/setup-omk-gateway.sh" "${GATEWAY_HARNESS_ROOT}/scripts/"
   cp "${GATEWAY_HARNESS_SOURCE_ROOT}/scripts/lib/apt-helpers.sh" "${GATEWAY_HARNESS_ROOT}/scripts/lib/"
+  cp "${GATEWAY_HARNESS_SOURCE_ROOT}/scripts/lib/validate-compose-publishes.py" "${GATEWAY_HARNESS_ROOT}/scripts/lib/"
+  cp "${GATEWAY_HARNESS_SOURCE_ROOT}/scripts/lib/validate-ap-socket-units.sh" "${GATEWAY_HARNESS_ROOT}/scripts/lib/"
+  cp "${GATEWAY_HARNESS_SOURCE_ROOT}/scripts/lib/validate-ap-socket-units.py" "${GATEWAY_HARNESS_ROOT}/scripts/lib/"
   touch "${GATEWAY_HARNESS_ROOT}/compose.yaml" "${GATEWAY_HARNESS_ROOT}/services/mosquitto/config/mosquitto.conf" \
     "${GATEWAY_HARNESS_ROOT}/etc/omk/dashboard-system-manager.env" \
     "${GATEWAY_HARNESS_ROOT}/units/omk-system-manager.service" "${GATEWAY_HARNESS_ROOT}/units/omk-data-transformer.service" "${GATEWAY_HARNESS_ROOT}/units/omk-data-transformer.timer"
+  cat >"${GATEWAY_HARNESS_ROOT}/units/omk-dashboard-ap-proxy.socket" <<'EOF'
+[Socket]
+ListenStream=192.168.50.1:8000
+BindToDevice=wlan0
+FreeBind=yes
+Accept=no
+EOF
+  cat >"${GATEWAY_HARNESS_ROOT}/units/omk-mqtt-ap-proxy.socket" <<'EOF'
+[Socket]
+ListenStream=192.168.50.1:1883
+BindToDevice=wlan0
+FreeBind=yes
+Accept=no
+EOF
+  printf '%s\n' '[Service]' 'ExecStart=/usr/lib/systemd/systemd-socket-proxyd 127.0.0.1:8000' >"${GATEWAY_HARNESS_ROOT}/units/omk-dashboard-ap-proxy.service"
+  printf '%s\n' '[Service]' 'ExecStart=/usr/lib/systemd/systemd-socket-proxyd 127.0.0.1:1883' >"${GATEWAY_HARNESS_ROOT}/units/omk-mqtt-ap-proxy.service"
+  touch "${GATEWAY_HARNESS_ROOT}/units/omk-ap-activation.service"
   chmod 775 "${GATEWAY_HARNESS_ROOT}/data" "${GATEWAY_HARNESS_ROOT}/logs"
   cat >"${GATEWAY_HARNESS_ROOT}/state/owner-mode" <<'EOF'
 data|omk|omk|775
@@ -92,9 +112,11 @@ if [[ -n "${GW_FAIL_COMMAND:-}" && "$name" == "$GW_FAIL_COMMAND" && ( -z "${GW_F
   fi
 fi
 case "$name" in
+  systemctl) exec "$(dirname "$0")/proxy-systemctl" "$@" ;;
+  ss) exec "$(dirname "$0")/proxy-ss" "$@" ;;
   dpkg) [[ "$*" == *'--print-architecture'* ]] && printf '%s\n' arm64 ;;
   df) printf '%s\n' 'Filesystem 1024-blocks Used Available Capacity Mounted on' '/dev/fake 20000000 1000 12000000 1% /' ;;
-  docker) if [[ "$*" == *'config --images'* ]]; then printf '%s\n' mosquitto image-collector image-dashboard image-harvest || true; elif [[ "$*" == *'ps --status'* ]]; then printf '%s\n' mosquitto sensor-collector dashboard harvest-uploader || true; fi ;;
+  docker) if [[ "$*" == *'--format json'* ]]; then printf '%s\n' '{"services":{"mosquitto":{"ports":[{"target":1883,"published":"1883","host_ip":"127.0.0.1","protocol":"tcp"}]},"dashboard":{"ports":[{"target":8000,"published":"8000","host_ip":"127.0.0.1","protocol":"tcp"}]}}}'; elif [[ "$*" == *'config --images'* ]]; then printf '%s\n' mosquitto image-collector image-dashboard image-harvest || true; elif [[ "$*" == *'ps --status'* ]]; then printf '%s\n' mosquitto sensor-collector dashboard harvest-uploader || true; fi ;;
   ip) [[ "$*" == *'route show default'* ]] && printf '%s\n' 'default via 192.0.2.1 dev wlan0' || printf '%s\n' 'inet 192.168.50.1/24' ;;
   getent) printf '%s\n' '192.0.2.2 STREAM deb.debian.org' ;;
   date) printf '%s\n' 1735689600 ;;
@@ -103,11 +125,11 @@ case "$name" in
     if [[ "$*" == *'--show-secrets'* ]]; then printf '%s\n' test-psk
     elif [[ "$*" == *'connection.interface-name'* ]]; then printf '%s\n' wlan0
     elif [[ "$*" == *'802-11-wireless.mode'* ]]; then printf '%s\n' ap
-    elif [[ "$*" == *'connection.autoconnect'* ]]; then printf '%s\n' yes
+    elif [[ "$*" == *'connection.autoconnect'* ]]; then printf '%s\n' "${GW_AP_AUTOCONNECT:-no}"
     elif [[ "$*" == *'ipv4.method'* ]]; then printf '%s\n' shared
     elif [[ "$*" == *'ipv4.addresses'* ]]; then printf '%s\n' 192.168.50.1/24
     elif [[ "$*" == *'ipv6.method'* ]]; then printf '%s\n' disabled; fi ;;
-  sudo) if [[ "${1:-}" == apt-get ]]; then shift; exec apt-get "$@"; fi ;;
+  sudo) if [[ "${1:-}" == -n && "${2:-}" == nmcli ]]; then shift; exec "$@"; fi; if [[ "${1:-}" == apt-get ]]; then shift; exec apt-get "$@"; fi ;;
   env) while [[ "${1:-}" == *=* ]]; do export "$1"; shift; done; exec "$@" ;;
   id) [[ "${1:-}" == -nG ]] && printf '%s\n' docker || printf '%s\n' omkdev ;;
   uname) if [[ "${1:-}" == -r ]]; then printf '%s\n' 6.1-rpi; else printf '%s\n' Linux; fi ;;
@@ -115,7 +137,9 @@ esac
 EOF
   chmod +x "${GATEWAY_HARNESS_ROOT}/bin/gw-command"
   local stub_command
-  for stub_command in apt-get dpkg docker python pip systemctl systemd-analyze visudo nmcli nft curl getent df date sudo ip id uname find iw env; do ln -s gw-command "${GATEWAY_HARNESS_ROOT}/bin/${stub_command}"; done
+  cp "${GATEWAY_HARNESS_SOURCE_ROOT}/scripts/tests/lib/proxy-systemctl" "${GATEWAY_HARNESS_ROOT}/bin/"
+  cp "${GATEWAY_HARNESS_SOURCE_ROOT}/scripts/tests/lib/proxy-ss" "${GATEWAY_HARNESS_ROOT}/bin/"
+  for stub_command in ss apt-get dpkg docker python pip systemctl systemd-analyze visudo nmcli nft curl getent df date sudo ip id uname find iw env; do ln -s gw-command "${GATEWAY_HARNESS_ROOT}/bin/${stub_command}"; done
 }
 
 gateway_harness_install_steps() {
@@ -132,6 +156,8 @@ checkpoint() {
   fi
 }
 case "$name" in
+  systemctl) exec "$(dirname "$0")/proxy-systemctl" "$@" ;;
+  ss) exec "$(dirname "$0")/proxy-ss" "$@" ;;
  setup-raspberry-pi.sh) omk_apt apt-get update; checkpoint apt-update; omk_apt apt-get full-upgrade -y; checkpoint os-upgrade; omk_apt apt-get install -y base; checkpoint package-install; docker info; checkpoint docker-install ;;
  setup-system-manager.sh)
    metadata() { grep -Fqx "$1|$2|$3|$4" "${GW_STATE_DIR}/owner-mode" || printf '%s|%s|%s|%s\n' "$1" "$2" "$3" "$4" >>"${GW_STATE_DIR}/owner-mode"; }

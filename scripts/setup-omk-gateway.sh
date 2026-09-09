@@ -77,8 +77,8 @@ steps+=(
 "${WITH_BROUTE}" && steps+=('setup-broute-meter.sh|Optional B-route host service')
 "${WITH_KIOSK}" && steps+=('setup-dashboard-kiosk.sh --prepare|Standard kiosk package preparation before AP activation')
 steps+=(
-  'setup-wifi-access-point.sh|Required OMK AP profile/isolation preparation; does not switch wlan0'
-  'setup-data-collection.sh|Required Docker collection and Dashboard services'
+  'setup-wifi-access-point.sh --prepare|Required OMK AP profile/socket preparation; does not switch wlan0'
+  'setup-data-collection.sh --with-ap-proxies|Required Docker collection and Dashboard services'
 )
 "${WITH_KIOSK}" && steps+=('setup-dashboard-kiosk.sh|Standard Dashboard kiosk configuration (local Dashboard is now available)')
 steps+=(
@@ -172,6 +172,11 @@ preflight_before_ap_activation() {
     "${systemd_unit_dir}/omk-system-manager.service"
     "${systemd_unit_dir}/omk-data-transformer.service"
     "${systemd_unit_dir}/omk-data-transformer.timer"
+    "${systemd_unit_dir}/omk-dashboard-ap-proxy.socket"
+    "${systemd_unit_dir}/omk-dashboard-ap-proxy.service"
+    "${systemd_unit_dir}/omk-mqtt-ap-proxy.socket"
+    "${systemd_unit_dir}/omk-mqtt-ap-proxy.service"
+    "${systemd_unit_dir}/omk-ap-activation.service"
   )
   local -a images=()
   local command_name path image
@@ -186,6 +191,9 @@ preflight_before_ap_activation() {
 
   docker compose -f "${OMK_ROOT}/compose.yaml" config --quiet ||
     fail 'AP preflight failed: Docker Compose configuration is invalid.'
+  docker compose -f "${OMK_ROOT}/compose.yaml" config --no-env-resolution --format json |
+    "${OMK_ROOT}/scripts/lib/validate-compose-publishes.py" ||
+    fail 'AP preflight failed: Dashboard/MQTT Docker publishes are not IPv4-loopback-only.'
   # compose.yaml contains only the four production services.  Do not depend on
   # optional positional-service support in older Compose plugin versions.
   mapfile -t images < <(docker compose -f "${OMK_ROOT}/compose.yaml" config --images)
@@ -204,16 +212,36 @@ preflight_before_ap_activation() {
   else
     log 'WARN: systemd-analyze is unavailable; OMK systemd unit syntax was not verified before AP activation.'
   fi
+  "${OMK_ROOT}/scripts/lib/validate-ap-socket-units.sh" "${systemd_unit_dir}" --runtime >/dev/null ||
+    fail 'AP preflight failed: AP socket proxy security contract is invalid.'
+  systemctl is-active --quiet omk-dashboard-ap-proxy.socket || fail 'AP preflight failed: Dashboard AP socket is not active.'
+  systemctl is-active --quiet omk-mqtt-ap-proxy.socket || fail 'AP preflight failed: MQTT AP socket is not active.'
   log 'PASS: AP preflight completed; local Compose startup prerequisites are available.'
 }
 
 base_reboot_is_required() {
   local current_kernel latest_kernel
-  [[ -e /var/run/reboot-required ]] && return 0
+  [[ -e "${OMK_REBOOT_REQUIRED_PATH:-/var/run/reboot-required}" ]] && return 0
   current_kernel="$(uname -r)"
   latest_kernel="$(find /lib/modules -mindepth 2 -maxdepth 2 -type d -name kernel -printf '%h\n' 2>/dev/null | sed 's|.*/||' | sort -V | tail -n 1)"
   [[ -n "${latest_kernel}" && "${latest_kernel}" != "${current_kernel}" ]] || return 1
   [[ "$(printf '%s\n%s\n' "${current_kernel}" "${latest_kernel}" | sort -V | tail -n 1)" == "${latest_kernel}" ]]
+}
+
+continuation_preflight() {
+  log 'Continuation preflight: checking reboot state and non-root Docker access before setup changes.'
+  base_reboot_is_required && fail 'A reboot is required before setup can continue.'
+  ((EUID != 0)) && [[ -z "${SUDO_USER:-}" ]] || fail 'Continue setup from a normal login shell, not root or sudo.'
+  id -nG | tr ' ' '\n' | grep -Fxq docker || fail 'The current login session does not include the docker group. Re-login before continuing.'
+  command -v docker >/dev/null 2>&1 || fail 'Docker is unavailable. Run the base setup first.'
+  docker info >/dev/null 2>&1 || fail 'The current login cannot access the Docker daemon without sudo.'
+  docker compose version >/dev/null 2>&1 || fail 'The Docker Compose plugin is unavailable to the current login.'
+  command -v python3 >/dev/null 2>&1 || fail 'python3 is required for the production publish security check.'
+  [[ -x "${OMK_ROOT}/scripts/lib/validate-compose-publishes.py" ]] || fail 'The production publish security validator is missing or not executable.'
+  docker compose -f "${OMK_ROOT}/compose.yaml" config --no-env-resolution --format json |
+    "${OMK_ROOT}/scripts/lib/validate-compose-publishes.py" >/dev/null ||
+    fail 'Dashboard/MQTT Docker publishing is not restricted to IPv4 loopback.'
+  log 'PASS: continuation prerequisites are ready.'
 }
 
 if "${WITH_BASE}"; then
@@ -232,6 +260,8 @@ if "${WITH_BASE}"; then
   fi
 fi
 
+continuation_preflight
+
 for index in "${!steps[@]}"; do
   if "${WITH_BASE}" && ((index == 0)); then
     continue
@@ -242,13 +272,16 @@ for index in "${!steps[@]}"; do
 done
 
 validate_prepared_ap_profile() {
-  local property value
+  local property value expected_autoconnect=no
   command -v nmcli >/dev/null 2>&1 || fail 'Prepared AP verification failed: nmcli is unavailable.'
   nmcli connection show omk-ap >/dev/null 2>&1 || fail 'Prepared AP verification failed: omk-ap NetworkManager profile is missing.'
+  if nmcli -g NAME connection show --active 2>/dev/null | grep -Fxq omk-ap; then
+    expected_autoconnect=yes
+  fi
   local -a expected=(
     'connection.interface-name|wlan0'
     '802-11-wireless.mode|ap'
-    'connection.autoconnect|yes'
+    "connection.autoconnect|${expected_autoconnect}"
     'ipv4.method|shared'
     'ipv4.addresses|192.168.50.1/24'
     'ipv6.method|disabled'
@@ -258,7 +291,7 @@ validate_prepared_ap_profile() {
     [[ "$(nmcli -g "${property}" connection show omk-ap 2>/dev/null | head -n 1)" == "${value}" ]] ||
       fail "Prepared AP verification failed: omk-ap ${property} is not ${value}."
   done
-  [[ -n "$(nmcli --show-secrets -g 802-11-wireless-security.psk connection show omk-ap 2>/dev/null | head -n 1)" ]] ||
+  [[ -n "$(sudo -n nmcli --show-secrets -g 802-11-wireless-security.psk connection show omk-ap 2>/dev/null | head -n 1)" ]] ||
     fail 'Prepared AP verification failed: omk-ap WPA2 PSK is missing.'
 }
 
@@ -299,15 +332,15 @@ show_ap_credentials_before_wlan0_handoff() {
   IFS= read -r answer <"${credential_input}" || answer=''
   if [[ "${answer}" =~ ^[Yy]([Ee][Ss])?$ ]]; then
     if ((EUID == 0)); then
-      psk="$(nmcli --show-secrets -g 802-11-wireless-security.psk connection show omk-ap 2>/dev/null | head -n 1)"
+      psk="$(sudo -n nmcli --show-secrets -g 802-11-wireless-security.psk connection show omk-ap 2>/dev/null | head -n 1)"
     else
       psk="$(sudo -n nmcli --show-secrets -g 802-11-wireless-security.psk connection show omk-ap 2>/dev/null | head -n 1)"
     fi
     [[ -n "${psk}" ]] || fail 'Cannot read the prepared OMK AP password from NetworkManager.'
-    printf '\nOMK AP password: %s\n' "${psk}" >"${credential_tty}"
+    printf '\nOMK AP password: %s\n' "${psk}" >>"${credential_tty}"
     unset psk
   else
-    printf '\nOMK AP password was not displayed. Retrieve it before disconnecting if needed.\n' >"${credential_tty}"
+    printf '\nOMK AP password was not displayed. Retrieve it before disconnecting if needed.\n' >>"${credential_tty}"
   fi
 }
 
@@ -316,8 +349,11 @@ log 'Final pre-activation Gateway health check:'
 systemctl is-active --quiet omk-system-manager.service || fail 'system-manager is not active.'
 systemctl is-active --quiet omk-data-transformer.timer || fail 'data-transformer timer is not active.'
 systemctl is-active --quiet omk-ap-isolation.service || fail 'OMK AP isolation service is not active.'
+systemctl is-active --quiet omk-dashboard-ap-proxy.socket || fail 'Dashboard AP proxy socket is not active.'
+systemctl is-active --quiet omk-mqtt-ap-proxy.socket || fail 'MQTT AP proxy socket is not active.'
+running_services="$(docker compose -f "${OMK_ROOT}/compose.yaml" ps --status running --services)"
 for service in mosquitto sensor-collector dashboard harvest-uploader; do
-  docker compose -f "${OMK_ROOT}/compose.yaml" ps --status running --services | grep -Fxq "${service}" || fail "${service} container is not running."
+  grep -Fxq "${service}" <<<"${running_services}" || fail "${service} container is not running."
 done
 curl --fail --silent --show-error http://127.0.0.1:8000/health >/dev/null || fail 'Dashboard health check failed.'
 "${WITH_BLE}" && systemctl is-active --quiet omk-ble-sensor-manager.service || ! "${WITH_BLE}" || fail 'BLE sensor-manager is not active.'
@@ -346,5 +382,6 @@ preflight_before_ap_activation
 final_pre_activation_check
 show_ap_credentials_before_wlan0_handoff
 if ! run_step 'setup-wifi-access-point.sh --activate' 'Final OMK AP activation; may disconnect wlan0 SSH'; then
-  fail 'OMK AP profile is prepared but final activation was not completed.'
+  fail 'OMK AP profile is prepared but activation could not be handed to the worker.'
 fi
+log 'OMK AP activation has been queued independently of this SSH session.'

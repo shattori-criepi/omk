@@ -78,7 +78,7 @@ def test_start_configures_will_and_publishes_online_after_connect() -> None:
     publisher, client = _publisher()
 
     publisher.start()
-    assert client.connected_to == ("192.168.50.1", 1883, 60)
+    assert client.connected_to == ("127.0.0.1", 1883, 60)
     assert client.will == (
         "omk/broute-001/status",
         '{"device_id": "broute-001", "status": "offline"}',

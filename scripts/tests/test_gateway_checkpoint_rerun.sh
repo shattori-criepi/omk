@@ -30,7 +30,7 @@ run_checkpoint() {
     status=$?
   fi
   [[ "${status}" == 99 ]]
-  ! grep -Fq 'nmcli connection up omk-ap' "${GW_CALL_LOG}"
+  if grep -Fq 'nmcli connection up omk-ap' "${GW_CALL_LOG}"; then echo "Forbidden text or operation detected." >&2; exit 1; fi
   cp "${GW_CALL_LOG}" "${GATEWAY_HARNESS_ROOT}/${cp}-first.calls"
   gateway_harness_artifact_snapshot >"${GATEWAY_HARNESS_ROOT}/${cp}-before.snapshot"
   uuid_before=''; token_before=''

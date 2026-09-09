@@ -12,7 +12,7 @@ base_output="$("${SETUP}" --dry-run --with-base)"
 no_kiosk_output="$("${SETUP}" --dry-run --no-kiosk)"
 
 grep -Fq 'Base setup: skipped' <<<"${output}"
-! grep -Fq 'setup-raspberry-pi.sh' <<<"${output}"
+if grep -Fq 'setup-raspberry-pi.sh' <<<"${output}"; then echo "Forbidden text or operation detected." >&2; exit 1; fi
 grep -Fq 'setup-raspberry-pi.sh' <<<"${base_output}"
 grep -Fq 'setup-soracom-onyx.sh' <<<"${output}"
 grep -Fq 'setup-wifi-access-point.sh --activate' <<<"${output}"
@@ -23,17 +23,17 @@ grep -Fq 'setup-ble-sensor-manager.sh' <<<"${output}"
 grep -Fq 'setup-broute-meter.sh' <<<"${output}"
 grep -Fq 'setup-dashboard-kiosk.sh' <<<"${output}"
 grep -Fq 'setup-dashboard-kiosk.sh --prepare' <<<"${base_output}"
-! grep -Fq 'setup-dashboard-kiosk.sh' <<<"${no_kiosk_output}"
-! grep -Fq 'setup-ichijo-energy-node.sh' <<<"${output}"
+if grep -Fq 'setup-dashboard-kiosk.sh' <<<"${no_kiosk_output}"; then echo "Forbidden text or operation detected." >&2; exit 1; fi
+if grep -Fq 'setup-ichijo-energy-node.sh' <<<"${output}"; then echo "Forbidden text or operation detected." >&2; exit 1; fi
 
 system_manager_line="$(grep -n -F 'setup-system-manager.sh' <<<"${output}" | cut -d: -f1)"
 collection_line="$(grep -n -F 'setup-data-collection.sh --prepare' <<<"${output}" | cut -d: -f1)"
 transformer_line="$(grep -n -F 'setup-data-transformer.sh' <<<"${output}" | cut -d: -f1)"
 exporter_line="$(grep -n -F 'setup-data-exporter.sh' <<<"${output}" | cut -d: -f1)"
-ap_prepare_line="$(grep -n -F 'setup-wifi-access-point.sh — Required OMK AP profile' <<<"${output}" | cut -d: -f1)"
+ap_prepare_line="$(grep -n -F 'setup-wifi-access-point.sh --prepare — Required OMK AP profile' <<<"${output}" | cut -d: -f1)"
 health_check_line="$(grep -n -F 'final-pre-activation-check — Final local Gateway health verification' <<<"${output}" | cut -d: -f1)"
 ap_activation_line="$(grep -n -F 'setup-wifi-access-point.sh --activate' <<<"${output}" | cut -d: -f1)"
-start_collection_line="$(grep -n -F 'setup-data-collection.sh — Required Docker collection' <<<"${output}" | cut -d: -f1)"
+start_collection_line="$(grep -n -F 'setup-data-collection.sh --with-ap-proxies — Required Docker collection' <<<"${output}" | cut -d: -f1)"
 [[ "${system_manager_line}" -lt "${collection_line}" ]]
 [[ "${collection_line}" -lt "${transformer_line}" ]]
 [[ "${transformer_line}" -lt "${exporter_line}" ]]
@@ -57,6 +57,9 @@ mkdir -p "${TEMP_DIR}/scripts/lib" "${TEMP_DIR}/bin" \
   "${TEMP_DIR}/units" "${TEMP_DIR}/kiosk/default.target.wants"
 cp "${SETUP}" "${TEMP_DIR}/scripts/setup-omk-gateway.sh"
 cp "${ROOT_DIR}/scripts/lib/apt-helpers.sh" "${TEMP_DIR}/scripts/lib/apt-helpers.sh"
+cp "${ROOT_DIR}/scripts/lib/validate-compose-publishes.py" "${TEMP_DIR}/scripts/lib/"
+cp "${ROOT_DIR}/scripts/lib/validate-ap-socket-units.sh" "${TEMP_DIR}/scripts/lib/"
+cp "${ROOT_DIR}/scripts/lib/validate-ap-socket-units.py" "${TEMP_DIR}/scripts/lib/"
 touch "${TEMP_DIR}/compose.yaml" \
   "${TEMP_DIR}/services/mosquitto/config/mosquitto.conf" \
   "${TEMP_DIR}/services/system-manager/.venv/bin/python" \
@@ -65,6 +68,23 @@ touch "${TEMP_DIR}/compose.yaml" \
   "${TEMP_DIR}/units/omk-system-manager.service" \
   "${TEMP_DIR}/units/omk-data-transformer.service" \
   "${TEMP_DIR}/units/omk-data-transformer.timer"
+cat >"${TEMP_DIR}/units/omk-dashboard-ap-proxy.socket" <<'EOF'
+[Socket]
+ListenStream=192.168.50.1:8000
+BindToDevice=wlan0
+FreeBind=yes
+Accept=no
+EOF
+cat >"${TEMP_DIR}/units/omk-mqtt-ap-proxy.socket" <<'EOF'
+[Socket]
+ListenStream=192.168.50.1:1883
+BindToDevice=wlan0
+FreeBind=yes
+Accept=no
+EOF
+printf '%s\n' '[Service]' 'ExecStart=/usr/lib/systemd/systemd-socket-proxyd 127.0.0.1:8000' >"${TEMP_DIR}/units/omk-dashboard-ap-proxy.service"
+printf '%s\n' '[Service]' 'ExecStart=/usr/lib/systemd/systemd-socket-proxyd 127.0.0.1:1883' >"${TEMP_DIR}/units/omk-mqtt-ap-proxy.service"
+touch "${TEMP_DIR}/units/omk-ap-activation.service"
 chmod +x "${TEMP_DIR}/services/system-manager/.venv/bin/python" "${TEMP_DIR}/services/data-transformer/.venv/bin/python"
 touch "${TEMP_DIR}/kiosk/omk-dashboard-kiosk.service"
 ln -s ../omk-dashboard-kiosk.service "${TEMP_DIR}/kiosk/default.target.wants/omk-dashboard-kiosk.service"
@@ -101,6 +121,7 @@ EOF
 cat > "${TEMP_DIR}/bin/docker" <<'EOF'
 #!/usr/bin/env bash
 case "$*" in
+  *'--format json'*) printf '%s\n' '{"services":{"mosquitto":{"ports":[{"target":1883,"published":"1883","host_ip":"127.0.0.1","protocol":"tcp"}]},"dashboard":{"ports":[{"target":8000,"published":"8000","host_ip":"127.0.0.1","protocol":"tcp"}]}}}' ;;
   *'config --quiet'*) [[ "${FAIL_PREFLIGHT_CONFIG:-false}" != true ]] ;;
   *'config --images'*) printf '%s\n' eclipse-mosquitto:2.0.22 omk-sensor-collector omk-dashboard omk-harvest-uploader ;;
   *'image inspect'*) [[ "${FAIL_PREFLIGHT_IMAGE:-false}" != true ]] ;;
@@ -127,7 +148,7 @@ if [[ "$*" == *'connection show omk-ap'* && "$*" == *'-g '* ]]; then
     *802-11-wireless.ssid*) printf '%s\n' OMK-TEST ;;
     *connection.interface-name*) printf '%s\n' wlan0 ;;
     *802-11-wireless.mode*) printf '%s\n' ap ;;
-    *connection.autoconnect*) printf '%s\n' yes ;;
+    *connection.autoconnect*) printf '%s\n' no ;;
     *ipv4.method*) printf '%s\n' shared ;;
     *ipv4.addresses*) printf '%s\n' 192.168.50.1/24 ;;
     *ipv6.method*) printf '%s\n' disabled ;;
@@ -148,10 +169,12 @@ cat > "${TEMP_DIR}/bin/systemd-analyze" <<'EOF'
 #!/usr/bin/env bash
 [[ "${FAIL_PREFLIGHT_SYSTEMD:-false}" != true ]]
 EOF
+cp "${ROOT_DIR}/scripts/tests/lib/proxy-systemctl" "${TEMP_DIR}/bin/systemctl"
+cp "${ROOT_DIR}/scripts/tests/lib/proxy-ss" "${TEMP_DIR}/bin/ss"
 chmod +x "${TEMP_DIR}/bin/"*
 
 CALL_LOG="${TEMP_DIR}/calls" PATH="${TEMP_DIR}/bin:${PATH}" "${TEMP_DIR}/scripts/setup-omk-gateway.sh"
-! grep -Fq 'setup-raspberry-pi.sh' "${TEMP_DIR}/calls"
+if grep -Fq 'setup-raspberry-pi.sh' "${TEMP_DIR}/calls"; then echo "Forbidden text or operation detected." >&2; exit 1; fi
 CALL_LOG="${TEMP_DIR}/calls" PATH="${TEMP_DIR}/bin:${PATH}" "${TEMP_DIR}/scripts/setup-omk-gateway.sh" --with-base
 [[ "$(grep -Fxc 'setup-raspberry-pi.sh ' "${TEMP_DIR}/calls")" == 1 ]]
 
@@ -161,7 +184,7 @@ rm -f -- "${TEMP_DIR}/calls"
 SUDO_USER=omkdev CALL_LOG="${TEMP_DIR}/calls" PATH="${TEMP_DIR}/bin:${PATH}" \
   "${TEMP_DIR}/scripts/setup-omk-gateway.sh" --with-base >"${TEMP_DIR}/relogin-required.log"
 grep -Fq 'Docker group membership needs a new login session.' "${TEMP_DIR}/relogin-required.log"
-! grep -Fq 'setup-system-manager.sh' "${TEMP_DIR}/calls"
+if grep -Fq 'setup-system-manager.sh' "${TEMP_DIR}/calls"; then echo "Forbidden text or operation detected." >&2; exit 1; fi
 
 # A base setup failure, including an exhausted apt/dpkg lock timeout, must not
 # let the top-level orchestrator reach AP activation.
@@ -172,7 +195,7 @@ if FAIL_SETUP=setup-raspberry-pi.sh CALL_LOG="${TEMP_DIR}/calls" PATH="${TEMP_DI
   exit 1
 fi
 grep -Fq 'setup-raspberry-pi.sh ' "${TEMP_DIR}/calls"
-! grep -Fq 'setup-wifi-access-point.sh' "${TEMP_DIR}/calls"
+if grep -Fq 'setup-wifi-access-point.sh' "${TEMP_DIR}/calls"; then echo "Forbidden text or operation detected." >&2; exit 1; fi
 
 rm -f -- "${TEMP_DIR}/calls"
 CALL_LOG="${TEMP_DIR}/calls" PATH="${TEMP_DIR}/bin:${PATH}" "${TEMP_DIR}/scripts/setup-omk-gateway.sh" --with-soracom --with-ble --with-broute
@@ -188,7 +211,7 @@ for script in \
   'setup-broute-meter.sh '; do
   [[ "$(line_number "${script}")" -lt "${ap_line}" ]]
 done
-start_collection_line="$(grep -n -E 'setup-data-collection\.sh $' "${TEMP_DIR}/calls" | cut -d: -f1)"
+start_collection_line="$(grep -n -E 'setup-data-collection\.sh --with-ap-proxies$' "${TEMP_DIR}/calls" | cut -d: -f1)"
 [[ "${ap_line}" -lt "${start_collection_line}" ]]
 normal_kiosk_line="$(grep -n -E 'setup-dashboard-kiosk\.sh $' "${TEMP_DIR}/calls" | cut -d: -f1)"
 [[ "${start_collection_line}" -lt "${normal_kiosk_line}" ]]
@@ -211,7 +234,7 @@ if FAIL_SETUP=setup-data-collection.sh CALL_LOG="${TEMP_DIR}/calls" PATH="${TEMP
   exit 1
 fi
 grep -Fq 'setup-data-collection.sh --prepare' "${TEMP_DIR}/calls"
-! grep -Fq 'setup-wifi-access-point.sh' "${TEMP_DIR}/calls"
+if grep -Fq 'setup-wifi-access-point.sh' "${TEMP_DIR}/calls"; then echo "Forbidden text or operation detected." >&2; exit 1; fi
 
 # Full Dashboard/kiosk and health failures must stop before final activation.
 for failure_setup in setup-dashboard-kiosk.sh setup-data-collection.sh; do
@@ -221,7 +244,7 @@ for failure_setup in setup-dashboard-kiosk.sh setup-data-collection.sh; do
     echo "Gateway setup accepted failed ${failure_setup}." >&2
     exit 1
   fi
-  ! grep -Fq 'setup-wifi-access-point.sh --activate' "${TEMP_DIR}/calls"
+  if grep -Fq 'setup-wifi-access-point.sh --activate' "${TEMP_DIR}/calls"; then echo "Forbidden text or operation detected." >&2; exit 1; fi
 done
 rm -f -- "${TEMP_DIR}/calls"
 if FAIL_HEALTH=true CALL_LOG="${TEMP_DIR}/calls" PATH="${TEMP_DIR}/bin:${PATH}" \
@@ -229,7 +252,7 @@ if FAIL_HEALTH=true CALL_LOG="${TEMP_DIR}/calls" PATH="${TEMP_DIR}/bin:${PATH}" 
   echo 'Gateway setup accepted failed Dashboard health.' >&2
   exit 1
 fi
-! grep -Fq 'setup-wifi-access-point.sh --activate' "${TEMP_DIR}/calls"
+if grep -Fq 'setup-wifi-access-point.sh --activate' "${TEMP_DIR}/calls"; then echo "Forbidden text or operation detected." >&2; exit 1; fi
 
 # Failure of the last activation remains incomplete rather than a false
 # overall SUCCESS; the non-activate profile preparation has already run.
@@ -241,7 +264,7 @@ if FAIL_SETUP=setup-wifi-access-point.sh FAIL_SETUP_ARGS=--activate CALL_LOG="${
 fi
 grep -Fq 'setup-wifi-access-point.sh ' "${TEMP_DIR}/calls"
 grep -Fq 'setup-wifi-access-point.sh --activate' "${TEMP_DIR}/calls"
-grep -Fq 'final activation was not completed' "${TEMP_DIR}/activation-failed.log"
+grep -Fq 'activation could not be handed to the worker' "${TEMP_DIR}/activation-failed.log"
 
 # Every preflight failure is before wlan0 is handed to the AP script.
 for failure in FAIL_PREFLIGHT_CONFIG FAIL_PREFLIGHT_IMAGE FAIL_PREFLIGHT_SYSTEMD; do
@@ -252,7 +275,7 @@ for failure in FAIL_PREFLIGHT_CONFIG FAIL_PREFLIGHT_IMAGE FAIL_PREFLIGHT_SYSTEMD
     exit 1
   fi
   grep -Fq 'AP preflight failed:' "${TEMP_DIR}/${failure}.log"
-  ! grep -Fq 'setup-wifi-access-point.sh' "${TEMP_DIR}/calls"
+  if grep -Fq 'setup-wifi-access-point.sh --activate' "${TEMP_DIR}/calls"; then echo "Forbidden text or operation detected." >&2; exit 1; fi
 done
 
 # Simulate a missing post-AP command by making the docker command itself
@@ -272,8 +295,8 @@ if CALL_LOG="${TEMP_DIR}/calls" PATH="${TEMP_DIR}/bin-no-docker" \
   echo 'Gateway setup accepted a missing docker command.' >&2
   exit 1
 fi
-grep -Fq 'required post-AP command is unavailable: docker' "${TEMP_DIR}/missing-command.log"
-! grep -Fq 'setup-wifi-access-point.sh' "${TEMP_DIR}/calls"
+grep -Fq 'Docker is unavailable. Run the base setup first.' "${TEMP_DIR}/missing-command.log"
+if grep -Fq 'setup-wifi-access-point.sh' "${TEMP_DIR}/calls"; then echo "Forbidden text or operation detected." >&2; exit 1; fi
 
 # The kiosk package setup must occur before the common AP preflight and AP
 # activation; its normal GUI work remains after local Compose startup.
@@ -300,7 +323,7 @@ grep -Fq 'This SSH session routes through wlan0; offering OMK AP credentials bef
 [[ "$(grep -n -F 'offering OMK AP credentials' "${TEMP_DIR}/wlan0-credential.log" | cut -d: -f1)" -lt "$(grep -n -F 'Starting: Final OMK AP activation' "${TEMP_DIR}/wlan0-credential.log" | cut -d: -f1)" ]]
 grep -Fq 'SSID: OMK-TEST' "${credential_tty}"
 grep -Fq 'OMK AP password: test-psk' "${credential_tty}"
-! grep -Fq 'test-psk' "${TEMP_DIR}/wlan0-credential.log"
+if grep -Fq 'test-psk' "${TEMP_DIR}/wlan0-credential.log"; then echo "Forbidden text or operation detected." >&2; exit 1; fi
 
 # Declining the optional display leaves the secret out of both output streams.
 : >"${credential_tty}"
@@ -311,8 +334,8 @@ SSH_CONNECTION='198.51.100.10 40000 192.0.2.2 22' TEST_SSH_ROUTE_DEV=wlan0 \
   CALL_LOG="${TEMP_DIR}/calls" PATH="${TEMP_DIR}/bin:${PATH}" \
   "${TEMP_DIR}/scripts/setup-omk-gateway.sh" >"${TEMP_DIR}/wlan0-no-password.log"
 grep -Fq 'password was not displayed' "${credential_tty}"
-! grep -Fq 'test-psk' "${credential_tty}"
-! grep -Fq 'test-psk' "${TEMP_DIR}/wlan0-no-password.log"
+if grep -Fq 'test-psk' "${credential_tty}"; then echo "Forbidden text or operation detected." >&2; exit 1; fi
+if grep -Fq 'test-psk' "${TEMP_DIR}/wlan0-no-password.log"; then echo "Forbidden text or operation detected." >&2; exit 1; fi
 
 # A Napter/ethernet-like route does not force an AP credential prompt.
 : >"${credential_tty}"
@@ -322,19 +345,19 @@ SSH_CONNECTION='198.51.100.10 40000 192.0.2.2 22' TEST_SSH_ROUTE_DEV=eth0 \
   CALL_LOG="${TEMP_DIR}/calls" PATH="${TEMP_DIR}/bin:${PATH}" \
   "${TEMP_DIR}/scripts/setup-omk-gateway.sh" >"${TEMP_DIR}/non-wlan0.log"
 [[ ! -s "${credential_tty}" ]]
-! grep -Fq 'offering OMK AP credentials' "${TEMP_DIR}/non-wlan0.log"
+if grep -Fq 'offering OMK AP credentials' "${TEMP_DIR}/non-wlan0.log"; then echo "Forbidden text or operation detected." >&2; exit 1; fi
 
 # Dry-run prints no secret even when its environment resembles wlan0 SSH.
 dry_run_output="$(SSH_CONNECTION='198.51.100.10 40000 192.0.2.2 22' TEST_SSH_ROUTE_DEV=wlan0 \
   OMK_TEST_CREDENTIAL_TTY="${credential_tty}" OMK_TEST_CREDENTIAL_INPUT="${credential_input}" \
   PATH="${TEMP_DIR}/bin:${PATH}" "${TEMP_DIR}/scripts/setup-omk-gateway.sh" --dry-run)"
-! grep -Fq 'test-psk' <<<"${dry_run_output}"
-! grep -Fq 'Show the OMK AP password' <<<"${dry_run_output}"
+if grep -Fq 'test-psk' <<<"${dry_run_output}"; then echo "Forbidden text or operation detected." >&2; exit 1; fi
+if grep -Fq 'Show the OMK AP password' <<<"${dry_run_output}"; then echo "Forbidden text or operation detected." >&2; exit 1; fi
 
 rm -f -- "${TEMP_DIR}/calls"
 CALL_LOG="${TEMP_DIR}/calls" PATH="${TEMP_DIR}/bin:${PATH}" \
   "${TEMP_DIR}/scripts/setup-omk-gateway.sh" --no-kiosk
-! grep -Fq 'setup-dashboard-kiosk.sh' "${TEMP_DIR}/calls"
+if grep -Fq 'setup-dashboard-kiosk.sh' "${TEMP_DIR}/calls"; then echo "Forbidden text or operation detected." >&2; exit 1; fi
 [[ "$(tail -n 1 "${TEMP_DIR}/calls")" == 'setup-wifi-access-point.sh --activate' ]]
 
 # A rerun keeps the same profile-prepare, local-startup, health, and final

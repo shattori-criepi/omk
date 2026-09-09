@@ -16,7 +16,7 @@ from collections.abc import Callable
 
 PROTOCOL_VERSION = 1
 DEFAULT_PROFILE = "omk-ap"
-DEFAULT_MQTT_BROKER = "192.168.50.1"
+DEFAULT_MQTT_BROKER = "127.0.0.1"
 # AtomS3 Lite exposes its supported USB provisioning interface as USB CDC ACM
 # (and, normally, as an Espressif /dev/serial/by-id symlink).  Do not probe
 # every ttyUSB device: gateways can have modems and FTDI adapters for which an

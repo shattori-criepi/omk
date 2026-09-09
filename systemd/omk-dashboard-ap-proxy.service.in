@@ -1,0 +1,13 @@
+[Unit]
+Description=OMK Dashboard proxy from the Wi-Fi access point to loopback
+Requires=omk-dashboard-ap-proxy.socket
+Wants=docker.service
+After=docker.service
+
+[Service]
+ExecStart=@SYSTEMD_SOCKET_PROXYD@ 127.0.0.1:8000
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+RestrictAddressFamilies=AF_INET AF_UNIX

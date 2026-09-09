@@ -1,0 +1,15 @@
+[Unit]
+Description=Activate the prepared OMK Wi-Fi access point
+After=NetworkManager.service
+Wants=NetworkManager.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/omk-activate-access-point
+# Budgets: preflight 30 + request 20 + activation 60 + verify 15 + rollback 90
+# plus command termination/scheduling margin 45 seconds.
+TimeoutStartSec=260
+TimeoutStopSec=100
+KillMode=mixed
+RuntimeDirectory=omk-ap-activation
+RuntimeDirectoryMode=0700

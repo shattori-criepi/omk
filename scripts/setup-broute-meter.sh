@@ -502,6 +502,7 @@ main() {
   log "B-route meter setup started. Log file: ${LOG_FILE}"
   migrate_legacy_runtime_config
   ensure_python_runtime
+  "${VENV_PYTHON}" "${SCRIPT_DIR}/lib/check-host-mqtt-config.py" "${OMK_ROOT}/services/broute-meter/config/settings.yaml" || fail "B-route MQTT configuration must be migrated before service changes."
   ensure_runtime_directory "${OMK_ROOT}/data/broute-meter"
   ensure_runtime_directory "${OMK_ROOT}/logs/broute-meter"
   ensure_credentials_permissions

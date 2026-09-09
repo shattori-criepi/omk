@@ -7,7 +7,7 @@ trap gateway_harness_destroy EXIT
 
 # A: Compose config error aborts before AP activation.
 if GW_FAIL_COMMAND=docker GW_FAIL_SUBCOMMAND='config --quiet' gateway_harness_run >"${GATEWAY_HARNESS_ROOT}/a.log" 2>&1; then exit 1; fi
-! grep -Fq 'setup-wifi-access-point.sh' "${GW_CALL_LOG}"
+if grep -Fq 'setup-wifi-access-point.sh' "${GW_CALL_LOG}"; then echo "Forbidden text or operation detected." >&2; exit 1; fi
 
 # B: two apt lock errors are observed, then the same standard command succeeds.
 : >"${GW_CALL_LOG}"; rm -f "${GW_STATE_DIR}"/count-apt-get

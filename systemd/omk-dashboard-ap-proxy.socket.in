@@ -1,0 +1,12 @@
+[Unit]
+Description=OMK Dashboard socket on the Wi-Fi access point
+After=network-pre.target
+
+[Socket]
+ListenStream=192.168.50.1:8000
+BindToDevice=wlan0
+FreeBind=yes
+Accept=no
+
+[Install]
+WantedBy=sockets.target

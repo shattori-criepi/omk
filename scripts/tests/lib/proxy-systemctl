@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ -n "${TEST_SYSTEMCTL_CALLS:-}" ]]; then printf '%s\n' "$*" >>"${TEST_SYSTEMCTL_CALLS}"; fi
+if [[ "${FORBID_ACTIVATION:-no}" == yes && "$*" == *omk-ap-activation.service* ]]; then
+  echo 'Forbidden early activation operation.' >&2
+  exit 97
+fi
+if [[ "${BROUTE_INACTIVE:-false}" == true && "$*" == *omk-broute-meter.service* ]]; then exit 3; fi
+if [[ "${FORBID_ACTIVATION:-no}" == yes && "${1:-}" =~ ^(start|restart|enable)$ && "$*" == *-ap-proxy.* ]]; then
+  echo 'Prepare started an AP proxy before backend migration.' >&2; exit 97
+fi
+unit_dir="${OMK_SYSTEMD_UNIT_DIR:-${OMK_PREFLIGHT_SYSTEMD_UNIT_DIR:-}}"
+case "${1:-}" in
+  cat) cat "${unit_dir}/${2}"; for drop in "${unit_dir}/${2}.d/"*.conf; do [[ ! -f "$drop" ]] || cat "$drop"; done ;;
+  show)
+    port=8000; [[ "${2}" == *mqtt* ]] && port=1883
+    printf 'FreeBind=%s\nBindToDevice=wlan0\nAccept=no\nListen=192.168.50.1:%s (Stream)\nActiveState=active\n' "${TEST_EFFECTIVE_FREEBIND:-yes}" "$port" ;;
+esac

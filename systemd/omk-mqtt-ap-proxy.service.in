@@ -1,0 +1,13 @@
+[Unit]
+Description=OMK MQTT proxy from the Wi-Fi access point to loopback
+Requires=omk-mqtt-ap-proxy.socket
+Wants=docker.service
+After=docker.service
+
+[Service]
+ExecStart=@SYSTEMD_SOCKET_PROXYD@ 127.0.0.1:1883
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+RestrictAddressFamilies=AF_INET AF_UNIX

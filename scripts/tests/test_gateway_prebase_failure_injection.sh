@@ -21,10 +21,10 @@ expect_prebase_failure() {
   fi
   [[ "${status}" == 1 ]]
   grep -Fq "${expected}" "${GATEWAY_HARNESS_ROOT}/${case_name}.log"
-  ! grep -Fq 'apt-get update' "${GW_CALL_LOG}"
-  ! grep -Fq 'apt-get full-upgrade' "${GW_CALL_LOG}"
-  ! grep -Fq 'apt-get install' "${GW_CALL_LOG}"
-  ! grep -Fq 'setup-wifi-access-point.sh' "${GW_CALL_LOG}"
+  if grep -Fq 'apt-get update' "${GW_CALL_LOG}"; then echo "Forbidden text or operation detected." >&2; exit 1; fi
+  if grep -Fq 'apt-get full-upgrade' "${GW_CALL_LOG}"; then echo "Forbidden text or operation detected." >&2; exit 1; fi
+  if grep -Fq 'apt-get install' "${GW_CALL_LOG}"; then echo "Forbidden text or operation detected." >&2; exit 1; fi
+  if grep -Fq 'setup-wifi-access-point.sh' "${GW_CALL_LOG}"; then echo "Forbidden text or operation detected." >&2; exit 1; fi
 }
 
 write_low_space_df() {
@@ -127,7 +127,7 @@ exit 0
 EOF
 chmod +x "${GATEWAY_HARNESS_ROOT}/bin/ip"
 expect_prebase_failure F7 'no default network route is available'
-! grep -Fq 'getent ahosts' "${GW_CALL_LOG}"
+if grep -Fq 'getent ahosts' "${GW_CALL_LOG}"; then echo "Forbidden text or operation detected." >&2; exit 1; fi
 gateway_harness_destroy
 
 # F8: route remains normal; only the first repository DNS lookup fails.

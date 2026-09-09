@@ -4,7 +4,7 @@ services:
     container_name: omk-mosquitto
     restart: unless-stopped
     ports:
-      - "192.168.50.1:1883:1883"
+      - "127.0.0.1:1883:1883"
     volumes:
       - ./services/mosquitto/config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
       - ./services/mosquitto/data:/mosquitto/data
@@ -15,10 +15,9 @@ services:
     container_name: omk-dashboard
     restart: unless-stopped
     ports:
-      # Admin pages can reveal the AP PSK. Do not expose them through wwan0
-      # or Ethernet; the kiosk uses loopback and OMK clients use the AP IP.
+      # Admin pages can reveal the AP PSK. Docker only publishes loopback;
+      # systemd socket proxies provide explicitly device-bound OMK AP access.
       - "127.0.0.1:8000:8000"
-      - "192.168.50.1:8000:8000"
     environment:
       TZ: Asia/Tokyo
       OMK_PROCESSED_DATA_ROOT: /app/data/processed

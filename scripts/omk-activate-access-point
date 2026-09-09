@@ -1,0 +1,125 @@
+#!/usr/bin/env bash
+# One fixed handoff, no credentials or persistent connection state.
+set -euo pipefail
+readonly INTERFACE=wlan0
+readonly ADDRESS=192.168.50.1/24
+readonly PREFLIGHT_SECONDS=30 REQUEST_SECONDS=20 ACTIVATION_SECONDS=60 VERIFY_SECONDS=15 ROLLBACK_SECONDS=90
+readonly COMMAND_SECONDS=5
+readonly LOCK_FILE="${OMK_AP_ACTIVATION_LOCK_FILE:-/run/omk-ap-activation/worker.lock}"
+log() { printf '[omk-ap-activation] %s\n' "$*"; }
+exec 9>"${LOCK_FILE}"
+flock -n 9 || { log 'Another activation owns the handoff.'; exit 1; }
+phase_deadline=$((SECONDS + PREFLIGHT_SECONDS))
+# Every external NM/IP command is bounded by both its own and its phase budget.
+bounded() {
+  local seconds=$((phase_deadline - SECONDS))
+  ((seconds > 0)) || return 124
+  ((seconds <= COMMAND_SECONDS)) || seconds=${COMMAND_SECONDS}
+  timeout --kill-after=1 "${seconds}" "$@"
+}
+current_uuid() { bounded nmcli -g GENERAL.CON-UUID device show "${INTERFACE}"; }
+healthy_ap() {
+  [[ "$(current_uuid)" == "${ap_uuid}" ]] &&
+    [[ "$(bounded nmcli -g GENERAL.STATE device show "${INTERFACE}")" == 100* ]] &&
+    bounded ip -4 -o address show dev "${INTERFACE}" | grep -Fq " ${ADDRESS} "
+}
+ap_uuid="$(bounded nmcli -g connection.uuid connection show omk-ap)"
+[[ "${ap_uuid}" =~ ^[0-9a-fA-F-]{36}$ ]] || { log 'ERROR: ambiguous or missing omk-ap UUID.'; exit 1; }
+[[ "$(bounded nmcli -g connection.interface-name connection show uuid "${ap_uuid}")" == wlan0 ]] || exit 1
+previous_uuid="$(current_uuid)"
+[[ "${previous_uuid}" == -- ]] && previous_uuid=''
+if [[ "${previous_uuid}" == "${ap_uuid}" ]]; then
+  healthy_ap || { log 'ERROR: existing AP is not healthy; leaving it unchanged.'; exit 1; }
+  bounded nmcli connection modify uuid "${ap_uuid}" connection.autoconnect yes
+  log 'OMK AP is already active; no down/up was performed.'
+  exit 0
+fi
+[[ -z "${previous_uuid}" || "${previous_uuid}" =~ ^[0-9a-fA-F-]{36}$ ]] || exit 1
+[[ "$(bounded nmcli -g connection.autoconnect connection show uuid "${ap_uuid}")" == no ]] || {
+  log 'ERROR: inactive AP must be prepared with autoconnect=no.'; exit 1;
+}
+changed=no
+rollback() {
+  local status="$1" current
+  trap - EXIT
+  # Do not let a second TERM interrupt cleanup. The unit allows its full budget.
+  trap '' TERM INT HUP
+  phase_deadline=$((SECONDS + ROLLBACK_SECONDS))
+  if healthy_ap; then
+    log 'AP became healthy before cleanup; preserving it.'
+    return "${status}"
+  fi
+  if [[ "${changed}" == yes ]]; then
+    bounded nmcli connection modify uuid "${ap_uuid}" connection.autoconnect no || {
+      log 'ERROR: could not disable AP autoconnect.'; return "${status}";
+    }
+  fi
+  current="$(current_uuid)" || { log 'ERROR: cannot establish wlan0 ownership; no reconnect attempted.'; return "${status}"; }
+  if [[ -n "${current}" && "${current}" != -- && "${current}" != "${ap_uuid}" ]]; then
+    log 'wlan0 has an existing connection; preserving it without reconnecting.'
+    return "${status}"
+  fi
+  if [[ "${current}" == "${ap_uuid}" && "${changed}" == yes ]]; then
+    bounded nmcli --wait 0 connection down uuid "${ap_uuid}" || { log 'ERROR: could not cancel own AP request.'; return "${status}"; }
+  fi
+  # --wait 0 only queues deactivation. Poll every 1 second within the shared
+  # 90 second rollback budget; never treat the still-deactivating AP as free.
+  while :; do
+    if ((SECONDS >= phase_deadline)); then
+      log 'ERROR: rollback timed out after 90 seconds; own AP deactivation is still pending.'
+      return "${status}"
+    fi
+    current="$(current_uuid)" || {
+      if ((SECONDS >= phase_deadline)); then
+        log 'ERROR: rollback timed out after 90 seconds; deactivation completion could not be confirmed.'
+      else
+        log 'ERROR: rollback cannot read wlan0 state; no Wi-Fi activation attempted.'
+      fi
+      return "${status}"
+    }
+    if [[ -z "${current}" || "${current}" == -- ]]; then break; fi
+    if [[ "${current}" != "${ap_uuid}" ]]; then
+      log 'Rollback externally restored: preserving the current Wi-Fi connection.'
+      return "${status}"
+    fi
+    if ((SECONDS >= phase_deadline - 1)); then
+      log 'ERROR: rollback timed out after 90 seconds; own AP deactivation is still pending.'
+      return "${status}"
+    fi
+    sleep 1
+  done
+  [[ -n "${previous_uuid}" ]] || { log 'No previous Wi-Fi UUID to restore.'; return "${status}"; }
+  bounded nmcli --wait 0 connection up uuid "${previous_uuid}" ifname "${INTERFACE}" || {
+    log 'WARNING: previous Wi-Fi restoration request failed.'; return "${status}";
+  }
+  while ((SECONDS < phase_deadline)); do
+    current="$(current_uuid)" || break
+    if [[ -n "${current}" && "${current}" != -- && "${current}" != "${previous_uuid}" ]]; then
+      log 'User selected another connection during rollback; leaving it untouched.'
+      return "${status}"
+    fi
+    if [[ "${current}" == "${previous_uuid}" && "$(bounded nmcli -g GENERAL.STATE device show "${INTERFACE}")" == 100* ]]; then
+      log 'Previous Wi-Fi restored.'; return "${status}"
+    fi
+    sleep 1
+  done
+  log 'WARNING: Wi-Fi restoration did not complete within its 90 second budget.'
+  return "${status}"
+}
+trap 'status=$?; log "ERROR: activation failed or was interrupted; checking rollback ownership."; rollback "${status}"' EXIT
+trap 'exit 143' TERM HUP
+trap 'exit 130' INT
+phase_deadline=$((SECONDS + REQUEST_SECONDS))
+changed=yes
+bounded nmcli connection modify uuid "${ap_uuid}" connection.autoconnect yes
+bounded nmcli --wait 0 connection up uuid "${ap_uuid}" ifname "${INTERFACE}"
+phase_deadline=$((SECONDS + ACTIVATION_SECONDS))
+while ((SECONDS < phase_deadline)); do
+  if healthy_ap; then break; fi
+  sleep 1
+done
+# A separate result-verification budget is included in TimeoutStartSec.
+phase_deadline=$((SECONDS + VERIFY_SECONDS))
+healthy_ap
+trap - EXIT TERM INT HUP
+log 'OMK AP activation succeeded on wlan0 (192.168.50.1/24).'

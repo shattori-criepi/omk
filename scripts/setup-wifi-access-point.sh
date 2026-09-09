@@ -13,6 +13,8 @@ readonly FIREWALL_CONFIG_PATH="${FIREWALL_CONFIG_DIR}/omk-ap-isolation.nft"
 readonly FIREWALL_UNIT_PATH="/etc/systemd/system/omk-ap-isolation.service"
 readonly DNSMASQ_SHARED_DIR="/etc/NetworkManager/dnsmasq-shared.d"
 readonly DNSMASQ_ISOLATION_PATH="${DNSMASQ_SHARED_DIR}/omk-ap-isolation.conf"
+readonly DEFAULT_SYSTEMD_UNIT_DIR="/etc/systemd/system"
+readonly DEFAULT_LIBEXEC_DIR="/usr/local/libexec"
 
 CONNECTION_NAME="${OMK_AP_CONNECTION_NAME:-${DEFAULT_CONNECTION_NAME}}"
 INTERFACE="${OMK_AP_INTERFACE:-${DEFAULT_INTERFACE}}"
@@ -23,6 +25,9 @@ ACTIVATE="${OMK_AP_ACTIVATE:-no}"
 ACTIVATION_REQUESTED="${ACTIVATE}"
 DRY_RUN=no
 PRINT_CONFIG=no
+PREPARE=no
+EXPLICIT_ACTIVATE=no
+START_PROXIES=no
 ASSUME_YES="${OMK_AP_CONFIRM:-no}"
 EXISTING=no
 NEEDS_PSK=no
@@ -46,7 +51,10 @@ not activate the AP, so an SSH connection is not switched unexpectedly.
 Options:
   --dry-run       Show the proposed configuration without changing anything.
   --print-config  Print the resolved configuration (the PSK is always masked).
-  --activate      After confirmation, activate the AP profile.
+  --prepare       Prepare an inactive profile and AP socket proxies. This always
+                  suppresses activation requested through the environment.
+  --start-proxies Start prepared sockets after loopback backend migration.
+  --activate      Hand the prepared profile to the independent worker.
   --yes           Confirm profile changes and --activate non-interactively.
   --help, -h      Show this help.
 
@@ -92,10 +100,8 @@ run_privileged() {
 
 install_ap_isolation_firewall() {
   # NetworkManager's `shared` mode supplies DHCP/DNS, but may also add NAT and
-  # forwarding rules. Docker publishes host ports by DNATing them to a bridge,
-  # so admit only conntrack-DNAT traffic before dropping all other forwarding
-  # from the AP. This permits MQTT/Dashboard host-port publishing without
-  # depending on Docker's generated bridge name.
+  # forwarding rules. Dashboard and MQTT terminate in host-bound systemd
+  # sockets, so AP clients never need forwarding to a Docker bridge.
   local temporary_config temporary_unit
   if [[ "${DRY_RUN}" != yes ]]; then
     command -v nft >/dev/null 2>&1 || fail "nft is required to isolate OMK AP clients. Install the nftables package and re-run this script."
@@ -104,10 +110,11 @@ install_ap_isolation_firewall() {
   temporary_unit="$(mktemp)"
   trap 'rm -f -- "${temporary_config}" "${temporary_unit}"' RETURN
   cat > "${temporary_config}" <<EOF
+add table inet omk_ap_isolation
+delete table inet omk_ap_isolation
 table inet omk_ap_isolation {
   chain forward {
     type filter hook forward priority -100; policy accept;
-    iifname "${INTERFACE}" ct status dnat counter accept comment "Allow Gateway Docker published ports after DNAT"
     iifname "${INTERFACE}" oifname != "${INTERFACE}" counter drop comment "OMK AP clients must not route outside the AP"
   }
 }
@@ -120,9 +127,7 @@ Wants=NetworkManager.service
 
 [Service]
 Type=oneshot
-ExecStartPre=-/usr/sbin/nft delete table inet omk_ap_isolation
 ExecStart=/usr/sbin/nft -f ${FIREWALL_CONFIG_PATH}
-ExecReload=-/usr/sbin/nft delete table inet omk_ap_isolation
 ExecReload=/usr/sbin/nft -f ${FIREWALL_CONFIG_PATH}
 ExecStop=-/usr/sbin/nft delete table inet omk_ap_isolation
 RemainAfterExit=yes
@@ -137,15 +142,54 @@ EOF
     "${SUDO[@]}" install -o root -g root -m 0644 "${temporary_config}" "${FIREWALL_CONFIG_PATH}"
     "${SUDO[@]}" install -o root -g root -m 0644 "${temporary_unit}" "${FIREWALL_UNIT_PATH}"
     "${SUDO[@]}" systemctl daemon-reload
-    # Restart even when already active. This both applies the revised rules and
-    # replaces any operator-added temporary rule in this dedicated table.
+    # The nft file replaces the table in one transaction; failure preserves
+    # the old forwarding rules, including legacy Docker access during migration.
     "${SUDO[@]}" systemctl enable omk-ap-isolation.service
-    "${SUDO[@]}" systemctl restart omk-ap-isolation.service
+    "${SUDO[@]}" systemctl reload-or-restart omk-ap-isolation.service
     "${SUDO[@]}" nft list table inet omk_ap_isolation >/dev/null
-    log "Installed nftables AP isolation: Docker-published DNAT traffic is allowed; other forwarded traffic from ${INTERFACE} is dropped."
+    log "Installed nftables AP isolation: forwarded traffic from ${INTERFACE} to external interfaces is dropped."
   fi
   rm -f -- "${temporary_config}" "${temporary_unit}"
   trap - RETURN
+}
+
+find_systemd_socket_proxyd() {
+  local candidate
+  for candidate in /usr/lib/systemd/systemd-socket-proxyd /lib/systemd/systemd-socket-proxyd; do
+    [[ -x "${candidate}" ]] && { printf '%s\n' "${candidate}"; return 0; }
+  done
+  command -v systemd-socket-proxyd 2>/dev/null || return 1
+}
+
+install_ap_socket_proxies_and_worker() {
+  local unit_dir="${OMK_SYSTEMD_UNIT_DIR:-${DEFAULT_SYSTEMD_UNIT_DIR}}"
+  local libexec_dir="${OMK_LIBEXEC_DIR:-${DEFAULT_LIBEXEC_DIR}}"
+  local proxyd template name temporary
+  proxyd="$(find_systemd_socket_proxyd)" || fail 'systemd-socket-proxyd was not found in the systemd installation.'
+
+  if [[ "${DRY_RUN}" == yes ]]; then
+    log "DRY-RUN: would install the AP-only Dashboard/MQTT socket proxies and activation worker (proxyd: ${proxyd})."
+    return 0
+  fi
+
+  "${SUDO[@]}" install -d -o root -g root -m 0755 "${unit_dir}" "${libexec_dir}"
+  "${SUDO[@]}" install -o root -g root -m 0755 "${SCRIPT_DIR}/omk-activate-access-point" "${libexec_dir}/omk-activate-access-point"
+  for name in omk-dashboard-ap-proxy.socket omk-dashboard-ap-proxy.service omk-mqtt-ap-proxy.socket omk-mqtt-ap-proxy.service omk-ap-activation.service; do
+    template="${OMK_ROOT}/systemd/${name}.in"
+    [[ -f "${template}" ]] || fail "Required systemd template is missing: ${template}"
+    temporary="$(mktemp)"
+    sed "s|@SYSTEMD_SOCKET_PROXYD@|${proxyd}|g" "${template}" >"${temporary}"
+    if [[ "${name}" == *-ap-proxy.* ]] && ! cmp -s "${temporary}" "${unit_dir}/${name}"; then
+      "${SUDO[@]}" touch "${unit_dir}/.omk-ap-proxy-restart-required"
+    fi
+    "${SUDO[@]}" install -o root -g root -m 0644 "${temporary}" "${unit_dir}/${name}"
+    rm -f -- "${temporary}"
+  done
+  "${SCRIPT_DIR}/lib/validate-ap-socket-units.sh" "${unit_dir}" >/dev/null || fail 'Installed AP socket proxy units failed their security contract.'
+  "${SUDO[@]}" systemctl daemon-reload
+  "${SCRIPT_DIR}/lib/validate-ap-socket-units.sh" "${unit_dir}" --effective
+  log 'AP socket units installed; listeners will start only after backend migration.'
+
 }
 
 install_ap_dns_isolation() {
@@ -188,7 +232,7 @@ generate_ssid() {
 }
 
 print_config() {
-  printf 'Connection profile: %s\nSSID: %s\nInterface: %s\nIPv4 address: %s\nAutoconnect: yes\nActivate AP: %s\nPSK: %s\n' \
+  printf 'Connection profile: %s\nSSID: %s\nInterface: %s\nIPv4 address: %s\nAutoconnect before activation: no\nActivate AP: %s\nPSK: %s\n' \
     "${CONNECTION_NAME}" "${SSID}" "${INTERFACE}" "${IPV4_ADDRESS}" "${ACTIVATE}" \
     '[MASKED]'
 }
@@ -301,13 +345,21 @@ while (($# > 0)); do
   case "$1" in
     --dry-run) DRY_RUN=yes ;;
     --print-config) PRINT_CONFIG=yes ;;
-    --activate) ACTIVATE=yes; ACTIVATION_REQUESTED=yes ;;
+    --prepare) PREPARE=yes ;;
+    --start-proxies) START_PROXIES=yes ;;
+    --activate) ACTIVATE=yes; ACTIVATION_REQUESTED=yes; EXPLICIT_ACTIVATE=yes ;;
     --yes) ASSUME_YES=yes ;;
     --help|-h) usage; exit 0 ;;
     *) usage >&2; fail "Unknown option: $1" ;;
   esac
   shift
 done
+
+if [[ "${PREPARE}" == yes ]]; then
+  [[ "${EXPLICIT_ACTIVATE}" == no ]] || fail '--prepare and --activate cannot be used together.'
+  ACTIVATE=no
+  ACTIVATION_REQUESTED=no
+fi
 
 is_yes "${ACTIVATE}" || [[ "${ACTIVATE}" == "no" || "${ACTIVATE}" == "false" || "${ACTIVATE}" == "0" ]] || fail "OMK_AP_ACTIVATE must be yes or no."
 require_safe_text "${CONNECTION_NAME}" "Connection name"
@@ -332,6 +384,37 @@ if [[ "${PRINT_CONFIG}" == yes ]]; then
   [[ -n "${SSID}" ]] || generate_ssid
   require_safe_text "${SSID}" "SSID"
   print_config
+  exit 0
+fi
+
+if [[ "${START_PROXIES}" == yes ]] || is_yes "${ACTIVATE}"; then
+  [[ "${DRY_RUN}" != yes ]] || { log 'DRY-RUN: would start prepared sockets or activation worker.'; exit 0; }
+  SUDO=()
+  ((EUID == 0)) || SUDO=(sudo)
+  unit_dir="${OMK_SYSTEMD_UNIT_DIR:-${DEFAULT_SYSTEMD_UNIT_DIR}}"
+  if [[ "${START_PROXIES}" == yes ]]; then
+    curl --fail --silent --show-error --max-time 5 http://127.0.0.1:8000/health >/dev/null
+    python3 "${SCRIPT_DIR}/lib/check-mqtt-backend.py"
+    "${SUDO[@]}" systemctl daemon-reload
+    "${SCRIPT_DIR}/lib/validate-ap-socket-units.sh" "${unit_dir}" --effective
+    if [[ -e "${unit_dir}/.omk-ap-proxy-restart-required" ]] || ! "${SCRIPT_DIR}/lib/validate-ap-socket-units.sh" "${unit_dir}" --runtime >/dev/null 2>&1; then
+      # Stopping old proxyd processes releases inherited sockets after a unit update.
+      "${SUDO[@]}" systemctl stop omk-dashboard-ap-proxy.service omk-mqtt-ap-proxy.service
+      "${SUDO[@]}" systemctl restart omk-dashboard-ap-proxy.socket omk-mqtt-ap-proxy.socket
+    fi
+    "${SCRIPT_DIR}/lib/validate-ap-socket-units.sh" "${unit_dir}" --runtime
+    "${SUDO[@]}" rm -f -- "${unit_dir}/.omk-ap-proxy-restart-required"
+    "${SUDO[@]}" systemctl enable omk-dashboard-ap-proxy.socket omk-mqtt-ap-proxy.socket
+    # Only now replace legacy DNAT isolation. nft replacement is atomic.
+    install_ap_dns_isolation
+    install_ap_isolation_firewall
+    exit 0
+  fi
+  "${SCRIPT_DIR}/lib/validate-ap-socket-units.sh" "${unit_dir}" --runtime
+  confirm 'Activate omk-ap now? This can disconnect SSH' || { log 'Activation declined.'; exit 1; }
+  "${SUDO[@]}" systemctl reset-failed omk-ap-activation.service
+  "${SUDO[@]}" systemctl start --no-block omk-ap-activation.service
+  log 'AP activation queued; inspect journalctl -u omk-ap-activation.service for its result.'
   exit 0
 fi
 
@@ -381,15 +464,19 @@ CURRENT_PSK="$(nm_secret_value 802-11-wireless-security.psk)"
 CURRENT_IPV4_METHOD="$(nm_value ipv4.method)"
 CURRENT_IPV4_ADDRESS="$(nm_value ipv4.addresses)"
 CURRENT_IPV6_METHOD="$(nm_value ipv6.method)"
+PROFILE_ACTIVE=no
+is_active && PROFILE_ACTIVE=yes || true
+TARGET_AUTOCONNECT=no
+[[ "${PROFILE_ACTIVE}" == yes ]] && TARGET_AUTOCONNECT=yes
 
 CHANGES=()
 if [[ "${EXISTING}" == no ]]; then
-  CHANGES=("create connection profile" "connection.id=${CONNECTION_NAME}" "connection.interface-name=${INTERFACE}" "connection.autoconnect=yes" "802-11-wireless.mode=ap" "802-11-wireless.ssid=${SSID}" "802-11-wireless-security.key-mgmt=wpa-psk" "ipv4.method=shared" "ipv4.addresses=${IPV4_ADDRESS}" "ipv6.method=disabled")
+  CHANGES=("create connection profile" "connection.id=${CONNECTION_NAME}" "connection.interface-name=${INTERFACE}" "connection.autoconnect=no" "802-11-wireless.mode=ap" "802-11-wireless.ssid=${SSID}" "802-11-wireless-security.key-mgmt=wpa-psk" "ipv4.method=shared" "ipv4.addresses=${IPV4_ADDRESS}" "ipv6.method=disabled")
   NEEDS_PSK=yes
 else
   [[ "${CURRENT_ID}" == "${CONNECTION_NAME}" ]] || CHANGES+=("connection.id: ${CURRENT_ID:-unset} -> ${CONNECTION_NAME}")
   [[ "${CURRENT_INTERFACE}" == "${INTERFACE}" ]] || CHANGES+=("connection.interface-name: ${CURRENT_INTERFACE:-unset} -> ${INTERFACE}")
-  [[ "${CURRENT_AUTOCONNECT}" == yes ]] || CHANGES+=("connection.autoconnect: ${CURRENT_AUTOCONNECT:-unset} -> yes")
+  [[ "${CURRENT_AUTOCONNECT}" == "${TARGET_AUTOCONNECT}" ]] || CHANGES+=("connection.autoconnect: ${CURRENT_AUTOCONNECT:-unset} -> ${TARGET_AUTOCONNECT}")
   [[ "${CURRENT_MODE}" == ap ]] || CHANGES+=("802-11-wireless.mode: ${CURRENT_MODE:-unset} -> ap")
   [[ "${CURRENT_SSID}" == "${SSID}" ]] || CHANGES+=("802-11-wireless.ssid: ${CURRENT_SSID:-unset} -> ${SSID}")
   if [[ "${CURRENT_KEY_MGMT}" != wpa-psk ]]; then
@@ -417,9 +504,9 @@ if ((${#CHANGES[@]} > 0)); then
     fi
   fi
   if [[ "${EXISTING}" == no ]]; then
-    run_privileged nmcli connection add type wifi ifname "${INTERFACE}" con-name "${CONNECTION_NAME}" autoconnect yes ssid "${SSID}"
+    run_privileged nmcli connection add type wifi ifname "${INTERFACE}" con-name "${CONNECTION_NAME}" autoconnect no ssid "${SSID}"
   fi
-  run_privileged nmcli connection modify "${CONNECTION_NAME}" connection.interface-name "${INTERFACE}" connection.autoconnect yes 802-11-wireless.mode ap 802-11-wireless.ssid "${SSID}" 802-11-wireless.band bg ipv4.method shared ipv4.addresses "${IPV4_ADDRESS}" ipv6.method disabled
+  run_privileged nmcli connection modify "${CONNECTION_NAME}" connection.interface-name "${INTERFACE}" connection.autoconnect "${TARGET_AUTOCONNECT}" 802-11-wireless.mode ap 802-11-wireless.ssid "${SSID}" 802-11-wireless.band bg ipv4.method shared ipv4.addresses "${IPV4_ADDRESS}" ipv6.method disabled
   if [[ "${NEEDS_KEY_MGMT}" == yes || "${NEEDS_PSK}" == yes ]]; then
     run_privileged nmcli connection modify "${CONNECTION_NAME}" 802-11-wireless-security.key-mgmt wpa-psk
   fi
@@ -433,27 +520,14 @@ fi
 
 unset PSK CURRENT_PSK
 
-install_ap_isolation_firewall
-install_ap_dns_isolation
-
-if is_yes "${ACTIVATE}"; then
-  show_wan_reference
-  confirm "Activate ${CONNECTION_NAME} now? This can disconnect SSH" || { log "Profile is saved but final activation was declined."; ACTIVATE=no; }
-  if is_yes "${ACTIVATE}"; then
-    if is_active; then
-      log "Restarting the active AP so its DHCP/DNS isolation configuration is reloaded."
-      run_privileged nmcli connection down "${CONNECTION_NAME}"
-    fi
-    run_privileged nmcli connection up "${CONNECTION_NAME}"
-    log "AP activation requested."
-  fi
-fi
+install_ap_socket_proxies_and_worker
 
 ACTIVE=no
 is_active && ACTIVE=yes || true
 log "Result (no secrets):"
-printf '  Connection profile: %s\n  SSID: %s\n  Interface: %s\n  IPv4 address: %s\n  Autoconnect: yes\n  Active now: %s\n' "${CONNECTION_NAME}" "${SSID}" "${INTERFACE}" "${IPV4_ADDRESS}" "${ACTIVE}"
-printf '  Enable AP: sudo nmcli connection up %q\n' "${CONNECTION_NAME}"
+FINAL_AUTOCONNECT="$(nm_value connection.autoconnect)"
+printf '  Connection profile: %s\n  SSID: %s\n  Interface: %s\n  IPv4 address: %s\n  Autoconnect: %s\n  Active now: %s\n' "${CONNECTION_NAME}" "${SSID}" "${INTERFACE}" "${IPV4_ADDRESS}" "${FINAL_AUTOCONNECT:-unknown}" "${ACTIVE}"
+printf '  Enable AP: sudo systemctl start omk-ap-activation.service\n'
 printf '  Status:    nmcli connection show --active; nmcli device status\n'
 printf '  Disable:   sudo nmcli connection down %q\n' "${CONNECTION_NAME}"
 printf '  Delete:    sudo nmcli connection delete %q  # displayed only; not run automatically\n' "${CONNECTION_NAME}"

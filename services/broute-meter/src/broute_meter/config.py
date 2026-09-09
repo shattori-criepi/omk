@@ -176,7 +176,7 @@ class MqttConfig:
     """MQTT real-time delivery settings."""
 
     enabled: bool = False
-    host: str = "192.168.50.1"
+    host: str = "127.0.0.1"
     port: int = 1883
     device_id: str = "broute-001"
     topic_prefix: str = "omk"
@@ -500,7 +500,7 @@ def _default_values() -> dict[str, dict[str, Any]]:
         "logging": {"level": "INFO", "directory": "../../logs/broute-meter"},
         "mqtt": {
             "enabled": False,
-            "host": "192.168.50.1",
+            "host": "127.0.0.1",
             "port": 1883,
             "device_id": "broute-001",
             "topic_prefix": "omk",
