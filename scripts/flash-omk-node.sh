@@ -49,10 +49,47 @@ fi
 [[ -f "$esptool_py" ]] || fail "Cannot locate PlatformIO esptool.py after build: $esptool_py"
 esptool=("$platformio_python" "$esptool_py")
 
-# esptool may report the same MAC before and after starting its stub. Keep
-# unique values; multiple identities or any malformed line must fail below.
-mac="$("${esptool[@]}" --port "$port" read_mac | awk '/MAC:/ { if ($1 != "MAC:" || NF != 2) print "invalid"; else print tolower($2) }' | LC_ALL=C sort -u)" || fail 'Cannot read ESP MAC.'
-[[ "$mac" =~ ^([[:xdigit:]]{2}:){5}[[:xdigit:]]{2}$ ]] || fail 'Cannot read a valid ESP MAC.'
+# Inspect the selected port afresh at each write boundary. Do not print raw
+# esptool output: it contains the device MAC. Board identity remains the user's
+# assertion; an ESP32-S3 chip alone does not identify an AtomS3 Lite.
+inspect_device() {
+  local output
+  output="$("${esptool[@]}" --port "$port" read_mac 2>&1)" || {
+    echo 'Cannot read ESP MAC/chip; check the selected port and retry.' >&2
+    return 1
+  }
+  printf '%s\n' "$output" | "$platformio_python" -c '
+import re
+import sys
+
+def fail(message):
+    sys.exit(message)
+
+lines = sys.stdin.read().splitlines()
+chips = [line.strip() for line in lines if "Chip is" in line]
+if not chips or any(not re.fullmatch(r"Chip is [A-Za-z0-9-]+(?: .+)?", line) for line in chips):
+    fail("Cannot read valid ESP chip information.")
+families = {line.split()[2] for line in chips}
+if len(families) != 1:
+    fail("Cannot read unambiguous ESP chip information.")
+if families != {"ESP32-S3"}:
+    fail("Unsupported chip; ESP32-S3 is required.")
+reports = [line.strip() for line in lines if "MAC:" in line]
+if not reports or any(not re.fullmatch(r"MAC: ([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}", line) for line in reports):
+    fail("Cannot read a valid ESP MAC.")
+macs = {line.split()[1].lower() for line in reports}
+if len(macs) != 1:
+    fail("Ambiguous MAC output; refusing to write.")
+print(macs.pop())
+'
+}
+confirm_identity() {
+  local current_mac
+  current_mac="$(inspect_device)" || fail 'Device identity recheck failed; no further writes will be started.'
+  [[ "$current_mac" == "$mac" ]] || fail 'Device identity changed; no further writes will be started.'
+}
+mac="$(inspect_device)" || exit 1
+printf 'ESP32-S3 chip confirmed; AtomS3 Lite board is user-specified.\n'
 node_id="$("$platformio_python" - "$mac" <<'PY'
 import sys
 mac=bytes.fromhex(sys.argv[1].replace(':',''))
@@ -81,14 +118,18 @@ if [[ ! -f "$credential" ]]; then
   credential_tmp="$(mktemp "$store/.credential.XXXXXXXX")" || fail 'Cannot create provisioning credential file.'
   printf '{\n  "node_id": "%s",\n  "provisioning_secret": "%s",\n  "board": "%s"\n}\n' "$node_id" "$secret" "$env_name" > "$credential_tmp" || fail 'Cannot write provisioning credential.'
   chmod 600 "$credential_tmp" || fail 'Cannot secure provisioning credential.'
-  mv -- "$credential_tmp" "$credential" || fail 'Cannot save provisioning credential.'
-  credential_tmp=''
   # First flash only: factory record is consumed and verified by firmware.
   printf 'OMKP' > "$record_dir/record.bin" || fail 'Cannot create factory provisioning record.'
   printf '%s' "$secret" | xxd -r -p >> "$record_dir/record.bin" || fail 'Cannot encode factory provisioning record.'
   unset secret
-  "${esptool[@]}" --port "$port" write_flash 0xf000 "$record_dir/record.bin" || fail "Factory provisioning record write failed; credential retained at $credential. Verify factory provisioning before retrying."
+  confirm_identity
+  # Persist only after identity confirmation, but before a write attempt: a
+  # partially successful write must remain recoverable with the same secret.
+  mv -- "$credential_tmp" "$credential" || fail 'Cannot save provisioning credential.'
+  credential_tmp=''
+  "${esptool[@]}" --port "$port" --chip esp32s3 write_flash 0xf000 "$record_dir/record.bin" || fail "Factory provisioning record write failed; credential retained at $credential. Verify factory provisioning before retrying."
 fi
+confirm_identity
 "${pio[@]}" run -d "$project" -e "$env_name" -t upload --upload-port "$port" || fail 'PlatformIO firmware upload failed; provisioning credential was retained.'
 chmod 600 "$credential" || fail 'Cannot secure provisioning credential.'
 printf 'Node %s flashed; credential saved at %s\n' "$node_id" "$credential"

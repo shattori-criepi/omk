@@ -10,7 +10,7 @@ import pytest
 
 
 SCRIPT = Path(__file__).resolve().parents[1] / "flash-omk-node.sh"
-NODE_ID = "9af9509eb8b6"  # Existing FNV-1a vector for ac:a7:04:03:d7:f8.
+NODE_ID = "6e6005821cda"  # FNV-1a vector for a synthetic MAC.
 SECRET = "ab" * 32  # Synthetic fixture only.
 
 FAKE_ESPTOOL = '''import json, os, pathlib, sys
@@ -18,16 +18,24 @@ args = sys.argv[1:]
 assert args[:2] == ["--port", "/dev/fake port"]
 with open(os.environ["EVENTS"], "a") as log:
     if "read_mac" in args:
+        index = pathlib.Path(os.environ["EVENTS"]).read_text().splitlines().count("mac")
         log.write("mac\\n")
         if os.environ.get("FAIL_AT") == "mac": sys.exit(1)
-        if "MAC_OUTPUT" in os.environ:
+        inspections = json.loads(os.environ.get("INSPECTIONS", "[]"))
+        if inspections:
+            output = inspections[index]
+            if output is None: sys.exit(1)
+            print(output)
+        elif "MAC_OUTPUT" in os.environ:
+            print(os.environ.get("CHIP_OUTPUT", "Chip is ESP32-S3 (QFN56) (revision v0.2)"))
             print(os.environ["MAC_OUTPUT"])
         else:
-            print("MAC: " + os.environ.get("MAC_VALUE", "ac:a7:04:03:d7:f8"))
+            print(os.environ.get("CHIP_OUTPUT", "Chip is ESP32-S3 (QFN56) (revision v0.2)"))
+            print("MAC: " + os.environ.get("MAC_VALUE", "02:00:00:00:00:ab"))
         if os.environ.get("MAC_EXIT_FAILURE"): sys.exit(1)
     else:
-        assert args[2:4] == ["write_flash", "0xf000"]
-        record = pathlib.Path(args[4])
+        assert args[2:6] == ["--chip", "esp32s3", "write_flash", "0xf000"]
+        record = pathlib.Path(args[6])
         assert record.read_bytes() == b"OMKP" + bytes.fromhex("ab" * 32)
         assert record.stat().st_mode & 0o777 == 0o600
         assert record.parent.stat().st_mode & 0o777 == 0o700
@@ -166,7 +174,7 @@ def test_first_build_installs_package_before_resolution_and_factory_flash(flash)
     assert not flash.package.exists()
     result = flash.run()
     assert result.returncode == 0, result.stderr
-    assert flash.events() == ["build", "resolve", "mac", "secret", "factory", "upload"]
+    assert flash.events() == ["build", "resolve", "mac", "secret", "mac", "factory", "mac", "upload"]
     assert json.loads(flash.credential.read_text()) == {
         "node_id": NODE_ID, "provisioning_secret": SECRET, "board": "atom-s3-lite",
     }
@@ -182,7 +190,7 @@ def test_existing_credential_is_preserved_without_factory_write(flash):
     result = flash.run(FAIL_AT="secret")
     assert result.returncode == 0, result.stderr
     assert flash.credential.read_text() == original
-    assert flash.events() == ["build", "resolve", "mac", "upload"]
+    assert flash.events() == ["build", "resolve", "mac", "mac", "upload"]
 
 
 def test_python_and_esptool_overrides(flash):
@@ -193,7 +201,7 @@ def test_python_and_esptool_overrides(flash):
     result = flash.run(PLATFORMIO_CMD=str(wrapper), PLATFORMIO_PYTHON=sys.executable,
                        ESPTOOL_PY=str(flash.source), FAIL_AT="missing_esptool")
     assert result.returncode == 0, result.stderr
-    assert flash.events() == ["build", "mac", "secret", "factory", "upload"]
+    assert flash.events() == ["build", "mac", "secret", "mac", "factory", "mac", "upload"]
 
 
 @pytest.mark.parametrize("step,expected,message", [
@@ -202,8 +210,8 @@ def test_python_and_esptool_overrides(flash):
     ("missing_esptool", ["build", "resolve"], "Cannot locate PlatformIO esptool.py after build"),
     ("mac", ["build", "resolve", "mac"], "Cannot read ESP MAC"),
     ("secret", ["build", "resolve", "mac", "secret"], "Cannot generate provisioning secret"),
-    ("factory", ["build", "resolve", "mac", "secret", "factory"], "Factory provisioning record write failed"),
-    ("upload", ["build", "resolve", "mac", "secret", "factory", "upload"], "firmware upload failed"),
+    ("factory", ["build", "resolve", "mac", "secret", "mac", "factory"], "Factory provisioning record write failed"),
+    ("upload", ["build", "resolve", "mac", "secret", "mac", "factory", "mac", "upload"], "firmware upload failed"),
 ])
 def test_failures_stop_at_the_expected_step_and_clean_up(flash, step, expected, message):
     result = flash.run(FAIL_AT=step)
@@ -228,30 +236,30 @@ def test_identical_mac_reports_allow_factory_write_and_upload(flash, copies):
         ["MAC: 02:00:00:00:00:ab"] * copies)
     result = flash.run(MAC_OUTPUT=output)
     assert result.returncode == 0, result.stderr
-    assert flash.events() == ["build", "resolve", "mac", "secret", "factory", "upload"]
+    assert flash.events() == ["build", "resolve", "mac", "secret", "mac", "factory", "mac", "upload"]
     assert len(list(flash.credential.parent.glob("*.json"))) == 1
 
 
 def test_same_mac_with_different_hex_case_is_one_identity(flash):
     result = flash.run(MAC_OUTPUT="MAC: 02:00:00:00:00:ab\nMAC: 02:00:00:00:00:AB")
     assert result.returncode == 0, result.stderr
-    assert flash.events()[-2:] == ["factory", "upload"]
+    assert flash.events()[-3:] == ["factory", "mac", "upload"]
 
 
-@pytest.mark.parametrize("output", [
-    "Uploading stub...\nStub running...",  # No MAC report.
-    "MAC: 02:00:00:00:00:01\nMAC: 02:00:00:00:00:02",
-    "MAC: 02:00:00:00:00:02\nMAC: 02:00:00:00:00:01",
-    "MAC: malformed\nMAC: 02:00:00:00:00:01",
-    "MAC: 02:00:00:00:00:01\nMAC:",
-    "MAC: garbage 02:00:00:00:00:01",
-    "MAC: 02:00:00:00:00:gg",
-    "MAC: 02:00:00:00:00:01 extra",
+@pytest.mark.parametrize("output,message", [
+    ("Uploading stub...\nStub running...", "Cannot read a valid ESP MAC"),
+    ("MAC: 02:00:00:00:00:01\nMAC: 02:00:00:00:00:02", "Ambiguous MAC output"),
+    ("MAC: 02:00:00:00:00:02\nMAC: 02:00:00:00:00:01", "Ambiguous MAC output"),
+    ("MAC: malformed\nMAC: 02:00:00:00:00:01", "Cannot read a valid ESP MAC"),
+    ("MAC: 02:00:00:00:00:01\nMAC:", "Cannot read a valid ESP MAC"),
+    ("MAC: garbage 02:00:00:00:00:01", "Cannot read a valid ESP MAC"),
+    ("MAC: 02:00:00:00:00:gg", "Cannot read a valid ESP MAC"),
+    ("MAC: 02:00:00:00:00:01 extra", "Cannot read a valid ESP MAC"),
 ])
-def test_missing_ambiguous_or_malformed_mac_reports_stop_before_writes(flash, output):
+def test_missing_ambiguous_or_malformed_mac_reports_stop_before_writes(flash, output, message):
     result = flash.run(MAC_OUTPUT=output)
     assert result.returncode != 0
-    assert "Cannot read a valid ESP MAC" in result.stderr
+    assert message in result.stderr
     assert flash.events() == ["build", "resolve", "mac"]
     assert not list(flash.credential.parent.glob("*.json"))
 
@@ -271,3 +279,83 @@ def test_credential_directory_failure_stops_before_factory_write(flash):
     assert result.returncode != 0
     assert "Cannot create provisioning credential directory" in result.stderr
     assert flash.events() == ["build", "resolve", "mac"]
+
+
+# Locally administered test identities, unrelated to physical Nodes.
+IDENTITY_A = "Chip is ESP32-S3 (QFN56) (revision v0.2)\nMAC: 02:00:00:00:00:ab"
+IDENTITY_B = "Chip is ESP32-S3 (QFN56) (revision v0.2)\nMAC: 02:00:00:00:00:cd"
+BAD_INSPECTIONS = [
+    (IDENTITY_B, "Device identity changed"),
+    ("Chip is ESP32-C3\nMAC: 02:00:00:00:00:ab", "Unsupported chip"),
+    (None, "Cannot read ESP MAC"),  # Disappeared port / esptool failure.
+    (IDENTITY_A + "\nMAC: 02:00:00:00:00:cd", "Ambiguous MAC output"),
+    ("MAC: 02:00:00:00:00:ab", "Cannot read valid ESP chip"),
+    ("Chip is\nMAC: 02:00:00:00:00:ab", "Cannot read valid ESP chip"),
+    ("Chip is ESP32-S3\nMAC: malformed", "Cannot read a valid ESP MAC"),
+]
+
+
+@pytest.mark.parametrize("chip", ["ESP32", "ESP32-C3", "ESP32-C6", "ESP8266", "OTHER", "ESP32-S3-not-a-chip"])
+def test_unsupported_chip_never_writes(flash, chip):
+    result = flash.run(CHIP_OUTPUT=f"Chip is {chip}")
+    assert result.returncode != 0
+    assert "Unsupported chip" in result.stderr
+    assert flash.events() == ["build", "resolve", "mac"]
+    assert not list(flash.credential.parent.glob("*.json"))
+
+
+@pytest.mark.parametrize("output", ["", "Chip is", "Chip is ???", "Chip isESP32-S3",
+                                     "Chip is ESP32-S3\nChip is ESP32-C3"])
+def test_missing_malformed_or_ambiguous_chip_never_writes(flash, output):
+    result = flash.run(CHIP_OUTPUT=output)
+    assert result.returncode != 0
+    assert "chip information" in result.stderr
+    assert flash.events() == ["build", "resolve", "mac"]
+    assert not list(flash.credential.parent.glob("*.json"))
+
+
+@pytest.mark.parametrize("replacement,message", BAD_INSPECTIONS)
+@pytest.mark.parametrize("boundary", ["factory", "upload", "existing"])
+def test_identity_recheck_stops_writes(flash, replacement, message, boundary):
+    original = '{"provisioning_secret": "existing-secret"}\n'
+    if boundary == "existing":
+        flash.credential.parent.mkdir(parents=True)
+        flash.credential.write_text(original)
+    inspections = [IDENTITY_A]
+    if boundary == "upload":
+        inspections.append(IDENTITY_A)
+    inspections.append(replacement)
+    result = flash.run(INSPECTIONS=json.dumps(inspections))
+    assert result.returncode != 0
+    assert message in result.stderr
+    assert "02:00:00:00:00:" not in result.stdout + result.stderr
+    assert flash.events().count("factory") == (1 if boundary == "upload" else 0)
+    assert flash.events().count("upload") == 0
+    assert flash.credential.exists() == (boundary != "factory")
+    if boundary == "existing":
+        assert flash.credential.read_text() == original
+    if boundary == "upload":
+        assert json.loads(flash.credential.read_text())["provisioning_secret"] == SECRET
+        assert flash.credential.stat().st_mode & 0o777 == 0o600
+
+
+def test_rechecks_normalize_case_and_duplicate_mac(flash):
+    repeated = IDENTITY_A + "\nUploading stub...\nMAC: 02:00:00:00:00:AB"
+    result = flash.run(INSPECTIONS=json.dumps([IDENTITY_A, repeated, repeated]))
+    assert result.returncode == 0, result.stderr
+    assert flash.events().count("mac") == 3
+    assert flash.events().count("factory") == 1
+    assert flash.events().count("upload") == 1
+
+
+def test_retry_original_node_after_post_factory_swap_preserves_secret(flash):
+    result = flash.run(INSPECTIONS=json.dumps([IDENTITY_A, IDENTITY_A, IDENTITY_B]))
+    assert result.returncode != 0
+    original = flash.credential.read_bytes()
+    result = flash.run(FAIL_AT="secret")
+    assert result.returncode == 0, result.stderr
+    assert flash.credential.read_bytes() == original
+    assert flash.events().count("secret") == 1
+    assert flash.events().count("factory") == 1
+    assert flash.events().count("upload") == 1
+    assert flash.events()[-5:] == ["build", "resolve", "mac", "mac", "upload"]
