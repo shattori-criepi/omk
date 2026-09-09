@@ -299,6 +299,7 @@ def _run(args: argparse.Namespace) -> int:
                             credentials.b_route_id,
                             credentials.password,
                         )
+                        _write_runtime_status(runtime_status, "connected", logger)
                     except (AdapterError, BRouteSessionError, TransportError) as exc:
                         if not _adapter_device_present(port):
                             logger.warning("アダプター再接続中にデバイスが取り外されました")

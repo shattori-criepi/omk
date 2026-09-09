@@ -1701,3 +1701,191 @@ def test_run_continues_when_mqtt_publisher_start_fails(
     assert adapter.open_calls == 1
     assert scheduler_started
     assert caplog.messages.count("MQTT publisherを開始できませんでした。計測を継続します") == 1
+
+
+def test_reconnect_updates_runtime_status_to_connected_after_pana_success(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """計測中のPANA再接続も初回接続と同じconnected状態で完了する。"""
+
+    adapter = _FakeSetupAdapter(_adapter_result(initial="80", final="80"))
+    states: list[str] = []
+
+    class FakeSession:
+        def __init__(self, _adapter: object, *, scan_max_attempts: int, on_state_change) -> None:
+            assert scan_max_attempts == 3
+            self._on_state_change = on_state_change
+
+        def connect(self, _identifier: str, _password: str) -> SimpleNamespace:
+            self._on_state_change("authenticating")
+            return SimpleNamespace(smart_meter_ipv6=IPv6Address("fe80::2"))
+
+    class FakePublisher:
+        def start(self) -> None:
+            pass
+
+        def close(self) -> None:
+            pass
+
+    class FakeStorage:
+        def close(self) -> None:
+            pass
+
+    class FakeRecoveringMeterReader:
+        def __init__(self, _meter: object, reconnect, **_kwargs: object) -> None:
+            self.reconnected_meter = reconnect()
+
+    class FakeScheduler:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        def run(self) -> None:
+            pass
+
+    config = SimpleNamespace(
+        credentials=SimpleNamespace(b_route_id="A" * 32, password="P" * 12),
+        storage=SimpleNamespace(data_directory=tmp_path / "data"),
+        mqtt=SimpleNamespace(),
+        adapter=SimpleNamespace(
+            expected_settings={"uart_mode": "80"}, auto_configure=True
+        ),
+        retry=SimpleNamespace(
+            request_max_attempts=3,
+            request_timeout_seconds=5,
+            reconnect_after_consecutive_failures=1,
+            reconnect_wait_seconds=0,
+        ),
+        measurement=SimpleNamespace(
+            instantaneous_interval_seconds=10,
+            cumulative_fetch_delay_seconds=5,
+        ),
+    )
+    original_write = cli._write_runtime_status
+
+    def record_runtime_status(store, state: str, logger, **kwargs: object) -> None:
+        states.append(state)
+        original_write(store, state, logger, **kwargs)
+
+    monkeypatch.setattr(cli, "_load_application_config", lambda *_args, **_kwargs: config)
+    monkeypatch.setattr(cli, "_configure_command_logging", lambda _config: logging.getLogger())
+    monkeypatch.setattr(cli, "_resolve_adapter_port", lambda _config: "COM5")
+    monkeypatch.setattr(cli, "_create_rs_wsuha_p_adapter", lambda _config, _port: adapter)
+    monkeypatch.setattr(
+        cli,
+        "_configure_adapter_after_adapter_presence",
+        lambda *_args: adapter.result,
+    )
+    monkeypatch.setattr(
+        cli,
+        "_connect_broute_until_ready",
+        lambda *_args, **_kwargs: SimpleNamespace(smart_meter_ipv6=IPv6Address("fe80::1")),
+    )
+    monkeypatch.setattr(cli, "_wait_for_adapter_device", lambda *_args: True)
+    monkeypatch.setattr(cli, "BRouteSession", FakeSession)
+    monkeypatch.setattr(cli, "SmartMeterClient", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(cli, "create_measurement_publisher", lambda _config: FakePublisher())
+    monkeypatch.setattr(cli, "CsvMeasurementStorage", lambda _path: FakeStorage())
+    monkeypatch.setattr(cli, "RecoveringMeterReader", FakeRecoveringMeterReader)
+    monkeypatch.setattr(cli, "MeasurementScheduler", FakeScheduler)
+    monkeypatch.setattr(cli, "_install_stop_signal_handlers", lambda *_args: {})
+    monkeypatch.setattr(cli, "_write_runtime_status", record_runtime_status)
+
+    assert cli._run(SimpleNamespace()) == 0
+    assert states[states.index("scanning") : states.index("scanning") + 3] == [
+        "scanning",
+        "authenticating",
+        "connected",
+    ]
+
+
+def test_reconnect_failure_does_not_write_connected_runtime_status(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """PANA再接続に失敗した場合はconnectedへ遷移しない。"""
+
+    adapter = _FakeSetupAdapter(_adapter_result(initial="80", final="80"))
+    states: list[str] = []
+
+    class FakeSession:
+        def __init__(self, _adapter: object, *, scan_max_attempts: int, on_state_change) -> None:
+            assert scan_max_attempts == 3
+            self._on_state_change = on_state_change
+
+        def connect(self, _identifier: str, _password: str) -> SimpleNamespace:
+            self._on_state_change("authenticating")
+            raise BRouteSessionError("PANA reconnect failed")
+
+    class FakePublisher:
+        def start(self) -> None:
+            pass
+
+        def close(self) -> None:
+            pass
+
+    class FakeStorage:
+        def close(self) -> None:
+            pass
+
+    class FakeRecoveringMeterReader:
+        def __init__(self, _meter: object, reconnect, **_kwargs: object) -> None:
+            reconnect()
+
+    config = SimpleNamespace(
+        credentials=SimpleNamespace(b_route_id="A" * 32, password="P" * 12),
+        storage=SimpleNamespace(data_directory=tmp_path / "data"),
+        mqtt=SimpleNamespace(),
+        adapter=SimpleNamespace(
+            expected_settings={"uart_mode": "80"}, auto_configure=True
+        ),
+        retry=SimpleNamespace(
+            request_max_attempts=3,
+            request_timeout_seconds=5,
+            reconnect_after_consecutive_failures=1,
+            reconnect_wait_seconds=0,
+        ),
+        measurement=SimpleNamespace(
+            instantaneous_interval_seconds=10,
+            cumulative_fetch_delay_seconds=5,
+        ),
+    )
+    original_write = cli._write_runtime_status
+
+    def record_runtime_status(store, state: str, logger, **kwargs: object) -> None:
+        states.append(state)
+        original_write(store, state, logger, **kwargs)
+
+    monkeypatch.setattr(cli, "_load_application_config", lambda *_args, **_kwargs: config)
+    monkeypatch.setattr(cli, "_configure_command_logging", lambda _config: logging.getLogger())
+    monkeypatch.setattr(cli, "_resolve_adapter_port", lambda _config: "COM5")
+    monkeypatch.setattr(cli, "_create_rs_wsuha_p_adapter", lambda _config, _port: adapter)
+    monkeypatch.setattr(
+        cli,
+        "_configure_adapter_after_adapter_presence",
+        lambda *_args: adapter.result,
+    )
+    monkeypatch.setattr(
+        cli,
+        "_connect_broute_until_ready",
+        lambda *_args, **_kwargs: SimpleNamespace(smart_meter_ipv6=IPv6Address("fe80::1")),
+    )
+    monkeypatch.setattr(cli, "_wait_for_adapter_device", lambda *_args: True)
+    monkeypatch.setattr(cli, "BRouteSession", FakeSession)
+    monkeypatch.setattr(cli, "SmartMeterClient", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(cli, "create_measurement_publisher", lambda _config: FakePublisher())
+    monkeypatch.setattr(cli, "CsvMeasurementStorage", lambda _path: FakeStorage())
+    monkeypatch.setattr(cli, "RecoveringMeterReader", FakeRecoveringMeterReader)
+    monkeypatch.setattr(cli, "_install_stop_signal_handlers", lambda *_args: {})
+    monkeypatch.setattr(cli, "_write_runtime_status", record_runtime_status)
+
+    with pytest.raises(BRouteSessionError, match="PANA reconnect failed"):
+        cli._run(SimpleNamespace())
+
+    assert states == [
+        "starting",
+        "scanning",
+        "authenticating",
+        "connection_error",
+        "stopped",
+    ]
