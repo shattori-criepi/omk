@@ -1,148 +1,158 @@
 #include "sensor_manager.h"
 
 #include <inttypes.h>
-
+#include <stdlib.h>
 #include "driver/i2c_master.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-
-#include "mqtt_registration.h"
 #include "node_registration.h"
-#include "sen66_sensor.h"
+#include "sensor_driver.h"
 
 static const char *TAG = "sensor_manager";
-
 #ifndef OMK_SENSOR_I2C_SDA_GPIO
 #define OMK_SENSOR_I2C_SDA_GPIO 2
 #endif
-
 #ifndef OMK_SENSOR_I2C_SCL_GPIO
 #define OMK_SENSOR_I2C_SCL_GPIO 1
 #endif
-
 #define SENSOR_I2C_FREQUENCY_HZ 100000
-#define SEN66_RETRY_INTERVAL_MS 60000
-#define SEN66_MEASUREMENT_INTERVAL_MS 10000
-#define SEN66_MEASUREMENT_LIVENESS_TIMEOUT_MS 60000
+#define SENSOR_RETRY_INTERVAL_MS 60000
+#define SENSOR_MEASUREMENT_INTERVAL_MS 10000
+#define SENSOR_MEASUREMENT_LIVENESS_TIMEOUT_MS 60000
 
 static i2c_master_bus_handle_t sensor_i2c_bus;
 typedef struct {
+    sensor_endpoint_t endpoint;
+    const sensor_driver_t *driver;
+    void *context;
+    unsigned consecutive_read_failures;
+    bool logical_id_warning_logged;
+    bool mqtt_warning_logged;
+    bool recovery_pending;
     uint32_t recovery_count;
     uint32_t measurement_timeout_count;
-} sen66_diagnostics_t;
-
-static sen66_diagnostics_t sen66_diagnostics;
+    uint64_t last_successful_measurement_ms;
+    uint64_t next_attempt_ms;
+} sensor_slot_t;
 
 static uint64_t monotonic_milliseconds(void) {
     return (uint64_t)(esp_timer_get_time() / 1000);
 }
 
-static void recover_sen66(sen66_sensor_t *sen66, const char *reason) {
-    ESP_LOGW(TAG, "Recovering SEN66 after %s", reason);
-    ++sen66_diagnostics.recovery_count;
-    mqtt_registration_set_sen66_diagnostics(sen66_diagnostics.recovery_count,
-                                             sen66_diagnostics.measurement_timeout_count);
-    esp_err_t stop_err = sen66_sensor_stop(sen66);
-    mqtt_registration_set_sen66_connected(false);
-    if (stop_err != ESP_OK) {
-        ESP_LOGW(TAG, "SEN66 stop failed during recovery: %s", esp_err_to_name(stop_err));
+static void recover_sensor(sensor_slot_t *slot, const char *reason) {
+    ESP_LOGW(TAG, "Recovering %s after %s", slot->driver->driver_id, reason);
+    ++slot->recovery_count;
+    slot->driver->diagnostics(slot->recovery_count, slot->measurement_timeout_count);
+    slot->driver->connected(false);
+    // The endpoint may now contain a different sensor. Release locally only.
+    slot->driver->close(slot->context);
+    free(slot->context);
+    slot->context = NULL;
+    slot->driver = NULL;
+    slot->consecutive_read_failures = 0;
+    slot->recovery_pending = true;
+    slot->next_attempt_ms = monotonic_milliseconds() + SENSOR_RETRY_INTERVAL_MS;
+}
+
+static void sensor_slot_tick(sensor_slot_t *slot) {
+    if (monotonic_milliseconds() < slot->next_attempt_ms) return;
+    if (!slot->driver) {
+        const sensor_driver_t *selected = NULL;
+        sensor_identity_t identity = sensor_discover(&slot->endpoint, sensor_drivers,
+                                                     sensor_driver_count, &selected);
+        slot->next_attempt_ms = monotonic_milliseconds() + SENSOR_RETRY_INTERVAL_MS;
+        if (identity != SENSOR_ID_EXACT) {
+            ESP_LOGI(TAG, "Sensor identity unresolved (%d); retrying in 60 seconds", identity);
+            return;
+        }
+        void *context = calloc(1, selected->context_size);
+        if (!context) return;
+        esp_err_t err = selected->start(&slot->endpoint, context);
+        if (err != ESP_OK) {
+            selected->connected(false);
+            selected->close(context);
+            free(context);
+            slot->next_attempt_ms = monotonic_milliseconds() + SENSOR_RETRY_INTERVAL_MS;
+            ESP_LOGW(TAG, "%s startup failed: %s", selected->driver_id, esp_err_to_name(err));
+            return;
+        }
+        slot->driver = selected;
+        slot->context = context;
+        selected->connected(true);
+        slot->consecutive_read_failures = 0;
+        slot->last_successful_measurement_ms = monotonic_milliseconds();
+        slot->next_attempt_ms = slot->last_successful_measurement_ms + SENSOR_MEASUREMENT_INTERVAL_MS;
+        ESP_LOGI(TAG, "%s continuous measurement started", selected->driver_id);
+        return;
     }
+
+    bool data_ready = false;
+    esp_err_t err = slot->driver->read(slot->context, &data_ready);
+    if (err != ESP_OK) {
+        ++slot->consecutive_read_failures;
+        ESP_LOGW(TAG, "%s read failed: %s (consecutive_failures=%u)",
+                 slot->driver->driver_id, esp_err_to_name(err), slot->consecutive_read_failures);
+        // Loss of identity is immediate; ordinary transient I/O retains the
+        // existing three-failure recovery policy.
+        if (err == ESP_ERR_INVALID_STATE || slot->consecutive_read_failures >= 3) {
+            recover_sensor(slot, "identity lost or consecutive read failures");
+            return;
+        }
+    } else if (data_ready) {
+        slot->consecutive_read_failures = 0;
+        slot->last_successful_measurement_ms = monotonic_milliseconds();
+        if (slot->recovery_pending) {
+            ESP_LOGI(TAG, "%s measurement recovered", slot->driver->driver_id);
+            slot->recovery_pending = false;
+        }
+        char logical_id[OMK_NODE_LOGICAL_ID_MAX_LENGTH + 1];
+        err = node_registration_get_logical_id(logical_id, sizeof(logical_id));
+        if (err != ESP_OK) {
+            if (!slot->logical_id_warning_logged) {
+                ESP_LOGI(TAG, "%s publish waiting for logical ID", slot->driver->driver_id);
+                slot->logical_id_warning_logged = true;
+            }
+        } else {
+            slot->logical_id_warning_logged = false;
+            err = slot->driver->publish(slot->context, logical_id);
+            if (err != ESP_OK && !slot->mqtt_warning_logged) {
+                ESP_LOGW(TAG, "%s MQTT publish unavailable: %s", slot->driver->driver_id, esp_err_to_name(err));
+                slot->mqtt_warning_logged = true;
+            } else if (err == ESP_OK) {
+                slot->mqtt_warning_logged = false;
+            }
+        }
+    }
+    if (monotonic_milliseconds() - slot->last_successful_measurement_ms >= SENSOR_MEASUREMENT_LIVENESS_TIMEOUT_MS) {
+        ++slot->measurement_timeout_count;
+        ESP_LOGW(TAG, "%s measurement timeout: no successful measurement for %" PRIu64 " s; recovering",
+                 slot->driver->driver_id,
+                 (monotonic_milliseconds() - slot->last_successful_measurement_ms) / 1000);
+        recover_sensor(slot, "measurement liveness timeout");
+        return;
+    }
+    slot->next_attempt_ms = monotonic_milliseconds() + SENSOR_MEASUREMENT_INTERVAL_MS;
 }
 
 static void sensor_manager_task(void *arg) {
     (void)arg;
-    sen66_sensor_t sen66 = {0};
-    unsigned int consecutive_read_failures = 0;
-    bool logical_id_warning_logged = false;
-    bool mqtt_warning_logged = false;
-    bool recovery_pending = false;
-    uint64_t measurement_started_ms = 0;
-    uint64_t last_successful_measurement_ms = 0;
-
+    // Current board profile has one candidate endpoint. More slots do not
+    // require model branches; multi-sensor Logical IDs remain a future change.
+    sensor_slot_t slots[] = {{ .endpoint = {
+        .transport = SENSOR_TRANSPORT_I2C, .handle = sensor_i2c_bus,
+        .location.i2c_address = 0x6B,
+    } }};
     for (;;) {
-        if (!sen66_sensor_is_measuring(&sen66)) {
-            esp_err_t err = sen66_sensor_probe(sensor_i2c_bus, &sen66);
-            if (err != ESP_OK) {
-                mqtt_registration_set_sen66_connected(false);
-                ESP_LOGI(TAG, "SEN66 not detected at 0x6B; retrying in 60 seconds");
-            } else {
-                ESP_LOGI(TAG, "SEN66 detected at 0x6B");
-                err = sen66_sensor_start(sensor_i2c_bus, &sen66);
-                if (err == ESP_OK) {
-                    mqtt_registration_set_sen66_connected(true);
-                    ESP_LOGI(TAG, "SEN66 continuous measurement started");
-                    consecutive_read_failures = 0;
-                    measurement_started_ms = monotonic_milliseconds();
-                    last_successful_measurement_ms = measurement_started_ms;
-                } else {
-                    ESP_LOGW(TAG, "SEN66 startup failed: %s; retrying in 60 seconds",
-                             esp_err_to_name(err));
-                }
-            }
-            vTaskDelay(pdMS_TO_TICKS(sen66_sensor_is_measuring(&sen66)
-                                     ? SEN66_MEASUREMENT_INTERVAL_MS
-                                     : SEN66_RETRY_INTERVAL_MS));
-            continue;
+        for (size_t i = 0; i < sizeof(slots) / sizeof(slots[0]); ++i) sensor_slot_tick(&slots[i]);
+        uint64_t now = monotonic_milliseconds();
+        uint64_t wait_ms = SENSOR_RETRY_INTERVAL_MS;
+        for (size_t i = 0; i < sizeof(slots) / sizeof(slots[0]); ++i) {
+            uint64_t remaining = slots[i].next_attempt_ms > now ? slots[i].next_attempt_ms - now : 1;
+            if (remaining < wait_ms) wait_ms = remaining;
         }
-
-        sen66_measurement_t measurement;
-        bool data_ready = false;
-        esp_err_t err = sen66_sensor_read(&sen66, &measurement, &data_ready);
-        if (err != ESP_OK) {
-            ++consecutive_read_failures;
-            ESP_LOGW(TAG, "SEN66 read failed: %s (consecutive_failures=%u)",
-                     esp_err_to_name(err), consecutive_read_failures);
-            if (consecutive_read_failures >= 3) {
-                recover_sen66(&sen66, "consecutive read failures");
-                consecutive_read_failures = 0;
-                recovery_pending = true;
-                vTaskDelay(pdMS_TO_TICKS(SEN66_RETRY_INTERVAL_MS));
-                continue;
-            }
-        } else if (data_ready) {
-            consecutive_read_failures = 0;
-            last_successful_measurement_ms = monotonic_milliseconds();
-            if (recovery_pending) {
-                ESP_LOGI(TAG, "SEN66 measurement recovered");
-                recovery_pending = false;
-            }
-            char logical_id[OMK_NODE_LOGICAL_ID_MAX_LENGTH + 1];
-            err = node_registration_get_logical_id(logical_id, sizeof(logical_id));
-            if (err != ESP_OK) {
-                if (!logical_id_warning_logged) {
-                    ESP_LOGI(TAG, "SEN66 publish waiting for logical ID: %s",
-                             esp_err_to_name(err));
-                    logical_id_warning_logged = true;
-                }
-            } else {
-                logical_id_warning_logged = false;
-                err = mqtt_registration_publish_sen66(logical_id, &measurement);
-                if (err != ESP_OK && !mqtt_warning_logged) {
-                    ESP_LOGW(TAG, "SEN66 MQTT publish unavailable: %s", esp_err_to_name(err));
-                    mqtt_warning_logged = true;
-                } else if (err == ESP_OK) {
-                    mqtt_warning_logged = false;
-                }
-            }
-        }
-        uint64_t liveness_reference_ms = last_successful_measurement_ms;
-        if (liveness_reference_ms == 0) liveness_reference_ms = measurement_started_ms;
-        uint64_t elapsed_ms = monotonic_milliseconds() - liveness_reference_ms;
-        if (elapsed_ms >= SEN66_MEASUREMENT_LIVENESS_TIMEOUT_MS) {
-            ++sen66_diagnostics.measurement_timeout_count;
-            ESP_LOGW(TAG,
-                     "SEN66 measurement timeout: no successful measurement for %" PRIu64
-                     " s; recovering",
-                     elapsed_ms / 1000);
-            recover_sen66(&sen66, "measurement liveness timeout");
-            consecutive_read_failures = 0;
-            recovery_pending = true;
-            vTaskDelay(pdMS_TO_TICKS(SEN66_RETRY_INTERVAL_MS));
-            continue;
-        }
-        vTaskDelay(pdMS_TO_TICKS(SEN66_MEASUREMENT_INTERVAL_MS));
+        vTaskDelay(pdMS_TO_TICKS(wait_ms) ? pdMS_TO_TICKS(wait_ms) : 1);
     }
 }
 

@@ -4,6 +4,7 @@
 
 #include "driver/i2c_master.h"
 #include "esp_err.h"
+#include "sensor_driver.h"
 
 typedef enum {
     SEN66_SENSOR_STATE_ABSENT,
@@ -30,6 +31,8 @@ typedef struct {
 } sen66_sensor_t;
 
 esp_err_t sen66_sensor_probe(i2c_master_bus_handle_t bus, sen66_sensor_t *sensor);
+sensor_identity_t sen66_sensor_identify(i2c_master_bus_handle_t bus);
+void sen66_sensor_close(sen66_sensor_t *sensor);
 esp_err_t sen66_sensor_start(i2c_master_bus_handle_t bus, sen66_sensor_t *sensor);
 esp_err_t sen66_sensor_stop(sen66_sensor_t *sensor);
 esp_err_t sen66_sensor_read(sen66_sensor_t *sensor, sen66_measurement_t *measurement,

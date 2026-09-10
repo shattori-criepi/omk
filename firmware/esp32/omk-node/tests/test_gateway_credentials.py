@@ -70,10 +70,11 @@ def test_legacy_mesh_parent_state_is_not_migrated_as_gateway_credential():
 def test_sen66_mqtt_failure_does_not_stop_periodic_measurement():
     sensor_manager = (SOURCE / "sensor_manager.c").read_text()
 
-    publish = sensor_manager[sensor_manager.index("err = mqtt_registration_publish_sen66") :]
+    publish = sensor_manager[sensor_manager.index("err = slot->driver->publish") :]
     assert "mqtt_warning_logged = true;" in publish
     assert "mqtt_warning_logged = false;" in publish
-    assert "vTaskDelay(pdMS_TO_TICKS(SEN66_MEASUREMENT_INTERVAL_MS));" in publish
+    assert "slot->next_attempt_ms = monotonic_milliseconds() + SENSOR_MEASUREMENT_INTERVAL_MS;" in publish
+    assert "mqtt_registration_publish_sen66(logical_id, &ctx->sample)" in (SOURCE / "sensor_drivers.c").read_text()
 
 
 def test_registration_status_payload_has_dedicated_capacity_for_sensor_presence():
