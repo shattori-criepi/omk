@@ -15,6 +15,8 @@ readonly DNSMASQ_SHARED_DIR="/etc/NetworkManager/dnsmasq-shared.d"
 readonly DNSMASQ_ISOLATION_PATH="${DNSMASQ_SHARED_DIR}/omk-ap-isolation.conf"
 readonly DEFAULT_SYSTEMD_UNIT_DIR="/etc/systemd/system"
 readonly DEFAULT_LIBEXEC_DIR="/usr/local/libexec"
+readonly DEFAULT_NM_DISPATCHER_DIR="/etc/NetworkManager/dispatcher.d"
+readonly AP_PROXY_DISPATCHER_NAME="90-omk-ap-proxy-sockets"
 
 CONNECTION_NAME="${OMK_AP_CONNECTION_NAME:-${DEFAULT_CONNECTION_NAME}}"
 INTERFACE="${OMK_AP_INTERFACE:-${DEFAULT_INTERFACE}}"
@@ -164,7 +166,8 @@ find_systemd_socket_proxyd() {
 install_ap_socket_proxies_and_worker() {
   local unit_dir="${OMK_SYSTEMD_UNIT_DIR:-${DEFAULT_SYSTEMD_UNIT_DIR}}"
   local libexec_dir="${OMK_LIBEXEC_DIR:-${DEFAULT_LIBEXEC_DIR}}"
-  local proxyd template name temporary
+  local dispatcher_dir="${OMK_NM_DISPATCHER_DIR:-${DEFAULT_NM_DISPATCHER_DIR}}"
+  local proxyd template name temporary dispatcher_path
   proxyd="$(find_systemd_socket_proxyd)" || fail 'systemd-socket-proxyd was not found in the systemd installation.'
 
   if [[ "${DRY_RUN}" == yes ]]; then
@@ -172,8 +175,10 @@ install_ap_socket_proxies_and_worker() {
     return 0
   fi
 
-  "${SUDO[@]}" install -d -o root -g root -m 0755 "${unit_dir}" "${libexec_dir}"
+  "${SUDO[@]}" install -d -o root -g root -m 0755 "${unit_dir}" "${libexec_dir}" "${dispatcher_dir}"
   "${SUDO[@]}" install -o root -g root -m 0755 "${SCRIPT_DIR}/omk-activate-access-point" "${libexec_dir}/omk-activate-access-point"
+  dispatcher_path="${dispatcher_dir}/${AP_PROXY_DISPATCHER_NAME}"
+  "${SUDO[@]}" install -o root -g root -m 0755 "${SCRIPT_DIR}/omk-ap-proxy-dispatcher" "${dispatcher_path}"
   for name in omk-dashboard-ap-proxy.socket omk-dashboard-ap-proxy.service omk-mqtt-ap-proxy.socket omk-mqtt-ap-proxy.service omk-ap-activation.service; do
     template="${OMK_ROOT}/systemd/${name}.in"
     [[ -f "${template}" ]] || fail "Required systemd template is missing: ${template}"
@@ -188,7 +193,7 @@ install_ap_socket_proxies_and_worker() {
   "${SCRIPT_DIR}/lib/validate-ap-socket-units.sh" "${unit_dir}" >/dev/null || fail 'Installed AP socket proxy units failed their security contract.'
   "${SUDO[@]}" systemctl daemon-reload
   "${SCRIPT_DIR}/lib/validate-ap-socket-units.sh" "${unit_dir}" --effective
-  log 'AP socket units installed; listeners will start only after backend migration.'
+  log 'AP socket units installed; NetworkManager will restore them after a verified omk-ap activation.'
 
 }
 

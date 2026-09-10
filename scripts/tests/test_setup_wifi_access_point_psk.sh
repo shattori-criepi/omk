@@ -9,6 +9,7 @@ trap '[[ "${KEEP_TEST_TEMP:-no}" == yes ]] || rm -rf -- "${TEMP_DIR}"' EXIT
 mkdir -p "${TEMP_DIR}/scripts/lib" "${TEMP_DIR}/systemd" "${TEMP_DIR}/units" "${TEMP_DIR}/libexec" "${TEMP_DIR}/bin"
 cp "${SETUP}" "${TEMP_DIR}/scripts/setup-wifi-access-point.sh"
 cp "${ROOT_DIR}/scripts/omk-activate-access-point" "${TEMP_DIR}/scripts/"
+cp "${ROOT_DIR}/scripts/omk-ap-proxy-dispatcher" "${TEMP_DIR}/scripts/"
 cp "${ROOT_DIR}/scripts/lib/apt-helpers.sh" "${TEMP_DIR}/scripts/lib/apt-helpers.sh"
 cp "${ROOT_DIR}/scripts/lib/validate-ap-socket-units.sh" "${TEMP_DIR}/scripts/lib/"
 cp "${ROOT_DIR}/scripts/lib/validate-ap-socket-units.py" "${TEMP_DIR}/scripts/lib/"
@@ -33,7 +34,7 @@ done
 cat > "${TEMP_DIR}/bin/install" <<'EOF'
 #!/usr/bin/env bash
 for argument in "$@"; do
-  if [[ "${argument}" == "${OMK_SYSTEMD_UNIT_DIR}"* || "${argument}" == "${OMK_LIBEXEC_DIR}"* ]]; then
+  if [[ "${argument}" == "${OMK_SYSTEMD_UNIT_DIR}"* || "${argument}" == "${OMK_LIBEXEC_DIR}"* || "${argument}" == "${OMK_NM_DISPATCHER_DIR}"* ]]; then
     args=()
     skip=no
     for value in "$@"; do
@@ -104,7 +105,7 @@ run_setup() {
   env PATH="${TEMP_DIR}/bin:${PATH}" \
     FAKE_NMCLI_ARGS="${TEMP_DIR}/${name}.nmcli-args" \
     FAKE_CAPTURED_PSK="${TEMP_DIR}/${name}.psk" \
-    OMK_SYSTEMD_UNIT_DIR="${TEMP_DIR}/units" OMK_LIBEXEC_DIR="${TEMP_DIR}/libexec" \
+    OMK_SYSTEMD_UNIT_DIR="${TEMP_DIR}/units" OMK_LIBEXEC_DIR="${TEMP_DIR}/libexec" OMK_NM_DISPATCHER_DIR="${TEMP_DIR}/dispatcher" \
     OMK_AP_CONFIRM=yes OMK_AP_SSID=OMK-TEST "$@" \
     bash "${TEMP_DIR}/scripts/setup-wifi-access-point.sh" > "${TEMP_DIR}/${name}.output" 2>&1 < /dev/null
 }
@@ -122,6 +123,8 @@ assert_absent() {
 run_setup generated PROFILE_EXISTS=no PROFILE_PSK=''
 generated_psk="$(<"${TEMP_DIR}/generated.psk")"
 [[ "${generated_psk}" =~ ^[A-Za-z0-9]{24}$ ]]
+[[ -x "${TEMP_DIR}/dispatcher/90-omk-ap-proxy-sockets" ]]
+cmp -s "${ROOT_DIR}/scripts/omk-ap-proxy-dispatcher" "${TEMP_DIR}/dispatcher/90-omk-ap-proxy-sockets"
 grep -Fq '802-11-wireless-security.key-mgmt wpa-psk' "${TEMP_DIR}/generated.nmcli-args"
 assert_absent "${generated_psk}" "${TEMP_DIR}/generated.output"
 assert_absent "${generated_psk}" "${TEMP_DIR}/generated.nmcli-args"
@@ -134,7 +137,7 @@ if grep -Fq 'WPA2-PSK (input is hidden)' "${TEMP_DIR}/generated.output"; then ec
 env PATH="${TEMP_DIR}/bin:${PATH}" FAKE_NMCLI_ARGS="${TEMP_DIR}/early.nmcli-args" \
   FAKE_CAPTURED_PSK="${TEMP_DIR}/early.psk" PROFILE_EXISTS=no PROFILE_PSK='' \
   FORBID_ACTIVATION=yes TEST_SYSTEMCTL_CALLS="${TEMP_DIR}/early.systemctl" OMK_AP_CONFIRM=yes OMK_AP_SSID=OMK-TEST OMK_AP_ACTIVATE=yes \
-  OMK_SYSTEMD_UNIT_DIR="${TEMP_DIR}/units" OMK_LIBEXEC_DIR="${TEMP_DIR}/libexec" \
+  OMK_SYSTEMD_UNIT_DIR="${TEMP_DIR}/units" OMK_LIBEXEC_DIR="${TEMP_DIR}/libexec" OMK_NM_DISPATCHER_DIR="${TEMP_DIR}/dispatcher" \
   bash "${TEMP_DIR}/scripts/setup-wifi-access-point.sh" --prepare >"${TEMP_DIR}/early.output" 2>&1 </dev/null
 if grep -Fq 'connection up' "${TEMP_DIR}/early.nmcli-args"; then
   echo 'Prepare performed an early AP activation.' >&2
