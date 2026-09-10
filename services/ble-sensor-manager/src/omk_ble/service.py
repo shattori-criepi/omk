@@ -399,6 +399,12 @@ class BleManager:
             # Registration can occur while an API response is in flight.
             if candidate.device_key in registered_keys:
                 continue
+            # Nodes have their own authoritative /api/nodes management flow.
+            # It covers provisioning, relay-only operation, and later SEN66
+            # registration, so Node advertisements never belong in the BLE
+            # sensor candidate API.
+            if candidate.model == "omk_node":
+                continue
             item = candidate.as_dict()
             item["identifier_suffix"] = candidate.device_key[-4:].upper()
             item["highlight"] = "value_changed" if candidate.values else None

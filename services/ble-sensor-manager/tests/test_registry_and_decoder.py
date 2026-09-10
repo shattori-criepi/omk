@@ -80,20 +80,94 @@ def test_omk_node_provisioned_and_registered_states_decode() -> None:
         assert decoded is not None and decoded.values["provisioning_state"] == expected
 
 
-def test_omk_node_candidate_cannot_be_formally_registered_yet(tmp_path: Path) -> None:
-    manager = BleManager(SensorRegistry(tmp_path / "sensors.json"))
+def test_omk_node_is_managed_by_node_list_not_sensor_candidates(tmp_path: Path) -> None:
+    manager = BleManager(SensorRegistry(tmp_path / "sensors.json"), node_registry=NodeRegistry(tmp_path / "nodes.json"))
     manager.scanning = True
     decoded = decode_omk_node(-41, {OMK_NODE_SERVICE_UUID: bytes.fromhex("01000002112233445566")}, "now")
     assert decoded is not None
     manager.record_advertisement(decoded)
-    candidate = manager.candidate_list()[0]
-    assert candidate["values"]["capabilities"] == ["sen66"]
-    with pytest.raises(ValueError, match="まだ実装されていません"):
-        manager.register({"device_key": decoded.device_key, "sensor_id": "node-001", "display_name": "Node"})
+    assert manager.candidate_list() == []
+    assert manager.node_list()[0]["node_id"] == "112233445566"
+    assert manager.node_list()[0]["capabilities"] == ["sen66"]
 
 
-def test_ble_scan_callback_adds_omk_node_candidate_without_affecting_switchbot_decoder(tmp_path: Path) -> None:
-    manager = BleManager(SensorRegistry(tmp_path / "sensors.json"))
+def _node_candidate(node_id: str, provisioning_state: int) -> DecodedAdvertisement:
+    decoded = decode_omk_node(
+        -41, {OMK_NODE_SERVICE_UUID: bytes([1, provisioning_state, 0, 1]) + bytes.fromhex(node_id)}, "now",
+    )
+    assert decoded is not None
+    return decoded
+
+
+def test_all_node_states_stay_in_node_list_not_sensor_candidates(tmp_path: Path) -> None:
+    node_registry = NodeRegistry(tmp_path / "nodes.json")
+    node_registry.update("112233445566", registration_state="provisioned")
+    node_registry.update("223344556677", registration_state="provisioned", requested_logical_id="pending-001",
+                         request_state="request_sent")
+    node_registry.update("334455667788", registration_state="registered", logical_id="relay-001")
+    node_registry.update("445566778899", registration_state="registered", logical_id="sen66-001")
+    manager = BleManager(SensorRegistry(tmp_path / "sensors.json"), node_registry=node_registry)
+    manager.scanning = True
+
+    # Node provisioning state and formal Gateway registration are managed by
+    # node_list. Neither an unconfigured nor any provisioned/registered Node
+    # may appear in the generic BLE sensor candidate API.
+    for node_id, state in (
+        ("001122334455", 0), ("112233445566", 1), ("223344556677", 1),
+        ("334455667788", 1), ("445566778899", 2),
+    ):
+        manager.record_advertisement(_node_candidate(node_id, state))
+
+    manager.record_advertisement(DecodedAdvertisement(
+        "switchbot:020000000040", "switchbot", "motion_sensor", "motion", -50, "now", {"motion_state": 1}, {},
+    ))
+    assert [item["device_key"] for item in manager.candidate_list()] == ["switchbot:020000000040"]
+    nodes = {item["node_id"]: item for item in manager.node_list()}
+    assert nodes["001122334455"]["registration_state"] == "unregistered"
+    assert nodes["112233445566"]["registration_state"] == "provisioned"
+    assert nodes["223344556677"]["request_state"] == "request_sent"
+    assert nodes["334455667788"]["registration_state"] == "registered"
+    assert nodes["445566778899"]["registration_state"] == "registered"
+
+
+def test_node_registration_removal_keeps_node_list_registration_path(tmp_path: Path) -> None:
+    node_registry = NodeRegistry(tmp_path / "nodes.json")
+    node_registry.update("112233445566", registration_state="registered", logical_id="sen66-001",
+                         connected_sensors=["sen66"])
+    manager = BleManager(SensorRegistry(tmp_path / "sensors.json"), node_registry=node_registry)
+    manager.scanning = True
+    manager.record_advertisement(_node_candidate("112233445566", 1))
+    assert manager.candidate_list() == []
+
+    manager.remove_node_registration("112233445566")
+    assert manager.candidate_list() == []
+    node = manager.node_list()[0]
+    assert node["registration_state"] == "provisioned"
+    assert node["attached_sensors"] == ["SEN66"]
+    assert "logical_id" not in node
+
+
+def test_provisioned_relay_node_with_later_sen66_uses_node_list_registration_path(tmp_path: Path) -> None:
+    node_registry = NodeRegistry(tmp_path / "nodes.json")
+    node_registry.update("112233445566", registration_state="provisioned", connected_sensors=[])
+    manager = BleManager(SensorRegistry(tmp_path / "sensors.json"), node_registry=node_registry)
+    manager.scanning = True
+    manager.record_advertisement(_node_candidate("112233445566", 1))
+    assert manager.candidate_list() == []
+    assert manager.node_list()[0]["attached_sensors"] == []
+
+    manager.handle_node_mqtt(
+        "omk/node/112233445566/registration/status",
+        b'{"protocol_version":1,"node_id":"112233445566","registration_state":"provisioned","capabilities":3,"connected_sensors":["sen66"]}',
+    )
+    node = manager.node_list()[0]
+    assert node["registration_state"] == "provisioned"
+    assert node["attached_sensors"] == ["SEN66"]
+    assert manager.candidate_list() == []
+
+
+def test_ble_scan_callback_adds_omk_node_to_node_list_without_sensor_candidate(tmp_path: Path) -> None:
+    manager = BleManager(SensorRegistry(tmp_path / "sensors.json"), node_registry=NodeRegistry(tmp_path / "nodes.json"))
     manager.scanning = True
     device = type("Device", (), {"address": "AA:BB:CC:DD:EE:FF"})()
     advertisement = type(
@@ -106,7 +180,8 @@ def test_ble_scan_callback_adds_omk_node_candidate_without_affecting_switchbot_d
         },
     )()
     manager._on_detection(device, advertisement)
-    assert manager.candidate_list()[0]["device_key"] == "omk-node:112233445566"
+    assert manager.candidate_list() == []
+    assert manager.node_list()[0]["node_id"] == "112233445566"
 
 
 def test_pi_captured_meter_manufacturer_packets_decode_temperature_and_humidity() -> None:
