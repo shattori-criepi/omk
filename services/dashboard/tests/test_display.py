@@ -1900,7 +1900,7 @@ const missingMarkup = registeredCard({device_key: "switchbot:b0e9fee87fc8", sens
 console.log(JSON.stringify({
   candidate: ["SwitchBot Presence Sensor Pro", "RSSI -42 dBm", "検出", "バッテリー: <strong>100%</strong>", "照度レベル: <strong>12</strong>", "このセンサを登録"].every(value => candidate.includes(value)),
   unknown: ["未対応のSwitchBot機器", "この機器は現在OMKで対応していないため登録できません。", "RSSI -60 dBm", "ID …ABCD", "later"].every(value => unknownCandidate.includes(value)) && !unknownCandidate.includes("このセンサを登録") && !unknownCandidate.includes("値の仕様を確認中"),
-  registered: ["motion-002", "玄関 · switchbot Presence Sensor Pro", "未検出", "バッテリー</span><strong>87</strong><small>%", "照度レベル</span><strong>7</strong>", "正常"].every(value => registeredMarkup.includes(value)),
+  registered: ["motion-002", "玄関 · SwitchBot Presence Sensor Pro", "未検出", "バッテリー</span><strong>87</strong><small>%", "照度レベル</span><strong>7</strong>", "正常"].every(value => registeredMarkup.includes(value)),
   missing: missingMarkup.includes("未検出") && !missingMarkup.includes("undefined") && !missingMarkup.includes("NaN"),
 }));
 '''

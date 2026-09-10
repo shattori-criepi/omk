@@ -16,7 +16,7 @@ from .models import DecodedAdvertisement, RegisteredSensor, now_iso
 from .node_registry import NodeRegistry
 from .omk_node import decode as decode_omk_node
 from .registry import SensorRegistry
-from .switchbot import decode, device_key_for
+from .switchbot import decode, device_key_for, unconfirmed_model_options, unconfirmed_registration_candidate
 
 LOGGER = logging.getLogger(__name__)
 ENVIRONMENT_PUBLISH_INTERVAL_SECONDS = 10.0
@@ -332,7 +332,7 @@ class BleManager:
         for item in service_values:
             uuid = item.get("uuid") if isinstance(item, dict) else None
             data = parse_hex(item.get("data")) if isinstance(item, dict) else None
-            if not isinstance(uuid, str) or uuid.lower() != "0000fd3d-0000-1000-8000-00805f9b34fb" or data is None or uuid in service_data: return None
+            if not isinstance(uuid, str) or uuid.lower() != "0000fd3d-0000-1000-8000-00805f9b34fb" or data is None or uuid.lower() in service_data: return None
             service_data[uuid.lower()] = data
         if not manufacturer_data and not service_data: return None
         return address, rssi, manufacturer_data, service_data
@@ -382,6 +382,10 @@ class BleManager:
                 except ValueError:
                     item["online"] = False
                 item["status"] = "normal" if item["online"] else "offline"
+                if (seen.sensor_type == "unknown" or seen.model != sensor.model
+                        or seen.sensor_type != sensor.sensor_type):
+                    item["latest"]["values"] = {}
+                    item["status"] = "unrecognized"
             result.append(item)
         return result
 
@@ -398,13 +402,30 @@ class BleManager:
             item = candidate.as_dict()
             item["identifier_suffix"] = candidate.device_key[-4:].upper()
             item["highlight"] = "value_changed" if candidate.values else None
+            unconfirmed = unconfirmed_model_options(candidate)
+            if unconfirmed:
+                model, preview = next(iter(unconfirmed.items()))
+                item["manual_registration_models"] = [model]
+                # This is a UI-only interpretation for an operator to compare
+                # with the physical device. Keep candidate.model/values unknown
+                # so it cannot become telemetry, registry state, or a model ID.
+                item["unconfirmed_preview"] = {"model": model, "values": preview.values}
             items.append(item)
         return items
 
-    def register(self, request: dict[str, Any]) -> RegisteredSensor:
-        candidate = self.setup_candidates.get(request["device_key"])
+    def _registration_candidate(self, device_key: str, confirmed_model: str | None = None) -> DecodedAdvertisement:
+        candidate = self.setup_candidates.get(device_key)
         if not candidate:
             raise ValueError("device was not found in the current setup scan")
+        if confirmed_model is not None:
+            validated = unconfirmed_registration_candidate(candidate, confirmed_model)
+            if validated is None:
+                raise ValueError("現在の受信データでは指定した機種として登録できません。再受信して確認してください")
+            return validated
+        return candidate
+
+    def register(self, request: dict[str, Any]) -> RegisteredSensor:
+        candidate = self._registration_candidate(request["device_key"], request.get("confirmed_model"))
         if candidate.model == "omk_node":
             raise ValueError("OMK Nodeの登録とWi-Fi provisioningはまだ実装されていません")
         if candidate.model == "unknown_switchbot" or candidate.sensor_type == "unknown":
@@ -415,16 +436,16 @@ class BleManager:
             display_name=request["display_name"], enabled=bool(request.get("enabled", True)),
         )
         registered = self.registry.register(sensor)
+        if request.get("confirmed_model"):
+            self.observations[candidate.device_key] = candidate
         # Remove it immediately; remaining candidates retain their order.
         self.setup_candidates.pop(candidate.device_key, None)
         self._setup_candidate_order.remove(candidate.device_key)
         return registered
 
-    def suggested_sensor_id(self, device_key: str) -> str:
+    def suggested_sensor_id(self, device_key: str, confirmed_model: str | None = None) -> str:
         """Suggest a type-plus-sequence OMK ID without changing registration."""
-        candidate = self.setup_candidates.get(device_key)
-        if not candidate:
-            raise ValueError("device was not found in the current setup scan")
+        candidate = self._registration_candidate(device_key, confirmed_model)
         if candidate.model == "omk_node":
             raise ValueError("OMK Nodeの登録とWi-Fi provisioningはまだ実装されていません")
         if candidate.model == "unknown_switchbot" or candidate.sensor_type == "unknown":
@@ -460,6 +481,8 @@ class BleManager:
             return
         if not sensor or not advertisement.values:
             return
+        if advertisement.model != sensor.model or advertisement.sensor_type != sensor.sensor_type:
+            return  # Never publish a new model under an existing model's sensor ID.
         now = self._monotonic_provider()
         if source == "direct":
             # This is observation freshness, deliberately independent from

@@ -27,6 +27,7 @@ class RegisterRequest(BaseModel):
     display_name: str = Field(min_length=1, max_length=64)
     location: str = Field(default="", max_length=64)
     enabled: bool = True
+    confirmed_model: str | None = None
 
 
 class UpdateSensorRequest(BaseModel):
@@ -98,9 +99,9 @@ def candidates() -> dict[str, Any]:
 
 
 @app.get("/api/setup/suggested-sensor-id")
-def suggested_sensor_id(device_key: str) -> dict[str, str]:
+def suggested_sensor_id(device_key: str, confirmed_model: str | None = None) -> dict[str, str]:
     try:
-        return {"sensor_id": manager.suggested_sensor_id(device_key)}
+        return {"sensor_id": manager.suggested_sensor_id(device_key, confirmed_model)}
     except ValueError as error:
         raise HTTPException(400, str(error)) from error
 

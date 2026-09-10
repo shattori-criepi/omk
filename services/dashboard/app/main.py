@@ -6,6 +6,7 @@ from datetime import datetime
 from collections.abc import Mapping
 from pathlib import Path
 from zoneinfo import ZoneInfo
+from urllib.parse import urlencode
 
 import httpx
 import qrcode
@@ -454,8 +455,11 @@ async def ble_candidates() -> dict:
 
 
 @app.get("/api/admin/setup/suggested-sensor-id")
-async def suggested_sensor_id(device_key: str) -> dict:
-    return await _ble_request("GET", f"/api/setup/suggested-sensor-id?device_key={device_key}")
+async def suggested_sensor_id(device_key: str, confirmed_model: str | None = None) -> dict:
+    params = {"device_key": device_key}
+    if confirmed_model is not None:
+        params["confirmed_model"] = confirmed_model
+    return await _ble_request("GET", "/api/setup/suggested-sensor-id?" + urlencode(params))
 
 
 @app.post("/api/admin/sensors", status_code=201)

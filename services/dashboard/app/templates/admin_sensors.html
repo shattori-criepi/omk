@@ -30,6 +30,10 @@
       <form id="register-form" method="dialog">
         <h2 id="register-title">センサを登録</h2>
         <p id="register-device" class="dialog-device"></p>
+        <div id="unconfirmed-model-confirmation" hidden>
+          <p>この機器は自動判定できません。機器を操作した際の受信変化などで対象を確認してください。</p>
+          <label><input id="confirm-unconfirmed-model" type="checkbox">対象の実物が<span id="confirmed-model-name"></span>であることを確認しました</label>
+        </div>
         <label>OMK センサID<input id="sensor-id" name="sensor_id" required pattern="[a-z][a-z0-9-]{0,63}" placeholder="co2-001" autocomplete="off"></label>
         <p class="field-hint">種別＋連番を自動提案します（例: <code>co2-001</code>、<code>th-001</code>）。</p>
         <label>表示名<input id="display-name" name="display_name" required maxlength="64" placeholder="リビング" autocomplete="off"></label>

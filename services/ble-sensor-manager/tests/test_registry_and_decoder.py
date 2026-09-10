@@ -110,14 +110,14 @@ def test_ble_scan_callback_adds_omk_node_candidate_without_affecting_switchbot_d
 
 
 def test_pi_captured_meter_manufacturer_packets_decode_temperature_and_humidity() -> None:
-    fixtures = (("cf3941c7ed79f40304992c", 25.4), ("cf3941c7ed79f80305992c", 25.5))
+    fixtures = (("020000000004f40304992c", 25.4), ("020000000004f80305992c", 25.5))
     for packet, temperature_c in fixtures:
         decoded = decode(
-            "CF:39:41:C7:ED:79", -28,
+            "02:00:00:00:00:04", -28,
             {SWITCHBOT_COMPANY_ID: bytes.fromhex(packet)}, {}, "2026-08-12T10:00:00+09:00",
-        )
+         model_hint="temperature_humidity_sensor")
         assert decoded is not None
-        assert decoded.device_key == "switchbot:cf3941c7ed79"
+        assert decoded.device_key == "switchbot:020000000004"
         assert decoded.model == "temperature_humidity_sensor"
         assert decoded.sensor_type == "environment"
         assert decoded.values == {"temperature_c": temperature_c, "relative_humidity_percent": 44}
@@ -125,15 +125,15 @@ def test_pi_captured_meter_manufacturer_packets_decode_temperature_and_humidity(
 
 def test_pi_captured_co2_manufacturer_packets_decode_environment_measurements() -> None:
     fixtures = (
-        ("B0:E9:FE:54:96:C5", "b0e9fe5496c5b6e4059a2a003f02ad00", {"co2_ppm": 685}),
-        ("B0:E9:FE:54:96:C5", "b0e9fe5496c5b9e4059a28003f028100", {"co2_ppm": 641}),
-        ("B0:E9:FE:58:15:CC", "b0e9fe5815ccf6e405982e0024020e00", {"temperature_c": 24.5, "relative_humidity_percent": 46, "co2_ppm": 526}),
-        ("B0:E9:FE:58:15:CC", "b0e9fe5815ccf7e406982e0024027b00", {"temperature_c": 24.6, "relative_humidity_percent": 46, "co2_ppm": 635}),
-        ("B0:E9:FE:54:96:C5", "b0e9fe5496c50ae4029c250334022600", {"temperature_c": 28.2, "relative_humidity_percent": 37, "co2_ppm": 550}),
-        ("B0:E9:FE:58:15:CC", "b0e9fe5815cc788006992a002d027000", {"temperature_c": 25.6, "relative_humidity_percent": 42, "co2_ppm": 624}),
+        ("02:00:00:00:00:06", "020000000006b6e4059a2a003f02ad00", {"co2_ppm": 685}),
+        ("02:00:00:00:00:06", "020000000006b9e4059a28003f028100", {"co2_ppm": 641}),
+        ("02:00:00:00:00:07", "020000000007f6e405982e0024020e00", {"temperature_c": 24.5, "relative_humidity_percent": 46, "co2_ppm": 526}),
+        ("02:00:00:00:00:07", "020000000007f7e406982e0024027b00", {"temperature_c": 24.6, "relative_humidity_percent": 46, "co2_ppm": 635}),
+        ("02:00:00:00:00:06", "0200000000060ae4029c250334022600", {"temperature_c": 28.2, "relative_humidity_percent": 37, "co2_ppm": 550}),
+        ("02:00:00:00:00:07", "020000000007788006992a002d027000", {"temperature_c": 25.6, "relative_humidity_percent": 42, "co2_ppm": 624}),
     )
     for address, packet, expected in fixtures:
-        decoded = decode(address, -31, {SWITCHBOT_COMPANY_ID: bytes.fromhex(packet)}, {}, "now")
+        decoded = decode(address, -31, {SWITCHBOT_COMPANY_ID: bytes.fromhex(packet)}, {}, "now", model_hint="co2_sensor")
         assert decoded is not None
         assert decoded.model == "co2_sensor"
         assert decoded.sensor_type == "environment"
@@ -142,18 +142,18 @@ def test_pi_captured_co2_manufacturer_packets_decode_environment_measurements() 
 
 
 @pytest.mark.parametrize("packet", (
-    "b0e9fe5496c50ae4029c2503340226",  # len != 16
-    "b0e9fe5496c50ae40a9c250334022600",  # invalid temperature fraction
-    "b0e9fe5496c50ae4029c650334022600",  # invalid humidity
-    "b0e9fe5496c50ae4029c250334018f00",  # CO2 < 400 ppm
-    "b0e9fe5496c50ae4029c250334271100",  # CO2 > 10,000 ppm
-    "b0e9fe5496c50ae4029c250334022601",  # non-zero terminator
+    "0200000000060ae4029c2503340226",  # len != 16
+    "0200000000060ae40a9c250334022600",  # invalid temperature fraction
+    "0200000000060ae4029c650334022600",  # invalid humidity
+    "0200000000060ae4029c250334018f00",  # CO2 < 400 ppm
+    "0200000000060ae4029c250334271100",  # CO2 > 10,000 ppm
+    "0200000000060ae4029c250334022601",  # non-zero terminator
 ))
 def test_invalid_co2_manufacturer_packets_remain_unknown(packet: str) -> None:
     decoded = decode(
-        "B0:E9:FE:54:96:C5", -31,
+        "02:00:00:00:00:06", -31,
         {SWITCHBOT_COMPANY_ID: bytes.fromhex(packet)}, {}, "now",
-    )
+     model_hint="co2_sensor")
     assert decoded is not None
     assert decoded.model == "unknown_switchbot"
     assert decoded.values == {}
@@ -161,19 +161,19 @@ def test_invalid_co2_manufacturer_packets_remain_unknown(packet: str) -> None:
 
 def test_waterproof_sensor_decodes_its_dedicated_service_and_manufacturer_layouts() -> None:
     service_only = decode(
-        "D6:69:17:D3:10:38", -53, {}, {METER_SERVICE_UUID: bytes.fromhex("770047")}, "now",
-    )
+        "02:00:00:00:00:02", -53, {}, {METER_SERVICE_UUID: bytes.fromhex("770047")}, "now",
+     model_hint="waterproof_sensor")
     captured = decode(
-        "D6:69:17:D3:10:38", -53,
-        {SWITCHBOT_COMPANY_ID: bytes.fromhex("d66917d31038550b069bd200")},
+        "02:00:00:00:00:02", -53,
+        {SWITCHBOT_COMPANY_ID: bytes.fromhex("020000000002550b069bd200")},
         {METER_SERVICE_UUID: bytes.fromhex("770047")}, "now",
-    )
+     model_hint="waterproof_sensor")
     below_freezing = decode(
         "11:22:33:44:55:66", -60,
         {SWITCHBOT_COMPANY_ID: bytes.fromhex("112233445566550b06055200")}, {}, "now",
-    )
-    malformed = decode("x", -1, {SWITCHBOT_COMPANY_ID: bytes.fromhex("d66917d31038550b069bd2")}, {}, "now")
-    unrelated = decode("x", -1, {SWITCHBOT_COMPANY_ID: bytes.fromhex("d66917d31038550b069bd201")}, {}, "now")
+     model_hint="waterproof_sensor")
+    malformed = decode("x", -1, {SWITCHBOT_COMPANY_ID: bytes.fromhex("020000000002550b069bd2")}, {}, "now", model_hint="waterproof_sensor")
+    unrelated = decode("x", -1, {SWITCHBOT_COMPANY_ID: bytes.fromhex("020000000002550b069bd201")}, {}, "now", model_hint="waterproof_sensor")
     assert service_only is not None and service_only.model == "waterproof_sensor" and service_only.values == {}
     assert captured is not None and captured.sensor_type == "environment"
     assert captured.values == {"temperature_c": 27.6, "relative_humidity_percent": 82}
@@ -184,20 +184,20 @@ def test_waterproof_sensor_decodes_its_dedicated_service_and_manufacturer_layout
 
 
 def test_plug_sensor_decodes_service_and_manufacturer_power_layouts() -> None:
-    service_only = decode("60:55:F9:2E:77:82", -50, {}, {METER_SERVICE_UUID: bytes.fromhex("6a0064")}, "now")
-    on_low = decode("60:55:F9:2E:77:82", -50, {SWITCHBOT_COMPANY_ID: bytes.fromhex("6055f92e7782378016360035")}, {}, "now")
-    off_low = decode("60:55:F9:2E:77:82", -50, {SWITCHBOT_COMPANY_ID: bytes.fromhex("6055f92e7782380016360035")}, {}, "now")
-    on_high = decode("60:55:F9:2E:77:82", -50, {SWITCHBOT_COMPANY_ID: bytes.fromhex("6055f92e77827080163806c4")}, {}, "now")
-    overload_high = decode("60:55:F9:2E:77:82", -50, {SWITCHBOT_COMPANY_ID: bytes.fromhex("6055f92e77827080163886c4")}, {}, "now")
-    unrelated = decode("x", -1, {SWITCHBOT_COMPANY_ID: bytes.fromhex("6055f92e7782378015360035")}, {}, "now")
-    old_verified = decode("60:55:F9:2E:77:82", -50, {SWITCHBOT_COMPANY_ID: bytes.fromhex("6055f92e77826f80163805f2")}, {}, "now")
+    service_only = decode("02:00:00:00:00:05", -50, {}, {METER_SERVICE_UUID: bytes.fromhex("6a0064")}, "now", model_hint="plug_sensor")
+    on_low = decode("02:00:00:00:00:05", -50, {SWITCHBOT_COMPANY_ID: bytes.fromhex("020000000005378016360035")}, {}, "now", model_hint="plug_sensor")
+    off_low = decode("02:00:00:00:00:05", -50, {SWITCHBOT_COMPANY_ID: bytes.fromhex("020000000005380016360035")}, {}, "now", model_hint="plug_sensor")
+    on_high = decode("02:00:00:00:00:05", -50, {SWITCHBOT_COMPANY_ID: bytes.fromhex("0200000000057080163806c4")}, {}, "now", model_hint="plug_sensor")
+    overload_high = decode("02:00:00:00:00:05", -50, {SWITCHBOT_COMPANY_ID: bytes.fromhex("0200000000057080163886c4")}, {}, "now", model_hint="plug_sensor")
+    unrelated = decode("x", -1, {SWITCHBOT_COMPANY_ID: bytes.fromhex("020000000005378015360035")}, {}, "now")
+    old_verified = decode("02:00:00:00:00:05", -50, {SWITCHBOT_COMPANY_ID: bytes.fromhex("0200000000056f80163805f2")}, {}, "now", model_hint="plug_sensor")
     new_verified = decode(
-        "AC:27:6E:43:26:9E", -50,
-        {SWITCHBOT_COMPANY_ID: bytes.fromhex("ac276e43269e778010370037")},
+        "02:00:00:00:00:08", -50,
+        {SWITCHBOT_COMPANY_ID: bytes.fromhex("020000000008778010370037")},
         {METER_SERVICE_UUID: bytes.fromhex("6a0064")}, "now",
-    )
+     model_hint="plug_sensor")
     assert service_only is not None and service_only.model == "plug_sensor" and service_only.sensor_type == "power" and service_only.values == {}
-    assert on_low is not None and on_low.device_key == "switchbot:6055f92e7782"
+    assert on_low is not None and on_low.device_key == "switchbot:020000000005"
     assert on_low.values == {"power_w": 5.3, "switch_state": 1}
     assert off_low is not None and off_low.values == {"power_w": 5.3, "switch_state": 0}
     assert on_high is not None and on_high.values == {"power_w": 173.2, "switch_state": 1}
@@ -210,23 +210,23 @@ def test_plug_sensor_decodes_service_and_manufacturer_power_layouts() -> None:
 
 def test_registered_plug_model_hint_decodes_ambiguous_manufacturer_only_packets() -> None:
     packets = (
-        ("ac276e43269e96801032002a", {"switch_state": 1, "power_w": 4.2}),
-        ("ac276e43269e9c0010330029", {"switch_state": 0, "power_w": 4.1}),
-        ("ac276e43269e9d0010330000", {"switch_state": 0, "power_w": 0.0}),
+        ("02000000000896801032002a", {"switch_state": 1, "power_w": 4.2}),
+        ("0200000000089c0010330029", {"switch_state": 0, "power_w": 4.1}),
+        ("0200000000089d0010330000", {"switch_state": 0, "power_w": 0.0}),
     )
     for packet, values in packets:
-        hinted = decode("AC:27:6E:43:26:9E", -50, {SWITCHBOT_COMPANY_ID: bytes.fromhex(packet)}, {}, "now", model_hint="plug_sensor")
+        hinted = decode("02:00:00:00:00:08", -50, {SWITCHBOT_COMPANY_ID: bytes.fromhex(packet)}, {}, "now", model_hint="plug_sensor")
         assert hinted is not None and hinted.model == "plug_sensor" and hinted.values == values
 
     # Without registration metadata this collision remains conservatively
     # non-Plug; the last packet can otherwise match Waterproof's 12-byte form.
-    unhinted = decode("AC:27:6E:43:26:9E", -50, {SWITCHBOT_COMPANY_ID: bytes.fromhex(packets[-1][0])}, {}, "now")
+    unhinted = decode("02:00:00:00:00:08", -50, {SWITCHBOT_COMPANY_ID: bytes.fromhex(packets[-1][0])}, {}, "now")
     assert unhinted is not None and unhinted.model != "plug_sensor"
 
 
 def test_short_and_unknown_manufacturer_packets_remain_raw_unknown_candidates() -> None:
-    for packet in (b"", bytes.fromhex("cf3941c7ed79f40304"), bytes.fromhex("cf3941c7ed79000004992c")):
-        decoded = decode("CF:39:41:C7:ED:79", -50, {SWITCHBOT_COMPANY_ID: packet}, {}, "now")
+    for packet in (b"", bytes.fromhex("020000000004f40304"), bytes.fromhex("020000000004000004992c")):
+        decoded = decode("02:00:00:00:00:04", -50, {SWITCHBOT_COMPANY_ID: packet}, {}, "now")
         assert decoded is not None
         assert decoded.model == "unknown_switchbot"
         assert decoded.values == {}
@@ -629,7 +629,7 @@ def test_updated_sensor_id_is_used_for_next_mqtt_publish_and_disabled_sensor_is_
 def test_raw_relay_reuses_switchbot_decoder_and_resolves_registered_sensor_id(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     registry = SensorRegistry(tmp_path / "sensors.json")
     registry.register(RegisteredSensor(
-        "switchbot:cf3941c7ed79", "th-001", "environment", "switchbot",
+        "switchbot:020000000004", "th-001", "environment", "switchbot",
         "temperature_humidity_sensor", "", "温湿度計",
     ))
     publisher = _MqttPublisher()
@@ -638,8 +638,8 @@ def test_raw_relay_reuses_switchbot_decoder_and_resolves_registered_sensor_id(tm
 
     manager.handle_relay_mqtt(
         "omk-relay/09dda0d5a8f2/ble/raw",
-        b'{"protocol_version":1,"relay_node_id":"09dda0d5a8f2","ble_address":"cf3941c7ed79","rssi":-42,'
-        b'"manufacturer_data":[{"company_id":2409,"data":"cf3941c7ed79f40304992c"}],"service_data":[]}',
+        b'{"protocol_version":1,"relay_node_id":"09dda0d5a8f2","ble_address":"020000000004","rssi":-42,'
+        b'"manufacturer_data":[{"company_id":2409,"data":"020000000004f40304992c"}],"service_data":[]}',
     )
 
     assert publisher.messages == [("omk/th-001/environment", json.dumps({
@@ -667,18 +667,18 @@ def test_raw_relay_does_not_publish_unregistered_or_disabled_devices(tmp_path: P
             }).encode(),
         )
 
-    relay("cf3941c7ed79")
+    relay("020000000004")
     relay("111111111111")
     assert publisher.messages == []
 
 
 def test_registered_plug_model_hint_is_used_for_direct_and_raw_relay(tmp_path: Path) -> None:
     registry = SensorRegistry(tmp_path / "sensors.json")
-    registry.register(RegisteredSensor("switchbot:ac276e43269e", "plug-001", "power", "switchbot", "plug_sensor", "", "プラグ"))
-    packet = "ac276e43269e9d0010330000"
+    registry.register(RegisteredSensor("switchbot:020000000008", "plug-001", "power", "switchbot", "plug_sensor", "", "プラグ"))
+    packet = "0200000000089d0010330000"
     direct_publisher = _MqttPublisher()
     direct_manager = BleManager(registry, direct_publisher)
-    device = type("Device", (), {"address": "AC:27:6E:43:26:9E"})()
+    device = type("Device", (), {"address": "02:00:00:00:00:08"})()
     advertisement = type("Advertisement", (), {"rssi": -50, "manufacturer_data": {SWITCHBOT_COMPANY_ID: bytes.fromhex(packet)}, "service_data": {}})()
     direct_manager._on_detection(device, advertisement)
     assert json.loads(direct_publisher.messages[-1][1])["power_w"] == 0.0
@@ -687,7 +687,7 @@ def test_registered_plug_model_hint_is_used_for_direct_and_raw_relay(tmp_path: P
     relay_manager = BleManager(registry, relay_publisher)
     relay_manager.handle_relay_mqtt(
         "omk-relay/09dda0d5a8f2/ble/raw",
-        json.dumps({"protocol_version": 1, "relay_node_id": "09dda0d5a8f2", "ble_address": "ac276e43269e", "rssi": -50,
+        json.dumps({"protocol_version": 1, "relay_node_id": "09dda0d5a8f2", "ble_address": "020000000008", "rssi": -50,
                     "manufacturer_data": [{"company_id": 2409, "data": packet}], "service_data": []}).encode(),
     )
     relay_payload = json.loads(relay_publisher.messages[-1][1])
@@ -862,16 +862,16 @@ def test_disabled_waterproof_sensor_updates_latest_without_publishing(tmp_path: 
 
 def test_motion_manufacturer_packets_decode_only_motion_state() -> None:
     fixtures = (
-        ("cffc6a48db15362c0059", 0),
-        ("cffc6a48db15376c0001", 1),
+        ("020000000001362c0059", 0),
+        ("020000000001376c0001", 1),
         # Index 8 is variable data, not a reserved zero byte.
-        ("cffc6a48db15172cda59", 0),
+        ("020000000001172cda59", 0),
     )
     for packet, motion_state in fixtures:
         decoded = decode(
-            "CF:FC:6A:48:DB:15", -40,
+            "02:00:00:00:00:01", -40,
             {SWITCHBOT_COMPANY_ID: bytes.fromhex(packet)}, {}, "now",
-        )
+         model_hint="motion_sensor")
         assert decoded is not None
         assert decoded.model == "motion_sensor"
         assert decoded.sensor_type == "motion"
@@ -879,10 +879,10 @@ def test_motion_manufacturer_packets_decode_only_motion_state() -> None:
 
 
 def test_motion_decoder_does_not_classify_existing_or_unrelated_switchbot_layouts() -> None:
-    meter = decode("CF:39:41:C7:ED:79", -40, {SWITCHBOT_COMPANY_ID: bytes.fromhex("cf3941c7ed79f40304992c")}, {}, "now")
-    co2 = decode("B0:E9:FE:58:15:CC", -40, {SWITCHBOT_COMPANY_ID: bytes.fromhex("b0e9fe5815ccf6e405982e0024020e00")}, {}, "now")
-    malformed = decode("CF:FC:6A:48:DB:15", -40, {SWITCHBOT_COMPANY_ID: bytes.fromhex("cffc6a48db150c")}, {}, "now")
-    unrelated = decode("CF:FC:6A:48:DB:15", -40, {SWITCHBOT_COMPANY_ID: bytes.fromhex("cffc6a48db150b2d0087")}, {}, "now")
+    meter = decode("02:00:00:00:00:04", -40, {SWITCHBOT_COMPANY_ID: bytes.fromhex("020000000004f40304992c")}, {}, "now", model_hint="temperature_humidity_sensor")
+    co2 = decode("02:00:00:00:00:07", -40, {SWITCHBOT_COMPANY_ID: bytes.fromhex("020000000007f6e405982e0024020e00")}, {}, "now", model_hint="co2_sensor")
+    malformed = decode("02:00:00:00:00:01", -40, {SWITCHBOT_COMPANY_ID: bytes.fromhex("0200000000010c")}, {}, "now")
+    unrelated = decode("02:00:00:00:00:01", -40, {SWITCHBOT_COMPANY_ID: bytes.fromhex("0200000000010b2d0087")}, {}, "now")
     assert meter is not None and meter.model == "temperature_humidity_sensor"
     assert co2 is not None and co2.model == "co2_sensor"
     assert malformed is not None and malformed.model == "unknown_switchbot"
@@ -892,53 +892,53 @@ def test_motion_decoder_does_not_classify_existing_or_unrelated_switchbot_layout
 def test_presence_sensor_pro_decodes_motion_battery_and_light_level() -> None:
     service = {METER_SERVICE_UUID: bytes.fromhex("0020640110ccc8")}
     false = decode(
-        "B0:E9:FE:E8:7F:C8", -40,
-        {SWITCHBOT_COMPANY_ID: bytes.fromhex("b0e9fee87fc8208c0004008c")}, service, "now",
-    )
+        "02:00:00:00:00:03", -40,
+        {SWITCHBOT_COMPANY_ID: bytes.fromhex("020000000003208c0004008c")}, service, "now",
+     model_hint="presence_sensor")
     true = decode(
-        "B0:E9:FE:E8:7F:C8", -40,
-        {SWITCHBOT_COMPANY_ID: bytes.fromhex("b0e9fee87fc81bcc0008008c")}, service, "now",
-    )
+        "02:00:00:00:00:03", -40,
+        {SWITCHBOT_COMPANY_ID: bytes.fromhex("0200000000031bcc0008008c")}, service, "now",
+     model_hint="presence_sensor")
     changed_light = decode(
-        "B0:E9:FE:E8:7F:C8", -40,
-        {SWITCHBOT_COMPANY_ID: bytes.fromhex("b0e9fee87fc8208c00040087")}, service, "now",
-    )
+        "02:00:00:00:00:03", -40,
+        {SWITCHBOT_COMPANY_ID: bytes.fromhex("020000000003208c00040087")}, service, "now",
+     model_hint="presence_sensor")
     assert false is not None and false.model == "presence_sensor" and false.sensor_type == "motion"
     assert false.values == {"motion_state": 0, "battery_percent": 100, "light_level": 12}
     assert true is not None and true.values["motion_state"] == 1
     assert changed_light is not None and changed_light.values["light_level"] == 7
 
 
-def test_presence_sensor_pro_classifier_uses_only_combined_packet_structure() -> None:
+def test_presence_sensor_pro_hint_requires_supported_packet_encoding() -> None:
     service = {METER_SERVICE_UUID: bytes.fromhex("0020640110ccc8")}
     # Sequence number, motion status, and light level each vary without
     # affecting classification.
     for packet in (
-        "b0e9fee87fc8008800040080",
-        "b0e9fee87fc8ffcc0004008f",
+        "020000000003008800040080",
+        "020000000003ffcc0004008f",
     ):
-        decoded = decode("B0:E9:FE:E8:7F:C8", -40, {SWITCHBOT_COMPANY_ID: bytes.fromhex(packet)}, service, "now")
+        decoded = decode("02:00:00:00:00:03", -40, {SWITCHBOT_COMPANY_ID: bytes.fromhex(packet)}, service, "now", model_hint="presence_sensor")
         assert decoded is not None and decoded.model == "presence_sensor"
 
     malformed_packets = (
-        ({SWITCHBOT_COMPANY_ID: bytes.fromhex("b0e9fee87fc8208c000400")}, service),
-        ({SWITCHBOT_COMPANY_ID: bytes.fromhex("b0e9fee87fc8208c0004008c")}, {METER_SERVICE_UUID: bytes.fromhex("0020640110cc")}),
-        ({SWITCHBOT_COMPANY_ID: bytes.fromhex("b0e9fee87fc8208c0004008c")}, {}),
+        ({SWITCHBOT_COMPANY_ID: bytes.fromhex("020000000003208c000400")}, service),
+        ({SWITCHBOT_COMPANY_ID: bytes.fromhex("020000000003208c0004008c")}, {METER_SERVICE_UUID: bytes.fromhex("0020640110cc")}),
+        ({SWITCHBOT_COMPANY_ID: bytes.fromhex("020000000003208c0004008c")}, {}),
     )
     for manufacturer_data, service_data in malformed_packets:
-        decoded = decode("B0:E9:FE:E8:7F:C8", -40, manufacturer_data, service_data, "now")
+        decoded = decode("02:00:00:00:00:03", -40, manufacturer_data, service_data, "now", model_hint="presence_sensor")
         assert decoded is not None and decoded.model == "unknown_switchbot"
 
 
 def test_presence_sensor_pro_does_not_collide_with_existing_12_byte_layouts() -> None:
     waterproof = decode(
-        "D6:69:17:D3:10:38", -53,
-        {SWITCHBOT_COMPANY_ID: bytes.fromhex("d66917d31038550b069bd200")},
+        "02:00:00:00:00:02", -53,
+        {SWITCHBOT_COMPANY_ID: bytes.fromhex("020000000002550b069bd200")},
         {METER_SERVICE_UUID: bytes.fromhex("770047")}, "now",
     )
     plug = decode(
-        "AC:27:6E:43:26:9E", -50,
-        {SWITCHBOT_COMPANY_ID: bytes.fromhex("ac276e43269e778010370037")},
+        "02:00:00:00:00:08", -50,
+        {SWITCHBOT_COMPANY_ID: bytes.fromhex("020000000008778010370037")},
         {METER_SERVICE_UUID: bytes.fromhex("6a0064")}, "now",
     )
     assert waterproof is not None and waterproof.model == "waterproof_sensor"
@@ -953,9 +953,9 @@ def test_presence_sensor_pro_uses_the_existing_motion_setup_id_prefix(tmp_path: 
     manager = BleManager(registry)
     manager.scanning = True
     decoded = decode(
-        "B0:E9:FE:E8:7F:C8", -40,
-        {SWITCHBOT_COMPANY_ID: bytes.fromhex("b0e9fee87fc8208c0004008c")},
-        {METER_SERVICE_UUID: bytes.fromhex("0020640110ccc8")}, "now",
+        "02:00:00:00:00:03", -40,
+        {SWITCHBOT_COMPANY_ID: bytes.fromhex("020000000003208c0004008c")},
+        {METER_SERVICE_UUID: bytes.fromhex("7020640110ccc8")}, "now",
     )
     assert decoded is not None
     manager.record_advertisement(decoded)
@@ -970,10 +970,10 @@ def test_presence_sensor_pro_uses_the_existing_motion_setup_id_prefix(tmp_path: 
 
 def test_presence_sensor_pro_publishes_its_decoded_values_on_the_motion_topic(tmp_path: Path) -> None:
     advertisement = decode(
-        "B0:E9:FE:E8:7F:C8", -40,
-        {SWITCHBOT_COMPANY_ID: bytes.fromhex("b0e9fee87fc8208c0004008c")},
+        "02:00:00:00:00:03", -40,
+        {SWITCHBOT_COMPANY_ID: bytes.fromhex("020000000003208c0004008c")},
         {METER_SERVICE_UUID: bytes.fromhex("0020640110ccc8")}, "now",
-    )
+     model_hint="presence_sensor")
     assert advertisement is not None
     registry = SensorRegistry(tmp_path / "sensors.json")
     registry.register(RegisteredSensor(
@@ -1060,11 +1060,11 @@ def test_motion_sensor_id_change_uses_new_topic_and_setup_suggestion(tmp_path: P
 
 
 def test_contact_sensor_decodes_official_service_data_and_manufacturer_layouts() -> None:
-    closed = decode("D3:B2:04:E2:31:25", -31, {}, {METER_SERVICE_UUID: bytes.fromhex("64006401068f053d81")}, "now")
-    opened = decode("D3:B2:04:E2:31:25", -31, {}, {METER_SERVICE_UUID: bytes([0x64, 0, 0x64, 0x02])}, "now")
-    timeout = decode("D3:B2:04:E2:31:25", -31, {}, {METER_SERVICE_UUID: bytes([0x64, 0, 0x64, 0x04])}, "now")
-    manufacturer_closed = decode("D3:B2:04:E2:31:25", -31, {SWITCHBOT_COMPANY_ID: bytes.fromhex("d3b204e23125704c00530051c1")}, {}, "now")
-    manufacturer_open = decode("D3:B2:04:E2:31:25", -31, {SWITCHBOT_COMPANY_ID: bytes.fromhex("d3b204e23125715c0059000041")}, {}, "now")
+    closed = decode("02:00:00:00:00:09", -31, {}, {METER_SERVICE_UUID: bytes.fromhex("64006401068f053d81")}, "now", model_hint="contact_sensor")
+    opened = decode("02:00:00:00:00:09", -31, {}, {METER_SERVICE_UUID: bytes([0x64, 0, 0x64, 0x02, 0, 0, 0, 0, 0])}, "now", model_hint="contact_sensor")
+    timeout = decode("02:00:00:00:00:09", -31, {}, {METER_SERVICE_UUID: bytes([0x64, 0, 0x64, 0x04, 0, 0, 0, 0, 0])}, "now", model_hint="contact_sensor")
+    manufacturer_closed = decode("02:00:00:00:00:09", -31, {SWITCHBOT_COMPANY_ID: bytes.fromhex("020000000009704c00530051c1")}, {}, "now", model_hint="contact_sensor")
+    manufacturer_open = decode("02:00:00:00:00:09", -31, {SWITCHBOT_COMPANY_ID: bytes.fromhex("020000000009715c0059000041")}, {}, "now", model_hint="contact_sensor")
     assert closed is not None and closed.model == "contact_sensor" and closed.sensor_type == "contact" and closed.values == {"contact_state": 0}
     assert opened is not None and opened.values == {"contact_state": 1}
     assert timeout is not None and timeout.values == {"contact_state": 1}
@@ -1072,32 +1072,32 @@ def test_contact_sensor_decodes_official_service_data_and_manufacturer_layouts()
     assert manufacturer_open is not None and manufacturer_open.values == {"contact_state": 1}
 
     for packet, expected_state in (
-        ("d3b204e231251d4c003a002d80", 0),
-        ("d3b204e231251e5c003e0000c0", 1),
-        ("d3b204e231251fdc00010003c0", 1),
-        ("d3b204e2312520cc00040000c0", 0),
-        ("d3b204e2312521dc0007000040", 1),
-        ("d3b204e2312522cc000e000140", 0),
-        ("d3b204e23125f26c00cd009480", 1),  # timeout-not-close; still open
+        ("0200000000091d4c003a002d80", 0),
+        ("0200000000091e5c003e0000c0", 1),
+        ("0200000000091fdc00010003c0", 1),
+        ("02000000000920cc00040000c0", 0),
+        ("02000000000921dc0007000040", 1),
+        ("02000000000922cc000e000140", 0),
+        ("020000000009f26c00cd009480", 1),  # timeout-not-close; still open
         # Bytes 8 and 10 are elapsed-time/counter fields, not reserved zeroes.
-        ("d3b204e23125066c02a80260c0", 1),
+        ("020000000009066c02a80260c0", 1),
     ):
-        decoded = decode("D3:B2:04:E2:31:25", -31, {SWITCHBOT_COMPANY_ID: bytes.fromhex(packet)}, {}, "now")
+        decoded = decode("02:00:00:00:00:09", -31, {SWITCHBOT_COMPANY_ID: bytes.fromhex(packet)}, {}, "now", model_hint="contact_sensor")
         assert decoded is not None and decoded.model == "contact_sensor"
         assert decoded.values == {"contact_state": expected_state}
 
     for packet in (
-        "d3b204e23125066d02a80260c0",  # status low nibble is not 0x0c
-        "d3b204e23125067c02a80260c0",  # HAL state 3 is reserved
+        "020000000009066d02a80260c0",  # status low nibble is not 0x0c
+        "020000000009067c02a80260c0",  # HAL state 3 is reserved
     ):
-        decoded = decode("D3:B2:04:E2:31:25", -31, {SWITCHBOT_COMPANY_ID: bytes.fromhex(packet)}, {}, "now")
+        decoded = decode("02:00:00:00:00:09", -31, {SWITCHBOT_COMPANY_ID: bytes.fromhex(packet)}, {}, "now", model_hint="contact_sensor")
         assert decoded is not None and decoded.model == "unknown_switchbot"
 
 
 def test_contact_timeout_not_close_manufacturer_packet_matches_service_hal_state() -> None:
     decoded = decode(
-        "D3:B2:04:E2:31:25", -31,
-        {SWITCHBOT_COMPANY_ID: bytes.fromhex("d3b204e23125f26c00cd009480")},
+        "02:00:00:00:00:09", -31,
+        {SWITCHBOT_COMPANY_ID: bytes.fromhex("020000000009f26c00cd009480")},
         {METER_SERVICE_UUID: bytes.fromhex("644064030004000780")}, "now",
     )
     assert decoded is not None
@@ -1107,20 +1107,20 @@ def test_contact_timeout_not_close_manufacturer_packet_matches_service_hal_state
 
 def test_contact_prefers_current_manufacturer_state_over_stale_service_data() -> None:
     stale_open_service_data = {METER_SERVICE_UUID: bytes.fromhex("64006405011300d981")}
-    manufacturer_closed = {SWITCHBOT_COMPANY_ID: bytes.fromhex("d3b204e23125854c00450035c1")}
-    manufacturer_open = {SWITCHBOT_COMPANY_ID: bytes.fromhex("d3b204e23125865c004a000041")}
-    closed = decode("D3:B2:04:E2:31:25", -31, manufacturer_closed, stale_open_service_data, "now")
-    opened = decode("D3:B2:04:E2:31:25", -31, manufacturer_open, {METER_SERVICE_UUID: bytes([0x64, 0, 0x64, 0x01])}, "now")
+    manufacturer_closed = {SWITCHBOT_COMPANY_ID: bytes.fromhex("020000000009854c00450035c1")}
+    manufacturer_open = {SWITCHBOT_COMPANY_ID: bytes.fromhex("020000000009865c004a000041")}
+    closed = decode("02:00:00:00:00:09", -31, manufacturer_closed, stale_open_service_data, "now")
+    opened = decode("02:00:00:00:00:09", -31, manufacturer_open, {METER_SERVICE_UUID: bytes([0x64, 0, 0x64, 0x01, 0, 0, 0, 0, 0])}, "now")
     assert closed is not None and closed.model == "contact_sensor" and closed.values == {"contact_state": 0}
     assert opened is not None and opened.model == "contact_sensor" and opened.values == {"contact_state": 1}
 
 
 def test_contact_decoder_does_not_misclassify_existing_sensor_layouts() -> None:
-    meter = decode("CF:39:41:C7:ED:79", -40, {SWITCHBOT_COMPANY_ID: bytes.fromhex("cf3941c7ed79f40304992c")}, {}, "now")
-    co2 = decode("B0:E9:FE:58:15:CC", -40, {SWITCHBOT_COMPANY_ID: bytes.fromhex("b0e9fe5815ccf6e405982e0024020e00")}, {}, "now")
-    motion = decode("CF:FC:6A:48:DB:15", -40, {SWITCHBOT_COMPANY_ID: bytes.fromhex("cffc6a48db150c6c0000")}, {}, "now")
-    malformed = decode("D3:B2:04:E2:31:25", -40, {}, {METER_SERVICE_UUID: bytes.fromhex("64")}, "now")
-    unrelated = decode("D3:B2:04:E2:31:25", -40, {SWITCHBOT_COMPANY_ID: bytes.fromhex("d3b204e23125707c01530051c1")}, {}, "now")
+    meter = decode("02:00:00:00:00:04", -40, {SWITCHBOT_COMPANY_ID: bytes.fromhex("020000000004f40304992c")}, {}, "now", model_hint="temperature_humidity_sensor")
+    co2 = decode("02:00:00:00:00:07", -40, {SWITCHBOT_COMPANY_ID: bytes.fromhex("020000000007f6e405982e0024020e00")}, {}, "now", model_hint="co2_sensor")
+    motion = decode("02:00:00:00:00:01", -40, {SWITCHBOT_COMPANY_ID: bytes.fromhex("0200000000010c6c0000")}, {}, "now", model_hint="motion_sensor")
+    malformed = decode("02:00:00:00:00:09", -40, {}, {METER_SERVICE_UUID: bytes.fromhex("64")}, "now")
+    unrelated = decode("02:00:00:00:00:09", -40, {SWITCHBOT_COMPANY_ID: bytes.fromhex("020000000009707c01530051c1")}, {}, "now")
     assert meter is not None and meter.model == "temperature_humidity_sensor"
     assert co2 is not None and co2.model == "co2_sensor"
     assert motion is not None and motion.model == "motion_sensor"
