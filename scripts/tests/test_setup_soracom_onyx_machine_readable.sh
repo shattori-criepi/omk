@@ -5,6 +5,7 @@ SCRIPT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)/setup-soracom-
 
 # Load production parsing functions without entering the host-mutating main flow.
 source <(sed -n '/^mmcli_kv_value()/,/^}$/p' "${SCRIPT}")
+source <(sed -n '/^modem_paths_from_list()/,/^}$/p' "${SCRIPT}")
 source <(sed -n '/^modem_is_connected()/,/^}$/p' "${SCRIPT}")
 source <(sed -n '/^redact_modem_identifiers()/,/^}$/p' "${SCRIPT}")
 source <(sed -n '/^quectel_usb_syspaths()/,/^}$/p' "${SCRIPT}")
@@ -30,7 +31,7 @@ modem_is_connected "$(valid_kv roaming attached)"
 
 # Human-readable tables are diagnostics only; success checks use -K fields.
 grep -Fq -- '--output-keyvalue' "${SCRIPT}"
-grep -Fq 'ping -I wwan0 -c 4 pong.soracom.io' "${SCRIPT}"
+grep -Fq 'ping -I "${CELLULAR_INTERFACE}" -c 4 pong.soracom.io' "${SCRIPT}"
 if grep -Fq -- '--path' "${SCRIPT}"; then
   echo 'Invalid udevadm --path option remains.' >&2
   exit 1
@@ -38,7 +39,9 @@ fi
 grep -Fq -- '--parent-match="${syspath}"' "${SCRIPT}"
 grep -Fq 'nmcli -g NAME connection show --active' "${SCRIPT}"
 grep -Fq 'GENERAL.DEVICES connection show soracom' "${SCRIPT}"
-grep -Fq 'ping -I wwan0 -c 4 pong.soracom.io' "${SCRIPT}"
+grep -Fq 'single_soracom_nm_device' "${SCRIPT}"
+grep -Fq 'modem_owns_nm_device' "${SCRIPT}"
+grep -Fq 'select_unique_onyx_modem' "${SCRIPT}"
 grep -Fq 'already active; preserving the current cellular connection' "${SCRIPT}"
 redacted="$(printf '%s\n' 'device id: 123456' 'Numbers | own: +819012345678' '|                     own: +819012345678' 'imei: 123' 'operator name: SORACOM' 'state UNKNOWN' 'wwan0' 'UNKNOWN' | redact_modem_identifiers)"
 grep -Fq 'device id: [REDACTED]' <<<"${redacted}"

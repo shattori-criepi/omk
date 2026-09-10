@@ -11,6 +11,7 @@ readonly EXIT_SIM_NOT_FOUND=4
 readonly EXIT_NETWORK_NOT_REGISTERED=5
 readonly EXIT_NO_IPV4=6
 readonly EXIT_SORACOM_UNREACHABLE=7
+readonly EXIT_MODEM_AMBIGUOUS=8
 readonly DEFAULT_APN="soracom.io"
 readonly MODEM_WAIT_SECONDS=60
 readonly CONNECTION_WAIT_SECONDS=30
@@ -27,6 +28,8 @@ RUN_HOME="$(getent passwd "${RUN_USER}" | cut -d: -f6 || true)"
 LOG_FILE=""
 MODEM_DETAILS=""
 MODEM_PATH=""
+ONYX_USB_SYSPATH=""
+CELLULAR_INTERFACE=""
 USB_SYSFS_ROOT="${SORACOM_USB_SYSFS_ROOT:-/sys/bus/usb/devices}"
 USB_SYSFS_ALLOWED_ROOT="${SORACOM_USB_SYSFS_ALLOWED_ROOT:-/sys/devices}"
 SORACOM_DISPATCHER_PATH="${SORACOM_DISPATCHER_PATH:-/etc/NetworkManager/dispatcher.d/90.soracom_route}"
@@ -51,8 +54,8 @@ show_diagnostics() {
   (ls -l /dev/ttyUSB* 2>/dev/null || true) | redact_modem_identifiers
   log "/dev/cdc-wdm*:"
   (ls -l /dev/cdc-wdm* 2>/dev/null || true) | redact_modem_identifiers
-  log "wwan0 link:"
-  (ip link show wwan0 2>/dev/null || true) | redact_modem_identifiers
+  log "WWAN links:"
+  (ip -o link show 2>/dev/null | grep -E '(^|: )(wwan|wwp)' || true) | redact_modem_identifiers
   log "NetworkManager devices:"
   (nmcli device status 2>&1 || true) | redact_modem_identifiers
   log "ModemManager (last 50 journal lines):"
@@ -89,8 +92,8 @@ quectel_usb_syspaths() {
   done
 }
 
-modem_path_from_list() {
-  sed -n 's|.*\(/org/freedesktop/ModemManager1/Modem/[0-9][0-9]*\).*|\1|p' | head -n 1
+modem_paths_from_list() {
+  sed -n 's|.*\(/org/freedesktop/ModemManager1/Modem/[0-9][0-9]*\).*|\1|p' | sort -u
 }
 
 mmcli_kv_value() {
@@ -99,6 +102,62 @@ mmcli_kv_value() {
   value="${value#\"}"; value="${value%\"}"
   value="${value#\'}"; value="${value%\'}"
   printf '%s\n' "${value}"
+}
+
+path_is_within() {
+  local path="$1" parent="$2"
+  [[ "${path}" == "${parent}" || "${path}" == "${parent}"/* ]]
+}
+
+modem_matches_onyx_usb() {
+  local modem_path="$1" usb_syspath="$2" kv device_syspath
+  kv="$(mmcli -m "${modem_path}" --output-keyvalue 2>/dev/null || mmcli -m "${modem_path}" -K 2>/dev/null || true)"
+  device_syspath="$(printf '%s\n' "${kv}" | mmcli_kv_value modem.generic.device)"
+  [[ "${device_syspath}" == /* ]] || return 1
+  device_syspath="$(readlink -e -- "${device_syspath}" 2>/dev/null || true)"
+  [[ -n "${device_syspath}" ]] && path_is_within "${device_syspath}" "${usb_syspath}"
+}
+
+# A ModemManager object number, ttyUSB number, VID/PID, and list order are not
+# identities. Select only the unique MM object whose reported sysfs device is
+# under the unique supported USB device. Status 2 means it is not ready yet;
+# status 3 means that automatic selection would be unsafe.
+select_unique_onyx_modem() {
+  local modem_list="$1" modem_path
+  local -a usb_candidates modem_paths
+  local -a matches=()
+  mapfile -t usb_candidates < <(quectel_usb_syspaths)
+  case "${#usb_candidates[@]}" in
+    0) return 2 ;;
+    1) ONYX_USB_SYSPATH="${usb_candidates[0]}" ;;
+    *) return 3 ;;
+  esac
+  mapfile -t modem_paths < <(printf '%s\n' "${modem_list}" | modem_paths_from_list)
+  case "${#modem_paths[@]}" in
+    0) return 2 ;;
+    1) ;;
+    *) return 3 ;;
+  esac
+  for modem_path in "${modem_paths[@]}"; do
+    modem_matches_onyx_usb "${modem_path}" "${ONYX_USB_SYSPATH}" && matches+=("${modem_path}")
+  done
+  [[ "${#matches[@]}" == 1 ]] || return 2
+  MODEM_PATH="${matches[0]}"
+}
+
+single_soracom_nm_device() {
+  local -a devices
+  mapfile -t devices < <(nmcli -g GENERAL.DEVICES connection show soracom 2>/dev/null | sed '/^$/d' | sort -u)
+  [[ "${#devices[@]}" == 1 && "${devices[0]}" != -- && "${devices[0]}" != *,* ]] || return 1
+  printf '%s\n' "${devices[0]}"
+}
+
+modem_owns_nm_device() {
+  local kv="$1" device="$2" ports pattern
+  [[ "${device}" =~ ^[A-Za-z0-9_.-]+$ ]] || return 1
+  ports="$(printf '%s\n' "${kv}" | mmcli_kv_value modem.generic.ports)"
+  pattern="(^|[[:space:],])${device}([[:space:],(]|$)"
+  [[ "${ports}" =~ ${pattern} ]]
 }
 
 modem_is_connected() {
@@ -255,17 +314,19 @@ if command -v nmcli >/dev/null 2>&1; then
   fi
 fi
 
-USB_INFO="$(lsusb 2>&1 || true)"
-if grep -Eqi '2c7c:0125|Quectel|EC25|EG25' <<<"${USB_INFO}" || \
-  [[ -e /dev/cdc-wdm0 || -e /sys/class/net/wwan0 ]] || \
-  has_quectel_usb_id; then
-  log "A possible Onyx/Quectel modem was detected."
-  printf '%s\n' "${USB_INFO}" | grep -Ei '2c7c:0125|Quectel|EC25|EG25' || true
-else
+mapfile -t ONYX_USB_CANDIDATES < <(quectel_usb_syspaths)
+if [[ "${#ONYX_USB_CANDIDATES[@]}" == 0 ]]; then
   log "No SORACOM Onyx/Quectel modem was detected. Connect the Onyx, wait for USB enumeration, then rerun."
   show_diagnostics
   exit "${EXIT_ONYX_NOT_FOUND}"
 fi
+if [[ "${#ONYX_USB_CANDIDATES[@]}" != 1 ]]; then
+  log 'Multiple supported Quectel USB candidates were detected; refusing order-dependent modem selection.'
+  show_diagnostics
+  exit "${EXIT_MODEM_AMBIGUOUS}"
+fi
+ONYX_USB_SYSPATH="${ONYX_USB_CANDIDATES[0]}"
+log 'One supported Quectel USB candidate was detected; waiting for its ModemManager object.'
 
 PACKAGES=(network-manager modemmanager usb-modeswitch usbutils curl ca-certificates)
 log "Updating package indexes and installing: ${PACKAGES[*]}"
@@ -293,8 +354,16 @@ log "Waiting up to ${MODEM_WAIT_SECONDS}s for ModemManager to recognize the mode
 deadline=$((SECONDS + MODEM_WAIT_SECONDS))
 while ((SECONDS < deadline)); do
   MODEM_LIST="$(mmcli -L 2>&1 || true)"
-  MODEM_PATH="$(printf '%s\n' "${MODEM_LIST}" | modem_path_from_list)"
-  [[ -n "${MODEM_PATH}" ]] && break
+  if select_unique_onyx_modem "${MODEM_LIST}"; then
+    break
+  else
+    selection_status=$?
+  fi
+  if [[ "${selection_status}" == 3 ]]; then
+    log 'Multiple ModemManager candidates were detected; refusing order-dependent modem selection.'
+    show_diagnostics
+    exit "${EXIT_MODEM_AMBIGUOUS}"
+  fi
   sleep 3
 done
 if [[ -z "${MODEM_PATH:-}" ]]; then
@@ -385,27 +454,30 @@ SIM_PATH="$(printf '%s\n' "${MODEM_KV}" | mmcli_kv_value modem.generic.sim)"
 [[ "${SIM_PATH}" == /org/freedesktop/ModemManager1/SIM/* ]] || fail "${EXIT_SIM_NOT_FOUND}" 'No SIM object was detected.'
 modem_is_connected "${MODEM_KV}" || fail "${EXIT_NETWORK_NOT_REGISTERED}" 'Cellular state is not connected/registered/attached.'
 nmcli -g NAME connection show --active | grep -Fxq soracom || fail "${EXIT_GENERAL}" 'The soracom profile is not active.'
-NM_DEVICE="$(nmcli -g GENERAL.DEVICES connection show soracom 2>/dev/null | head -n 1)"
+NM_DEVICE="$(single_soracom_nm_device)" || fail "${EXIT_GENERAL}" 'The active soracom connection does not have exactly one NetworkManager device.'
 [[ -n "${NM_DEVICE}" && "${NM_DEVICE}" != -- ]] || fail "${EXIT_GENERAL}" 'The active soracom connection has no NetworkManager device.'
 nmcli -g GENERAL.STATE device show "${NM_DEVICE}" 2>/dev/null | grep -Eq '^100 \(connected\)$|^connected$' || fail "${EXIT_GENERAL}" "The soracom NetworkManager device is not connected: ${NM_DEVICE}."
+modem_owns_nm_device "${MODEM_KV}" "${NM_DEVICE}" || fail "${EXIT_GENERAL}" 'The active soracom connection is not owned by the selected Onyx modem.'
+CELLULAR_INTERFACE="$(nmcli -g GENERAL.IP-IFACE device show "${NM_DEVICE}" 2>/dev/null)"
+[[ -n "${CELLULAR_INTERFACE}" && "${CELLULAR_INTERFACE}" != -- && "${CELLULAR_INTERFACE}" != *,* ]] || fail "${EXIT_GENERAL}" 'The selected Onyx modem has no unique IP interface.'
 
-IPV4_STATUS="$(ip -4 address show wwan0 2>&1 || true)"
-log "wwan0 IPv4 status:"
+IPV4_STATUS="$(ip -4 address show "${CELLULAR_INTERFACE}" 2>&1 || true)"
+log "Cellular IPv4 status:"
 printf '%s\n' "${IPV4_STATUS}" | redact_modem_identifiers
 if ! grep -Eq 'inet[[:space:]]+[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' <<<"${IPV4_STATUS}"; then
-  fail "${EXIT_NO_IPV4}" "wwan0 has no IPv4 address."
+  fail "${EXIT_NO_IPV4}" 'The selected Onyx IP interface has no IPv4 address.'
 fi
 
-if ! ping -I wwan0 -c 4 pong.soracom.io; then
+if ! ping -I "${CELLULAR_INTERFACE}" -c 4 pong.soracom.io; then
   fail "${EXIT_SORACOM_UNREACHABLE}" "SORACOM reachability check (pong.soracom.io) failed."
 fi
 log "SORACOM reachability check succeeded."
-if ping -I wwan0 -c 4 8.8.8.8; then
+if ping -I "${CELLULAR_INTERFACE}" -c 4 8.8.8.8; then
   log "Optional external IPv4 reachability check succeeded."
 else
   log "WARNING: Optional external IPv4 reachability check failed; this does not change the successful SORACOM result."
 fi
-if curl --interface wwan0 -4 --max-time 20 --fail --silent https://ifconfig.me >/dev/null; then
+if curl --interface "${CELLULAR_INTERFACE}" -4 --max-time 20 --fail --silent https://ifconfig.me >/dev/null; then
   log "Optional external DNS/HTTPS reachability check succeeded."
 else
   log "WARNING: Optional external DNS/HTTPS reachability check failed; this does not change the successful SORACOM result."
