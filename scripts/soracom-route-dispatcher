@@ -29,7 +29,10 @@ try:
     interface = run('nmcli', '-g', 'GENERAL.IP-IFACE', 'device', 'show', device)
     if not interface or interface == '--' or sys.argv[1] not in (device, interface):
         raise ValueError('dispatcher interface is not the SORACOM data interface')
-    defaults = routes('default', 'dev', interface)
+    # Do not pass ``dev`` here. Some iproute2 versions omit the ``dev`` key
+    # from JSON after server-side filtering, which would make a valid route
+    # indistinguishable from no route. Select the owned interface ourselves.
+    defaults = routes('default')
     gateways = {r.get('gateway') for r in defaults if r.get('dev') == interface}
     if len(gateways) != 1 or None in gateways:
         raise ValueError('cannot establish an unambiguous SORACOM IPv4 gateway')

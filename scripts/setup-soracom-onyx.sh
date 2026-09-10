@@ -15,6 +15,7 @@ readonly EXIT_MODEM_AMBIGUOUS=8
 readonly DEFAULT_APN="soracom.io"
 readonly MODEM_WAIT_SECONDS=60
 readonly CONNECTION_WAIT_SECONDS=30
+readonly LEGACY_SORACOM_DISPATCHER_SHA256="fcb91353b7e55d644a0b22e032c0409521d65b18f4e4205306e562db080ba7d0"
 
 APN="${SORACOM_APN:-${DEFAULT_APN}}"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
@@ -33,6 +34,7 @@ CELLULAR_INTERFACE=""
 USB_SYSFS_ROOT="${SORACOM_USB_SYSFS_ROOT:-/sys/bus/usb/devices}"
 USB_SYSFS_ALLOWED_ROOT="${SORACOM_USB_SYSFS_ALLOWED_ROOT:-/sys/devices}"
 SORACOM_DISPATCHER_PATH="${SORACOM_DISPATCHER_PATH:-/etc/NetworkManager/dispatcher.d/90.soracom_route}"
+SORACOM_LEGACY_BACKUP_PATH="${SORACOM_LEGACY_BACKUP_PATH:-/etc/omk/soracom-route-legacy-${LEGACY_SORACOM_DISPATCHER_SHA256}.sh}"
 
 log() {
   printf '[%s] %s\n' "$(date --iso-8601=seconds)" "$*"
@@ -179,6 +181,35 @@ replay_quectel_udev_events() {
   done < <(quectel_usb_syspaths)
 }
 
+dispatcher_metadata_is_safe() {
+  local path="$1" metadata
+  [[ -f "${path}" && ! -L "${path}" && -x "${path}" ]] || return 1
+  metadata="$(stat -c '%u:%g:%a' "${path}" 2>/dev/null || true)"
+  [[ "${metadata}" == 0:0:755 ]]
+}
+
+file_has_legacy_hash_as_user() {
+  local path="$1" digest
+  digest="$(sha256sum "${path}" 2>/dev/null | awk '{print $1}')"
+  [[ "${digest}" == "${LEGACY_SORACOM_DISPATCHER_SHA256}" ]]
+}
+
+file_has_legacy_hash_as_root() {
+  local path="$1" digest
+  digest="$("${SUDO[@]}" sha256sum "${path}" 2>/dev/null | awk '{print $1}')"
+  [[ "${digest}" == "${LEGACY_SORACOM_DISPATCHER_SHA256}" ]]
+}
+
+dispatcher_has_legacy_hash() {
+  local path="$1"
+  dispatcher_metadata_is_safe "${path}" && file_has_legacy_hash_as_user "${path}"
+}
+
+dispatcher_is_current_omk() {
+  local path="$1"
+  dispatcher_metadata_is_safe "${path}" && cmp -s "${SCRIPT_DIR}/soracom-route-dispatcher" "${path}"
+}
+
 install_soracom_dispatcher() {
   local dispatcher_dir source="${SCRIPT_DIR}/soracom-route-dispatcher" metadata temporary
   [[ -f "${source}" ]] || return 1
@@ -205,6 +236,77 @@ install_soracom_dispatcher() {
   fi
   [[ -f "${SORACOM_DISPATCHER_PATH}" && -x "${SORACOM_DISPATCHER_PATH}" ]] || return 1
   log 'Installed and verified the SORACOM route dispatcher without cycling cellular.'
+}
+
+migrate_legacy_soracom_dispatcher() {
+  local dispatcher_dir backup_dir source temporary backup_temporary
+  source="${SCRIPT_DIR}/soracom-route-dispatcher"
+  dispatcher_has_legacy_hash "${SORACOM_DISPATCHER_PATH}" || {
+    log 'SORACOM dispatcher migration: legacy source no longer passed verification.'
+    return 1
+  }
+  dispatcher_dir="${SORACOM_DISPATCHER_PATH%/*}"
+  backup_dir="${SORACOM_LEGACY_BACKUP_PATH%/*}"
+  "${SUDO[@]}" install -d -o root -g root -m 0755 "${backup_dir}" || {
+    log 'SORACOM dispatcher migration: could not prepare the backup directory.'
+    return 1
+  }
+
+  # The hash identifies known non-secret vendor content. Preserve it once for
+  # upgrade auditability; never copy an unrecognized dispatcher into /etc/omk.
+  if [[ ! -e "${SORACOM_LEGACY_BACKUP_PATH}" ]]; then
+    backup_temporary="$("${SUDO[@]}" mktemp "${backup_dir}/.omk-soracom-legacy.XXXXXX")" || {
+      log 'SORACOM dispatcher migration: could not stage the legacy backup.'
+      return 1
+    }
+    if ! "${SUDO[@]}" install -o root -g root -m 0600 "${SORACOM_DISPATCHER_PATH}" "${backup_temporary}" ||
+       ! file_has_legacy_hash_as_root "${backup_temporary}" ||
+       ! "${SUDO[@]}" mv -T --no-clobber "${backup_temporary}" "${SORACOM_LEGACY_BACKUP_PATH}"; then
+      "${SUDO[@]}" rm -f -- "${backup_temporary}" || true
+      log 'SORACOM dispatcher migration: legacy backup staging or verification failed.'
+      return 1
+    fi
+  fi
+  [[ -f "${SORACOM_LEGACY_BACKUP_PATH}" && ! -L "${SORACOM_LEGACY_BACKUP_PATH}" &&
+     "$("${SUDO[@]}" stat -c '%u:%g:%a' "${SORACOM_LEGACY_BACKUP_PATH}" 2>/dev/null || true)" == 0:0:600 ]] || {
+    log 'SORACOM dispatcher migration: existing legacy backup does not meet the root-only contract.'
+    return 1
+  }
+  file_has_legacy_hash_as_root "${SORACOM_LEGACY_BACKUP_PATH}" || {
+    log 'SORACOM dispatcher migration: existing legacy backup hash did not match.'
+    return 1
+  }
+
+  temporary="$("${SUDO[@]}" mktemp "${dispatcher_dir}/.omk-soracom.XXXXXX")" || {
+    log 'SORACOM dispatcher migration: could not stage the replacement dispatcher.'
+    return 1
+  }
+  if ! "${SUDO[@]}" install -o root -g root -m 0755 "${source}" "${temporary}" ||
+     ! dispatcher_is_current_omk "${temporary}" ||
+     ! dispatcher_has_legacy_hash "${SORACOM_DISPATCHER_PATH}" ||
+     ! "${SUDO[@]}" mv -T -f "${temporary}" "${SORACOM_DISPATCHER_PATH}"; then
+    "${SUDO[@]}" rm -f -- "${temporary}" || true
+    log 'SORACOM dispatcher migration: replacement staging, source recheck, or atomic replacement failed.'
+    return 1
+  fi
+  dispatcher_is_current_omk "${SORACOM_DISPATCHER_PATH}" || {
+    log 'SORACOM dispatcher migration: replacement dispatcher verification failed.'
+    return 1
+  }
+  log 'Migrated the verified legacy SORACOM dispatcher without cycling cellular.'
+}
+
+ensure_current_soracom_dispatcher() {
+  if [[ ! -e "${SORACOM_DISPATCHER_PATH}" ]]; then
+    [[ "${APN}" == *soracom.io ]] || return 1
+    install_soracom_dispatcher
+  elif dispatcher_is_current_omk "${SORACOM_DISPATCHER_PATH}"; then
+    return 0
+  elif dispatcher_has_legacy_hash "${SORACOM_DISPATCHER_PATH}"; then
+    migrate_legacy_soracom_dispatcher
+  else
+    return 1
+  fi
 }
 
 repair_dispatcher_routes_without_reconnect() {
@@ -297,17 +399,7 @@ if command -v nmcli >/dev/null 2>&1; then
   ACTIVE_CONNECTIONS="$(nmcli -g NAME connection show --active)" ||
     fail "${EXIT_GENERAL}" 'Cannot establish active connections before package changes.'
   if grep -Fxq soracom <<<"${ACTIVE_CONNECTIONS}"; then
-    if [[ ! -e "${SORACOM_DISPATCHER_PATH}" ]]; then
-      [[ "${APN}" == *soracom.io ]] || fail "${EXIT_GENERAL}" 'Dispatcher repair requires a SORACOM APN.'
-      install_soracom_dispatcher || fail "${EXIT_GENERAL}" 'Dispatcher installation failed.'
-    fi
-    # An existing file is not proof that route repair ever completed. Only run
-    # our exact, validated hook; never execute or replace an unknown dispatcher.
-    if [[ ! -f "${SORACOM_DISPATCHER_PATH}" || -L "${SORACOM_DISPATCHER_PATH}" || ! -x "${SORACOM_DISPATCHER_PATH}" ]] ||
-       [[ "$(stat -c '%u:%g:%a' "${SORACOM_DISPATCHER_PATH}")" != 0:0:755 ]] ||
-       ! cmp -s "${SCRIPT_DIR}/soracom-route-dispatcher" "${SORACOM_DISPATCHER_PATH}"; then
-      fail "${EXIT_GENERAL}" 'Existing dispatcher is not verified OMK-managed code; preserved without execution. Review it before repairing routes.'
-    fi
+    ensure_current_soracom_dispatcher || fail "${EXIT_GENERAL}" 'Existing dispatcher is not verified OMK-managed code; preserved without execution. Review it before repairing routes.'
     repair_dispatcher_routes_without_reconnect yes yes || fail "${EXIT_GENERAL}" 'Dispatcher route repair failed; existing routes were not replaced.'
     log 'Active soracom preserved: no package, service, profile or reconnect operations performed.'
     exit 0
@@ -381,8 +473,8 @@ SORACOM_ACTIVE=no
 nmcli connection show soracom >/dev/null 2>&1 && SORACOM_PROFILE_EXISTS=yes
 nmcli -g NAME connection show --active 2>/dev/null | grep -Fxq soracom && SORACOM_ACTIVE=yes || true
 DISPATCHER_INSTALLED=no
-if [[ "${APN}" == *soracom.io && ! -e "${SORACOM_DISPATCHER_PATH}" ]]; then
-  install_soracom_dispatcher || fail "${EXIT_GENERAL}" 'Dispatcher installation failed.'
+if [[ "${APN}" == *soracom.io ]]; then
+  ensure_current_soracom_dispatcher || fail "${EXIT_GENERAL}" 'Dispatcher installation failed or existing dispatcher is unverified.'
   DISPATCHER_INSTALLED=yes
 fi
 repair_dispatcher_routes_without_reconnect "${SORACOM_ACTIVE}" "${DISPATCHER_INSTALLED}" || fail "${EXIT_GENERAL}" 'Dispatcher route repair failed.'
@@ -426,9 +518,7 @@ if [[ "${CURRENT_AUTOCONNECT}" != "yes" ]]; then
   log "Enabling automatic connection for the soracom profile (was: ${CURRENT_AUTOCONNECT:-unset})."
   "${SUDO[@]}" nmcli connection modify soracom connection.autoconnect yes
 fi
-if [[ -e "${SORACOM_DISPATCHER_PATH}" ]]; then
-  log "Existing SORACOM route dispatcher rule is present; preserving it."
-fi
+[[ ! -e "${SORACOM_DISPATCHER_PATH}" ]] || log 'Verified OMK SORACOM route dispatcher rule is present.'
 
 if nmcli -g NAME connection show --active | grep -Fxq soracom; then
   log 'The soracom connection is already active; preserving the current cellular connection.'
