@@ -159,7 +159,7 @@ def get_dashboard_view_model(mode_override: str | None = None):
     display_repository = get_display_repository()
     candidates = _dashboard_candidates()
     selectable = [item for item in candidates if item.selectable]
-    if selectable:
+    if selectable or mode_override is not None:
         settings = _settings_for(candidates)
         now = datetime.now(JST)
         current_candidates = _dashboard_candidates(now)
@@ -374,7 +374,7 @@ async def update_dashboard_settings(request: Request) -> dict:
         # is the sole owner of this setting.
         if isinstance(payload, dict) and "demo" not in payload:
             current = _settings_for(candidates)
-            payload = {**payload, "demo": {"enabled": current.demo_enabled, "rotation_seconds": current.demo_rotation_seconds}}
+            payload = {**payload, "demo": {"enabled": current.demo_enabled}}
         settings = get_settings_repository().save_payload(
             payload, _available_display_groups([item for item in candidates if item.selectable]), display_item_migrations(candidates),
         )
@@ -398,7 +398,7 @@ async def update_dashboard_mode(request: Request) -> dict:
         # is responsible for replacing the recommendation snapshot.
         recommended = settings.recommended_blocks
         clock_items = clock_item_ids(selectable) if mode == "clock" else settings.clock_item_ids
-        updated = DashboardSettings(mode, settings.custom_blocks, recommended, clock_items, settings.demo_enabled, settings.demo_rotation_seconds)
+        updated = DashboardSettings(mode, settings.custom_blocks, recommended, clock_items, settings.demo_enabled)
         get_settings_repository().save(updated, _available_display_groups(candidates))
     except (SettingsError, ValueError, AttributeError) as error:
         raise HTTPException(400, str(error)) from error
@@ -410,7 +410,7 @@ async def refresh_recommended_dashboard() -> dict:
     candidates = _dashboard_candidates()
     try:
         settings = _settings_for(candidates)
-        updated = DashboardSettings("recommended", settings.custom_blocks, tuple(recommended_blocks([item for item in candidates if item.selectable])), settings.clock_item_ids, settings.demo_enabled, settings.demo_rotation_seconds)
+        updated = DashboardSettings("recommended", settings.custom_blocks, tuple(recommended_blocks([item for item in candidates if item.selectable])), settings.clock_item_ids, settings.demo_enabled)
         get_settings_repository().save(updated, _available_display_groups(candidates))
     except (SettingsError, OSError) as error:
         raise HTTPException(400, str(error)) from error
@@ -540,7 +540,7 @@ async def display_api(demo_mode: str | None = None) -> dict:
     """Return the current dashboard snapshot for in-page refreshes."""
     if demo_mode is not None and demo_mode not in {"custom", "clock", "recommended"}:
         raise HTTPException(400, "表示モードが正しくありません")
-    return get_dashboard_view_model(demo_mode if _demo_enabled() else None).as_dict()
+    return get_dashboard_view_model((demo_mode or "custom") if _demo_enabled() else None).as_dict()
 
 
 @app.post("/api/admin/dashboard-settings/demo")
@@ -551,7 +551,7 @@ async def update_dashboard_demo(request: Request) -> dict:
         if not isinstance(enabled, bool):
             raise SettingsError("展示用デモモードの指定が正しくありません")
         settings = _settings_for(candidates)
-        updated = DashboardSettings(settings.mode, settings.custom_blocks, settings.recommended_blocks, settings.clock_item_ids, enabled, settings.demo_rotation_seconds)
+        updated = DashboardSettings(settings.mode, settings.custom_blocks, settings.recommended_blocks, settings.clock_item_ids, enabled)
         get_settings_repository().save(updated, _available_display_groups(candidates))
     except (SettingsError, ValueError, AttributeError) as error:
         raise HTTPException(400, str(error)) from error

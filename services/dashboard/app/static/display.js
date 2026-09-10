@@ -13,13 +13,7 @@ const WEEKDAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const WEEKDAY_ARIA_NAMES = ["日曜日", "月曜日", "火曜日", "水曜日", "木曜日", "金曜日", "土曜日"];
 let displayFetchInProgress = false;
 const demoEnabled = document.body?.dataset.demoEnabled === "true";
-const demoModes = ["custom", "clock", "recommended"];
-let demoModeIndex = Math.max(0, demoModes.indexOf(document.body?.dataset.demoMode));
-
-function nextDemoMode(mode) {
-  const index = demoModes.indexOf(mode);
-  return demoModes[(index + 1 + demoModes.length) % demoModes.length];
-}
+const demoMode = document.body?.dataset.demoMode || "custom";
 
 function updateCurrentDatetime() {
   if (!currentDatetime && !clockDate && !clockTime) return;
@@ -108,7 +102,7 @@ function updateDisplay(data) {
   // continue through the in-place paths below.
   const renderedMode = renderedDisplayMode();
   if (renderedMode !== "unknown" && renderedMode !== responseDisplayMode(data)) {
-    if (demoEnabled) window.location.assign(`/display?demo_mode=${demoModes[demoModeIndex]}`);
+    if (demoEnabled) window.location.assign(`/display?demo_mode=${demoMode}`);
     else window.location.reload();
     return;
   }
@@ -229,7 +223,7 @@ async function refreshDisplay() {
   displayFetchInProgress = true;
   try {
     const response = demoEnabled
-      ? await fetch(`/api/display?demo_mode=${demoModes[demoModeIndex]}`, { cache: "no-store" })
+      ? await fetch(`/api/display?demo_mode=${demoMode}`, { cache: "no-store" })
       : await fetch("/api/display", { cache: "no-store" });
     if (!response.ok) throw new Error(`display API returned ${response.status}`);
     updateDisplay(await response.json());
@@ -242,7 +236,4 @@ async function refreshDisplay() {
 
 updateCurrentDatetime();
 window.setInterval(updateCurrentDatetime, 1_000);
-window.setInterval(() => {
-  if (demoEnabled) demoModeIndex = demoModes.indexOf(nextDemoMode(demoModes[demoModeIndex]));
-  refreshDisplay();
-}, DISPLAY_POLL_INTERVAL_MS);
+window.setInterval(refreshDisplay, DISPLAY_POLL_INTERVAL_MS);

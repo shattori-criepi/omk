@@ -4,10 +4,17 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <title>OMK ダッシュボード</title>
-    <link rel="stylesheet" href="{{ url_for('static', path='/display.css') }}?v=20260903-demo-2">
+    <link rel="stylesheet" href="{{ url_for('static', path='/display.css') }}?v=20260910-demo-manual-1">
   </head>
   <body data-demo-enabled="{{ 'true' if demo_enabled else 'false' }}" data-demo-mode="{{ dashboard.mode if demo_enabled else '' }}" data-dashboard-mode="{{ dashboard.mode }}">
-    {% if demo_enabled %}<p class="demo-mode-notice" role="status">デモモード</p>{% endif %}
+    {% if demo_enabled %}
+    <nav class="demo-mode-notice" aria-label="デモ表示の切替">
+      <span>デモモード</span>
+      {% for mode, label in [('custom', 'カスタム'), ('clock', '時計'), ('recommended', 'おすすめ')] %}
+      <a href="/display?demo_mode={{ mode }}"{% if dashboard.mode == mode %} aria-current="page"{% endif %}>{{ label }}</a>
+      {% endfor %}
+    </nav>
+    {% endif %}
     {% if dashboard.mode is defined and dashboard.mode == 'clock' %}
     <main class="dashboard clock-dashboard" aria-label="時計">
       <aside class="clock-status-area" aria-label="ダッシュボードの状態"><p class="updated">最終更新 <time id="clock-updated-at" datetime="{{ dashboard.updated_at_iso }}">{{ dashboard.updated_at }}</time></p><p id="clock-freshness" class="freshness freshness--{{ dashboard.freshness }}">{{ dashboard.freshness }}</p><a class="admin-link" href="/admin" aria-label="管理画面" title="管理画面"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M19.14 12.94c.04-.31.06-.63.06-.94s-.02-.63-.07-.94l2.03-1.58-1.92-3.32-2.39.96a7.32 7.32 0 0 0-1.63-.94L14.86 3h-3.84l-.36 2.24c-.58.24-1.13.55-1.63.94l-2.39-.96-1.92 3.32 2.03 1.58A7.1 7.1 0 0 0 6.68 12c0 .32.02.63.07.94l-2.03 1.58 1.92 3.32 2.39-.96c.5.39 1.05.71 1.63.94L11.02 21h3.84l.36-2.24c.58-.24 1.13-.55 1.63-.94l2.39.96 1.92-3.32-2.03-1.58ZM12.94 16a4 4 0 1 1 0-8 4 4 0 0 1 0 8Z"/></svg></a></aside>
@@ -182,6 +189,6 @@
     </main>
     {% endif %}
 
-    <script src="{{ url_for('static', path='/display.js') }}?v=20260903-demo-2" defer></script>
+    <script src="{{ url_for('static', path='/display.js') }}?v=20260910-demo-manual-1" defer></script>
   </body>
 </html>

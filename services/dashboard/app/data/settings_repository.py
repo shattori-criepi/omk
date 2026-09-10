@@ -74,7 +74,6 @@ class DashboardSettings:
     recommended_blocks: tuple[DisplayBlock, ...]
     clock_item_ids: tuple[str, ...] = ()
     demo_enabled: bool = False
-    demo_rotation_seconds: int = 10
 
     @property
     def blocks(self) -> tuple[DisplayBlock, ...]:
@@ -96,7 +95,7 @@ class DashboardSettings:
                 "recommended": {"blocks": [block.as_dict() for block in self.recommended_blocks]},
                 "clock": {"item_ids": list(self.clock_item_ids)},
             },
-            "demo": {"enabled": self.demo_enabled, "rotation_seconds": self.demo_rotation_seconds},
+            "demo": {"enabled": self.demo_enabled},
         }
 
 
@@ -176,10 +175,8 @@ class SettingsRepository:
         demo = payload.get("demo", {})
         if not isinstance(demo, dict) or not isinstance(demo.get("enabled", False), bool):
             raise SettingsError("展示用デモモード設定が正しくありません")
-        rotation = demo.get("rotation_seconds", 10)
-        if not isinstance(rotation, int) or rotation < 1 or rotation > 3600:
-            raise SettingsError("展示用デモモードの切替周期が正しくありません")
-        settings = DashboardSettings(mode, tuple(blocks), tuple(recommended), tuple(clock_raw), demo.get("enabled", False), rotation)
+        # Ignore legacy rotation_seconds; the next save drops this unused key.
+        settings = DashboardSettings(mode, tuple(blocks), tuple(recommended), tuple(clock_raw), demo.get("enabled", False))
         self._validate(settings, available_groups, allow_missing=allow_missing)
         return settings, migrated or recommended_migrated
 

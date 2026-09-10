@@ -417,27 +417,104 @@ console.log(JSON.stringify({reloads}));
     assert json.loads(completed.stdout) == {"reloads": 1}
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is required for display rotation tests")
-def test_demo_rotation_cycles_all_saved_display_modes_and_ui_avoids_fixture_jargon() -> None:
+@pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is required for display polling tests")
+@pytest.mark.parametrize("mode", ["custom", "clock", "recommended"])
+def test_demo_polling_keeps_selected_mode(mode: str) -> None:
     javascript_path = Path(__file__).parents[1] / "app" / "static" / "display.js"
     harness = r'''
-const fs = require("fs"), vm = require("vm");
-global.document = {body: {dataset: {demoEnabled: "false", demoMode: ""}}, documentElement: {classList: {add() {}}}, querySelector() { return null; }};
-global.window = {setInterval() {}};
-global.fetch = async () => ({ok: true, json: async () => ({})});
-vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8") + "\nglobalThis.__displayTest = { nextDemoMode };");
-console.log(JSON.stringify(["custom", "clock", "recommended", "custom"].map(__displayTest.nextDemoMode)));
+const fs = require("fs"), vm = require("vm"), assert = require("assert");
+const mode = process.argv[2], intervals = [], urls = [], navigations = [];
+global.document = {body: {dataset: {demoEnabled: "true", demoMode: mode, dashboardMode: mode}}, documentElement: {classList: {add() {}}}, querySelector() { return null; }};
+global.window = {setInterval(fn, delay) { intervals.push({fn, delay}); }, location: {assign(url) { navigations.push(url); }, reload() { throw Error("unexpected reload"); }}};
+global.fetch = async (url) => { urls.push(url); return {ok: true, json: async () => ({mode, blocks: [], supplemental: []})}; };
+vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8"));
+(async () => {
+  assert.deepStrictEqual(intervals.map(x => x.delay), [1000, 10000]);
+  const poll = intervals.find(x => x.delay === 10000);
+  for (let i = 0; i < 4; i++) await poll.fn();
+  assert.deepStrictEqual(urls, Array(4).fill(`/api/display?demo_mode=${mode}`));
+  assert.deepStrictEqual(navigations, []);
+  updateDisplay({mode: "legacy"});
+  assert.deepStrictEqual(navigations, [`/display?demo_mode=${mode}`]);
+})().catch(error => { console.error(error); process.exitCode = 1; });
 '''
-    completed = subprocess.run(["node", "-e", harness, str(javascript_path)], check=True, capture_output=True, text=True)
-
-    assert json.loads(completed.stdout) == ["clock", "recommended", "custom", "clock"]
+    subprocess.run(["node", "-e", harness, str(javascript_path), mode], check=True, capture_output=True, text=True)
+    script = javascript_path.read_text(encoding="utf-8")
+    for obsolete in ("demoModes", "demoModeIndex", "nextDemoMode", "rotation"):
+        assert obsolete not in script
     user_html = "\n".join(
         (Path(__file__).parents[1] / "app" / "templates" / name).read_text(encoding="utf-8")
         for name in ("display.html", "admin_display.html")
     )
-    user_javascript = javascript_path.read_text(encoding="utf-8")
     assert "fixture" not in user_html.lower()
-    assert "fixture" not in user_javascript.lower()
+    assert "fixture" not in script.lower()
+
+
+@pytest.mark.parametrize("saved_mode", ["clock", "recommended"])
+@pytest.mark.parametrize("with_candidates", [False, True])
+def test_demo_manual_modes_preserve_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, saved_mode: str, with_candidates: bool) -> None:
+    item = DisplayItem("temp", "温度", "th", "omk/th/environment", "th-demo", "temperature_c", "number", "℃", "環境", "temperature", True, "", "--", "unavailable")
+    candidates = [item] if with_candidates else []
+    monkeypatch.setattr(dashboard_main, "_dashboard_candidates", lambda now=None: candidates)
+    path = tmp_path / "dashboard" / "settings.json"
+    SettingsRepository(path).save(DashboardSettings(saved_mode, (), (), (), True), {})
+    original = path.read_bytes()
+    for query, expected in [("", "custom"), ("?demo_mode=custom", "custom"), ("?demo_mode=clock", "clock"), ("?demo_mode=recommended", "recommended")]:
+        response = client.get("/display" + query)
+        assert response.status_code == 200
+        assert f'data-dashboard-mode="{expected}"' in response.text
+        assert 'class="demo-mode-notice"' in response.text
+        for mode, label in [("custom", "カスタム"), ("clock", "時計"), ("recommended", "おすすめ")]:
+            current = ' aria-current="page"' if mode == expected else ""
+            assert f'<a href="/display?demo_mode={mode}"{current}>{label}</a>' in response.text
+        for _ in range(2):
+            snapshot = client.get("/api/display" + query)
+            assert snapshot.status_code == 200
+            assert snapshot.json()["mode"] == expected
+        assert path.read_bytes() == original
+    for enabled in (False, True):
+        assert client.post("/api/admin/dashboard-settings/demo", json={"enabled": enabled}).status_code == 200
+        assert json.loads(path.read_text())["mode"] == saved_mode
+        normal_mode = saved_mode if with_candidates or saved_mode == "clock" else None
+        assert client.get("/api/display").json().get("mode") == ("custom" if enabled else normal_mode)
+        for endpoint in ("/display", "/api/display"):
+            assert client.get(endpoint + "?demo_mode=invalid").status_code == 400
+        if not enabled:
+            normal_html = client.get("/display").text
+            for mode in ("custom", "clock", "recommended"):
+                html = client.get(f"/display?demo_mode={mode}").text
+                assert 'class="demo-mode-notice"' not in html
+                assert re.search(r'data-dashboard-mode="[^"]*"', html).group() == re.search(r'data-dashboard-mode="[^"]*"', normal_html).group()
+                assert client.get(f"/api/display?demo_mode={mode}").json().get("mode") == normal_mode
+    assert 'data-dashboard-mode="custom"' in client.get("/display").text
+
+
+def test_legacy_demo_rotation_setting_is_ignored_without_losing_presets(tmp_path: Path) -> None:
+    path = tmp_path / "settings.json"
+    repository = SettingsRepository(path)
+    block = DisplayBlock("environment", "環境", "温度", "small", "temp", ("temp",))
+    settings = DashboardSettings("clock", (block,), (block,), ("temp",), True)
+    payload = settings.as_dict()
+    payload["demo"]["rotation_seconds"] = 10
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    loaded = repository.load_or_create({"temp": "環境"}, [])
+    assert loaded == settings
+    repository.save(loaded, {"temp": "環境"})
+    assert json.loads(path.read_text()) == settings.as_dict()
+    assert "rotation_seconds" not in json.loads(path.read_text())["demo"]
+
+
+@pytest.mark.parametrize("freshness", ["normal", "delayed", "stale", "unavailable"])
+def test_demo_fallback_only_replaces_stale_or_unavailable(freshness: str) -> None:
+    item = DisplayItem("temp", "温度", "th", "omk/th/environment", "th-demo", "temperature_c", "number", "℃", "環境", "temperature", True, "", "19.0", freshness)
+    result = apply_demo_fallback([item])[0]
+    assert item.value == "19.0"
+    assert item.freshness == freshness
+    if freshness in {"normal", "delayed"}:
+        assert result is item
+    else:
+        assert result.value == "25.1"
+        assert result.freshness == "normal"
 
 
 def test_demo_indicator_is_fixed_and_display_assets_are_cache_busted() -> None:
@@ -1498,7 +1575,7 @@ def test_admin_display_css_allows_vertical_scroll_without_changing_kiosk_overflo
     assert 'href="/display">ダッシュボードを確認</a>' not in admin_template
     assert '>保存する<' not in admin_template
     assert re.search(r"admin_display\.js'\) }}\?v=20260819-clock-navigation-\d+", admin_template)
-    assert re.search(r"display\.css'\) }}\?v=20260819-clock-navigation-\d+", admin_template)
+    assert re.search(r"display\.css'\) }}\?v=20260910-demo-layout-\d+", admin_template)
     assert '<body class="admin-body">' not in display_template
     assert re.search(r"display\.js'\) }}\?v=[^\"']+", display_template)
     assert re.search(r"display\.css'\) }}\?v=[^\"']+", display_template)
@@ -1524,6 +1601,21 @@ def test_admin_display_css_allows_vertical_scroll_without_changing_kiosk_overflo
     assert ".clock-reading-value { display: inline-flex; align-items: baseline; justify-self: center;" in stylesheet
     assert 'data-role="unit"' in display_template
     assert "overflow: hidden;" in stylesheet
+
+
+def test_admin_display_keeps_demo_settings_after_normal_display_settings() -> None:
+    template = (Path(__file__).parents[1] / "app" / "templates" / "admin_display.html").read_text(encoding="utf-8")
+    demo_script = (Path(__file__).parents[1] / "app" / "static" / "demo_settings.js").read_text(encoding="utf-8")
+
+    mode_buttons = [template.index(f'data-mode="{mode}"') for mode in ("recommended", "custom", "clock")]
+    assert mode_buttons == sorted(mode_buttons)
+    assert 'class="display-settings-main"' in template
+    assert 'class="demo-settings"' in template
+    assert template.index('id="save-settings"') < template.index('class="demo-settings"')
+    assert template.index('id="demo-enabled"') > template.index('id="save-settings"')
+    assert '展示・説明時の利用を想定した機能です。' in template
+    assert 'querySelector("#demo-enabled")' in demo_script
+    assert '"/api/admin/dashboard-settings/demo"' in demo_script
 
 
 def test_display_pattern_css_keeps_only_hero_primary_large_and_fits_the_viewport() -> None:
