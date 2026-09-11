@@ -211,27 +211,39 @@ class SerialJson:
         # Also discard replies left by an earlier request on this connection.
         self._buffer = b""
         _discard_pending_input(self.fd, deadline)
-        _write_until(self.fd, data, deadline)
-        while time.monotonic() < deadline:
-            readable, _, _ = select.select([self.fd], [], [], max(0, deadline - time.monotonic()))
-            if not readable:
-                continue
-            try:
-                chunk = os.read(self.fd, 512)
-            except BlockingIOError:
-                continue
-            if not chunk:
-                raise OSError("OMK USB provisioning device disconnected")
-            self._buffer += chunk
-            while b"\n" in self._buffer:
-                raw, self._buffer = self._buffer.split(b"\n", 1)
-                try:
-                    response = json.loads(raw.decode())
-                except (UnicodeDecodeError, json.JSONDecodeError):
+        try:
+            _write_until(self.fd, data, deadline)
+            while time.monotonic() < deadline:
+                readable, _, _ = select.select([self.fd], [], [], max(0, deadline - time.monotonic()))
+                if not readable:
                     continue
-                if isinstance(response, dict) and matches(response):
-                    return response
-        raise TimeoutError(f"No OMK USB provisioning response from {self.device}")
+                try:
+                    chunk = os.read(self.fd, 512)
+                except BlockingIOError:
+                    continue
+                if not chunk:
+                    raise OSError("OMK USB provisioning device disconnected")
+                self._buffer += chunk
+                while b"\n" in self._buffer:
+                    raw, self._buffer = self._buffer.split(b"\n", 1)
+                    try:
+                        response = json.loads(raw.decode())
+                    except (UnicodeDecodeError, json.JSONDecodeError):
+                        continue
+                    if isinstance(response, dict) and matches(response):
+                        return response
+            raise TimeoutError(f"No OMK USB provisioning response from {self.device}")
+        except BaseException:
+            # A failed/partial write can leave USB CDC output queued, making
+            # close wait for ~30 seconds on an unresponsive device. Discard
+            # output only on failure; never flush a successfully matched reply.
+            try:
+                termios.tcflush(self.fd, termios.TCOFLUSH)
+            except (OSError, termios.error):
+                # Disconnected devices may reject cleanup. Preserve the
+                # original failure and let the caller's finally close the fd.
+                pass
+            raise
 
 
 def identify(device: str, timeout: float = 10) -> dict[str, object] | None:

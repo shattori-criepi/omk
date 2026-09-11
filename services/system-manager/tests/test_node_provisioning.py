@@ -21,9 +21,12 @@ def serial_env(monkeypatch):
 
     monkeypatch.setattr(usb, 'time', SimpleNamespace(monotonic=lambda: clock.now, sleep=advance))
     monkeypatch.setattr(usb.termios, 'tcdrain', lambda *_: pytest.fail('unbounded tcdrain called'))
-    def forbidden_flush(*args):
-        raise usb.termios.error(5, 'Input/output error')
-    monkeypatch.setattr(usb.termios, 'tcflush', forbidden_flush)
+    flushed = []
+    def output_flush(fd, selector):
+        assert selector == usb.termios.TCOFLUSH, 'input flush must remain nonblocking reads'
+        os.fstat(fd)
+        flushed.append(fd)
+    monkeypatch.setattr(usb.termios, 'tcflush', output_flush)
     opened = []
     original_open = usb.os.open
 
@@ -34,7 +37,8 @@ def serial_env(monkeypatch):
         return fd
 
     monkeypatch.setattr(usb, 'os', SimpleNamespace(**{**vars(os), 'open': open_serial}))
-    env = SimpleNamespace(device=os.ttyname(slave), master=master, clock=clock, advance=advance, opened=opened)
+    env = SimpleNamespace(device=os.ttyname(slave), master=master, clock=clock,
+                          advance=advance, opened=opened, flushed=flushed)
     yield env
     for fd in opened:
         try:
@@ -118,6 +122,7 @@ def test_partial_write_and_would_block_share_response_deadline(monkeypatch, seri
         assert waits[0] == (True, 3)
         assert waits[-1][0] is False
         assert waits[-1][1] == pytest.approx(2.5)
+        assert serial_env.flushed == []
     finally:
         serial.close()
 
@@ -147,6 +152,8 @@ def test_blank_candidate_scan_releases_fd_and_allows_following_setup(monkeypatch
         assert_closed(serial_env)
         assert serial_env.clock.now <= 3
         assert command[-1] == 'read_mac'
+        if mode != 'oserror':
+            assert serial_env.flushed == serial_env.opened
         assert kwargs['timeout'] == 15
         inspected.append(command)
         if mac_timeout:
@@ -227,6 +234,7 @@ def test_continuous_input_fails_closed_and_closes_fd(monkeypatch, serial_env, li
     finally:
         serial.close()
     assert sum(received) <= usb.INPUT_DISCARD_MAX_BYTES
+    assert serial_env.flushed == []  # Failure before any write attempt.
     assert serial_env.clock.now - started <= min(deadline, usb.INPUT_DISCARD_TIMEOUT_SECONDS) + 1e-9
     if limit == 'bytes':
         assert sum(received) == usb.INPUT_DISCARD_MAX_BYTES
@@ -298,4 +306,141 @@ def test_unresponsive_pty_identify_obeys_wall_clock_timeout(monkeypatch, serial_
     assert usb.identify(serial_env.device, timeout=3) is None
     elapsed = time.monotonic() - started
     assert 2.9 <= elapsed <= 3.5
+    assert_closed(serial_env)
+
+
+@pytest.mark.parametrize('failure', ['timeout', 'read_error', 'disconnect', 'partial_write'])
+@pytest.mark.parametrize('cleanup_error', [None, OSError, usb.termios.error])
+def test_failed_request_flushes_output_and_preserves_failure(monkeypatch, serial_env, failure, cleanup_error):
+    serial = usb.SerialJson(serial_env.device)
+    original = OSError('request I/O failed')
+    writes = []
+    events = []
+    def select(readable, writable, exceptional, timeout):
+        if timeout == 0:
+            return [], [], []
+        if readable and failure == 'timeout':
+            serial_env.advance(timeout)
+            return [], [], []
+        return readable, writable, []
+    def write(fd, data):
+        if writes and failure == 'partial_write':
+            raise original
+        writes.append(bytes(data[:2]))
+        return 2
+    def read(fd, size):
+        if failure == 'read_error':
+            raise original
+        assert failure == 'disconnect'
+        return b''
+    def flush(fd, selector):
+        assert writes
+        assert fd == serial.fd
+        assert selector == usb.termios.TCOFLUSH
+        os.fstat(fd)
+        events.append('flush')
+        if cleanup_error:
+            raise cleanup_error(5, 'cleanup failed')
+    real_close = usb.os.close
+    def close(fd):
+        events.append('close')
+        real_close(fd)
+    monkeypatch.setattr(usb, 'select', SimpleNamespace(select=select))
+    monkeypatch.setattr(usb.os, 'write', write)
+    monkeypatch.setattr(usb.os, 'read', read)
+    monkeypatch.setattr(usb.os, 'close', close)
+    monkeypatch.setattr(usb.termios, 'tcflush', flush)
+    try:
+        with pytest.raises(TimeoutError if failure == 'timeout' else OSError) as caught:
+            serial.request({'command': 'identify'}, 1, lambda _: True)
+        if failure in {'read_error', 'partial_write'}:
+            assert caught.value is original
+        elif failure == 'timeout':
+            assert 'No OMK USB provisioning response' in str(caught.value)
+        else:
+            assert 'device disconnected' in str(caught.value)
+    finally:
+        serial.close()
+    assert events == ['flush', 'close']
+    assert_closed(serial_env)
+
+
+@pytest.fixture
+def queued_output(monkeypatch, serial_env):
+    pending = bytearray()
+    flushes = []
+    real_close = usb.os.close
+    def write(fd, data):
+        pending.extend(data)
+        return len(data)
+    def flush(fd, selector):
+        assert selector == usb.termios.TCOFLUSH
+        os.fstat(fd)
+        pending.clear()
+        flushes.append(fd)
+    def close(fd):
+        if pending:
+            serial_env.advance(30)  # Reproduce the blank CDC close wait.
+        real_close(fd)
+    monkeypatch.setattr(usb.os, 'write', write)
+    monkeypatch.setattr(usb.os, 'close', close)
+    monkeypatch.setattr(usb.termios, 'tcflush', flush)
+    set_io(monkeypatch, serial_env, 'read_timeout')
+    return SimpleNamespace(pending=pending, flushes=flushes)
+
+
+def test_failed_output_is_not_carried_to_next_request(serial_env, queued_output):
+    serial = usb.SerialJson(serial_env.device)
+    try:
+        for _ in range(2):
+            with pytest.raises(TimeoutError):
+                serial.request({'command': 'identify'}, 1, lambda _: True)
+            assert queued_output.pending == b''
+        assert queued_output.flushes == [serial.fd, serial.fd]
+    finally:
+        serial.close()
+    assert serial_env.clock.now == pytest.approx(2.5)
+    assert_closed(serial_env)
+
+
+def test_repeated_blank_scans_flush_before_close_and_inspection(monkeypatch, serial_env, queued_output, tmp_path):
+    monkeypatch.setattr(usb, 'physical_usb_devices', lambda: [(serial_env.device, '/dev/ttyACM0')])
+    monkeypatch.setattr(setup, 'STORE', tmp_path)
+    inspected = []
+    def inspect(command, **kwargs):
+        assert command[-1] == 'read_mac'
+        assert_closed(serial_env)
+        assert not queued_output.pending
+        assert queued_output.flushes == serial_env.opened
+        inspected.append(command)
+        return SimpleNamespace(stdout='Chip is ESP32-S3\nMAC: 00:11:22:33:44:55\n')
+    monkeypatch.setattr(setup.subprocess, 'run', inspect)
+    serial_lock = threading.Lock()
+    for _ in range(3):
+        started = serial_env.clock.now
+        assert serial_lock.acquire(blocking=False)
+        candidates = scan_usb_candidates_with_serial_lock(serial_lock, lambda: setup.setup_candidates(timeout=3))
+        assert serial_env.clock.now - started == pytest.approx(3)
+        assert candidates == [{'device': '/dev/ttyACM0', 'node_id': setup.node_id_from_mac('00:11:22:33:44:55'),
+                               'kind': 'unconfirmed_esp32s3', 'wifi_configured': False}]
+        assert not serial_lock.locked()
+    assert len(inspected) == 3
+
+
+def test_successful_wifi_provisioning_never_flushes_output(monkeypatch, serial_env):
+    node_id = '000000000002'
+    commands = []
+    real_write = usb.os.write
+    def respond(fd, data):
+        request = json.loads(bytes(data))
+        commands.append(request['command'])
+        response = {'status': 'ok' if request['command'] == 'identify' else 'accepted',
+                    'node_id': node_id, 'protocol_version': 2}
+        written = real_write(fd, data)
+        real_write(serial_env.master, (json.dumps(response) + '\n').encode())
+        return written
+    monkeypatch.setattr(usb.os, 'write', respond)
+    assert usb.provision(serial_env.device, 'test-ssid', 'test-password', expected_node_id=node_id) == node_id
+    assert commands == ['identify', 'set_wifi']
+    assert serial_env.flushed == []
     assert_closed(serial_env)
