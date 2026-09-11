@@ -543,3 +543,39 @@ def test_dashboard_selected_identity_reaches_final_guard_before_send(tmp_path, m
     assert response.status_code == 422
     assert saved == [] and sent == [{"command": "identify", "protocol_version": 2}]
     assert "synthetic-secret" not in response.text
+
+
+def test_usb_setup_job_auth_conflicts_and_polling(tmp_path, monkeypatch):
+    from omk_system_manager import node_setup, main
+    entered = threading.Event()
+    release = threading.Event()
+
+    def work(device, node_id, confirmed, stage):
+        stage('flashing_firmware')
+        entered.set()
+        assert release.wait(3)
+        raise RuntimeError('secret-psk 02:00:00:00:00:01')
+
+    monkeypatch.setattr(node_setup, 'setup', work)
+    monkeypatch.setattr(main, 'usb_candidates', lambda: pytest.fail('Polling opened serial'))
+    body = dict(device='/dev/ttyACM0', node_id='000000000001')
+    with client_for(tmp_path) as client:
+        assert client.post('/api/nodes/usb-setup', json=body).status_code == 401
+        assert client.get('/api/nodes/usb-setup/status').status_code == 401
+        for extra in ({'offset': '0xf000'}, {'confirm_atom_s3_lite': 'true'}, {'device': '/dev/ttyUSB0'}):
+            assert client.post('/api/nodes/usb-setup', headers=headers(), json={**body, **extra}).status_code == 400
+        assert client.post('/api/nodes/usb-setup', headers=headers(), json=body).status_code == 202
+        assert entered.wait(3)
+        try:
+            assert client.post('/api/nodes/usb-setup', headers=headers(), json=body).status_code == 409
+            assert client.post('/api/nodes/usb-provision', headers=headers(), json=body).status_code == 409
+            assert client.get('/api/nodes/usb-candidates', headers=headers()).json()['busy'] is True
+            assert client.get('/api/nodes/usb-setup/status', headers=headers()).json()['stage'] == 'flashing_firmware'
+        finally:
+            release.set()
+            client.app.state.usb_node_setup.worker.join(3)
+        status = client.get('/api/nodes/usb-setup/status', headers=headers())
+        assert status.json() == dict(stage='failed', node_id=body['node_id'], error='setup_failed')
+        assert 'secret-psk' not in status.text and '02:00' not in status.text
+        assert not client.app.state.usb_node_serial_access_lock.locked()
+        assert not client.app.state.usb_node_provision_operation_lock.locked()

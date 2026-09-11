@@ -56,6 +56,9 @@ if ((EUID == 0)); then
 else
   AS_TARGET=(sudo -u "${TARGET_USER}")
 fi
+# USB CDC ACM access for fresh installs; service remains unprivileged.
+"${SUDO[@]}" usermod -a -G dialout "${TARGET_USER}"
+
 render_unit() {
   sed -e "s|@OMK_ROOT@|${OMK_ROOT}|g" \
       -e "s|@OMK_USER@|${TARGET_USER}|g" \

@@ -28,7 +28,8 @@ from .service_control import BRouteServiceController, ServiceControlError
 from .runtime_status import connection_status, request_immediate_retry
 from .site_uuid import SoracomMetadataClient, resolve_site_uuid
 from .usb_export import DATASETS, UsbExportController
-from .node_provisioning import ProvisioningError, provision_selected_node, usb_candidates
+from .node_provisioning import ProvisioningError, provision_selected_node
+from .node_setup import SetupController, setup_candidates as usb_candidates
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
@@ -121,8 +122,12 @@ class UsbExportRequest(BaseModel):
 
 class UsbNodeProvisionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    device: str = Field(pattern=r"^/dev/(serial/by-id/[^/]+|ttyACM[0-9]+|ttyUSB[0-9]+)$")
+    device: str = Field(pattern=r"^/dev/(serial/by-id/[^/]+|ttyACM[0-9]+)$")
     node_id: str = Field(pattern=r"^[0-9a-f]{12}$")
+
+
+class UsbNodeSetupRequest(UsbNodeProvisionRequest):
+    confirm_atom_s3_lite: bool = Field(default=False, strict=True)
 
 
 USB_NODE_MESSAGES = {
@@ -165,6 +170,7 @@ def create_app(
         app.state.usb_node_provision_operation_lock = threading.Lock()
         app.state.usb_node_serial_access_lock = threading.Lock()
         app.state.usb_node_candidates_cache = []
+        app.state.usb_node_setup = SetupController(app.state.usb_node_provision_operation_lock, app.state.usb_node_serial_access_lock)
         app.state.site_uuid = resolve_site_uuid(
             settings.site_uuid_path,
             site_uuid_metadata or SoracomMetadataClient(),
@@ -338,6 +344,16 @@ def create_app(
             raise HTTPException(status_code=422, detail=USB_NODE_MESSAGES.get(error.code, "USB接続Nodeを確認できませんでした。")) from None
         request.app.state.usb_node_candidates_cache = candidates
         return {"nodes": candidates, "busy": False}
+
+    @app.post("/api/nodes/usb-setup", dependencies=[Depends(authenticated)], status_code=202)
+    def setup_usb_node(request: Request, body: UsbNodeSetupRequest) -> dict:
+        if not request.app.state.usb_node_setup.start(body.device, body.node_id, body.confirm_atom_s3_lite):
+            raise HTTPException(409, detail="別のNodeを設定中です")
+        return {"accepted": True, "node_id": body.node_id}
+
+    @app.get("/api/nodes/usb-setup/status", dependencies=[Depends(authenticated)])
+    def setup_usb_node_status(request: Request) -> dict:
+        return request.app.state.usb_node_setup.status()
 
     @app.post("/api/nodes/usb-provision", dependencies=[Depends(authenticated)])
     def provision_usb_node(request: Request, body: UsbNodeProvisionRequest) -> dict[str, str | bool]:

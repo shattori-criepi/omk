@@ -11,7 +11,7 @@ const fs = require("fs"), vm = require("vm");
 function element() { return {addEventListener() {}, querySelectorAll() { return []; }, textContent: "", innerHTML: "", disabled: false, value: "", dataset: {}, showModal() {}, close() {}, reset() {}}; }
 global.document = {querySelector: () => element()};
 global.window = {setInterval() {}, confirm() { return false; }};
-global.fetch = async () => ({ok: true, json: async () => ({sensors: [], nodes: []})});
+global.fetch = async () => ({ok: true, json: async () => ({sensors: [], nodes: [], stage: "idle"})});
 vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8"));
 const rendered = registeredCard({device_key: "switchbot:020000000040", sensor_id: "test-sensor", display_name: "Test", vendor: "switchbot", model: "waterproof_sensor", sensor_type: "environment", online: true, status: "unrecognized", latest: {received_at: "now", rssi: -50, values: {}}});
 console.log(JSON.stringify({unrecognized: rendered.includes("機種・データ未確認"), normal: rendered.includes("正常") || rendered.includes("sensor-state--normal"), invalidNumber: rendered.includes("NaN") || rendered.includes("undefined"), measurement: rendered.includes("registered-values")}));
@@ -30,7 +30,7 @@ const elements = new Map();
 function element() { return {addEventListener() {}, querySelectorAll() { return []; }, textContent: "", innerHTML: "", disabled: false, hidden: true, checked: false, required: false, value: "", dataset: {}, showModal() {}, close() {}, reset() {}, focus() {}}; }
 global.document = {querySelector: key => { if (!elements.has(key)) elements.set(key, element()); return elements.get(key); }};
 global.window = {setInterval() {}, confirm() { return false; }};
-global.fetch = async () => ({ok: true, json: async () => ({sensors: [], nodes: []})});
+global.fetch = async () => ({ok: true, json: async () => ({sensors: [], nodes: [], stage: "idle"})});
 vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8"));
 const sensor = {device_key: "switchbot:020000000040", sensor_id: "contact-001", display_name: "玄関", vendor: "switchbot", model: "contact_sensor", sensor_type: "contact", location: "玄関", online: true, status: "normal", latest: {received_at: "now", rssi: -50, values: {contact_state: 1}}};
 assert(registeredCard(sensor).includes("SwitchBot 開閉センサー"));
@@ -49,7 +49,7 @@ const elements = new Map(), calls = [];
 function element() { return {addEventListener() {}, querySelectorAll() { return []; }, textContent: "", innerHTML: "", disabled: false, hidden: true, checked: false, value: "", dataset: {}, showModal() {}, close() {}, reset() {}, focus() {}}; }
 global.document = {querySelector: key => { if (!elements.has(key)) elements.set(key, element()); return elements.get(key); }};
 global.window = {setInterval() {}, confirm() { return false; }};
-global.fetch = async (url, options) => { calls.push({url, options}); return {ok: true, json: async () => ({sensor_id: "motion-001", sensors: [], nodes: [], candidates: []})}; };
+global.fetch = async (url, options) => { calls.push({url, options}); return {ok: true, json: async () => ({sensor_id: "motion-001", sensors: [], nodes: [], stage: "idle", candidates: []})}; };
 vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8"));
 (async () => {
   const item = {model: "unknown_switchbot", sensor_type: "unknown", device_key: "switchbot:020000000040", rssi: -51, received_at: "now", values: {}, manual_registration_models: ["presence_sensor"], unconfirmed_preview: {model: "presence_sensor", values: {motion_state: 1, battery_percent: 60, light_level: 7}}};
@@ -116,7 +116,7 @@ const fs = require("fs"), vm = require("vm"), assert = require("assert");
 function element() { return {addEventListener() {}, querySelectorAll() { return []; }, textContent: "", innerHTML: "", disabled: false, hidden: true, checked: false, required: false, value: "", dataset: {}, showModal() {}, close() {}, reset() {}, focus() {}}; }
 global.document = {querySelector: () => element()};
 global.window = {setInterval() {}, confirm() { return false; }};
-global.fetch = async () => ({ok: true, json: async () => ({sensors: [], nodes: []})});
+global.fetch = async () => ({ok: true, json: async () => ({sensors: [], nodes: [], stage: "idle"})});
 vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8"));
 const item = {model: "unknown_switchbot", sensor_type: "unknown", device_key: "switchbot:020000000040", rssi: -51, received_at: "now", identifier_suffix: "0040", values: {}, manual_registration_models: ["temperature_humidity_sensor"], unconfirmed_preview: {model: "temperature_humidity_sensor", values: {temperature_c: 24.0, relative_humidity_percent: 52}}};
 const rendered = card(item, true);
@@ -136,7 +136,7 @@ const fs = require("fs"), vm = require("vm"), assert = require("assert");
 function element() { return {addEventListener() {}, querySelectorAll() { return []; }, textContent: "", innerHTML: "", disabled: false, hidden: true, checked: false, required: false, value: "", dataset: {}, showModal() {}, close() {}, reset() {}, focus() {}}; }
 global.document = {querySelector: () => element()};
 global.window = {setInterval() {}, confirm() { return false; }};
-global.fetch = async () => ({ok: true, json: async () => ({sensors: [], nodes: []})});
+global.fetch = async () => ({ok: true, json: async () => ({sensors: [], nodes: [], stage: "idle"})});
 vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8"));
 const item = {model: "unknown_switchbot", sensor_type: "unknown", device_key: "switchbot:b0e9fe5815cc", rssi: -51, received_at: "now", identifier_suffix: "15CC", values: {}, manual_registration_models: ["co2_sensor"], unconfirmed_preview: {model: "co2_sensor", values: {co2_ppm: 766, temperature_c: 25.5, relative_humidity_percent: 45}}};
 const rendered = card(item, true);
@@ -160,7 +160,7 @@ global.window = {setInterval(fn, delay) { intervals.push({fn, delay}); return in
 global.setInterval = global.window.setInterval; global.clearInterval = global.window.clearInterval;
 let candidate = {device_key: "switchbot:020000000040", vendor: "switchbot", model: "unknown_switchbot", sensor_type: "unknown", rssi: -50, received_at: "first", identifier_suffix: "0040", values: {}, manual_registration_models: ["presence_sensor"], unconfirmed_preview: {model: "presence_sensor", values: {motion_state: 0, battery_percent: 100, light_level: 3}}};
 let other = {device_key: "switchbot:020000000041", vendor: "switchbot", model: "unknown_switchbot", sensor_type: "unknown", rssi: -61, received_at: "other", identifier_suffix: "0041", values: {}};
-global.fetch = async (url, options = {}) => { calls.push({url, options}); if (url.endsWith("/setup/candidates")) return {ok: true, json: async () => ({scanning: true, candidates: [candidate, other]})}; return {ok: true, json: async () => ({status: "scanning", sensors: [], nodes: []})}; };
+global.fetch = async (url, options = {}) => { calls.push({url, options}); if (url.endsWith("/setup/candidates")) return {ok: true, json: async () => ({scanning: true, candidates: [candidate, other]})}; return {ok: true, json: async () => ({status: "scanning", sensors: [], nodes: [], stage: "idle"})}; };
 vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8"));
 (async () => {
   await start.onclick();

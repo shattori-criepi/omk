@@ -6,3 +6,6 @@ httpx==0.28.1
 # Starlette TestClient backend; httpx remains the application HTTP client.
 httpx2==2.12.0
 pytest==8.3.5
+
+# Matches PlatformIO tool-esptoolpy 2.41100.0.
+esptool==4.11.0

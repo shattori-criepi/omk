@@ -275,8 +275,8 @@ def find_usb_node_by_id(node_id: str, timeout: float = 3) -> tuple[str, str]:
     return str(matches[0]["device"]), node_id
 
 
-def wait_for_registration_status(node_id: str, broker: str = DEFAULT_MQTT_BROKER, timeout: float = 60) -> None:
-    process = subprocess.Popen(["mosquitto_sub", "-h", broker, "-C", "1", "-W", str(int(timeout)), "-t", f"omk/node/{node_id}/registration/status"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+def wait_for_registration_status(node_id: str, broker: str = DEFAULT_MQTT_BROKER, timeout: float = 60, *, fresh: bool = False) -> None:
+    process = subprocess.Popen(["mosquitto_sub", *(["-R"] if fresh else []), "-h", broker, "-C", "1", "-W", str(int(timeout)), "-t", f"omk/node/{node_id}/registration/status"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
     try:
         message, _ = process.communicate(timeout=timeout + 2)
     except subprocess.TimeoutExpired:

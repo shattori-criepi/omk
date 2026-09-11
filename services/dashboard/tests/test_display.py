@@ -1912,7 +1912,7 @@ const selectors = ["#setup-status", "#candidates", "#registered-sensors", "#omk-
 const elements = Object.fromEntries(selectors.map(key => [key, element()]));
 global.document = {activeElement: null, querySelector: selector => elements[selector] || element()};
 global.window = {setInterval() {}, confirm() { return false; }};
-global.fetch = async () => ({ok: true, json: async () => ({sensors: [], nodes: []})});
+global.fetch = async () => ({ok: true, json: async () => ({sensors: [], nodes: [], stage: "idle"})});
 vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8"));
 const provisioned = nodeCard({node_id: "112233445566", registration_state: "provisioned", capabilities: ["ble_scan"], attached_sensors: ["SEN66"]});
 const requested = nodeCard({node_id: "112233445566", registration_state: "provisioned", request_state: "request_sent", capabilities: ["ble_scan"], attached_sensors: ["SEN66"]});
@@ -1983,7 +1983,7 @@ const selectors = ["#setup-status", "#candidates", "#registered-sensors", "#omk-
 const elements = Object.fromEntries(selectors.map(key => [key, element()]));
 global.document = {querySelector: selector => elements[selector] || element()};
 global.window = {setInterval() {}, confirm() { return false; }};
-global.fetch = async () => ({ok: true, json: async () => ({sensors: [], nodes: []})});
+global.fetch = async () => ({ok: true, json: async () => ({sensors: [], nodes: [], stage: "idle"})});
 vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8"));
 const candidate = card({vendor: "switchbot", model: "presence_sensor", sensor_type: "motion", rssi: -42, identifier_suffix: "7fc8", received_at: "now", values: {motion_state: 1, battery_percent: 100, light_level: 12}}, true);
 const unknownCandidate = card({vendor: "switchbot", model: "unknown_switchbot", sensor_type: "unknown", rssi: -60, identifier_suffix: "abcd", received_at: "later", values: {}}, true);
@@ -2486,3 +2486,15 @@ vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8") + "\nglobalThis.__b
 def test_static_files_are_available() -> None:
     assert client.get("/static/display.css").status_code == 200
     assert client.get("/static/display.js").status_code == 200
+
+
+def test_usb_setup_proxy_uses_fixed_endpoint_and_returns_202(monkeypatch):
+    body = dict(device='/dev/ttyACM0', node_id='000000000001', confirm_atom_s3_lite=True)
+    calls = []
+    async def request(method, path, payload=None):
+        calls.append((method, path, payload))
+        return {'accepted': True} if method == 'POST' else {'stage': 'flashing_firmware'}
+    monkeypatch.setattr(dashboard_main, '_system_manager_request', request)
+    assert client.post('/api/admin/setup/usb-setup', json=body).status_code == 202
+    assert client.get('/api/admin/setup/usb-setup/status').json()['stage'] == 'flashing_firmware'
+    assert calls == [('POST', '/api/nodes/usb-setup', body), ('GET', '/api/nodes/usb-setup/status', None)]
