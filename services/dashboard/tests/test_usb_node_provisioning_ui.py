@@ -23,10 +23,16 @@ def test_logical_id_keyboard_uses_shared_layout_and_node_targeting():
     template = (ROOT/'app/templates/admin_sensors.html').read_text()
     script = (ROOT/'app/static/admin.js').read_text()
     keyboard = ROOT/'app/static/software_keyboard.js'
+    stylesheet = (ROOT/'app/static/display.css').read_text()
     assert "software_keyboard.js" in template
     assert "logical-id-keyboard-overlay" in template
+    assert 'logical-id-keyboard-confirm" class="primary" type="button">決定' in template
     assert "maxlength=\"48\"" in script and 'pattern="[A-Za-z0-9_-]+"' in script
     assert 'nodes.addEventListener?.("focusin"' in script
+    assert '.logical-id-keyboard-overlay { box-sizing: border-box;' in stylesheet
+    assert 'overflow: hidden;' in stylesheet
+    assert 'grid-template-columns: repeat(7, minmax(0, 1fr)) minmax(0, 1.55fr) minmax(0, 1.35fr);' in stylesheet
+    assert 'min-height: 44px;' in stylesheet
     logical = script[script.index('const LOGICAL_ID_KEY_ROWS'):script.index('function formatApiError')]
     harness = r'''
 const assert = require('node:assert/strict'), fs = require('fs'), vm = require('vm');
@@ -46,16 +52,18 @@ function input(nodeId, initial = '') { const result = element(); result.value = 
 const first = input('000000000001'); current = [first];
 __logicalTest.openLogicalKeyboard(first);
 assert.equal(overlay.hidden, false); assert.equal(title.textContent, 'Logical ID');
+assert.deepEqual(keys.children[0].children.map(button => button.textContent), ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '_']);
 for (const key of 'sen66-001') __logicalTest.logicalKeyboard.insert(key);
 assert.equal(first.value, 'sen66-001');
 assert(allButtons.filter(button => /^[A-Za-z0-9_-]$/.test(button.textContent)).every(button => /^[A-Za-z0-9_-]$/.test(button.textContent)));
+assert(!allButtons.some(button => button.textContent === '全消去'));
 const upper = allButtons.find(button => button.textContent === '大文字'); upper.listeners.click();
 assert(allButtons.some(button => button.textContent === 'S'));
 __logicalTest.logicalKeyboard.insert('A'); __logicalTest.logicalKeyboard.backspace();
 assert.equal(first.value, 'sen66-001');
-__logicalTest.logicalKeyboard.clear(); assert.equal(first.value, '');
 for (let index = 0; index < 50; index += 1) __logicalTest.logicalKeyboard.insert('x');
-assert.equal(first.value.length, 48); confirm.listeners.click(); assert(overlay.hidden);
+assert.equal(first.value.length, 48); confirm.listeners.click(); assert(overlay.hidden && first.value.length === 48);
+__logicalTest.openLogicalKeyboard(first); __logicalTest.logicalKeyboard.backspace(); cancel.listeners.click(); assert.equal(first.value.length, 48);
 const second = input('000000000002'); current = [second]; __logicalTest.openLogicalKeyboard(second); __logicalTest.logicalKeyboard.insert('s');
 const replacement = input('000000000002', second.value); current = [replacement]; __logicalTest.logicalKeyboard.refresh(); __logicalTest.logicalKeyboard.insert('e');
 assert.equal(second.value, 's'); assert.equal(replacement.value, 'se');

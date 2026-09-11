@@ -8,6 +8,7 @@ const logicalKeyboard = window.createSoftwareKeyboard?.({
 }, {
   keyRows: state => LOGICAL_ID_KEY_ROWS.map(row => row.map(key => /[a-z]/.test(key) && state.uppercase ? key.toUpperCase() : key)),
   extraActions: state => [[state.uppercase ? "小文字" : "大文字", () => { state.uppercase = !state.uppercase; logicalKeyboard.refresh(); }]],
+  showClear: false,
   keyAllowed: key => /^[A-Za-z0-9_-]$/.test(key)
 });
 function logicalInputForNode(nodeId) { return [...nodes.querySelectorAll(".node-logical-id")].find(input => input.dataset.nodeId === nodeId) || null; }

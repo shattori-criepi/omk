@@ -46,6 +46,8 @@ window.createSoftwareKeyboard = function createSoftwareKeyboard(elements, option
     for (const [rowIndex, row] of rows.entries()) {
       const rowElement = document.createElement("div");
       rowElement.className = "broute-keyboard-row";
+      const controls = rowIndex === rows.length - 1 ? [...(options.extraActions?.(state) || []), ["⌫", backspace, "broute-keyboard-backspace"], ...(options.showClear === false ? [] : [["全消去", clear, "broute-keyboard-clear"]])] : [];
+      rowElement.style?.setProperty("--key-count", String(row.length + controls.length));
       for (const key of row) {
         const button = document.createElement("button");
         button.type = "button";
@@ -54,7 +56,7 @@ window.createSoftwareKeyboard = function createSoftwareKeyboard(elements, option
         rowElement.append(button);
       }
       if (rowIndex === rows.length - 1) {
-        for (const [label, action, className] of [...(options.extraActions?.(state) || []), ["⌫", backspace, "broute-keyboard-backspace"], ["全消去", clear, "broute-keyboard-clear"]]) {
+        for (const [label, action, className] of controls) {
           const button = document.createElement("button");
           button.type = "button"; button.className = className; button.textContent = label;
           button.addEventListener("click", action); rowElement.append(button);
