@@ -1,3 +1,4 @@
+import json
 import re
 import subprocess
 from pathlib import Path
@@ -16,6 +17,54 @@ def test_usb_setup_ui_contract_and_token_boundary():
     backend = (ROOT/'app/main.py').read_text()
     assert '"POST", "/api/nodes/usb-setup", await request.json()' in backend
     assert '"GET", "/api/nodes/usb-setup/status"' in backend
+
+
+def test_logical_id_keyboard_uses_shared_layout_and_node_targeting():
+    template = (ROOT/'app/templates/admin_sensors.html').read_text()
+    script = (ROOT/'app/static/admin.js').read_text()
+    keyboard = ROOT/'app/static/software_keyboard.js'
+    assert "software_keyboard.js" in template
+    assert "logical-id-keyboard-overlay" in template
+    assert "maxlength=\"48\"" in script and 'pattern="[A-Za-z0-9_-]+"' in script
+    assert 'nodes.addEventListener?.("focusin"' in script
+    logical = script[script.index('const LOGICAL_ID_KEY_ROWS'):script.index('function formatApiError')]
+    harness = r'''
+const assert = require('node:assert/strict'), fs = require('fs'), vm = require('vm');
+const allButtons = [];
+function element() { return {value: '', disabled: false, hidden: true, textContent: '', dataset: {}, children: [], listeners: {}, selectionStart: 0, selectionEnd: 0, addEventListener(type, listener) { this.listeners[type] = listener; }, append(child) { this.children.push(child); allButtons.push(child); }, setSelectionRange(start, end) { this.selectionStart = start; this.selectionEnd = end; }}; }
+const overlay = element(), title = element(), count = element(), value = element(), keys = element(), cancel = element(), confirm = element();
+const elements = {'#logical-id-keyboard-overlay': overlay, '#logical-id-keyboard-title': title, '#logical-id-keyboard-count': count, '#logical-id-keyboard-value': value, '#logical-id-keyboard-keys': keys, '#logical-id-keyboard-cancel': cancel, '#logical-id-keyboard-confirm': confirm};
+let current = [];
+const nodes = {listeners: {}, querySelectorAll(selector) { return selector === '.node-logical-id' ? current : []; }, addEventListener(type, listener) { this.listeners[type] = listener; }};
+global.window = globalThis;
+global.document = {querySelector: selector => elements[selector], createElement: () => element(), addEventListener() {}};
+vm.runInThisContext(fs.readFileSync(process.argv[1], 'utf8'));
+let usbProvisioningInProgress = false;
+''' + logical + r'''
+globalThis.__logicalTest = {logicalKeyboard, openLogicalKeyboard};
+function input(nodeId, initial = '') { const result = element(); result.value = initial; result.dataset.nodeId = nodeId; result.matches = selector => selector === '.node-logical-id'; return result; }
+const first = input('000000000001'); current = [first];
+__logicalTest.openLogicalKeyboard(first);
+assert.equal(overlay.hidden, false); assert.equal(title.textContent, 'Logical ID');
+for (const key of 'sen66-001') __logicalTest.logicalKeyboard.insert(key);
+assert.equal(first.value, 'sen66-001');
+assert(allButtons.filter(button => /^[A-Za-z0-9_-]$/.test(button.textContent)).every(button => /^[A-Za-z0-9_-]$/.test(button.textContent)));
+const upper = allButtons.find(button => button.textContent === '大文字'); upper.listeners.click();
+assert(allButtons.some(button => button.textContent === 'S'));
+__logicalTest.logicalKeyboard.insert('A'); __logicalTest.logicalKeyboard.backspace();
+assert.equal(first.value, 'sen66-001');
+__logicalTest.logicalKeyboard.clear(); assert.equal(first.value, '');
+for (let index = 0; index < 50; index += 1) __logicalTest.logicalKeyboard.insert('x');
+assert.equal(first.value.length, 48); confirm.listeners.click(); assert(overlay.hidden);
+const second = input('000000000002'); current = [second]; __logicalTest.openLogicalKeyboard(second); __logicalTest.logicalKeyboard.insert('s');
+const replacement = input('000000000002', second.value); current = [replacement]; __logicalTest.logicalKeyboard.refresh(); __logicalTest.logicalKeyboard.insert('e');
+assert.equal(second.value, 's'); assert.equal(replacement.value, 'se');
+const blocked = input('000000000003'); current = [blocked]; usbProvisioningInProgress = true; __logicalTest.openLogicalKeyboard(blocked); assert(overlay.hidden);
+const physical = input('000000000004', 'manual-id'); assert.equal(physical.value, 'manual-id');
+console.log(JSON.stringify({ok: true}));
+'''
+    completed = subprocess.run(['node', '-e', harness, str(keyboard)], check=True, capture_output=True, text=True)
+    assert json.loads(completed.stdout) == {"ok": True}
 
 
 def test_cards_and_explicit_new_node_confirmation():

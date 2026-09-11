@@ -2310,12 +2310,14 @@ def test_broute_layout_uses_wide_grid_rows_with_narrow_screen_fallback() -> None
 @pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is required for browser formatter tests")
 def test_broute_browser_formatter_groups_normalizes_and_submits_unformatted_values() -> None:
     javascript_path = Path(__file__).parents[1] / "app" / "static" / "broute.js"
+    keyboard_path = Path(__file__).parents[1] / "app" / "static" / "software_keyboard.js"
     harness = r'''
 const fs = require("fs"), vm = require("vm");
 const elements = {}, documentListeners = {};
 function element() { return { value: "", selectionStart: 0, disabled: false, className: "", textContent: "", hidden: false, children: [], listeners: {}, addEventListener(type, listener) { this.listeners[type] = listener; }, append(child) { this.children.push(child); }, setAttribute() {}, setSelectionRange(position) { this.selectionStart = position; }, reset() { elements["#broute-id"].value = ""; elements["#broute-password"].value = ""; } }; }
 for (const selector of ["#broute-form", "#broute-id", "#broute-password", "#broute-save", "#broute-retry", "#broute-message", "#broute-connection", "#broute-id-masked", "#broute-password-configured", "#broute-keyboard-overlay", "#broute-keyboard-title", "#broute-keyboard-count", "#broute-keyboard-value", "#broute-keyboard-keys", "#broute-keyboard-cancel", "#broute-keyboard-confirm"]) elements[selector] = element();
 elements["#broute-keyboard-overlay"].hidden = true;
+global.window = globalThis;
 global.document = { querySelector: (selector) => elements[selector], createElement: () => element(), addEventListener(type, listener) { documentListeners[type] = listener; } };
 const requests = [];
 let response = { status: 200, detail: { configured: true, id_masked: "0000************************4CEF", password_configured: true, service_active: true, connection_state: "starting" } }, scheduledDelay = null;
@@ -2324,7 +2326,8 @@ Date.now = () => currentNow;
 global.setTimeout = (_callback, delay) => { scheduledDelay = delay; return 1; };
 global.clearTimeout = () => {};
 global.fetch = async (url, options = {}) => { requests.push({url, options}); return { status: response.status, ok: response.status < 400, json: async () => response.detail }; };
-vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8") + "\nglobalThis.__brouteTest = {formatToken, unformatToken, validToken, appendKeyboardKey, backspaceKeyboardKey, showStatus, stateMessage, pollStatus, loadStatus};");
+vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8"));
+vm.runInThisContext(fs.readFileSync(process.argv[2], "utf8") + "\nglobalThis.__brouteTest = {formatToken, unformatToken, validToken, appendKeyboardKey, backspaceKeyboardKey, showStatus, stateMessage, pollStatus, loadStatus};");
 (async () => {
   const id = "123456789ABCDEF0123456789ABCDEF0", password = "123456789ABC";
   const identifier = elements["#broute-id"], passInput = elements["#broute-password"], overlay = elements["#broute-keyboard-overlay"];
@@ -2428,7 +2431,7 @@ vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8") + "\nglobalThis.__b
 })();
 '''
     completed = subprocess.run(
-        ["node", "-e", harness, str(javascript_path)],
+        ["node", "-e", harness, str(keyboard_path), str(javascript_path)],
         check=True,
         capture_output=True,
         text=True,
