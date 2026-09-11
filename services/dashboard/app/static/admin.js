@@ -42,7 +42,7 @@ function usbSetupControls(candidate) {
     if (candidate.kind === "recovery_required") return "<p>復旧が必要です。保存済みcredentialがあるため初回書込みを停止しました。</p>";
     const unconfirmed = candidate.kind === "unconfirmed_esp32s3";
     const deviceAttribute = String(candidate.device).replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
-    return `${unconfirmed ? '<p>USB接続されたNode候補：ESP32-S3を検出 · OMK firmware未確認</p><label><input type="checkbox" class="confirm-atom">接続した機器が未セットアップのAtomS3 Liteであることを確認しました</label>' : ''}<p>毎回、Gatewayに配置済みのfirmwareを書き込み、Wi-Fiを設定します。</p><button class="provision-usb-node" data-device="${deviceAttribute}" data-node-id="${text(candidate.node_id)}" data-unconfirmed="${unconfirmed}" ${usbProvisioningInProgress ? "disabled" : ""}>OMK Nodeをセットアップ</button>`;
+    return `${unconfirmed ? '<p>USB接続されたNode候補：ESP32-S3を検出 · OMK firmware未確認</p><label><input type="checkbox" class="confirm-atom">接続した機器が未セットアップのAtomS3 Liteであることを確認しました</label>' : ''}<p>毎回、Gatewayに配置済みのfirmwareを書き込み、Wi-Fiを設定します。</p><button class="provision-usb-node" data-device="${deviceAttribute}" data-node-id="${text(candidate.node_id)}" data-unconfirmed="${unconfirmed}" ${usbProvisioningInProgress ? "disabled" : ""}>${usbProvisioningInProgress ? "セットアップ中…" : "OMK Nodeをセットアップ"}</button>`;
 }
 function saveNodeInputState() { const saved = {}; nodes.querySelectorAll(".node-logical-id").forEach(input => { saved[input.dataset.nodeId] = {value: input.value, focused: document.activeElement === input, selectionStart: input.selectionStart, selectionEnd: input.selectionEnd}; }); return saved; }
 function restoreNodeInputState(saved) { Object.entries(saved).forEach(([nodeId, state]) => { const input = nodes.querySelector(`.node-logical-id[data-node-id="${nodeId}"]`); if (!input) return; input.value = state.value; if (state.focused) { input.focus(); if (state.selectionStart != null && state.selectionEnd != null) input.setSelectionRange(state.selectionStart, state.selectionEnd); } }); }
@@ -120,7 +120,8 @@ async function submitUsbProvision(button) {
     }
     usbProvisioningInProgress = true;
     button.disabled = true;
-    button.textContent = "設定中…";
+    button.textContent = "セットアップ中…";
+    renderNodes();
     clearTimeout(usbSetupPoll);
     let submissionFailed = false;
     try {
