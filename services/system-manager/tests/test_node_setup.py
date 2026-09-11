@@ -109,6 +109,21 @@ def test_existing_missing_credential_writes_only_three_segments(package, tmp_pat
     assert not (tmp_path/'store').exists()
 
 
+def test_setup_uses_long_fresh_registration_wait(package, tmp_path, hardware, monkeypatch):
+    waited = []
+
+    def wait_for_registration(node_id, **kwargs):
+        waited.append((node_id, kwargs))
+
+    monkeypatch.setattr(setup.usb, 'wait_for_registration_status', wait_for_registration)
+    execute(package, tmp_path)
+    assert waited == [(
+        NODE,
+        {'timeout': setup.MQTT_REGISTRATION_TIMEOUT_SECONDS, 'fresh': True},
+    )]
+    assert setup.MQTT_REGISTRATION_TIMEOUT_SECONDS == 180
+
+
 def test_existing_credential_is_unchanged(package, tmp_path, hardware):
     credential = tmp_path/'store/nodes'/f'{NODE}.json'; credential.parent.mkdir(parents=True)
     credential.write_text('preserve-existing-secret')
@@ -269,8 +284,22 @@ def test_registration_wait_ignores_retained_and_handles_timeout(monkeypatch):
         def communicate(self, **kwargs): return ('', '')
     monkeypatch.setattr(setup.subprocess, 'Popen', lambda command, **kw: commands.append(command) or Process())
     with pytest.raises(ProvisioningError, match='mqtt_registration_timeout'):
-        setup.usb.wait_for_registration_status(NODE, fresh=True)
+        setup.usb.wait_for_registration_status(NODE, timeout=180, fresh=True)
     assert '-R' in commands[0] and commands[0][-1] == f'omk/node/{NODE}/registration/status'
+    assert commands[0][commands[0].index('-W') + 1] == '180'
+
+
+def test_registration_wait_accepts_fresh_matching_status(monkeypatch):
+    class Process:
+        returncode = 0
+
+        def communicate(self, **kwargs):
+            return (json.dumps({'node_id': NODE, 'registration_state': 'provisioned'}), '')
+
+    command = []
+    monkeypatch.setattr(setup.subprocess, 'Popen', lambda args, **kwargs: command.extend(args) or Process())
+    setup.usb.wait_for_registration_status(NODE, timeout=180, fresh=True)
+    assert '-R' in command and command[command.index('-W') + 1] == '180'
 
 
 def test_write_boundary_inspection_keeps_bootloader_alive(monkeypatch):

@@ -36,13 +36,16 @@ const renderNodes = () => {};
 ''' + rendering + submit + r'''
 const candidate = {device: '/dev/ttyACM0', node_id: '000000000001', kind: 'omk_node', wifi_configured: true};
 usbCandidatesByNodeId.set(candidate.node_id, candidate);
-let card = nodeCard({node_id: candidate.node_id, registration_state: 'registered', logical_id: 'sen66-001'});
+let card = nodeCard({node_id: candidate.node_id, registration_state: 'registered', logical_id: 'sen66-001', capabilities: ['ble_scan', 'sen66']});
 assert(card.includes('OMK Nodeをセットアップ'));
-assert(card.includes('毎回'));
+assert(card.includes('Gatewayに配置済みのfirmwareを書き込み、Wi-Fiを設定します。'));
+assert(!card.includes('毎回、Gatewayに配置済み'));
+assert(card.includes('対応機能: BLE relay対応 · SEN66対応'));
 assert(card.includes('sen66-001'));
 candidate.kind = 'unconfirmed_esp32s3';
 card = nodeCard(candidate);
 assert(card.includes('ESP32-S3を検出') && card.includes('class="confirm-atom"'));
+assert(card.includes('対応機能: セットアップ後に確認'));
 const button = {disabled: false, dataset: {device: candidate.device, nodeId: candidate.node_id, unconfirmed: 'true'}, closest: () => ({querySelector: () => ({checked: false})})};
 (async () => {
  await submitUsbProvision(button);
