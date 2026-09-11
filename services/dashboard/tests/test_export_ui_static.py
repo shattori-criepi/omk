@@ -53,4 +53,5 @@ def test_usb_export_ui_static_contract() -> None:
     export_scroll_css = css[css.index("/* The export page is a scrollable admin document"):]
     assert "\n  height: 100dvh;" not in export_scroll_css
     assert "<details class=\"export-help\">" in template
-    assert "20260902-export-touch-6" in template
+    assert "/static/display.css?v=20260902-export-touch-6" in template
+    assert "/static/export.js?v=20260911-usb-identity-1" in template
