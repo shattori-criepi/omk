@@ -62,6 +62,38 @@ const button = {disabled: false, dataset: {device: candidate.device, nodeId: can
     subprocess.run(['node', '-e', javascript], check=True, capture_output=True, text=True)
 
 
+def test_atom_confirmation_is_preserved_and_locked_while_setup_runs():
+    script = (ROOT/'app/static/admin.js').read_text()
+    controls = script[script.index('function usbSetupControls'):script.index('function validLogicalId')]
+    harness = r'''
+const assert = require('node:assert/strict');
+const text = value => String(value ?? '—');
+let usbProvisioningInProgress = false;
+const logicalInputs = [];
+const oldConfirmation = {checked: true, dataset: {nodeId: '000000000001'}};
+const newConfirmation = {checked: false, disabled: true, dataset: {nodeId: '000000000001'}};
+const nodes = {
+  querySelectorAll(selector) { return selector === '.confirm-atom' ? [oldConfirmation] : logicalInputs; },
+  querySelector(selector) { return selector.startsWith('.confirm-atom') ? newConfirmation : null; },
+};
+global.document = {activeElement: null};
+''' + controls + r'''
+const candidate = {device: '/dev/ttyACM0', node_id: '000000000001', kind: 'unconfirmed_esp32s3'};
+const saved = saveNodeInputState();
+assert.equal(saved[candidate.node_id].confirmAtom, true);
+usbProvisioningInProgress = true;
+restoreNodeInputState(saved);
+const controlsDuringSetup = usbSetupControls(candidate);
+assert.equal(newConfirmation.checked, true);
+assert(controlsDuringSetup.includes('class="confirm-atom" data-node-id="000000000001" disabled'));
+assert(controlsDuringSetup.includes('セットアップ中…'));
+assert(controlsDuringSetup.includes('data-unconfirmed="true" disabled'));
+usbProvisioningInProgress = false;
+assert(!usbSetupControls(candidate).includes('class="confirm-atom" data-node-id="000000000001" disabled'));
+'''
+    subprocess.run(['node', '-e', harness], check=True, capture_output=True, text=True, timeout=10)
+
+
 def test_job_error_is_translated_without_echoing_untrusted_text():
     script = (ROOT/'app/static/admin.js').read_text()
     polling = script[script.index('const usbSetupStages'):script.index('async function submitUsbProvision')]
@@ -145,6 +177,7 @@ const newButton = {disabled: false, textContent: '', dataset: {device: newNode.d
   assert.equal(existingButton.textContent, 'セットアップ中…');
   assert(usbSetupControls(existing).includes('disabled') && usbSetupControls(existing).includes('セットアップ中…'));
   assert(usbSetupControls(newNode).includes('disabled') && usbSetupControls(newNode).includes('セットアップ中…'));
+  assert(usbSetupControls(newNode).includes('class="confirm-atom" data-node-id="000000000002" disabled'));
   await submitUsbProvision(existingButton);
   await submitUsbProvision(newButton);
   assert.equal(posts, 1);
