@@ -46,6 +46,8 @@ candidate.kind = 'unconfirmed_esp32s3';
 card = nodeCard(candidate);
 assert(card.includes('ESP32-S3を検出') && card.includes('class="confirm-atom"'));
 assert(card.includes('対応機能: セットアップ後に確認'));
+assert(card.includes('接続センサ: セットアップ後に確認'));
+assert(!card.includes('node-logical-id'));
 const button = {disabled: false, dataset: {device: candidate.device, nodeId: candidate.node_id, unconfirmed: 'true'}, closest: () => ({querySelector: () => ({checked: false})})};
 (async () => {
  await submitUsbProvision(button);
@@ -252,6 +254,7 @@ const newCandidate = {node_id: '000000000001', kind: 'unconfirmed_esp32s3', wifi
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(renders.length, 1);
   assert(nodes.innerHTML.includes('Wi-Fi: 確認中'));
+  assert(nodes.innerHTML.includes('接続センサ: 未検出'));
   assert(nodes.innerHTML.includes('Node ID: 3df94c3f187e'));
   assert(nodes.innerHTML.includes('Wi-Fi: Wi-Fi設定済み'));
   usbRequest.resolve({nodes: [blank, newCandidate]});
@@ -272,6 +275,17 @@ const newCandidate = {node_id: '000000000001', kind: 'unconfirmed_esp32s3', wifi
   pollUsbRequest.resolve({nodes: [blank]});
   await pollRefresh;
   assert(!nodes.innerHTML.includes('Node ID: 000000000001'));
+
+  // The next normal poll changes the completed Node from no sensor to detected SEN66 without re-setup.
+  const detectedRefresh = loadNodes();
+  const [detectedNodeRequest, detectedUsbRequest] = pending.splice(0);
+  detectedNodeRequest.resolve({nodes: [{...oldNode, online: true, attached_sensors: ['SEN66']}, onlineNode]});
+  detectedUsbRequest.resolve({nodes: []});
+  await detectedRefresh;
+  assert(nodes.innerHTML.includes('接続センサ: SEN66（検出済み）'));
+  assert(nodes.innerHTML.includes('SEN66を登録'));
+
+  usbCandidatesByNodeId = new Map([[oldNode.node_id, blank]]);
   usbProvisioningInProgress = true;
   let setupRefresh = loadNodes();
   assert.equal(pending.length, 1);
