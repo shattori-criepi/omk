@@ -14,6 +14,8 @@ const USB_MESSAGES = {
   not_present: "USBメモリが見つかりません",
   ambiguous: "USBメモリを1つだけ接続してください",
   unsupported_filesystem: "FAT32 または exFAT のUSBメモリを接続してください",
+  identity_unavailable: "USBメモリを確認できません。別のUSBメモリを接続してください",
+  usb_changed: "USBメモリが変更されました。接続を確認してもう一度実行してください",
   mount_not_writable: "USBメモリへ書き込めません",
   busy: "USBメモリを使用できません",
   export_failed: "書き出しに失敗しました",
@@ -129,7 +131,7 @@ function renderExportState(exportState, usb) {
 
 function updateControls() {
   const running = lastExport?.state === "running";
-  const usbAvailable = ["available", "mounted"].includes(lastUsb?.state);
+  const usbAvailable = ["available", "mounted"].includes(lastUsb?.state) && Boolean(lastUsb?.identity);
   const unsafeToRemove = isUnmountBlocked(lastExport, lastUsb);
   actionButton.disabled = running || !usbAvailable || unsafeToRemove || selectedDatasetNames().length === 0;
 
@@ -253,12 +255,16 @@ form.addEventListener("submit", async (event) => {
     const response = await fetch("/api/export/usb", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ from: selectedFrom, to: selectedTo, datasets: selected }),
+    body: JSON.stringify({ from: selectedFrom, to: selectedTo, datasets: selected, expected_identity: lastUsb.identity }),
     });
-    if (!response.ok) throw new Error("export request failed");
+    if (!response.ok) {
+      let detail;
+      try { detail = await response.json(); } catch (_) { detail = null; }
+      throw new Error(response.status === 409 && detail?.detail === "usb_changed" ? "usb_changed" : "export_failed");
+    }
     await refresh();
-  } catch (_) {
-    lastExport = { state: "failed", error_code: "export_failed" };
+  } catch (error) {
+    lastExport = { state: "failed", error_code: error?.message === "usb_changed" ? "usb_changed" : "export_failed" };
     renderExportState(lastExport, lastUsb);
     updateControls();
   }

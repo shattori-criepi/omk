@@ -35,19 +35,21 @@ class UsbExportController:
             return {"state": "error"}
         try:
             data = json.loads(result.stdout)
-            return {key: data.get(key) for key in ("state", "device", "filesystem", "label", "size", "free_space", "mount_state")}
+            return {key: data.get(key) for key in ("state", "device", "filesystem", "label", "size", "free_space", "mount_state", "identity")}
         except (ValueError, TypeError):
             return {"state": "error"}
 
-    def start(self, from_date: str, to_date: str, datasets: list[str]) -> bool:
+    def start(self, from_date: str, to_date: str, datasets: list[str], expected_identity: str) -> bool:
         with self.lock:
             if self.job.state == "running": return False
+            if self.status().get("identity") != expected_identity:
+                raise ValueError("usb_changed")
             self.job = UsbExportJob("running", datetime.now(JST).isoformat())
-            threading.Thread(target=self._run, args=(from_date, to_date, datasets), daemon=True).start()
+            threading.Thread(target=self._run, args=(from_date, to_date, datasets, expected_identity), daemon=True).start()
             return True
 
-    def _run(self, from_date: str, to_date: str, datasets: list[str]) -> None:
-        args = [self.command, "--from", from_date, "--to", to_date]
+    def _run(self, from_date: str, to_date: str, datasets: list[str], expected_identity: str) -> None:
+        args = [self.command, "--from", from_date, "--to", to_date, "--expected-identity", expected_identity]
         for dataset in datasets: args += ["--dataset", dataset]
         try:
             result = subprocess.run(args, capture_output=True, text=True, check=False, shell=False, timeout=None)
@@ -65,5 +67,5 @@ class UsbExportController:
                 LOGGER.warning("USB export failed: export_failed")
 
 def _safe_error_code(stderr: str) -> str:
-    known = {"not_present", "ambiguous", "unsupported_filesystem", "busy", "mount_not_writable", "export_failed", "sync_failed", "unmount_failed"}
+    known = {"not_present", "ambiguous", "unsupported_filesystem", "identity_unavailable", "usb_changed", "busy", "mount_not_writable", "export_failed", "sync_failed", "unmount_failed"}
     return next((code for code in known if code in stderr), "export_failed")

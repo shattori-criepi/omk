@@ -23,6 +23,7 @@ def main() -> None:
     parser.add_argument("--from", dest="from_date", type=_date, metavar="YYYY-MM-DD")
     parser.add_argument("--to", dest="to_date", type=_date, metavar="YYYY-MM-DD")
     parser.add_argument("--dataset", action="append")
+    parser.add_argument("--expected-identity", metavar="TOKEN", help=argparse.SUPPRESS)
     parser.add_argument("--processed-root", type=Path, default=Path("data/processed"), help=argparse.SUPPRESS)
     args = parser.parse_args()
     locator = UsbLocator()
@@ -36,7 +37,7 @@ def main() -> None:
             parser.error("--from と --to を指定してください。")
         service = UsbExportService(args.processed_root, locator,
                                    privileged_helper(Path("/usr/local/libexec/omk-export-usb-helper")))
-        result = service.export(args.from_date, args.to_date, args.dataset)
+        result = service.export(args.from_date, args.to_date, args.dataset, args.expected_identity)
         print(result.path)
     except (UsbExportError, ExportError) as error:
         print(f"ERROR: {error.code}: {error}", file=sys.stderr)

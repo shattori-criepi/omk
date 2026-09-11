@@ -86,6 +86,36 @@ def test_token_is_required_and_checked(tmp_path: Path) -> None:
         assert client.get("/api/broute/credentials/status", headers={"Authorization": "Bearer wrong"}).status_code == 401
 
 
+def test_usb_export_requires_the_status_identity(tmp_path: Path) -> None:
+    class UsbExportStub:
+        def __init__(self) -> None:
+            self.job = type("Job", (), {"public": lambda _: {"state": "idle"}})()
+            self.started: list[tuple[str, str, list[str], str]] = []
+
+        def status(self) -> dict[str, str]:
+            return {"state": "available", "identity": "a" * 64}
+
+        def start(self, from_date: str, to_date: str, datasets: list[str], identity: str) -> bool:
+            if identity != "a" * 64:
+                raise ValueError("usb_changed")
+            self.started.append((from_date, to_date, datasets, identity))
+            return True
+
+    with client_for(tmp_path) as client:
+        stub = UsbExportStub()
+        client.app.state.usb_export = stub
+        status = client.get("/api/export/usb/status", headers=headers())
+        changed = client.post("/api/export/usb", headers=headers(), json={
+            "from": "2026-08-01", "to": "2026-08-01", "datasets": ["sen66"], "expected_identity": "b" * 64,
+        })
+        accepted = client.post("/api/export/usb", headers=headers(), json={
+            "from": "2026-08-01", "to": "2026-08-01", "datasets": ["sen66"], "expected_identity": "a" * 64,
+        })
+    assert status.json()["usb"]["identity"] == "a" * 64
+    assert changed.status_code == 409 and changed.json()["detail"] == "usb_changed"
+    assert accepted.status_code == 202 and stub.started[-1][-1] == "a" * 64
+
+
 def test_access_point_apis_require_token_and_only_return_password_on_reveal(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

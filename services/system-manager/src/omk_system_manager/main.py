@@ -108,6 +108,7 @@ class UsbExportRequest(BaseModel):
     from_: str = Field(alias="from")
     to: str
     datasets: list[str]
+    expected_identity: str = Field(pattern=r"^[0-9a-f]{64}$")
 
     @classmethod
     def validate_request(cls, body: "UsbExportRequest") -> None:
@@ -306,7 +307,11 @@ def create_app(
         except ValueError as error:
             raise HTTPException(400, detail=str(error)) from None
         controller: UsbExportController = request.app.state.usb_export
-        if not controller.start(body.from_, body.to, body.datasets):
+        try:
+            accepted = controller.start(body.from_, body.to, body.datasets, body.expected_identity)
+        except ValueError:
+            raise HTTPException(409, detail="usb_changed") from None
+        if not accepted:
             raise HTTPException(409, detail="export_running")
         return {"accepted": True}
 

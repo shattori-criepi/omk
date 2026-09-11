@@ -1,6 +1,8 @@
 #!/usr/bin/python3
 """Root-only, fixed-action USB mount helper installed by setup-data-exporter."""
 import json
+import hashlib
+import re
 import subprocess
 import sys
 
@@ -16,28 +18,38 @@ def host_run(command, **kwargs):
     return subprocess.run([NSENTER, f"--mount={HOST_MOUNT_NAMESPACE}", "--", *command], **kwargs)
 
 
-def candidate():
-    result = host_run(["lsblk", "--json", "--bytes", "-o", "NAME,PATH,TYPE,TRAN,FSTYPE,MOUNTPOINT"], capture_output=True, text=True, check=False)
+def identity_token(serial, wwn, uuid, partuuid):
+    canonical = "|".join(f"{name}={value}" for name, value in (
+        ("serial", serial), ("wwn", wwn), ("uuid", uuid), ("partuuid", partuuid),
+    ) if value)
+    return hashlib.sha256(canonical.encode()).hexdigest() if canonical else None
+
+
+def candidate(expected_identity):
+    result = host_run(["lsblk", "--json", "--bytes", "-o", "NAME,PATH,TYPE,TRAN,FSTYPE,MOUNTPOINT,SERIAL,WWN,UUID,PARTUUID"], capture_output=True, text=True, check=False)
     if result.returncode:
         raise RuntimeError("lsblk_failed")
     found = []
-    def visit(nodes, inherited=None):
+    def visit(nodes, inherited=None, parent_serial=None, parent_wwn=None):
         for node in nodes:
             transport = node.get("tran") or inherited
+            serial = node.get("serial") or parent_serial
+            wwn = node.get("wwn") or parent_wwn
             filesystem = (node.get("fstype") or "").lower()
             if transport == "usb" and filesystem in {"vfat", "exfat"} and node.get("path") and node.get("mountpoint") != "/":
+                node["_omk_identity"] = identity_token(serial, wwn, node.get("uuid"), node.get("partuuid"))
                 found.append(node)
-            visit(node.get("children") or [], transport)
+            visit(node.get("children") or [], transport, serial, wwn)
     visit(json.loads(result.stdout).get("blockdevices", []))
-    if len(found) != 1:
-        raise RuntimeError("usb_not_single_supported_candidate")
+    if len(found) != 1 or found[0].get("_omk_identity") != expected_identity:
+        raise RuntimeError("usb_changed")
     return found[0]
 
 
 def main():
-    if len(sys.argv) != 2 or sys.argv[1] not in {"mount", "unmount"}:
+    if len(sys.argv) != 3 or sys.argv[1] not in {"mount", "unmount"} or not re.fullmatch(r"[0-9a-f]{64}", sys.argv[2]):
         raise SystemExit("fixed action required")
-    device = candidate()
+    device = candidate(sys.argv[2])
     if sys.argv[1] == "mount":
         if device.get("mountpoint"):
             raise SystemExit("device_already_mounted")

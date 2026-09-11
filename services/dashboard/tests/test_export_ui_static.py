@@ -35,6 +35,10 @@ def test_usb_export_ui_static_contract() -> None:
     assert 'usb?.mount_state === "mounted"' in script
     assert 'exportState?.error_code === "unmount_failed"' in script
     assert 'lastExport = { state: "running" }' in script
+    assert "expected_identity: lastUsb.identity" in script
+    assert "USBメモリが変更されました。接続を確認してもう一度実行してください" in script
+    assert 'response.status === 409 && detail?.detail === "usb_changed"' in script
+    assert 'error?.message === "usb_changed" ? "usb_changed" : "export_failed"' in script
     assert "await refresh();" in script and "window.setInterval(refresh, 3000)" in script
     assert "過去7日" in template and "過去30日" in template and "今月" in template
     assert "export-datasets" in template
