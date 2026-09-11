@@ -131,32 +131,66 @@ def physical_usb_devices() -> list[tuple[str, str]]:
     return sorted(groups, key=lambda group: device_priority(group[0]))
 
 
+def _write_until(fd: int, data: bytes, deadline: float) -> None:
+    """Queue the entire request on a nonblocking fd within the shared deadline."""
+    pending = memoryview(data)
+    while pending:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("OMK USB provisioning write timeout")
+        _, writable, _ = select.select([], [fd], [], remaining)
+        if not writable:
+            continue
+        if time.monotonic() >= deadline:
+            raise TimeoutError("OMK USB provisioning write timeout")
+        try:
+            written = os.write(fd, pending)
+        except BlockingIOError:
+            continue
+        if written == 0:
+            raise OSError("OMK USB provisioning write made no progress")
+        pending = pending[written:]
+
+
 class SerialJson:
-    def __init__(self, device: str) -> None:
+    def __init__(self, device: str, *, deadline: float | None = None) -> None:
         self.device = device
         self.fd = os.open(device, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
-        attributes = termios.tcgetattr(self.fd)
-        attributes[0] = attributes[1] = attributes[3] = 0
-        attributes[2] |= termios.CLOCAL | termios.CREAD
-        attributes[4] = attributes[5] = termios.B115200
-        attributes[6][termios.VMIN] = attributes[6][termios.VTIME] = 0
-        termios.tcsetattr(self.fd, termios.TCSANOW, attributes)
-        time.sleep(SERIAL_SETTLE_SECONDS)
-        termios.tcflush(self.fd, termios.TCIFLUSH)
+        try:
+            attributes = termios.tcgetattr(self.fd)
+            attributes[0] = attributes[1] = attributes[3] = 0
+            attributes[2] |= termios.CLOCAL | termios.CREAD
+            attributes[4] = attributes[5] = termios.B115200
+            attributes[6][termios.VMIN] = attributes[6][termios.VTIME] = 0
+            termios.tcsetattr(self.fd, termios.TCSANOW, attributes)
+            settle = SERIAL_SETTLE_SECONDS
+            if deadline is not None:
+                settle = min(settle, max(0, deadline - time.monotonic()))
+            time.sleep(settle)
+            termios.tcflush(self.fd, termios.TCIFLUSH)
+        except BaseException:
+            os.close(self.fd)
+            raise
         self._buffer = b""
 
     def close(self) -> None:
         os.close(self.fd)
 
     def request(self, request: dict[str, object], timeout: float, matches: Callable[[dict[str, object]], bool]) -> dict[str, object]:
-        os.write(self.fd, (json.dumps(request, separators=(",", ":")) + "\n").encode())
-        termios.tcdrain(self.fd)
         deadline = time.monotonic() + timeout
+        data = (json.dumps(request, separators=(",", ":")) + "\n").encode()
+        _write_until(self.fd, data, deadline)
         while time.monotonic() < deadline:
             readable, _, _ = select.select([self.fd], [], [], max(0, deadline - time.monotonic()))
             if not readable:
                 continue
-            self._buffer += os.read(self.fd, 512)
+            try:
+                chunk = os.read(self.fd, 512)
+            except BlockingIOError:
+                continue
+            if not chunk:
+                raise OSError("OMK USB provisioning device disconnected")
+            self._buffer += chunk
             while b"\n" in self._buffer:
                 raw, self._buffer = self._buffer.split(b"\n", 1)
                 try:
@@ -171,9 +205,11 @@ class SerialJson:
 def identify(device: str, timeout: float = 10) -> dict[str, object] | None:
     deadline = time.monotonic() + timeout
     for attempt in range(IDENTIFY_ATTEMPTS):
+        if time.monotonic() >= deadline:
+            return None
         serial = None
         try:
-            serial = SerialJson(device)
+            serial = SerialJson(device, deadline=deadline)
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 return None
@@ -186,10 +222,10 @@ def identify(device: str, timeout: float = 10) -> dict[str, object] | None:
         except (OSError, termios.error, TimeoutError):
             if attempt + 1 == IDENTIFY_ATTEMPTS or time.monotonic() >= deadline:
                 return None
-            time.sleep(min(IDENTIFY_RETRY_SECONDS, max(0, deadline - time.monotonic())))
         finally:
             if serial is not None:
                 serial.close()
+        time.sleep(min(IDENTIFY_RETRY_SECONDS, max(0, deadline - time.monotonic())))
     return None
 
 

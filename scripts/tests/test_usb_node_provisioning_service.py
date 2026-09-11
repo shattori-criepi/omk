@@ -29,7 +29,7 @@ def test_usb_candidates_deduplicates_same_node_and_prefers_by_id(monkeypatch) ->
 def test_identify_retries_after_initial_timeout(monkeypatch) -> None:
     attempts = []
     class FakeSerial:
-        def __init__(self, _device): attempts.append("open")
+        def __init__(self, _device, **_kwargs): attempts.append("open")
         def request(self, *_args):
             if len(attempts) == 1: raise TimeoutError()
             return {"status": "ok", "protocol_version": 2, "node_id": NODE_ID}
@@ -212,7 +212,7 @@ def test_legacy_nodes_are_counted_in_inventory_but_never_provisioned(monkeypatch
     monkeypatch.setattr(MODULE, "physical_usb_devices", lambda: ports)
     writes = []
     class Serial:
-        def __init__(self, device): self.legacy = device.endswith("0")
+        def __init__(self, device, **_kwargs): self.legacy = device.endswith("0")
         def request(self, request, timeout, matches):
             writes.append(request)
             version = 1 if self.legacy else 2

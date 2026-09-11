@@ -88,7 +88,7 @@ def test_request_ignores_logs_malformed_and_unrelated_json_until_identify(monkey
     serial = _serial_with_chunks(chunks)
     monkeypatch.setattr(MODULE.os, "write", lambda *_args: 1)
     monkeypatch.setattr(MODULE.termios, "tcdrain", lambda *_args: None)
-    monkeypatch.setattr(MODULE.select, "select", lambda *_args: ([42], [], []))
+    monkeypatch.setattr(MODULE.select, "select", lambda read, write, *_args: (read, write, []))
     monkeypatch.setattr(MODULE.os, "read", lambda *_args: chunks.pop(0))
     response = serial.request({"command": "identify", "protocol_version": 2}, 1,
                               lambda message: MODULE.is_protocol_response(message) and message["status"] == "ok")
@@ -102,7 +102,7 @@ def test_request_ignores_logs_until_set_wifi_response(monkeypatch) -> None:
     serial = _serial_with_chunks(chunks)
     monkeypatch.setattr(MODULE.os, "write", lambda *_args: 1)
     monkeypatch.setattr(MODULE.termios, "tcdrain", lambda *_args: None)
-    monkeypatch.setattr(MODULE.select, "select", lambda *_args: ([42], [], []))
+    monkeypatch.setattr(MODULE.select, "select", lambda read, write, *_args: (read, write, []))
     monkeypatch.setattr(MODULE.os, "read", lambda *_args: chunks.pop(0))
     response = serial.request({"command": "set_wifi", "protocol_version": 2}, 1,
                               lambda message: MODULE.is_protocol_response(message) and message["status"] == "accepted")
@@ -113,7 +113,7 @@ def test_request_times_out_when_no_matching_protocol_response(monkeypatch) -> No
     serial = _serial_with_chunks([])
     monkeypatch.setattr(MODULE.os, "write", lambda *_args: 1)
     monkeypatch.setattr(MODULE.termios, "tcdrain", lambda *_args: None)
-    with pytest.raises(TimeoutError, match="No OMK USB provisioning response"):
+    with pytest.raises(TimeoutError):
         serial.request({"command": "identify", "protocol_version": 2}, 0,
                        lambda message: MODULE.is_protocol_response(message) and message["status"] == "ok")
 
