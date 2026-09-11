@@ -68,7 +68,7 @@ preflight() {
   [[ -f "${REQUIREMENTS}" ]] || PREFLIGHT_FAILURES+=("requirements.txt is missing: ${REQUIREMENTS}")
   [[ -f "${ENV_SOURCE}" ]] || PREFLIGHT_FAILURES+=(".env.example is missing: ${ENV_SOURCE}")
   [[ -d "${SERVICE_ROOT}/src" ]] || PREFLIGHT_FAILURES+=("Service source directory is missing: ${SERVICE_ROOT}/src")
-  for command_name in apt-get dpkg-query grep systemctl install mktemp sed cmp stat tee; do require_command "${command_name}"; done
+  for command_name in apt-get dpkg-query grep systemctl install mktemp sed cmp stat tee awk; do require_command "${command_name}"; done
   if ((EUID != 0)); then
     require_command sudo
   elif [[ "${TARGET_USER}" != root ]] && ! command -v runuser >/dev/null 2>&1 && ! command -v sudo >/dev/null 2>&1; then
@@ -222,6 +222,44 @@ ensure_environment_file() {
   ENV_CREATED=true
 }
 
+environment_has_legacy_ichjo_variables() {
+  grep -Eq '^[[:space:]]*ICHJO_[[:alnum:]_]*[[:space:]]*=' "${ENV_DESTINATION}"
+}
+
+environment_has_target_ip() {
+  awk '
+    /^[[:space:]]*ICHIJO_ECHONET_TARGET_IP[[:space:]]*=/ {
+      value = $0
+      sub(/^[^=]*=/, "", value)
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+      if (length(value) >= 2 &&
+          ((substr(value, 1, 1) == "\"" && substr(value, length(value), 1) == "\"") ||
+           (substr(value, 1, 1) == "\047" && substr(value, length(value), 1) == "\047"))) {
+        value = substr(value, 2, length(value) - 2)
+      }
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+      configured = length(value) > 0
+      found = 1
+    }
+    END { exit !(found && configured) }
+  ' "${ENV_DESTINATION}"
+}
+
+validate_environment_configuration() {
+  if environment_has_legacy_ichjo_variables; then
+    fail "Legacy ICHJO_* settings detected in ${ENV_DESTINATION}. Migrate them to ICHIJO_* and re-run setup."
+    return 1
+  fi
+  if ! environment_has_target_ip; then
+    if "${ENV_CREATED}"; then
+      fail "Set ICHIJO_ECHONET_TARGET_IP in ${ENV_DESTINATION} and re-run setup. The service was not enabled or started."
+    else
+      fail "ICHIJO_ECHONET_TARGET_IP must be set in ${ENV_DESTINATION}. The service was not enabled, started, or restarted."
+    fi
+    return 1
+  fi
+}
+
 install_unit() {
   local temporary="$1" comparison_status
   render_unit > "${temporary}"
@@ -338,11 +376,26 @@ if "${DRY_RUN}"; then
     log "Would create virtual environment as ${TARGET_USER}: ${VENV}"
   fi
   if [[ -f "${REQUIREMENTS}" ]]; then
-    log "Would install runtime dependencies after the virtual environment is available and restart an active service."
+    log "Would install runtime dependencies after the virtual environment is available; service operations depend on environment validation."
   else
     warn 'Skipping pip plan because requirements.txt is unavailable.'
   fi
-  if [[ -e "${ENV_DESTINATION}" ]]; then log "Would preserve existing environment file without reading it: ${ENV_DESTINATION}"; elif [[ -f "${ENV_SOURCE}" ]]; then log "Would create environment file from example with mode 0600: ${ENV_DESTINATION}"; else warn 'Skipping environment-file plan because .env.example is unavailable.'; fi
+  CONFIGURATION_READY=false
+  if [[ -e "${ENV_DESTINATION}" ]]; then
+    log "Would preserve existing environment file: ${ENV_DESTINATION}"
+    if [[ -f "${ENV_DESTINATION}" ]] && environment_has_legacy_ichjo_variables; then
+      warn "Would stop before systemd changes: migrate legacy ICHJO_* settings to ICHIJO_*."
+    elif [[ -f "${ENV_DESTINATION}" ]] && environment_has_target_ip; then
+      CONFIGURATION_READY=true
+    else
+      warn "Would not enable, start, or restart the service until ICHIJO_ECHONET_TARGET_IP is set."
+    fi
+  elif [[ -f "${ENV_SOURCE}" ]]; then
+    log "Would create environment file from example with mode 0600: ${ENV_DESTINATION}"
+    warn "Would not enable, start, or restart the service until ICHIJO_ECHONET_TARGET_IP is set and setup is re-run."
+  else
+    warn 'Skipping environment-file plan because .env.example is unavailable.'
+  fi
   if [[ -f "${SERVICE_TEMPLATE}" ]] && command -v sed >/dev/null 2>&1 && command -v cmp >/dev/null 2>&1; then
     if [[ ! -e "${SERVICE_DESTINATION}" ]]; then
       log "Would create systemd unit: ${SERVICE_DESTINATION}"
@@ -356,7 +409,11 @@ if "${DRY_RUN}"; then
         warn "Cannot compare existing systemd unit; it will not be classified as changed: ${SERVICE_DESTINATION}"
       fi
     fi
-    log "Would daemon-reload only if the unit changes, enable if needed, and start or restart according to service state."
+    if "${CONFIGURATION_READY}"; then
+      log "Would daemon-reload only if the unit changes, enable if needed, and start or restart according to service state."
+    else
+      log "Would not enable, start, restart, or otherwise change the service state."
+    fi
   else
     warn 'Skipping systemd unit comparison because the template, sed, or cmp is unavailable.'
   fi
@@ -371,6 +428,7 @@ log "Ichijo energy node setup started. Log file: ${LOG_FILE}"
 ensure_packages
 ensure_venv_and_dependencies
 ensure_environment_file
+validate_environment_configuration
 temporary_unit="$(mktemp)"
 trap 'rm -f -- "${temporary_unit}"' EXIT
 install_unit "${temporary_unit}"

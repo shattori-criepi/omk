@@ -36,12 +36,12 @@ class FakeSocket:
     def settimeout(self, value): self.timeout = value
     def bind(self, address): self.bound = address
     def sendto(self, data, address): self.request, self.target = data, address
-    def recvfrom(self, size): return self.packet, ("192.168.8.182", 3610)
+    def recvfrom(self, size): return self.packet, ("192.0.2.10", 3610)
 
 
 @pytest.mark.parametrize("packet", [response(tid=2), response(epc=0xE1), response(esv=0x52)])
 def test_client_rejects_mismatched_or_get_sna(packet):
-    client = EchonetClient("192.168.8.182", "192.168.8.150", timeout_seconds=1, retry_count=0,
+    client = EchonetClient("192.0.2.10", "192.0.2.20", timeout_seconds=1, retry_count=0,
                            socket_factory=lambda *_: FakeSocket(packet))
     with pytest.raises(EchonetError):
         client.get(bytes.fromhex("027901"), 0xE0)
@@ -49,7 +49,7 @@ def test_client_rejects_mismatched_or_get_sna(packet):
 
 def test_client_binds_3610_and_returns_edt():
     fake = FakeSocket(response())
-    client = EchonetClient("192.168.8.182", "192.168.8.150", timeout_seconds=1, retry_count=0,
+    client = EchonetClient("192.0.2.10", "192.0.2.20", timeout_seconds=1, retry_count=0,
                            socket_factory=lambda *_: fake)
     assert client.get(bytes.fromhex("027901"), 0xE0) == bytes.fromhex("06d1")
-    assert fake.bound == ("192.168.8.150", 3610)
+    assert fake.bound == ("192.0.2.20", 3610)

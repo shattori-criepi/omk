@@ -15,6 +15,9 @@ source <(sed -n '/^environment_mode_has_group_or_world_permissions()/,/^}$/p' "$
 source <(sed -n '/^plan_log_directory()/,/^}$/p' "${SCRIPT_PATH}")
 # shellcheck disable=SC1090
 source <(sed -n '/^ensure_log_directory()/,/^}$/p' "${SCRIPT_PATH}")
+source <(sed -n '/^environment_has_legacy_ichjo_variables()/,/^}$/p' "${SCRIPT_PATH}")
+source <(sed -n '/^environment_has_target_ip()/,/^}$/p' "${SCRIPT_PATH}")
+source <(sed -n '/^validate_environment_configuration()/,/^}$/p' "${SCRIPT_PATH}")
 
 TARGET_USER="$(id -un)"
 TARGET_GROUP="$(id -gn)"
@@ -61,6 +64,38 @@ grep -Fq "install -d -o ${TARGET_USER} -g ${TARGET_GROUP} -m 0775 ${LOG_DIR}" "$
 [[ ! -e "${LOG_DIR}" ]]
 chmod 700 "${parent_dir}"
 
+ENV_DESTINATION="${TEST_ROOT}/env"
+ENV_CREATED=false
+service_calls=0
+ensure_service_state() { service_calls=$((service_calls + 1)); }
+fail() { printf '%s\n' "$*" >&2; return 1; }
+
+for environment_line in \
+  'ICHIJO_ECHONET_TARGET_IP=' \
+  'ICHIJO_ECHONET_TARGET_IP=""' \
+  "ICHIJO_ECHONET_TARGET_IP=''" \
+  'ICHIJO_ECHONET_TARGET_IP="   "' \
+  "ICHIJO_ECHONET_TARGET_IP='   '"; do
+  printf '%s\n' "${environment_line}" > "${ENV_DESTINATION}"
+  if validate_environment_configuration; then
+    echo "Empty target IP was accepted: ${environment_line}" >&2
+    exit 1
+  fi
+done
+[[ "${service_calls}" == 0 ]]
+
+printf 'ICHJO_ECHONET_TARGET_IP=192.0.2.10\n' > "${ENV_DESTINATION}"
+if validate_environment_configuration; then
+  echo 'Legacy ICHJO_* setting was accepted.' >&2
+  exit 1
+fi
+[[ "${service_calls}" == 0 ]]
+
+printf 'ICHIJO_ECHONET_TARGET_IP=192.0.2.10\n' > "${ENV_DESTINATION}"
+validate_environment_configuration
+ensure_service_state
+[[ "${service_calls}" == 1 ]]
+
 LOG_DIR="${TEST_ROOT}/not-a-directory"
 : > "${LOG_DIR}"
 if plan_log_directory; then
@@ -68,4 +103,4 @@ if plan_log_directory; then
   exit 1
 fi
 
-echo 'PASS: mode checks and setup-log directory plans are safe.'
+echo 'PASS: mode checks, environment validation, and setup-log directory plans are safe.'

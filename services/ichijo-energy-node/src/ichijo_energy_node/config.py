@@ -41,12 +41,14 @@ class Config:
 
     @classmethod
     def from_env(cls) -> "Config":
-        device_id = os.getenv("ICHJO_DEVICE_ID", "ichijo-001")
-        target_ip = os.getenv("ICHJO_ECHONET_TARGET_IP", "192.168.8.182")
-        interface = os.getenv("ICHJO_ECHONET_INTERFACE", "eth0")
+        device_id = os.getenv("ICHIJO_DEVICE_ID", "ichijo-001")
+        target_ip = os.getenv("ICHIJO_ECHONET_TARGET_IP", "").strip()
+        interface = os.getenv("ICHIJO_ECHONET_INTERFACE", "eth0")
         mqtt_host = os.getenv("MQTT_HOST", "127.0.0.1")
-        if not all((device_id, target_ip, interface, mqtt_host)):
-            raise ValueError("device ID, target IP, interface, and MQTT host must not be empty")
+        if not target_ip:
+            raise ValueError("ICHIJO_ECHONET_TARGET_IP must be set and must not be empty")
+        if not all((device_id, interface, mqtt_host)):
+            raise ValueError("device ID, interface, and MQTT host must not be empty")
         try:
             mqtt_port = int(os.getenv("MQTT_PORT", "1883"))
             keepalive = int(os.getenv("MQTT_KEEPALIVE_SECONDS", "60"))
@@ -56,9 +58,9 @@ class Config:
             raise ValueError("MQTT port must be 1-65535 and keepalive must be positive")
         return cls(
             device_id=device_id, target_ip=target_ip, interface=interface,
-            poll_interval_seconds=_positive_float("ICHJO_POLL_INTERVAL_SECONDS", 10),
-            echonet_timeout_seconds=_positive_float("ICHJO_ECHONET_TIMEOUT_SECONDS", 2),
-            echonet_retry_count=_non_negative_int("ICHJO_ECHONET_RETRY_COUNT", 1),
-            property_interval_seconds=_positive_float("ICHJO_PROPERTY_INTERVAL_SECONDS", 0.05),
+            poll_interval_seconds=_positive_float("ICHIJO_POLL_INTERVAL_SECONDS", 10),
+            echonet_timeout_seconds=_positive_float("ICHIJO_ECHONET_TIMEOUT_SECONDS", 2),
+            echonet_retry_count=_non_negative_int("ICHIJO_ECHONET_RETRY_COUNT", 1),
+            property_interval_seconds=_positive_float("ICHIJO_PROPERTY_INTERVAL_SECONDS", 0.05),
             mqtt_host=mqtt_host, mqtt_port=mqtt_port, mqtt_keepalive_seconds=keepalive,
         )
