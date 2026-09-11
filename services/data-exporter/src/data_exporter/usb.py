@@ -266,7 +266,8 @@ def privileged_helper(helper_path: Path) -> Callable[[str, str], None]:
             raise ValueError("invalid helper action")
         if not _is_identity_token(identity):
             raise UsbExportError("usb_changed")
-        result = subprocess.run(["sudo", "-n", str(helper_path), action, identity], check=False, capture_output=True, text=True)
+        result = subprocess.run(["sudo", "-n", str(helper_path), action], input=f"{identity}\n",
+                                check=False, capture_output=True, text=True)
         if result.returncode:
             if "usb_changed" in result.stderr or "usb_changed" in result.stdout:
                 raise UsbExportError("usb_changed")

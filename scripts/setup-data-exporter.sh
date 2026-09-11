@@ -33,7 +33,7 @@ install_cli_launcher() {
 }
 
 render_sudoers() {
-  printf '%s ALL=(root) NOPASSWD: %s ^(mount|unmount) [0-9a-f]{64}$\n' "${TARGET_USER}" "${HELPER_DEST}"
+  printf '%s ALL=(root) NOPASSWD: %s mount, %s unmount\n' "${TARGET_USER}" "${HELPER_DEST}" "${HELPER_DEST}"
 }
 
 [[ -f "${OMK_ROOT}/services/data-exporter/requirements.txt" ]] || { echo 'ERROR: OMK repository root not found.' >&2; exit 1; }

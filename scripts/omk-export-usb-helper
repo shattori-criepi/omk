@@ -47,9 +47,12 @@ def candidate(expected_identity):
 
 
 def main():
-    if len(sys.argv) != 3 or sys.argv[1] not in {"mount", "unmount"} or not re.fullmatch(r"[0-9a-f]{64}", sys.argv[2]):
+    if len(sys.argv) != 2 or sys.argv[1] not in {"mount", "unmount"}:
         raise SystemExit("fixed action required")
-    device = candidate(sys.argv[2])
+    expected_identity = sys.stdin.read().strip()
+    if not re.fullmatch(r"[0-9a-f]{64}", expected_identity):
+        raise SystemExit("valid identity token required")
+    device = candidate(expected_identity)
     if sys.argv[1] == "mount":
         if device.get("mountpoint"):
             raise SystemExit("device_already_mounted")

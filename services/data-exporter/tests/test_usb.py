@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
+import io
 from pathlib import Path
 import runpy
 import subprocess
@@ -291,7 +292,8 @@ def test_helper_runs_mount_actions_in_host_mount_namespace(monkeypatch, action, 
             return subprocess.CompletedProcess(arguments, 0, json.dumps({"blockdevices": _usb(mounted=mountpoint)}), "")
         return subprocess.CompletedProcess(arguments, 0, "", "")
     monkeypatch.setitem(namespace["subprocess"].__dict__, "run", run)
-    monkeypatch.setattr(namespace["sys"], "argv", ["helper", action, _identity_token("disk-a", "wwn-a", "uuid-a", "partuuid-a")])
+    monkeypatch.setattr(namespace["sys"], "argv", ["helper", action])
+    monkeypatch.setattr(namespace["sys"], "stdin", io.StringIO(_identity_token("disk-a", "wwn-a", "uuid-a", "partuuid-a") + "\n"))
     namespace["main"]()
     assert calls[0][0][:3] == ["/usr/bin/nsenter", "--mount=/proc/1/ns/mnt", "--"]
     assert calls[1][0][:3] == ["/usr/bin/nsenter", "--mount=/proc/1/ns/mnt", "--"]
@@ -308,7 +310,34 @@ def test_helper_does_not_mount_or_unmount_when_identity_changed(monkeypatch):
         calls.append(arguments)
         return subprocess.CompletedProcess(arguments, 0, json.dumps({"blockdevices": _usb()}), "")
     monkeypatch.setitem(namespace["subprocess"].__dict__, "run", run)
-    monkeypatch.setattr(namespace["sys"], "argv", ["helper", "mount", "b" * 64])
+    monkeypatch.setattr(namespace["sys"], "argv", ["helper", "mount"])
+    monkeypatch.setattr(namespace["sys"], "stdin", io.StringIO("b" * 64 + "\n"))
     with pytest.raises(RuntimeError, match="usb_changed"):
         namespace["main"]()
     assert len(calls) == 1 and "systemd-mount" not in calls[0]
+
+
+@pytest.mark.parametrize("token", ["", "invalid", "a" * 63])
+def test_helper_rejects_missing_or_invalid_stdin_token_without_host_operations(monkeypatch, token):
+    helper = Path(__file__).parents[3] / "scripts" / "omk-export-usb-helper"
+    namespace = runpy.run_path(str(helper))
+    calls = []
+    monkeypatch.setitem(namespace["subprocess"].__dict__, "run", lambda *args, **kwargs: calls.append(args))
+    monkeypatch.setattr(namespace["sys"], "argv", ["helper", "mount"])
+    monkeypatch.setattr(namespace["sys"], "stdin", io.StringIO(token))
+    with pytest.raises(SystemExit, match="valid identity token required"):
+        namespace["main"]()
+    assert calls == []
+
+
+def test_privileged_helper_keeps_identity_out_of_sudo_argv(monkeypatch, tmp_path):
+    from data_exporter.usb import privileged_helper
+    calls = []
+    def run(arguments, **kwargs):
+        calls.append((arguments, kwargs))
+        return subprocess.CompletedProcess(arguments, 0, "", "")
+    monkeypatch.setattr("data_exporter.usb.subprocess.run", run)
+    identity = "a" * 64
+    privileged_helper(tmp_path / "helper")("mount", identity)
+    assert calls[0][0] == ["sudo", "-n", str(tmp_path / "helper"), "mount"]
+    assert identity not in calls[0][0] and calls[0][1]["input"] == f"{identity}\n"
