@@ -12,6 +12,7 @@ static const char *TAG = "switchbot_relay";
 #define SWITCHBOT_RELAY_INTERVAL_US (10LL * 1000LL * 1000LL)
 #define SWITCHBOT_FRAGMENT_JOIN_WINDOW_US (2LL * 1000LL * 1000LL)
 #define SWITCHBOT_RELAY_DEVICE_SLOTS 16
+#define SWITCHBOT_RELAY_SLOT_TTL_US (60LL * 1000LL * 1000LL)
 typedef struct {
     bool in_use;
     uint8_t address[6];
@@ -41,20 +42,31 @@ static void mark_published(relay_device_slot_t *slot, int64_t now_us) {
     slot->published_has_service = slot->service_length > 0;
     slot->last_publish_us = now_us;
 }
-static relay_device_slot_t *find_slot(const uint8_t address[6]) {
+static void initialize_slot(relay_device_slot_t *slot, const uint8_t address[6]) {
+    memset(slot, 0, sizeof(*slot));
+    slot->in_use = true;
+    memcpy(slot->address, address, 6);
+}
+static relay_device_slot_t *find_slot(const uint8_t address[6], int64_t now_us) {
     relay_device_slot_t *available = NULL;
+    relay_device_slot_t *oldest_expired = NULL;
     for (size_t i = 0; i < SWITCHBOT_RELAY_DEVICE_SLOTS; ++i) {
         relay_device_slot_t *slot = &relay_device_slots[i];
         if (slot->in_use && memcmp(slot->address, address, 6) == 0) return slot;
         if (!slot->in_use && available == NULL) available = slot;
+        if (slot->in_use && now_us - slot->last_fragment_us >= SWITCHBOT_RELAY_SLOT_TTL_US &&
+            (oldest_expired == NULL || slot->last_fragment_us < oldest_expired->last_fragment_us)) {
+            oldest_expired = slot;
+        }
     }
-    if (available != NULL) { available->in_use = true; memcpy(available->address, address, 6); }
-    return available;
+    if (available != NULL) { initialize_slot(available, address); return available; }
+    if (oldest_expired != NULL) { initialize_slot(oldest_expired, address); return oldest_expired; }
+    return NULL;
 }
 void switchbot_relay_handle_observation(const uint8_t address[6], int rssi, const uint8_t *manufacturer_data, size_t manufacturer_length, const uint8_t *service_data, size_t service_length) {
     if (address == NULL || manufacturer_length > 31 || service_length > 31 || (manufacturer_length == 0 && service_length == 0)) return;
     int64_t now_us = esp_timer_get_time();
-    relay_device_slot_t *slot = find_slot(address);
+    relay_device_slot_t *slot = find_slot(address, now_us);
     if (slot == NULL) { ESP_LOGW(TAG, "Relay device slots exhausted; ignoring BLE observation"); return; }
     /* Active scan can report ADV and SCAN_RSP separately. Keep fragments long
      * enough to combine one advertisement, but never carry stale data into a
