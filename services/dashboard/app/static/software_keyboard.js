@@ -46,6 +46,7 @@ window.createSoftwareKeyboard = function createSoftwareKeyboard(elements, option
     for (const [rowIndex, row] of rows.entries()) {
       const rowElement = document.createElement("div");
       rowElement.className = "broute-keyboard-row";
+      if (rowIndex === rows.length - 1 && options.lastRowClass) rowElement.className += ` ${options.lastRowClass}`;
       const controls = rowIndex === rows.length - 1 ? [...(options.extraActions?.(state) || []), ["⌫", backspace, "broute-keyboard-backspace"], ...(options.showClear === false ? [] : [["全消去", clear, "broute-keyboard-clear"]])] : [];
       rowElement.style?.setProperty("--key-count", String(row.length + controls.length));
       for (const key of row) {

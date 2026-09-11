@@ -7,7 +7,8 @@ const logicalKeyboard = window.createSoftwareKeyboard?.({
   overlay: document.querySelector("#logical-id-keyboard-overlay"), title: document.querySelector("#logical-id-keyboard-title"), count: document.querySelector("#logical-id-keyboard-count"), value: document.querySelector("#logical-id-keyboard-value"), keys: document.querySelector("#logical-id-keyboard-keys"), cancel: document.querySelector("#logical-id-keyboard-cancel"), confirm: document.querySelector("#logical-id-keyboard-confirm")
 }, {
   keyRows: state => LOGICAL_ID_KEY_ROWS.map(row => row.map(key => /[a-z]/.test(key) && state.uppercase ? key.toUpperCase() : key)),
-  extraActions: state => [[state.uppercase ? "小文字" : "大文字", () => { state.uppercase = !state.uppercase; logicalKeyboard.refresh(); }]],
+  extraActions: state => [[state.uppercase ? "小文字" : "大文字", () => { state.uppercase = !state.uppercase; logicalKeyboard.refresh(); }, "logical-id-keyboard-case-toggle"]],
+  lastRowClass: "logical-id-keyboard-row--last",
   showClear: false,
   keyAllowed: key => /^[A-Za-z0-9_-]$/.test(key)
 });

@@ -31,7 +31,7 @@ def test_logical_id_keyboard_uses_shared_layout_and_node_targeting():
     assert 'nodes.addEventListener?.("focusin"' in script
     assert '.logical-id-keyboard-overlay { box-sizing: border-box;' in stylesheet
     assert 'overflow: hidden;' in stylesheet
-    assert 'grid-template-columns: repeat(7, minmax(0, 1fr)) minmax(0, 1.55fr) minmax(0, 1.35fr);' in stylesheet
+    assert '.logical-id-keyboard-row--last { grid-template-columns: repeat(7, minmax(0, 1fr)) minmax(0, 1.55fr) minmax(0, 1.35fr);' in stylesheet
     assert 'min-height: 44px;' in stylesheet
     logical = script[script.index('const LOGICAL_ID_KEY_ROWS'):script.index('function formatApiError')]
     harness = r'''
@@ -53,6 +53,8 @@ const first = input('000000000001'); current = [first];
 __logicalTest.openLogicalKeyboard(first);
 assert.equal(overlay.hidden, false); assert.equal(title.textContent, 'Logical ID');
 assert.deepEqual(keys.children[0].children.map(button => button.textContent), ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '_']);
+assert.equal(keys.children[3].className, 'broute-keyboard-row logical-id-keyboard-row--last');
+assert.deepEqual(keys.children[3].children.map(button => button.textContent), ['z', 'x', 'c', 'v', 'b', 'n', 'm', '大文字', '⌫']);
 for (const key of 'sen66-001') __logicalTest.logicalKeyboard.insert(key);
 assert.equal(first.value, 'sen66-001');
 assert(allButtons.filter(button => /^[A-Za-z0-9_-]$/.test(button.textContent)).every(button => /^[A-Za-z0-9_-]$/.test(button.textContent)));
