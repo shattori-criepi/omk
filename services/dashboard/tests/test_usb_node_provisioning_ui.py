@@ -26,7 +26,7 @@ def test_cards_and_explicit_new_node_confirmation():
     javascript = r'''
 const assert = require('node:assert/strict');
 const text = value => String(value ?? '').replaceAll('<', '&lt;');
-let usbProvisioningInProgress = false, pendingNodeRegistration, usbSetupPoll;
+let usbCandidatesInitialized = true, usbProvisioningInProgress = false, pendingNodeRegistration, usbSetupPoll;
 const usbCandidatesByNodeId = new Map();
 const statusLine = {};
 let requests = [];
@@ -148,7 +148,7 @@ def test_setup_buttons_follow_job_state_and_prevent_repeat_posts():
     rendering = script[script.index('function nodeCard'):script.index('function saveNodeInputState')]
     setup_js = script[script.index('const usbSetupStages'):script.index('// Restore progress')]
     harness = r'''const assert = require('node:assert/strict');
-let usbProvisioningInProgress = false, pendingNodeRegistration;
+let usbCandidatesInitialized = true, usbProvisioningInProgress = false, pendingNodeRegistration;
 const text = value => String(value ?? '—');
 const usbCandidatesByNodeId = new Map();
 const statusLine = {};
@@ -207,7 +207,7 @@ def test_running_job_recreates_disabled_button_after_page_reload():
     rendering = script[script.index('function nodeCard'):script.index('function saveNodeInputState')]
     polling = script[script.index('const usbSetupStages'):script.index('async function submitUsbProvision')]
     harness = r'''const assert = require('node:assert/strict');
-let usbProvisioningInProgress = false, pendingNodeRegistration;
+let usbCandidatesInitialized = true, usbProvisioningInProgress = false, pendingNodeRegistration;
 const text = value => String(value ?? '—');
 const usbCandidatesByNodeId = new Map();
 const statusLine = {};
@@ -242,11 +242,16 @@ let renders = [], pending = [], calls = 0;
 const api = path => { calls++; return new Promise((resolve, reject) => pending.push({path, resolve, reject})); };
 const renderNodes = () => { const visible = [...latestNodes, ...[...usbCandidatesByNodeId.values()].filter(candidate => !latestNodes.some(node => node.node_id === candidate.node_id))]; nodes.innerHTML = visible.map(nodeCard).join(''); renders.push(nodes.innerHTML); };
 ''' + rendering + loading + r'''
-const oldNode = {node_id: '55f94c790e12', registration_state: 'provisioned', online: false, relay_active: false};
-const onlineNode = {node_id: '3df94c3f187e', registration_state: 'provisioned', online: true, relay_active: false};
+const oldNode = {node_id: '55f94c790e12', registration_state: 'registered', logical_id: 'old-sen66', connected_sensors: ['sen66'], online: false, relay_active: false};
+const onlineNode = {node_id: '3df94c3f187e', registration_state: 'provisioned', attached_sensors: ['SEN66'], online: true, relay_active: false};
 const blank = {node_id: oldNode.node_id, kind: 'unconfirmed_esp32s3', wifi_configured: false, device: '/dev/ttyACM0'};
 const newCandidate = {node_id: '000000000001', kind: 'unconfirmed_esp32s3', wifi_configured: false, device: '/dev/ttyACM1'};
 (async () => {
+  const initialOldCard = nodeCard(oldNode);
+  assert(initialOldCard.includes('Wi-Fi: 確認中'));
+  assert(initialOldCard.includes('接続センサ: 確認中'));
+  assert(!initialOldCard.includes('old-sen66') && !initialOldCard.includes('node-logical-id'));
+  assert(nodeCard(onlineNode).includes('SEN66（検出済み）'));
   const refresh = loadNodes();
   assert.equal(loadNodes(), refresh); // Initial load and polling share in-flight work.
   const [nodeRequest, usbRequest] = pending.splice(0);
@@ -254,7 +259,7 @@ const newCandidate = {node_id: '000000000001', kind: 'unconfirmed_esp32s3', wifi
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(renders.length, 1);
   assert(nodes.innerHTML.includes('Wi-Fi: 確認中'));
-  assert(nodes.innerHTML.includes('接続センサ: 未検出'));
+  assert(nodes.innerHTML.includes('接続センサ: 確認中'));
   assert(nodes.innerHTML.includes('Node ID: 3df94c3f187e'));
   assert(nodes.innerHTML.includes('Wi-Fi: Wi-Fi設定済み'));
   usbRequest.resolve({nodes: [blank, newCandidate]});
@@ -279,7 +284,7 @@ const newCandidate = {node_id: '000000000001', kind: 'unconfirmed_esp32s3', wifi
   // The next normal poll changes the completed Node from no sensor to detected SEN66 without re-setup.
   const detectedRefresh = loadNodes();
   const [detectedNodeRequest, detectedUsbRequest] = pending.splice(0);
-  detectedNodeRequest.resolve({nodes: [{...oldNode, online: true, attached_sensors: ['SEN66']}, onlineNode]});
+  detectedNodeRequest.resolve({nodes: [{...oldNode, registration_state: 'provisioned', logical_id: undefined, connected_sensors: undefined, online: true, attached_sensors: ['SEN66']}, onlineNode]});
   detectedUsbRequest.resolve({nodes: []});
   await detectedRefresh;
   assert(nodes.innerHTML.includes('接続センサ: SEN66（検出済み）'));
