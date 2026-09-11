@@ -113,7 +113,7 @@ function usbSetupErrorMessage(code) {
     return Object.hasOwn(usbSetupErrors, code) ? usbSetupErrors[code] : usbSetupErrors.setup_failed;
 }
 let usbSetupPoll;
-async function pollUsbSetup(submissionFailed = false) {
+async function pollUsbSetup(submissionFailed = false, showTerminal = false) {
     try {
         const job = await api("/setup/usb-setup/status");
         usbProvisioningInProgress = !["idle", "completed", "failed"].includes(job.stage);
@@ -123,16 +123,16 @@ async function pollUsbSetup(submissionFailed = false) {
             await loadNodes();
             return;
         }
-        if (job.stage !== "idle") {
+        if (job.stage !== "idle" && (!['completed', 'failed'].includes(job.stage) || showTerminal)) {
             statusLine.className = `setup-status${job.stage === "failed" ? " error" : ""}`;
             statusLine.textContent = `${job.node_id}: ${usbSetupStages[job.stage] || "処理中"}${job.error ? ` ${usbSetupErrorMessage(job.error)}` : ""}`;
         }
-        if (usbProvisioningInProgress) { renderNodes(); usbSetupPoll = setTimeout(pollUsbSetup, 1000); }
-        else if (job.stage !== "idle") { await loadNodes(); }
+        if (usbProvisioningInProgress) { renderNodes(); usbSetupPoll = setTimeout(() => pollUsbSetup(submissionFailed, true), 1000); }
+        else if (job.stage !== "idle" && showTerminal) { await loadNodes(); }
     } catch (error) {
         // A network error is not proof that the host job ended. Keep polling.
         statusLine.textContent = "setup状態を確認できません。接続回復を待っています。";
-        usbSetupPoll = setTimeout(() => pollUsbSetup(submissionFailed), 2000);
+        usbSetupPoll = setTimeout(() => pollUsbSetup(submissionFailed, showTerminal), 2000);
     }
 }
 async function submitUsbProvision(button) {
@@ -151,7 +151,7 @@ async function submitUsbProvision(button) {
     try {
         await api("/setup/usb-setup", {method: "POST", body: JSON.stringify({device: button.dataset.device, node_id: button.dataset.nodeId, confirm_atom_s3_lite: confirmed})});
     } catch (error) { submissionFailed = true; }
-    await pollUsbSetup(submissionFailed);
+    await pollUsbSetup(submissionFailed, true);
 }
 // Restore progress after navigation/reload, without exposing the host token.
 pollUsbSetup();

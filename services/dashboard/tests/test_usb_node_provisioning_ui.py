@@ -96,23 +96,32 @@ assert(!usbSetupControls(candidate).includes('class="confirm-atom" data-node-id=
     subprocess.run(['node', '-e', harness], check=True, capture_output=True, text=True, timeout=10)
 
 
-def test_job_error_is_translated_without_echoing_untrusted_text():
+def test_initial_terminal_job_is_not_restored_but_current_job_terminal_state_is_shown():
     script = (ROOT/'app/static/admin.js').read_text()
     polling = script[script.index('const usbSetupStages'):script.index('async function submitUsbProvision')]
     harness = r'''const assert = require('node:assert/strict');
 const statusLine = {};
 let usbProvisioningInProgress = false;
-let job = {stage: 'failed', node_id: '000000000001', error: 'factory_write_failed'};
+let job = {stage: 'completed', node_id: '000000000001', error: null};
 const api = async () => job;
 const loadNodes = async () => {};
 const loadUsbNodes = async () => {};
 ''' + polling + r'''
 (async () => {
   await pollUsbSetup();
+  assert(!statusLine.textContent);
+  job = {stage: 'failed', node_id: '000000000001', error: 'factory_write_failed'};
+  await pollUsbSetup();
+  assert(!statusLine.textContent);
+  job = {stage: 'completed', node_id: '000000000001', error: null};
+  await pollUsbSetup(false, true);
+  assert(statusLine.textContent.includes('セットアップ完了'));
+  job = {stage: 'failed', node_id: '000000000001', error: 'factory_write_failed'};
+  await pollUsbSetup(false, true);
   assert(statusLine.textContent.includes('初回'));
   assert(!statusLine.textContent.includes('factory_write_failed'));
   job.error = 'untrusted-private-psk-02:00:00:00:00:01';
-  await pollUsbSetup();
+  await pollUsbSetup(false, true);
   assert(!statusLine.textContent.includes(job.error));
 })().catch(error => {console.error(error); process.exitCode = 1;});
 '''
@@ -186,16 +195,18 @@ const newButton = {disabled: false, textContent: '', dataset: {device: newNode.d
   acceptPost({accepted: true});
   await firstSetup;
   job = {stage: 'flashing_firmware', node_id: existing.node_id, error: null};
-  await pollUsbSetup();
+  await pollUsbSetup(false, true);
   assert.equal(usbProvisioningInProgress, true);
   assert(usbSetupControls(existing).includes('disabled'));
   job = {stage: 'completed', node_id: existing.node_id, error: null};
-  await pollUsbSetup();
+  await pollUsbSetup(false, true);
   assert.equal(usbProvisioningInProgress, false);
+  assert(statusLine.textContent.includes('セットアップ完了'));
   assert(!usbSetupControls(existing).includes('disabled') && usbSetupControls(existing).includes('OMK Nodeをセットアップ'));
   job = {stage: 'failed', node_id: existing.node_id, error: 'firmware_write_failed'};
-  await pollUsbSetup();
+  await pollUsbSetup(false, true);
   assert.equal(usbProvisioningInProgress, false);
+  assert(statusLine.textContent.includes('firmware書込みに失敗'));
   assert(!usbSetupControls(newNode).includes('disabled'));
 })().catch(error => {console.error(error); process.exitCode = 1;});
 '''
