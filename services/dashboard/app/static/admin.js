@@ -1,5 +1,5 @@
 const statusLine = document.querySelector("#setup-status"), candidates = document.querySelector("#candidates"), registered = document.querySelector("#registered-sensors"), nodes = document.querySelector("#omk-nodes"), start = document.querySelector("#start-scan"), stop = document.querySelector("#stop-scan"), dialog = document.querySelector("#register-dialog"), form = document.querySelector("#register-form"), registerError = document.querySelector("#register-error"), editDialog = document.querySelector("#edit-dialog"), editForm = document.querySelector("#edit-form"), editError = document.querySelector("#edit-error");
-let poll, candidateRefreshInFlight = false, selectedDeviceKey, confirmedModel, editingDeviceKey, pendingNodeRegistration, nodeRegistrationPoll, latestNodes = [], usbCandidatesByNodeId = new Map(), usbProvisioningInProgress = false;
+let poll, candidateRefreshInFlight = false, selectedDeviceKey, confirmedModel, editingDeviceKey, pendingNodeRegistration, nodeRegistrationPoll, latestNodes = [], usbCandidatesByNodeId = new Map(), usbCandidatesInitialized = false, usbProvisioningInProgress = false;
 const text = (value) => String(value ?? "—");
 const NORMAL_NODE_POLL_MS = 10_000, CANDIDATE_POLL_MS = 5_000, REGISTRATION_NODE_POLL_MS = 1_500, REGISTRATION_TIMEOUT_MS = 30_000;
 
@@ -36,7 +36,7 @@ function card(item, setup = false) {
 
 async function api(path, options = {}) { const response = await fetch(`/api/admin${path}`, {headers: {"Content-Type": "application/json"}, ...options}); let data; try { data = await response.json(); } catch (_) { data = null; } if (!response.ok) throw Error(formatApiError(data?.detail ?? data)); return data; }
 async function loadRegistered() { try { const data = await api("/sensors"); registered.innerHTML = `<h2>登録済みセンサ</h2>${data.sensors.length ? data.sensors.map(registeredCard).join("") : "<p>登録済みセンサはありません。</p>"}`; } catch (error) { registered.innerHTML = `<p class="error">${error.message}</p>`; } }
-function nodeCard(node) { const caps = (node.capabilities || []).map(cap => cap === "ble_scan" ? "BLE relay対応" : cap === "sen66" ? "SEN66対応" : cap).join(" · ") || "なし"; const usbCandidate = usbCandidatesByNodeId.get(node.node_id); const capabilities = usbCandidate?.kind === "unconfirmed_esp32s3" ? "セットアップ後に確認" : caps; const state = usbCandidate ? (usbCandidate.wifi_configured ? "Wi-Fi設定済み" : "未設定") : node.registration_state === "registered" ? "登録済み" : node.registration_state === "provisioned" ? "Wi-Fi設定済み" : "未設定"; const pending = pendingNodeRegistration?.nodeId === node.node_id || node.request_state === "request_sent"; const attachedSensors = node.attached_sensors?.length ? node.attached_sensors : (node.connected_sensors || []); const hasAttachedSensor = attachedSensors.length > 0; const logical = hasAttachedSensor || node.registration_state === "registered" ? `<p>Logical ID: ${text(node.logical_id)}</p>` : ""; const body = node.registration_state === "provisioned" ? !hasAttachedSensor ? "<p>センサ未接続のためLogical IDは不要です。</p>" : pending ? "<p>登録要求を送信済みです。状態更新を待っています。</p>" : `<label>Logical ID<input class="node-logical-id" data-node-id="${text(node.node_id)}" maxlength="48" pattern="[A-Za-z0-9_-]+" placeholder="sensor-001"></label><button class="register-node" data-node-id="${text(node.node_id)}">センサを登録</button>` : node.registration_state === "registered" ? `${logical}<label>Logical IDを変更<input class="node-logical-id" data-node-id="${text(node.node_id)}" maxlength="48" pattern="[A-Za-z0-9_-]+" value="${text(node.logical_id)}"></label><button class="register-node" data-node-id="${text(node.node_id)}">変更</button><button class="remove-node-registration" data-node-id="${text(node.node_id)}">登録解除</button>` : ""; const sensors = hasAttachedSensor ? `${attachedSensors.join(" / ")}（接続確認済み）` : "センサ未接続"; return `<article class="sensor-card"><h2>OMK Node</h2><p>Node ID: ${text(node.node_id)}</p><p>接続: ${usbCandidate ? "USB接続" : node.online ? "オンライン" : "最終状態のみ"} · Wi-Fi: ${state}</p><p>対応機能: ${capabilities}</p><p>接続センサ: ${sensors}</p><p>BLE relay: ${node.relay_active ? "稼働中" : "未確認"}</p><p>最終検出: ${text(node.last_seen || node.mqtt_status_seen_at)}</p><span class="sensor-state sensor-state--${node.online ? "normal" : "offline"}">${state}</span>${usbSetupControls(usbCandidate)}${body}</article>`; }
+function nodeCard(node) { const caps = (node.capabilities || []).map(cap => cap === "ble_scan" ? "BLE relay対応" : cap === "sen66" ? "SEN66対応" : cap).join(" · ") || "なし"; const usbCandidate = usbCandidatesByNodeId.get(node.node_id); const capabilities = usbCandidate?.kind === "unconfirmed_esp32s3" ? "セットアップ後に確認" : caps; const state = usbCandidate ? (usbCandidate.wifi_configured ? "Wi-Fi設定済み" : "未設定") : !usbCandidatesInitialized && !node.online ? "確認中" : node.registration_state === "registered" ? "登録済み" : node.registration_state === "provisioned" ? "Wi-Fi設定済み" : "未設定"; const pending = pendingNodeRegistration?.nodeId === node.node_id || node.request_state === "request_sent"; const attachedSensors = node.attached_sensors?.length ? node.attached_sensors : (node.connected_sensors || []); const hasAttachedSensor = attachedSensors.length > 0; const logical = hasAttachedSensor || node.registration_state === "registered" ? `<p>Logical ID: ${text(node.logical_id)}</p>` : ""; const body = node.registration_state === "provisioned" ? !hasAttachedSensor ? "<p>センサ未接続のためLogical IDは不要です。</p>" : pending ? "<p>登録要求を送信済みです。状態更新を待っています。</p>" : `<label>Logical ID<input class="node-logical-id" data-node-id="${text(node.node_id)}" maxlength="48" pattern="[A-Za-z0-9_-]+" placeholder="sensor-001"></label><button class="register-node" data-node-id="${text(node.node_id)}">センサを登録</button>` : node.registration_state === "registered" ? `${logical}<label>Logical IDを変更<input class="node-logical-id" data-node-id="${text(node.node_id)}" maxlength="48" pattern="[A-Za-z0-9_-]+" value="${text(node.logical_id)}"></label><button class="register-node" data-node-id="${text(node.node_id)}">変更</button><button class="remove-node-registration" data-node-id="${text(node.node_id)}">登録解除</button>` : ""; const sensors = hasAttachedSensor ? `${attachedSensors.join(" / ")}（接続確認済み）` : "センサ未接続"; return `<article class="sensor-card"><h2>OMK Node</h2><p>Node ID: ${text(node.node_id)}</p><p>接続: ${usbCandidate ? "USB接続" : node.online ? "オンライン" : "最終状態のみ"} · Wi-Fi: ${state}</p><p>対応機能: ${capabilities}</p><p>接続センサ: ${sensors}</p><p>BLE relay: ${node.relay_active ? "稼働中" : "未確認"}</p><p>最終検出: ${text(node.last_seen || node.mqtt_status_seen_at)}</p><span class="sensor-state sensor-state--${node.online ? "normal" : "offline"}">${state}</span>${usbSetupControls(usbCandidate)}${body}</article>`; }
 function usbSetupControls(candidate) {
     if (!candidate) return "";
     if (candidate.kind === "recovery_required") return "<p>復旧が必要です。保存済みcredentialがあるため初回書込みを停止しました。</p>";
@@ -52,24 +52,25 @@ let nodeRefreshPromise;
 function loadNodes() {
     if (nodeRefreshPromise) return nodeRefreshPromise;
     nodeRefreshPromise = (async () => {
-        const [nodeResult, usbResult] = await Promise.allSettled([
-            api("/nodes"),
-            usbProvisioningInProgress ? Promise.resolve(null) : api("/setup/usb-nodes"),
-        ]);
-        if (usbResult.status === "fulfilled") {
-            if (usbResult.value) usbCandidatesByNodeId = new Map(usbResult.value.nodes.map(node => [node.node_id, node]));
+        const nodeRequest = api("/nodes");
+        const usbRequest = usbProvisioningInProgress ? Promise.resolve(null) : api("/setup/usb-nodes");
+        const nodeResult = await nodeRequest.then(value => ({status: "fulfilled", value}), reason => ({status: "rejected", reason}));
+        if (nodeResult.status === "rejected") {
+            nodes.innerHTML = `<p class="error">${nodeResult.reason.message}</p>`;
         } else {
-            usbCandidatesByNodeId = new Map();
+            latestNodes = nodeResult.value.nodes;
+            renderNodes();
+        }
+        const usbResult = await usbRequest.then(value => ({status: "fulfilled", value}), reason => ({status: "rejected", reason}));
+        if (usbResult.status === "fulfilled" && usbResult.value) {
+            usbCandidatesByNodeId = new Map(usbResult.value.nodes.map(node => [node.node_id, node]));
+            usbCandidatesInitialized = true;
+            if (nodeResult.status === "fulfilled") renderNodes();
+        } else if (usbResult.status === "rejected") {
             statusLine.className = "setup-status error";
             statusLine.textContent = usbResult.reason.message;
         }
-        if (nodeResult.status === "rejected") {
-            nodes.innerHTML = `<p class="error">${nodeResult.reason.message}</p>`;
-            return [];
-        }
-        latestNodes = nodeResult.value.nodes;
-        renderNodes();
-        return latestNodes;
+        return nodeResult.status === "fulfilled" ? latestNodes : [];
     })().finally(() => { nodeRefreshPromise = undefined; });
     return nodeRefreshPromise;
 }

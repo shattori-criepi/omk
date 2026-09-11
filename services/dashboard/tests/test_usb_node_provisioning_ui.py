@@ -194,55 +194,69 @@ global.setTimeout = () => 0;
     subprocess.run(['node', '-e', harness], check=True, capture_output=True, text=True, timeout=10)
 
 
-def test_node_refresh_commits_both_results_once_and_handles_errors():
+def test_node_refresh_shows_nodes_before_usb_confirmation_and_keeps_prior_state():
     script = (ROOT/'app/static/admin.js').read_text()
     rendering = script[script.index('function nodeCard'):script.index('function saveNodeInputState')]
     loading = script[script.index('let nodeRefreshPromise'):script.index('function stopRegistrationPoll')]
     harness = r'''
 const assert = require('node:assert/strict');
-let latestNodes = [], usbCandidatesByNodeId = new Map(), usbProvisioningInProgress = false, pendingNodeRegistration;
+let latestNodes = [], usbCandidatesByNodeId = new Map(), usbCandidatesInitialized = false, usbProvisioningInProgress = false, pendingNodeRegistration;
 const text = value => String(value ?? '—');
 const nodes = {innerHTML: ''}, statusLine = {};
 let renders = [], pending = [], calls = 0;
 const api = path => { calls++; return new Promise((resolve, reject) => pending.push({path, resolve, reject})); };
-const renderNodes = () => { nodes.innerHTML = latestNodes.map(nodeCard).join(''); renders.push(nodes.innerHTML); };
+const renderNodes = () => { const visible = [...latestNodes, ...[...usbCandidatesByNodeId.values()].filter(candidate => !latestNodes.some(node => node.node_id === candidate.node_id))]; nodes.innerHTML = visible.map(nodeCard).join(''); renders.push(nodes.innerHTML); };
 ''' + rendering + loading + r'''
 const oldNode = {node_id: '55f94c790e12', registration_state: 'provisioned', online: false, relay_active: false};
+const onlineNode = {node_id: '3df94c3f187e', registration_state: 'provisioned', online: true, relay_active: false};
 const blank = {node_id: oldNode.node_id, kind: 'unconfirmed_esp32s3', wifi_configured: false, device: '/dev/ttyACM0'};
+const newCandidate = {node_id: '000000000001', kind: 'unconfirmed_esp32s3', wifi_configured: false, device: '/dev/ttyACM1'};
 (async () => {
-  for (let i = 0; i < 2; i++) {
-    const refresh = loadNodes();
-    assert.equal(loadNodes(), refresh); // Initial load and polling share in-flight work.
-    const [nodeRequest, usbRequest] = pending.splice(0);
-    nodeRequest.resolve({nodes: [oldNode]});
-    await new Promise(resolve => setImmediate(resolve));
-    assert.equal(renders.length, i);
-    usbRequest.resolve({nodes: [blank]});
-    await refresh;
-    assert.equal(renders.length, i + 1);
-    assert(nodes.innerHTML.includes('Wi-Fi: 未設定'));
-    assert(nodes.innerHTML.includes('対応機能: セットアップ後に確認'));
-    assert(!nodes.innerHTML.includes('BLE relay: 稼働中'));
-  }
-  assert.equal(calls, 4);
+  const refresh = loadNodes();
+  assert.equal(loadNodes(), refresh); // Initial load and polling share in-flight work.
+  const [nodeRequest, usbRequest] = pending.splice(0);
+  nodeRequest.resolve({nodes: [oldNode, onlineNode]});
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(renders.length, 1);
+  assert(nodes.innerHTML.includes('Wi-Fi: 確認中'));
+  assert(nodes.innerHTML.includes('Node ID: 3df94c3f187e'));
+  assert(nodes.innerHTML.includes('Wi-Fi: Wi-Fi設定済み'));
+  usbRequest.resolve({nodes: [blank, newCandidate]});
+  await refresh;
+  assert.equal(renders.length, 2);
+  assert(nodes.innerHTML.includes('Wi-Fi: 未設定'));
+  assert(nodes.innerHTML.includes('対応機能: セットアップ後に確認'));
+  assert(nodes.innerHTML.includes('Node ID: 000000000001'));
+  assert(!nodes.innerHTML.includes('BLE relay: 稼働中'));
+  assert.equal(calls, 2);
+
+  // Polling preserves the already-rendered list while its next USB scan runs.
+  const pollRefresh = loadNodes();
+  const [pollNodeRequest, pollUsbRequest] = pending.splice(0);
+  pollNodeRequest.resolve({nodes: [oldNode, onlineNode]});
+  await new Promise(resolve => setImmediate(resolve));
+  assert(nodes.innerHTML.includes('Node ID: 000000000001'));
+  pollUsbRequest.resolve({nodes: [blank]});
+  await pollRefresh;
+  assert(!nodes.innerHTML.includes('Node ID: 000000000001'));
   usbProvisioningInProgress = true;
-  let refresh = loadNodes();
+  let setupRefresh = loadNodes();
   assert.equal(pending.length, 1);
   pending.shift().resolve({nodes: [oldNode]});
-  await refresh;
+  await setupRefresh;
   assert(nodes.innerHTML.includes('disabled'));
   assert(usbCandidatesByNodeId.has(oldNode.node_id));
   usbProvisioningInProgress = false;
-  refresh = loadNodes();
+  setupRefresh = loadNodes();
   pending.shift().resolve({nodes: [oldNode]});
   pending.shift().reject(Error('USB unavailable'));
-  await refresh;
+  await setupRefresh;
   assert.equal(statusLine.textContent, 'USB unavailable');
-  assert.equal(usbCandidatesByNodeId.size, 0);
-  refresh = loadNodes();
+  assert(usbCandidatesByNodeId.has(oldNode.node_id));
+  setupRefresh = loadNodes();
   pending.shift().reject(Error('Node unavailable'));
   pending.shift().resolve({nodes: []});
-  await refresh;
+  await setupRefresh;
   assert(nodes.innerHTML.includes('Node unavailable'));
 })().catch(error => { console.error(error); process.exitCode = 1; });
 '''
