@@ -48,12 +48,35 @@ function saveNodeInputState() { const saved = {}; nodes.querySelectorAll(".node-
 function restoreNodeInputState(saved) { Object.entries(saved).forEach(([nodeId, state]) => { const input = nodes.querySelector(`.node-logical-id[data-node-id="${nodeId}"]`); if (!input) return; input.value = state.value; if (state.focused) { input.focus(); if (state.selectionStart != null && state.selectionEnd != null) input.setSelectionRange(state.selectionStart, state.selectionEnd); } }); }
 function validLogicalId(value) { return /^[A-Za-z0-9_-]{1,48}$/.test(value); }
 function renderNodes() { const savedInputs = saveNodeInputState(); const visible = [...latestNodes, ...[...usbCandidatesByNodeId.values()].filter(candidate => !latestNodes.some(node => node.node_id === candidate.node_id))]; nodes.innerHTML = `<h2>OMK Node</h2>${visible.length ? visible.map(nodeCard).join("") : "<p>OMK Nodeは未検出です。</p>"}`; restoreNodeInputState(savedInputs); }
-async function loadNodes() { try { const data = await api("/nodes"); latestNodes = data.nodes; renderNodes(); return data.nodes; } catch (error) { nodes.innerHTML = `<p class="error">${error.message}</p>`; return []; } }
+let nodeRefreshPromise;
+function loadNodes() {
+    if (nodeRefreshPromise) return nodeRefreshPromise;
+    nodeRefreshPromise = (async () => {
+        const [nodeResult, usbResult] = await Promise.allSettled([
+            api("/nodes"),
+            usbProvisioningInProgress ? Promise.resolve(null) : api("/setup/usb-nodes"),
+        ]);
+        if (usbResult.status === "fulfilled") {
+            if (usbResult.value) usbCandidatesByNodeId = new Map(usbResult.value.nodes.map(node => [node.node_id, node]));
+        } else {
+            usbCandidatesByNodeId = new Map();
+            statusLine.className = "setup-status error";
+            statusLine.textContent = usbResult.reason.message;
+        }
+        if (nodeResult.status === "rejected") {
+            nodes.innerHTML = `<p class="error">${nodeResult.reason.message}</p>`;
+            return [];
+        }
+        latestNodes = nodeResult.value.nodes;
+        renderNodes();
+        return latestNodes;
+    })().finally(() => { nodeRefreshPromise = undefined; });
+    return nodeRefreshPromise;
+}
 function stopRegistrationPoll(message) { if (nodeRegistrationPoll) clearInterval(nodeRegistrationPoll); nodeRegistrationPoll = undefined; pendingNodeRegistration = undefined; if (message) statusLine.textContent = message; }
 async function pollRegistration() { if (!pendingNodeRegistration) return; const listed = await loadNodes(); const node = listed.find(item => item.node_id === pendingNodeRegistration.nodeId); if (node?.registration_state === "registered" && node.logical_id === pendingNodeRegistration.logicalId) { stopRegistrationPoll("登録が完了しました。"); return; } if (Date.now() >= pendingNodeRegistration.deadline) stopRegistrationPoll("登録要求を送信しました。状態更新を待っています。"); }
 function beginRegistrationPoll(nodeId, logicalId) { if (nodeRegistrationPoll) clearInterval(nodeRegistrationPoll); pendingNodeRegistration = {nodeId, logicalId, deadline: Date.now() + REGISTRATION_TIMEOUT_MS}; nodeRegistrationPoll = setInterval(pollRegistration, REGISTRATION_NODE_POLL_MS); }
 async function refreshCandidates() { if (candidateRefreshInFlight) return; candidateRefreshInFlight = true; try { const data = await api("/setup/candidates", {cache: "no-store"}); candidates.innerHTML = `<h2>未登録デバイス</h2>${data.candidates.length ? data.candidates.map((candidate) => card(candidate, true)).join("") : "<p>未登録のSwitchBotまたはOMK Node advertisementを待っています…</p>"}`; if (!data.scanning) finish("探索時間が終了しました。必要ならもう一度開始してください。"); } catch (error) { finish(error.message, true); } finally { candidateRefreshInFlight = false; } }
-async function loadUsbNodes() { if (usbProvisioningInProgress) return; try { const data = await api("/setup/usb-nodes"); usbCandidatesByNodeId = new Map(data.nodes.map(node => [node.node_id, node])); renderNodes(); } catch (error) { usbCandidatesByNodeId = new Map(); renderNodes(); statusLine.className = "setup-status error"; statusLine.textContent = error.message; } }
 function finish(message, error = false) { clearInterval(poll); start.hidden = false; stop.hidden = true; statusLine.textContent = message; statusLine.className = `setup-status${error ? " error" : ""}`; }
 start.onclick = async () => { try { await api("/setup/scan", {method: "POST"}); start.hidden = true; stop.hidden = false; candidates.hidden = false; statusLine.textContent = "周囲の未登録SwitchBotセンサを探索中です。"; await refreshCandidates(); clearInterval(poll); poll = setInterval(refreshCandidates, CANDIDATE_POLL_MS); } catch (error) { finish(error.message, true); } };
 stop.onclick = async () => { await api("/setup/scan", {method: "DELETE"}); finish("探索を中止しました。"); };
@@ -96,7 +119,7 @@ async function pollUsbSetup(submissionFailed = false) {
         if (submissionFailed && !usbProvisioningInProgress) {
             statusLine.className = "setup-status error";
             statusLine.textContent = "今回のセットアップ要求の受付を確認できませんでした。接続を確認し、必要なら再実行してください。";
-            await Promise.all([loadNodes(), loadUsbNodes()]);
+            await loadNodes();
             return;
         }
         if (job.stage !== "idle") {
@@ -104,7 +127,7 @@ async function pollUsbSetup(submissionFailed = false) {
             statusLine.textContent = `${job.node_id}: ${usbSetupStages[job.stage] || "処理中"}${job.error ? ` ${usbSetupErrorMessage(job.error)}` : ""}`;
         }
         if (usbProvisioningInProgress) { renderNodes(); usbSetupPoll = setTimeout(pollUsbSetup, 1000); }
-        else if (job.stage !== "idle") { await Promise.all([loadNodes(), loadUsbNodes()]); }
+        else if (job.stage !== "idle") { await loadNodes(); }
     } catch (error) {
         // A network error is not proof that the host job ended. Keep polling.
         statusLine.textContent = "setup状態を確認できません。接続回復を待っています。";
@@ -137,4 +160,4 @@ document.querySelector("#cancel-register").onclick = () => dialog.close(); docum
 form.onsubmit = async (event) => { event.preventDefault(); if (confirmedModel && !document.querySelector("#confirm-unconfirmed-model").checked) { registerError.textContent = "実物の機種を確認してください"; registerError.hidden = false; return; } try { await api("/sensors", {method: "POST", body: JSON.stringify({device_key: selectedDeviceKey, ...(confirmedModel ? {confirmed_model: confirmedModel} : {}), sensor_id: document.querySelector("#sensor-id").value, display_name: document.querySelector("#display-name").value, location: document.querySelector("#location").value})}); dialog.close(); await Promise.all([refreshCandidates(), loadRegistered()]); statusLine.textContent = "登録しました。ほかの候補の順序はそのままです。"; } catch (error) { registerError.textContent = error.message; registerError.hidden = false; } };
 editForm.onsubmit = async (event) => { event.preventDefault(); try { await api(`/sensors/${encodeURIComponent(editingDeviceKey)}`, {method: "PATCH", body: JSON.stringify({sensor_id: document.querySelector("#edit-sensor-id").value, display_name: document.querySelector("#edit-display-name").value, location: document.querySelector("#edit-location").value, enabled: document.querySelector("#edit-enabled").checked})}); editDialog.close(); await loadRegistered(); } catch (error) { editError.textContent = error.message; editError.hidden = false; } };
 document.querySelector("#delete-sensor").onclick = async () => { const sensorId = document.querySelector("#edit-sensor-id").value; const displayName = document.querySelector("#edit-display-name").value; if (!editingDeviceKey || !window.confirm(`「${displayName}（${sensorId}）」の登録を削除しますか？\n過去の計測データは削除されません。`)) return; editError.hidden = true; try { await api(`/sensors/${encodeURIComponent(editingDeviceKey)}`, {method: "DELETE"}); editDialog.close(); await loadRegistered(); if (!candidates.hidden) await refreshCandidates(); statusLine.textContent = "センサ登録を削除しました。過去の計測データは保持されています。"; } catch (error) { if (error.message.includes("not found")) { editDialog.close(); await loadRegistered(); if (!candidates.hidden) await refreshCandidates(); statusLine.textContent = "センサ登録はすでに削除されています。"; return; } editError.textContent = `センサ登録を削除できませんでした: ${error.message}`; editError.hidden = false; } };
-loadRegistered(); Promise.all([loadNodes(), loadUsbNodes()]); window.setInterval(() => { loadRegistered(); loadNodes(); loadUsbNodes(); }, NORMAL_NODE_POLL_MS);
+loadRegistered(); loadNodes(); window.setInterval(() => { loadRegistered(); loadNodes(); }, NORMAL_NODE_POLL_MS);

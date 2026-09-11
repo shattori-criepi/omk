@@ -192,3 +192,60 @@ global.setTimeout = () => 0;
 })().catch(error => {console.error(error); process.exitCode = 1;});
 '''
     subprocess.run(['node', '-e', harness], check=True, capture_output=True, text=True, timeout=10)
+
+
+def test_node_refresh_commits_both_results_once_and_handles_errors():
+    script = (ROOT/'app/static/admin.js').read_text()
+    rendering = script[script.index('function nodeCard'):script.index('function saveNodeInputState')]
+    loading = script[script.index('let nodeRefreshPromise'):script.index('function stopRegistrationPoll')]
+    harness = r'''
+const assert = require('node:assert/strict');
+let latestNodes = [], usbCandidatesByNodeId = new Map(), usbProvisioningInProgress = false, pendingNodeRegistration;
+const text = value => String(value ?? '—');
+const nodes = {innerHTML: ''}, statusLine = {};
+let renders = [], pending = [], calls = 0;
+const api = path => { calls++; return new Promise((resolve, reject) => pending.push({path, resolve, reject})); };
+const renderNodes = () => { nodes.innerHTML = latestNodes.map(nodeCard).join(''); renders.push(nodes.innerHTML); };
+''' + rendering + loading + r'''
+const oldNode = {node_id: '55f94c790e12', registration_state: 'provisioned', online: false, relay_active: false};
+const blank = {node_id: oldNode.node_id, kind: 'unconfirmed_esp32s3', wifi_configured: false, device: '/dev/ttyACM0'};
+(async () => {
+  for (let i = 0; i < 2; i++) {
+    const refresh = loadNodes();
+    assert.equal(loadNodes(), refresh); // Initial load and polling share in-flight work.
+    const [nodeRequest, usbRequest] = pending.splice(0);
+    nodeRequest.resolve({nodes: [oldNode]});
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(renders.length, i);
+    usbRequest.resolve({nodes: [blank]});
+    await refresh;
+    assert.equal(renders.length, i + 1);
+    assert(nodes.innerHTML.includes('Wi-Fi: 未設定'));
+    assert(nodes.innerHTML.includes('対応機能: セットアップ後に確認'));
+    assert(!nodes.innerHTML.includes('BLE relay: 稼働中'));
+  }
+  assert.equal(calls, 4);
+  usbProvisioningInProgress = true;
+  let refresh = loadNodes();
+  assert.equal(pending.length, 1);
+  pending.shift().resolve({nodes: [oldNode]});
+  await refresh;
+  assert(nodes.innerHTML.includes('disabled'));
+  assert(usbCandidatesByNodeId.has(oldNode.node_id));
+  usbProvisioningInProgress = false;
+  refresh = loadNodes();
+  pending.shift().resolve({nodes: [oldNode]});
+  pending.shift().reject(Error('USB unavailable'));
+  await refresh;
+  assert.equal(statusLine.textContent, 'USB unavailable');
+  assert.equal(usbCandidatesByNodeId.size, 0);
+  refresh = loadNodes();
+  pending.shift().reject(Error('Node unavailable'));
+  pending.shift().resolve({nodes: []});
+  await refresh;
+  assert(nodes.innerHTML.includes('Node unavailable'));
+})().catch(error => { console.error(error); process.exitCode = 1; });
+'''
+    subprocess.run(['node', '-e', harness], check=True, capture_output=True, text=True, timeout=10)
+    assert 'Promise.all([loadNodes(), loadUsbNodes()])' not in script
+    assert 'loadRegistered(); loadNodes(); window.setInterval' in script

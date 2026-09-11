@@ -1928,7 +1928,7 @@ restoreNodeInputState(saved);
 const inputForSubmit = Object.assign(element(), {value: ""});
 const submitButton = Object.assign(element(), {dataset: {nodeId: "112233445566"}, closest() { return {querySelector() { return inputForSubmit; }}; }});
 const requests = [];
-global.fetch = async (url, options = {}) => { requests.push({url, options}); return {ok: true, json: async () => url.endsWith("/nodes") ? {nodes: [{node_id: "112233445566", registration_state: "registered", logical_id: "ble-relay-001"}]} : {status: "request_sent"}}; };
+global.fetch = async (url, options = {}) => { requests.push({url, options}); return {ok: true, json: async () => url.endsWith("/usb-nodes") ? {nodes: []} : url.endsWith("/nodes") ? {nodes: [{node_id: "112233445566", registration_state: "registered", logical_id: "ble-relay-001"}]} : {status: "request_sent"}}; };
 (async () => {
   await submitNodeRegistration(submitButton);
   const emptyDoesNotPost = requests.length === 0;

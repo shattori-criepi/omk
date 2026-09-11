@@ -23,7 +23,25 @@ ENVIRONMENT_PUBLISH_INTERVAL_SECONDS = 10.0
 STATE_PUBLISH_INTERVAL_SECONDS = 10.0
 POWER_PUBLISH_INTERVAL_SECONDS = 10.0
 DIRECT_FRESHNESS_SECONDS = 30.0
+# Discovery advertises every 80–100 ms; use the existing direct BLE tolerance.
+NODE_DISCOVERY_FRESHNESS_SECONDS = DIRECT_FRESHNESS_SECONDS
+# Relay and SEN66 normally send every 10 s. Allow six intervals of loss;
+# SEN66 firmware also considers measurements stale after 60 s.
+NODE_RELAY_FRESHNESS_SECONDS = 60.0
+NODE_SENSOR_FRESHNESS_SECONDS = 60.0
 NODE_CAPABILITY_NAMES = ((1 << 0, "ble_scan"), (1 << 1, "sen66"))
+
+
+def _fresh_node_timestamp(value: Any, now: datetime, seconds: float) -> bool:
+    if not isinstance(value, str):
+        return False
+    try:
+        timestamp = datetime.fromisoformat(value)
+        if timestamp.tzinfo is None:
+            return False
+        return 0 <= (now - timestamp).total_seconds() <= seconds
+    except (ValueError, TypeError, OverflowError):
+        return False
 
 
 class BleManager:
@@ -134,6 +152,7 @@ class BleManager:
         self._publish_if_registered(decoded, source=source, relay_node_id=relay_node_id)
 
     def node_list(self) -> list[dict[str, Any]]:
+        now = self._now_provider()
         persisted = self.node_registry.list() if self.node_registry else {}
         ids = sorted(set(persisted) | set(self.node_observations))
         result = []
@@ -147,9 +166,13 @@ class BleManager:
             elif isinstance(item.get("capabilities"), int):
                 item["capabilities"] = [name for bit, name in NODE_CAPABILITY_NAMES if item["capabilities"] & bit]
             item["registration_state"] = item.get("registration_state", item.get("ble_state", "unregistered"))
-            item["online"] = bool(item.get("mqtt_status_seen_at") or seen)
+            item["relay_active"] = _fresh_node_timestamp(item.get("relay_last_seen_at"), now, NODE_RELAY_FRESHNESS_SECONDS)
+            item["online"] = (
+                bool(seen and _fresh_node_timestamp(seen.received_at, now, NODE_DISCOVERY_FRESHNESS_SECONDS))
+                or item["relay_active"]
+                or _fresh_node_timestamp(item.get("sen66_last_seen_at"), now, NODE_SENSOR_FRESHNESS_SECONDS)
+            )
             item["attached_sensors"] = ["SEN66"] if "sen66" in item.get("connected_sensors", []) else []
-            item["relay_active"] = bool(item.get("relay_last_seen_at"))
             result.append(item)
         return result
 

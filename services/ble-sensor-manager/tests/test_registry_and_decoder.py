@@ -639,7 +639,7 @@ def test_node_mqtt_status_validation_does_not_persist_invalid_messages(tmp_path:
     assert node["node_id"] == "112233445566"
     assert node["capabilities"] == ["ble_scan"]
     assert node["registration_state"] == "registered"
-    assert node["online"] is True
+    assert node["online"] is False  # Registration status alone is not a heartbeat.
     assert node["attached_sensors"] == []
 
 
