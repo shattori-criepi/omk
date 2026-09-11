@@ -5,7 +5,6 @@ from pathlib import Path
 
 import pytest
 
-
 SCRIPT = Path(__file__).resolve().parents[1] / "provision_omk_node_via_usb.py"
 SPEC = importlib.util.spec_from_file_location("provision_omk_node_via_usb", SCRIPT)
 assert SPEC is not None and SPEC.loader is not None
@@ -36,13 +35,17 @@ def test_serial_open_matches_known_good_cdc_setup(monkeypatch) -> None:
     monkeypatch.setattr(MODULE.os, "open", lambda *_args: 42)
     monkeypatch.setattr(MODULE.termios, "tcgetattr", lambda _fd: attributes)
     monkeypatch.setattr(MODULE.termios, "tcsetattr", lambda *args: calls.append(args))
-    monkeypatch.setattr(MODULE.termios, "tcflush", lambda *args: calls.append(args))
+    monkeypatch.setattr(MODULE.termios, "tcflush", lambda *_: pytest.fail("unbounded tcflush called"))
+    monkeypatch.setattr(MODULE.select, "select", lambda *args: (calls.append(args) or ([], [], [])))
+    monkeypatch.setattr(MODULE.os, "close", lambda fd: calls.append(("close", fd)))
     monkeypatch.setattr(MODULE.time, "sleep", lambda value: calls.append(("sleep", value)))
     serial = MODULE.SerialJson("/dev/ttyACM0")
     assert serial.fd == 42
     assert attributes[4:6] == [MODULE.termios.B115200, MODULE.termios.B115200]
     assert ("sleep", MODULE.SERIAL_SETTLE_SECONDS) in calls
-    assert (42, MODULE.termios.TCIFLUSH) in calls
+    assert ([42], [], [], 0) in calls
+    serial.close()
+    assert ("close", 42) in calls
 
 
 def test_read_profile_psk_elevates_only_the_nmcli_secret_query(monkeypatch) -> None:
@@ -88,7 +91,7 @@ def test_request_ignores_logs_malformed_and_unrelated_json_until_identify(monkey
     serial = _serial_with_chunks(chunks)
     monkeypatch.setattr(MODULE.os, "write", lambda *_args: 1)
     monkeypatch.setattr(MODULE.termios, "tcdrain", lambda *_args: None)
-    monkeypatch.setattr(MODULE.select, "select", lambda read, write, *_args: (read, write, []))
+    monkeypatch.setattr(MODULE.select, "select", lambda read, write, exceptional, timeout: (read if timeout else [], write, []))
     monkeypatch.setattr(MODULE.os, "read", lambda *_args: chunks.pop(0))
     response = serial.request({"command": "identify", "protocol_version": 2}, 1,
                               lambda message: MODULE.is_protocol_response(message) and message["status"] == "ok")
@@ -102,7 +105,7 @@ def test_request_ignores_logs_until_set_wifi_response(monkeypatch) -> None:
     serial = _serial_with_chunks(chunks)
     monkeypatch.setattr(MODULE.os, "write", lambda *_args: 1)
     monkeypatch.setattr(MODULE.termios, "tcdrain", lambda *_args: None)
-    monkeypatch.setattr(MODULE.select, "select", lambda read, write, *_args: (read, write, []))
+    monkeypatch.setattr(MODULE.select, "select", lambda read, write, exceptional, timeout: (read if timeout else [], write, []))
     monkeypatch.setattr(MODULE.os, "read", lambda *_args: chunks.pop(0))
     response = serial.request({"command": "set_wifi", "protocol_version": 2}, 1,
                               lambda message: MODULE.is_protocol_response(message) and message["status"] == "accepted")

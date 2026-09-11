@@ -24,6 +24,8 @@ DEFAULT_MQTT_BROKER = "127.0.0.1"
 DEFAULT_DEVICE_GLOBS = ("/dev/serial/by-id/*", "/dev/ttyACM*")
 BY_ID_PREFIX = "/dev/serial/by-id/"
 SERIAL_SETTLE_SECONDS = 0.5
+INPUT_DISCARD_TIMEOUT_SECONDS = 0.05
+INPUT_DISCARD_MAX_BYTES = 64 * 1024
 IDENTIFY_ATTEMPTS = 3
 IDENTIFY_RETRY_SECONDS = 0.1
 IDENTIFY_ATTEMPT_TIMEOUT_SECONDS = 1.25
@@ -152,6 +154,32 @@ def _write_until(fd: int, data: bytes, deadline: float) -> None:
         pending = pending[written:]
 
 
+def _discard_pending_input(fd: int, deadline: float) -> None:
+    """Discard currently queued input without a potentially blocking TTY flush.
+
+    The fd must be nonblocking. Fail closed if a noisy device exhausts either
+    budget: sending a request with stale replies still queued would be unsafe.
+    """
+    deadline = min(deadline, time.monotonic() + INPUT_DISCARD_TIMEOUT_SECONDS)
+    discarded = 0
+    while time.monotonic() < deadline:
+        readable, _, _ = select.select([fd], [], [], 0)
+        if not readable:
+            return
+        if time.monotonic() >= deadline:
+            break
+        try:
+            chunk = os.read(fd, min(4096, INPUT_DISCARD_MAX_BYTES - discarded))
+        except BlockingIOError:
+            return
+        if not chunk:
+            raise OSError("OMK USB provisioning device disconnected")
+        discarded += len(chunk)
+        if discarded >= INPUT_DISCARD_MAX_BYTES:
+            break
+    raise TimeoutError("OMK USB provisioning input discard limit reached")
+
+
 class SerialJson:
     def __init__(self, device: str, *, deadline: float | None = None) -> None:
         self.device = device
@@ -167,7 +195,8 @@ class SerialJson:
             if deadline is not None:
                 settle = min(settle, max(0, deadline - time.monotonic()))
             time.sleep(settle)
-            termios.tcflush(self.fd, termios.TCIFLUSH)
+            _discard_pending_input(self.fd, deadline if deadline is not None
+                                   else time.monotonic() + INPUT_DISCARD_TIMEOUT_SECONDS)
         except BaseException:
             os.close(self.fd)
             raise
@@ -179,6 +208,9 @@ class SerialJson:
     def request(self, request: dict[str, object], timeout: float, matches: Callable[[dict[str, object]], bool]) -> dict[str, object]:
         deadline = time.monotonic() + timeout
         data = (json.dumps(request, separators=(",", ":")) + "\n").encode()
+        # Also discard replies left by an earlier request on this connection.
+        self._buffer = b""
+        _discard_pending_input(self.fd, deadline)
         _write_until(self.fd, data, deadline)
         while time.monotonic() < deadline:
             readable, _, _ = select.select([self.fd], [], [], max(0, deadline - time.monotonic()))
