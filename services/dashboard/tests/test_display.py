@@ -2335,6 +2335,14 @@ vm.runInThisContext(fs.readFileSync(process.argv[2], "utf8") + "\nglobalThis.__b
   identifier.value = "1234 5678";
   identifier.listeners.pointerdown({preventDefault() {}});
   const idOpened = !overlay.hidden && elements["#broute-keyboard-title"].textContent === "BルートID";
+  const assert = require("node:assert/strict");
+  const rows = elements["#broute-keyboard-keys"].children;
+  assert.deepEqual(rows.map(row => row.children.map(button => button.textContent)), [
+    [..."1234567890"], [..."QWERTYUIOP"], [..."ASDFGHJKL"], [..."ZXCVBNM", "⌫", "全消去"]
+  ]);
+  rows[3].children.find(button => button.textContent === "全消去").listeners.click();
+  assert.equal(identifier.value, "");
+
   __brouteTest.appendKeyboardKey("A");
   __brouteTest.backspaceKeyboardKey();
   elements["#broute-keyboard-cancel"].listeners.click();

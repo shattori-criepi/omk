@@ -72,7 +72,7 @@ window.createSoftwareKeyboard = function createSoftwareKeyboard(elements, option
     const start = config.appendAtEnd ? value.length : rawPosition(input.value, input.selectionStart ?? input.value.length);
     const end = config.appendAtEnd ? value.length : rawPosition(input.value, input.selectionEnd ?? input.selectionStart ?? input.value.length);
     state = {target: config.target || (() => input), label: config.label, length: config.length, value, original: value,
-             selectionStart: start, selectionEnd: end};
+             selectionStart: start, selectionEnd: end, uppercase: false};
     elements.overlay.hidden = false;
     renderKeys(); renderState();
   }
@@ -85,5 +85,5 @@ window.createSoftwareKeyboard = function createSoftwareKeyboard(elements, option
     else if (event.key === "Escape") { event.preventDefault(); close(true); }
     else if (keyAllowed(event.key)) { event.preventDefault(); insert(event.key); }
   });
-  return {open, insert, backspace, clear, close, refresh: () => { renderKeys(); renderState(); }};
+  return {open, insert, backspace, clear, close, refresh: () => { if (!state) return; renderKeys(); renderState(); }};
 };

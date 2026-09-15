@@ -59,7 +59,16 @@ function usbSetupControls(candidate) {
 function saveNodeInputState() { const saved = {}; nodes.querySelectorAll(".node-logical-id").forEach(input => { saved[input.dataset.nodeId] = {value: input.value, focused: document.activeElement === input, selectionStart: input.selectionStart, selectionEnd: input.selectionEnd}; }); nodes.querySelectorAll(".confirm-atom").forEach(input => { (saved[input.dataset.nodeId] ||= {}).confirmAtom = input.checked; }); return saved; }
 function restoreNodeInputState(saved) { Object.entries(saved).forEach(([nodeId, state]) => { const input = nodes.querySelector(`.node-logical-id[data-node-id="${nodeId}"]`); if (input) { input.value = state.value; if (state.focused) { input.focus(); if (state.selectionStart != null && state.selectionEnd != null) input.setSelectionRange(state.selectionStart, state.selectionEnd); } } const confirmation = nodes.querySelector(`.confirm-atom[data-node-id="${nodeId}"]`); if (confirmation && state.confirmAtom === true) confirmation.checked = true; }); }
 function validLogicalId(value) { return /^[A-Za-z0-9_-]{1,48}$/.test(value); }
-function renderNodes() { const savedInputs = saveNodeInputState(); const visible = [...latestNodes, ...[...usbCandidatesByNodeId.values()].filter(candidate => !latestNodes.some(node => node.node_id === candidate.node_id))]; nodes.innerHTML = `<h2>OMK Node</h2>${visible.length ? visible.map(nodeCard).join("") : "<p>OMK Nodeは未検出です。</p>"}`; restoreNodeInputState(savedInputs); logicalKeyboard?.refresh(); }
+let restoringNodeInputs = false;
+function renderNodes() {
+    const savedInputs = saveNodeInputState();
+    const visible = [...latestNodes, ...[...usbCandidatesByNodeId.values()].filter(candidate => !latestNodes.some(node => node.node_id === candidate.node_id))];
+    nodes.innerHTML = `<h2>OMK Node</h2>${visible.length ? visible.map(nodeCard).join("") : "<p>OMK Nodeは未検出です。</p>"}`;
+    // Restoring focus must not reopen or reset the keyboard via focusin.
+    restoringNodeInputs = true;
+    try { restoreNodeInputState(savedInputs); } finally { restoringNodeInputs = false; }
+    logicalKeyboard?.refresh();
+}
 let nodeRefreshPromise;
 function loadNodes() {
     if (nodeRefreshPromise) return nodeRefreshPromise;
@@ -168,7 +177,7 @@ async function submitUsbProvision(button) {
 // Restore progress after navigation/reload, without exposing the host token.
 pollUsbSetup();
 nodes.onclick = async (event) => { const provision = event.target.closest(".provision-usb-node"); if (provision) { await submitUsbProvision(provision); return; } const button = event.target.closest(".register-node"); if (button) { await submitNodeRegistration(button); return; } const remove = event.target.closest(".remove-node-registration"); if (!remove || !window.confirm("このNodeのLogical ID登録を解除します。Wi-Fi設定と過去データは保持されます。")) return; try { await api(`/nodes/${encodeURIComponent(remove.dataset.nodeId)}/registration`, {method: "DELETE"}); await loadNodes(); statusLine.className = "setup-status"; statusLine.textContent = "Node登録を解除しました。Nodeが接続すると本体側の登録も解除されます。"; } catch (error) { statusLine.className = "setup-status error"; statusLine.textContent = error.message; } };
-nodes.addEventListener?.("focusin", event => { if (event.target.matches(".node-logical-id")) openLogicalKeyboard(event.target); });
+nodes.addEventListener?.("focusin", event => { if (!restoringNodeInputs && event.target.matches(".node-logical-id")) openLogicalKeyboard(event.target); });
 registered.onclick = (event) => { const button = event.target.closest(".edit-sensor"); if (!button) return; const sensor = JSON.parse(decodeURIComponent(button.dataset.sensor)); editingDeviceKey = sensor.device_key; editError.hidden = true; document.querySelector("#edit-physical-info").textContent = `${sensor.device_key} · ${vendorName(sensor.vendor)} ${modelName(sensor.model)} · ${sensor.sensor_type}`; document.querySelector("#edit-sensor-id").value = sensor.sensor_id; document.querySelector("#edit-display-name").value = sensor.display_name; document.querySelector("#edit-location").value = sensor.location; document.querySelector("#edit-enabled").checked = sensor.enabled; editDialog.showModal(); };
 document.querySelector("#cancel-register").onclick = () => dialog.close(); document.querySelector("#cancel-edit").onclick = () => editDialog.close();
 form.onsubmit = async (event) => { event.preventDefault(); if (confirmedModel && !document.querySelector("#confirm-unconfirmed-model").checked) { registerError.textContent = "実物の機種を確認してください"; registerError.hidden = false; return; } try { await api("/sensors", {method: "POST", body: JSON.stringify({device_key: selectedDeviceKey, ...(confirmedModel ? {confirmed_model: confirmedModel} : {}), sensor_id: document.querySelector("#sensor-id").value, display_name: document.querySelector("#display-name").value, location: document.querySelector("#location").value})}); dialog.close(); await Promise.all([refreshCandidates(), loadRegistered()]); statusLine.textContent = "登録しました。ほかの候補の順序はそのままです。"; } catch (error) { registerError.textContent = error.message; registerError.hidden = false; } };
