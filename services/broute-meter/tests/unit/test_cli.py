@@ -24,7 +24,7 @@ from broute_meter.adapter import (
     AdapterScanError,
 )
 from broute_meter.broute import BRouteSessionError, NoSmartMeterFoundError
-from broute_meter.config import AppConfig
+from broute_meter.config import AppConfig, BRouteCredentials, StorageConfig
 from broute_meter.models import CumulativeEnergyReading, InstantaneousPowerReading
 from broute_meter.runtime_status import RetryRequestStore, RuntimeStatusStore
 from broute_meter.serial.port_detector import PortInfo
@@ -120,6 +120,31 @@ def test_setup_adapter_auto_detects_only_named_rs_wsuha_p_candidate(
     )
 
     assert cli._resolve_adapter_port(AppConfig()) == "COM5"
+
+
+def test_run_without_a_confirmed_port_stays_in_adapter_missing_state(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = AppConfig(
+        storage=StorageConfig(data_directory=tmp_path),
+        credentials=BRouteCredentials("A" * 32, "B" * 12),
+    )
+    states: list[str] = []
+    monkeypatch.setattr(cli, "_load_application_config", lambda *_args, **_kwargs: config)
+    monkeypatch.setattr(cli, "_configure_command_logging", lambda _config: Mock())
+    monkeypatch.setattr(
+        cli,
+        "_resolve_adapter_port",
+        lambda _config: (_ for _ in ()).throw(cli.PortDetectionError("not configured")),
+    )
+    monkeypatch.setattr(cli, "_write_runtime_status", lambda _store, state, _logger: states.append(state))
+    monkeypatch.setattr(cli.time, "sleep", lambda _seconds: (_ for _ in ()).throw(KeyboardInterrupt()))
+
+    with pytest.raises(KeyboardInterrupt):
+        cli._run(SimpleNamespace())
+
+    assert states == ["starting", "adapter_missing"]
 
 
 def test_setup_adapter_mock_mode_never_enumerates_or_opens_serial_port(

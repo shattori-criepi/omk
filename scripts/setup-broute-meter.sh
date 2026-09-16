@@ -26,6 +26,9 @@ LOG_FILE=""
 SUDO=()
 PREFLIGHT_FAILURES=()
 PREFLIGHT_OK=true
+SETTINGS_PATH="${OMK_ROOT}/services/broute-meter/config/settings.yaml"
+SETTINGS_EXAMPLE="${OMK_ROOT}/services/broute-meter/config/settings.example.yaml"
+SERIAL_BY_ID_DIRECTORY="${OMK_SERIAL_BY_ID_DIRECTORY:-/dev/serial/by-id}"
 
 usage() {
   cat <<'EOF'
@@ -77,7 +80,7 @@ preflight() {
   require_file "${VBUS_HELPER_SOURCE}" 'USB VBUS helper'
   [[ -x "${HELPER_SOURCE}" ]] || PREFLIGHT_FAILURES+=("USB reset helper is not executable: ${HELPER_SOURCE}")
   [[ -d "${OMK_ROOT}/services/broute-meter" ]] || PREFLIGHT_FAILURES+=("B-route working directory is missing: ${OMK_ROOT}/services/broute-meter")
-  for command_name in apt-get python3 install stat mktemp sed systemctl visudo cmp tee; do require_command "${command_name}"; done
+  for command_name in apt-get python3 install stat mktemp sed systemctl visudo cmp tee sleep; do require_command "${command_name}"; done
   ((EUID != 0)) || require_command runuser
   if ((EUID != 0)); then
     require_command sudo
@@ -211,6 +214,44 @@ migrate_legacy_runtime_config() {
       log "Migrated legacy B-route settings to the current config directory."
     fi
   fi
+}
+
+settings_has_serial_port() {
+  local value
+  [[ -f "${SETTINGS_PATH}" ]] || return 1
+  value="$(sed -n 's/^[[:space:]]*port:[[:space:]]*//p' "${SETTINGS_PATH}" | head -n 1)"
+  value="${value%%#*}"
+  value="${value//[[:space:]]/}"
+  [[ -n "${value}" && "${value}" != null && "${value}" != '~' && "${value}" != '""' && "${value}" != "''" ]]
+}
+
+initialize_settings_for_adapter() {
+  local -a candidates=()
+  local candidate response temporary
+  [[ -e "${SETTINGS_PATH}" ]] && return 0
+  [[ -f "${SETTINGS_EXAMPLE}" ]] || fail "B-route settings template is missing: ${SETTINGS_EXAMPLE}"
+
+  for candidate in "${SERIAL_BY_ID_DIRECTORY}"/usb-FTDI_FT230X_Basic_UART_*-if00-port0; do
+    [[ -c "${candidate}" ]] && candidates+=("${candidate}")
+  done
+  if ((${#candidates[@]} == 1)); then
+    candidate="${candidates[0]}"
+    printf 'Use this FT230X serial adapter as RS-WSUHA-P? %s [y/N] ' "${candidate}" >&2
+    if IFS= read -r response && [[ "${response}" =~ ^[Yy]([Ee][Ss])?$ ]]; then
+      temporary="$(mktemp "${SETTINGS_PATH}.XXXXXX")"
+      sed "s|^  port: null$|  port: \"${candidate}\"|" "${SETTINGS_EXAMPLE}" >"${temporary}"
+      "${SUDO[@]}" install -o "${TARGET_USER}" -g "${TARGET_GROUP}" -m 0600 "${temporary}" "${SETTINGS_PATH}"
+      rm -f -- "${temporary}"
+      log "Configured the confirmed RS-WSUHA-P stable serial path."
+      return 0
+    fi
+    warn "RS-WSUHA-P was not confirmed; B-route service will remain idle until setup is re-run with the adapter connected."
+  elif ((${#candidates[@]} > 1)); then
+    warn "Multiple FT230X serial adapters were found; none was selected automatically."
+  else
+    warn "No FT230X serial adapter was found; B-route service will remain idle until setup is re-run with the adapter connected."
+  fi
+  "${SUDO[@]}" install -o "${TARGET_USER}" -g "${TARGET_GROUP}" -m 0600 "${SETTINGS_EXAMPLE}" "${SETTINGS_PATH}"
 }
 
 ensure_system_directory() {
@@ -374,6 +415,13 @@ ensure_service_state() {
   else
     log "Service is already enabled: ${SERVICE}"
   fi
+  if ! settings_has_serial_port; then
+    if "${SUDO[@]}" systemctl is-active --quiet "${SERVICE}"; then
+      "${SUDO[@]}" systemctl stop "${SERVICE}"
+    fi
+    warn "B-route serial adapter is not configured; ${SERVICE} is enabled but not started. Re-run setup after confirming the RS-WSUHA-P adapter."
+    return
+  fi
   if "${SUDO[@]}" systemctl is-active --quiet "${SERVICE}"; then
     log "Restarting active service to apply the installed B-route application: ${SERVICE}"
     if ! "${SUDO[@]}" systemctl restart "${SERVICE}"; then
@@ -385,6 +433,13 @@ ensure_service_state() {
       warn "${SERVICE} did not start yet. This is expected until the B-route adapter and credentials are ready; installation remains complete."
     fi
   fi
+}
+
+service_is_stably_active() {
+  local state
+  sleep 1
+  state="$("${SUDO[@]}" systemctl show --property=ActiveState,SubState,Result --value "${SERVICE}" 2>/dev/null || true)"
+  [[ "${state}" == $'active\nrunning\nsuccess' ]]
 }
 
 verify_installation() {
@@ -400,13 +455,17 @@ verify_installation() {
     [[ "$(stat -c '%U:%G:%a' "${OMK_ROOT}/services/broute-meter/config/credentials.yaml")" == "${TARGET_USER}:${TARGET_GROUP}:600" ]] ||
       fail "Credentials file owner or mode is incorrect."
   fi
-  if ! "${SUDO[@]}" systemctl is-active --quiet "${SERVICE}"; then
+  if ! settings_has_serial_port; then
+    log "PASS: ${SERVICE} is installed and enabled; it will start after a confirmed RS-WSUHA-P adapter is configured."
+    return 0
+  fi
+  if ! service_is_stably_active; then
     warn "${SERVICE} is enabled but not active. The B-route adapter, B-route ID/PASS, or network may not be ready yet."
     log "Check: sudo systemctl status ${SERVICE} --no-pager"
     log "Check: sudo journalctl -u ${SERVICE} -n 100 --no-pager"
     return 0
   fi
-  log "PASS: ${SERVICE} is enabled and active."
+  log "PASS: ${SERVICE} is enabled and stably active."
 }
 
 main() {
@@ -503,8 +562,9 @@ main() {
   exec > >(tee -a "${LOG_FILE}") 2>&1
   log "B-route meter setup started. Log file: ${LOG_FILE}"
   migrate_legacy_runtime_config
+  initialize_settings_for_adapter
   ensure_python_runtime
-  "${VENV_PYTHON}" "${SCRIPT_DIR}/lib/check-host-mqtt-config.py" "${OMK_ROOT}/services/broute-meter/config/settings.yaml" || fail "B-route MQTT configuration must be migrated before service changes."
+  "${VENV_PYTHON}" "${SCRIPT_DIR}/lib/check-host-mqtt-config.py" "${SETTINGS_PATH}" || fail "B-route MQTT configuration must be migrated before service changes."
   ensure_runtime_directory "${OMK_ROOT}/data/broute-meter"
   ensure_runtime_directory "${OMK_ROOT}/logs/broute-meter"
   ensure_credentials_permissions

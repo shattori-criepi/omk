@@ -2461,12 +2461,12 @@ vm.runInThisContext(fs.readFileSync(process.argv[2], "utf8") + "\nglobalThis.__b
     assert result["upstreamErrorIsNotTransport"] is True
     assert result["transportError"] is True
     assert result["reconnectStates"] == [
-        {"state": "stopped", "label": "再起動中", "delay": 1500, "message": "Bルートへ接続しています。"},
-        {"state": "starting", "label": "起動中", "delay": 1500, "message": "Bルートへ接続しています。"},
-        {"state": "scanning", "label": "スマートメータを探索中", "delay": 1500, "message": "Bルートへ接続しています。"},
-        {"state": "retry_wait", "label": "再試行待ち", "delay": 10000, "message": "30秒後にスマートメータを再探索します。"},
-        {"state": "authenticating", "label": "認証中", "delay": 1500, "message": "Bルートへ接続しています。"},
-        {"state": "connected", "label": "接続済み", "delay": 10000, "message": "Bルートへ接続しました。"},
+        {"state": "stopped", "label": "サービス停止", "delay": 10000, "message": "Bルートサービスを開始できませんでした。アダプターの接続を確認してください。"},
+        {"state": "starting", "label": "起動中", "delay": 10000, "message": "Bルートサービスを開始できませんでした。アダプターの接続を確認してください。"},
+        {"state": "scanning", "label": "スマートメータを探索中", "delay": 10000, "message": "Bルートサービスを開始できませんでした。アダプターの接続を確認してください。"},
+        {"state": "retry_wait", "label": "再試行待ち", "delay": 10000, "message": "Bルートサービスを開始できませんでした。アダプターの接続を確認してください。"},
+        {"state": "authenticating", "label": "認証中", "delay": 10000, "message": "Bルートサービスを開始できませんでした。アダプターの接続を確認してください。"},
+        {"state": "connected", "label": "接続済み", "delay": 10000, "message": "Bルートサービスを開始できませんでした。アダプターの接続を確認してください。"},
     ]
     assert result["scanErrorTerminal"] is True
     assert result["authenticationErrorTerminal"] is True

@@ -209,7 +209,18 @@ def _run(args: argparse.Namespace) -> int:
     config = _load_application_config(args, require_credentials=True)
     logger = _configure_command_logging(config)
     _log_runtime(logger, "run")
-    port = _resolve_adapter_port(config)
+    runtime_status = RuntimeStatusStore(config.storage.data_directory / "status.json")
+    _write_runtime_status(runtime_status, "starting", logger)
+    try:
+        port = _resolve_adapter_port(config)
+    except PortDetectionError:
+        # A generic FT230X descriptor is insufficient to select an adapter.
+        # Keep the service alive with a safe status rather than entering a
+        # systemd restart loop before setup has confirmed a stable by-id path.
+        logger.warning("RS-WSUHA-Pの確認済みシリアルポートが未設定です。setupでアダプターを確認してください")
+        while True:
+            _write_runtime_status(runtime_status, "adapter_missing", logger)
+            time.sleep(ADAPTER_PRESENCE_CHECK_SECONDS)
     try:
         TRUSTED_IDENTITY_PATH.lstat()
     except FileNotFoundError:
@@ -221,9 +232,7 @@ def _run(args: argparse.Namespace) -> int:
     logger.info("runに使用するポート: %s", port)
     adapter = _create_rs_wsuha_p_adapter(config, port)
     storage = CsvMeasurementStorage(config.storage.data_directory)
-    runtime_status = RuntimeStatusStore(config.storage.data_directory / "status.json")
     retry_request = RetryRequestStore(config.storage.data_directory / "retry-request")
-    _write_runtime_status(runtime_status, "starting", logger)
     try:
         publisher = create_measurement_publisher(config.mqtt)
         publisher.start()
