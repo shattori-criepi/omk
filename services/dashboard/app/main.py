@@ -398,7 +398,10 @@ async def update_dashboard_mode(request: Request) -> dict:
         # are generated independently from current candidates.
         recommended = settings.recommended_blocks
         clock_items = clock_item_ids(selectable) if mode == "clock" else settings.clock_item_ids
-        updated = DashboardSettings(mode, settings.custom_blocks, recommended, clock_items, settings.demo_enabled)
+        # Selecting a regular mode also exits the exhibition state.  The admin
+        # UI presents demo as a fourth choice while settings v3 keeps it as a
+        # separate boolean for compatibility.
+        updated = DashboardSettings(mode, settings.custom_blocks, recommended, clock_items, False)
         get_settings_repository().save(updated, _available_display_groups(candidates))
     except (SettingsError, ValueError, AttributeError) as error:
         raise HTTPException(400, str(error)) from error

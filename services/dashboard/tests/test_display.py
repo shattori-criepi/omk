@@ -1579,8 +1579,8 @@ def test_admin_display_css_allows_vertical_scroll_without_changing_kiosk_overflo
     assert '保存してダッシュボードを確認' in admin_template
     assert 'href="/display">ダッシュボードを確認</a>' not in admin_template
     assert '>保存する<' not in admin_template
-    assert re.search(r"admin_display\.js'\) }}\?v=20260819-clock-navigation-\d+", admin_template)
-    assert re.search(r"display\.css'\) }}\?v=20260910-demo-layout-\d+", admin_template)
+    assert re.search(r"admin_display\.js'\) }}\?v=20260916-demo-mode-\d+", admin_template)
+    assert re.search(r"display\.css'\) }}\?v=20260916-demo-mode-\d+", admin_template)
     assert '<body class="admin-body">' not in display_template
     assert re.search(r"display\.js'\) }}\?v=[^\"']+", display_template)
     assert re.search(r"display\.css'\) }}\?v=[^\"']+", display_template)
@@ -1608,23 +1608,24 @@ def test_admin_display_css_allows_vertical_scroll_without_changing_kiosk_overflo
     assert "overflow: hidden;" in stylesheet
 
 
-def test_admin_display_keeps_demo_entry_separate_near_normal_modes() -> None:
+def test_admin_display_uses_demo_as_a_fourth_mode_without_legacy_controls() -> None:
     template = (Path(__file__).parents[1] / "app" / "templates" / "admin_display.html").read_text(encoding="utf-8")
-    demo_script = (Path(__file__).parents[1] / "app" / "static" / "demo_settings.js").read_text(encoding="utf-8")
+    admin_script = (Path(__file__).parents[1] / "app" / "static" / "admin_display.js").read_text(encoding="utf-8")
+    stylesheet = (Path(__file__).parents[1] / "app" / "static" / "display.css").read_text(encoding="utf-8")
 
-    mode_buttons = [template.index(f'data-mode="{mode}"') for mode in ("recommended", "custom", "clock")]
+    mode_buttons = [template.index(f'data-mode="{mode}"') for mode in ("recommended", "custom", "clock", "demo")]
     assert mode_buttons == sorted(mode_buttons)
     assert 'class="display-settings-main"' in template
-    assert 'class="demo-settings"' in template
-    assert mode_buttons[-1] < template.index('id="demo-entry"') < template.index('id="demo-settings"') < template.index('id="recommended-summary"')
-    assert re.findall(r'data-mode="([^"]+)"', template) == ["recommended", "custom", "clock"]
-    entry = re.search(r'<button id="demo-entry"[^>]+>', template).group(0)
-    assert 'aria-controls="demo-settings"' in entry and 'aria-expanded="false"' in entry
-    assert 'data-mode' not in entry
-    assert 'id="demo-settings" class="demo-settings" hidden' in template
-    assert '展示・説明時の利用を想定した機能です。' in template
-    assert 'querySelector("#demo-enabled")' in demo_script
-    assert '"/api/admin/dashboard-settings/demo"' in demo_script
+    assert re.findall(r'data-mode="([^"]+)"', template) == ["recommended", "custom", "clock", "demo"]
+    assert 'class="demo-mode"' in template
+    assert 'aria-label="デモ（展示・動作確認用）"' in template
+    for obsolete in ("demo-entry", "demo-settings", "demo-enabled", "demo_settings.js"):
+        assert obsolete not in template
+    assert not (Path(__file__).parents[1] / "app" / "static" / "demo_settings.js").exists()
+    assert ".demo-settings" not in stylesheet
+    assert 'button.dataset.mode === "demo"' in admin_script
+    assert '"/api/admin/dashboard-settings/demo"' in admin_script
+    assert ".display-mode-selector .demo-mode" in stylesheet
 
 
 def test_display_pattern_css_keeps_only_hero_primary_large_and_fits_the_viewport() -> None:
@@ -2643,7 +2644,7 @@ def test_display_settings_hidden_modes_and_dynamic_summary():
     assert ".display-settings-page [hidden] { display: none !important; }" in css
     for mode, element, variable in [("custom", "custom-editor", "customRoot"), ("recommended", "recommended-summary", "recommendedRoot"), ("clock", "clock-summary", "clockRoot")]:
         assert re.search(fr'<section id="{element}"[^>]*\bhidden', html)
-        assert f'{variable}.hidden = mode !== "{mode}"' in js
+        assert f'{variable}.hidden = demoEnabled || mode !== "{mode}"' in js
         assert f'data-mode="{mode}"' in html
     assert "currentRecommendedBlocks.map" in js
     assert "settings.current_recommended_blocks" in js
@@ -2742,60 +2743,6 @@ def test_clock_filters_current_candidates(freshness, selectable):
     assert clock_item_ids(candidates) == (("grid", "temperature") if selectable and freshness in {"normal", "delayed"} else ())
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is required for demo UI tests")
-def test_demo_entry_opens_settings_and_only_changes_demo_state():
-    harness = r'''
-const fs = require("fs"), vm = require("vm"), assert = require("assert");
-const handlers = {}, requests = [];
-const input = {checked: false, addEventListener(name, fn) {handlers[name] = fn;}};
-const entry = {textContent: "デモ用", addEventListener(name, fn) {handlers[name] = fn;}, setAttribute(name, value) {this[name] = value;}};
-const panel = {hidden: true}, status = {};
-const modes = {addEventListener(name, fn) {handlers.modeClick = fn;}};
-let ready, ok = true;
-global.document = {addEventListener(name, fn) {ready = fn;}, querySelector(selector) {return {"#demo-enabled": input, "#demo-entry": entry, "#demo-settings": panel, "#settings-status": status, "#display-modes": modes}[selector];}};
-global.fetch = async (path, options) => {requests.push([path, options]); return {ok, json: async () => ({mode: "clock", demo: {enabled: true}})};};
-vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8"));
-(async () => {
-  await ready();
-  assert.strictEqual(entry.textContent, "デモ用（使用中）");
-  handlers.click();
-  assert.strictEqual(panel.hidden, false);
-  assert.strictEqual(entry["aria-expanded"], "true");
-  assert.strictEqual(requests.length, 1);
-  for (const enabled of [false, true]) {
-    input.checked = enabled;
-    await handlers.change();
-    const [path, options] = requests.at(-1);
-    assert.strictEqual(path, "/api/admin/dashboard-settings/demo");
-    assert.deepStrictEqual(JSON.parse(options.body), {enabled});
-    assert.strictEqual(entry.textContent, enabled ? "デモ用（使用中）" : "デモ用");
-  }
-  ok = false;
-  input.checked = false;
-  await handlers.change();
-  assert.strictEqual(input.checked, true);
-  assert.strictEqual(input.disabled, false);
-  assert.strictEqual(entry.textContent, "デモ用（使用中）");
-  handlers.click();
-  assert.strictEqual(panel.hidden, true);
-  assert.strictEqual(entry["aria-expanded"], "false");
-  for (const mode of ["recommended", "custom", "clock"]) {
-    handlers.click();
-    assert.strictEqual(panel.hidden, false);
-    const count = requests.length;
-    handlers.modeClick({target: {closest(selector) {assert.strictEqual(selector, "[data-mode]"); return {dataset: {mode}};}}});
-    assert.strictEqual(panel.hidden, true);
-    assert.strictEqual(entry["aria-expanded"], "false");
-    assert.strictEqual(input.checked, true);
-    assert.strictEqual(entry.textContent, "デモ用（使用中）");
-    assert.strictEqual(requests.length, count);
-  }
-  assert(!requests.some(([path]) => path.endsWith("/mode")));
-})().catch(error => {console.error(error); process.exitCode = 1;});
-'''
-    subprocess.run(["node", "-e", harness, str(dashboard_main.APP_DIR / "static/demo_settings.js")], check=True, capture_output=True, text=True)
-
-
 def test_small_labels_and_units_remain_readable_and_long_readings_can_wrap():
     css = (dashboard_main.APP_DIR / "static/display.css").read_text()
     for count, font in [(1, "clamp(22px, 8cqw, 30px)"), (2, "clamp(20px, 7cqw, 28px)"), (3, "clamp(20px, 6.5cqw, 26px)")]:
@@ -2815,18 +2762,6 @@ def test_small_labels_and_units_remain_readable_and_long_readings_can_wrap():
         assert "max-width: 100%;" in rule
         assert "overflow-wrap: anywhere;" in rule
         assert "white-space: normal;" in rule
-
-
-def test_demo_controls_have_a_separate_muted_palette_and_respect_hidden():
-    css = (dashboard_main.APP_DIR / "static/display.css").read_text()
-    template = (dashboard_main.APP_DIR / "templates/admin_display.html").read_text()
-    assert '<div class="demo-entry-group"><button id="demo-entry"' in template
-    assert ".demo-entry-group {\n  border-left: 1px solid #b08938;" in css
-    for selector in (".demo-entry", ".display-settings-main > .demo-settings"):
-        rule = css.split(selector + " {", 1)[1].split("}", 1)[0]
-        assert "#b08938" in rule
-        assert "background: rgb(176 137 56 / .14);" in rule
-    assert ".display-settings-page [hidden] { display: none !important; }" in css
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is required for admin UI tests")
@@ -2870,3 +2805,77 @@ setImmediate(async () => {
     block = result["saved"]["presets"]["standard"]["blocks"][0]
     assert block["size"] == "small"
     assert block["layout_pattern"] == "strip"
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is required for admin UI tests")
+def test_demo_mode_button_enables_demo_and_regular_modes_exit_it() -> None:
+    javascript_path = Path(__file__).parents[1] / "app" / "static" / "admin_display.js"
+    harness = r'''
+const fs = require("fs"), vm = require("vm"), assert = require("assert");
+function element() { return {innerHTML: "", textContent: "", disabled: false, listeners: {}, addEventListener(type, handler) { this.listeners[type] = handler; }, closest() { return null; }}; }
+function button(mode) { return {dataset: {mode}, classList: {selected: false, toggle(_name, value) { this.selected = value; }}, setAttribute(name, value) { this[name] = value; }}; }
+const buttons = Object.fromEntries(["recommended", "custom", "clock", "demo"].map(mode => [mode, button(mode)]));
+const modeSelector = {listeners: {}, addEventListener(type, handler) { this.listeners[type] = handler; }, querySelectorAll() { return Object.values(buttons); }};
+const elements = Object.fromEntries(["#selected-items", "#available-items", "#capacity-status", "#settings-status", "#save-settings"].map(key => [key, element()]));
+elements["#display-modes"] = modeSelector;
+const requests = [];
+const settings = {version: 3, mode: "custom", demo: {enabled: false}, current_recommended_blocks: [], presets: {standard: {blocks: []}, recommended: {blocks: []}, clock: {item_ids: []}}};
+global.document = {querySelector: selector => elements[selector]};
+global.window = {location: {assign() {}}};
+global.fetch = async (url, options = {}) => {
+  requests.push([url, options]);
+  if (url.endsWith("display-items")) return {ok: true, json: async () => ({capacity: 6, groups: []})};
+  if (url.endsWith("/demo")) settings.demo.enabled = JSON.parse(options.body).enabled;
+  if (url.endsWith("/mode")) { settings.mode = JSON.parse(options.body).mode; settings.demo.enabled = false; }
+  return {ok: true, json: async () => structuredClone(settings)};
+};
+vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8"));
+setImmediate(async () => {
+  const click = async mode => modeSelector.listeners.click({target: {closest(selector) { assert.strictEqual(selector, "[data-mode]"); return buttons[mode]; }}});
+  const initial = Object.fromEntries(Object.entries(buttons).map(([mode, button]) => [mode, button.classList.selected]));
+  await click("demo");
+  const demo = Object.fromEntries(Object.entries(buttons).map(([mode, button]) => [mode, button.classList.selected]));
+  const regular = {};
+  for (const mode of ["recommended", "custom", "clock"]) {
+    await click(mode);
+    regular[mode] = {enabled: settings.demo.enabled, selected: Object.fromEntries(Object.entries(buttons).map(([name, button]) => [name, button.classList.selected]))};
+  }
+  console.log(JSON.stringify({initial, demo, regular, requests, settings}));
+});
+'''
+    completed = subprocess.run(["node", "-e", harness, str(javascript_path)], check=True, capture_output=True, text=True)
+    result = json.loads(completed.stdout)
+
+    assert result["initial"] == {"recommended": False, "custom": True, "clock": False, "demo": False}
+    assert result["demo"] == {"recommended": False, "custom": False, "clock": False, "demo": True}
+    assert result["requests"][2][0].endswith("/dashboard-settings/demo")
+    assert json.loads(result["requests"][2][1]["body"]) == {"enabled": True}
+    for mode in ("recommended", "custom", "clock"):
+        state = result["regular"][mode]
+        assert state["enabled"] is False
+        assert state["selected"] == {"recommended": mode == "recommended", "custom": mode == "custom", "clock": mode == "clock", "demo": False}
+    assert result["settings"]["mode"] == "clock"
+    assert result["settings"]["demo"]["enabled"] is False
+
+
+def test_demo_api_starts_custom_display_and_regular_mode_exits_demo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    path = tmp_path / "dashboard" / "settings.json"
+    monkeypatch.setenv("OMK_DASHBOARD_SETTINGS_PATH", str(path))
+    SettingsRepository(path).save(DashboardSettings("clock", (), (), (), False), {})
+
+    enabled = client.post("/api/admin/dashboard-settings/demo", json={"enabled": True})
+
+    assert enabled.status_code == 200
+    assert enabled.json()["mode"] == "clock"
+    assert enabled.json()["demo"]["enabled"] is True
+    assert client.get("/api/display").json()["mode"] == "custom"
+
+    switched = client.post("/api/admin/dashboard-settings/mode", json={"mode": "recommended"})
+
+    assert switched.status_code == 200
+    assert switched.json()["mode"] == "recommended"
+    assert switched.json()["demo"]["enabled"] is False
+    persisted = json.loads(path.read_text(encoding="utf-8"))
+    assert persisted["mode"] == "recommended"
+    assert persisted["demo"] == {"enabled": False}
+    assert client.get("/api/display").json()["mode"] == "recommended"
