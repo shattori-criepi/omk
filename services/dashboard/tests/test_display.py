@@ -2648,7 +2648,7 @@ def test_display_settings_hidden_modes_and_dynamic_summary():
 
 def test_small_card_css_scales_by_item_count_and_card_dimensions():
     css = (Path(__file__).parents[1] / "app/static/display.css").read_text()
-    for count, size in [(1, "min(24cqw, 32cqh, 96px)"), (2, "min(18cqw, 24cqh, 64px)"), (3, "min(16cqw, 20cqh, 56px)")]:
+    for count, size in [(1, "min(21cqw, 28cqh, 84px)"), (2, "min(16cqw, 21cqh, 56px)"), (3, "min(14cqw, 17.5cqh, 49px)")]:
         assert f".display-card--small.display-card--items-{count} {{\n  --small-value-size: {size};" in css
         if count > 1:
             assert f"grid-template-rows: repeat({count}, minmax(min-content, 1fr));" in css

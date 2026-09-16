@@ -764,23 +764,23 @@ body[data-demo-enabled="true"] .display-card--medium.display-card--compact.displ
 /* Scale small readings to the card area and count, independently of sensors. */
 .display-card--small {
   container-type: size;
-  --small-value-size: clamp(40px, 6vw, 80px);
+  --small-value-size: clamp(35px, 5.25vw, 70px);
   --small-label-size: clamp(20px, 7cqw, 28px);
   --small-unit-size: clamp(18px, 6cqw, 24px);
 }
 .display-card--small.display-card--items-1 {
-  --small-value-size: min(24cqw, 32cqh, 96px);
+  --small-value-size: min(21cqw, 28cqh, 84px);
   --small-label-size: clamp(22px, 8cqw, 30px);
   grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto minmax(0, 1fr) auto;
   align-content: stretch;
 }
 .display-card--small.display-card--items-2 {
-  --small-value-size: min(18cqw, 24cqh, 64px);
+  --small-value-size: min(16cqw, 21cqh, 56px);
   --small-label-size: clamp(20px, 7cqw, 28px);
 }
 .display-card--small.display-card--items-3 {
-  --small-value-size: min(16cqw, 20cqh, 56px);
+  --small-value-size: min(14cqw, 17.5cqh, 49px);
   --small-label-size: clamp(20px, 6.5cqw, 26px);
 }
 .display-card--small.display-card--items-2 .display-card-stacked-items {
