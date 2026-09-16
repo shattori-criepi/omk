@@ -26,7 +26,9 @@ SERVICE_ACTIVE=false
 START_RESULT=1
 UNIT_CHANGED=false
 SYSTEMCTL_CALLS=()
-SYSTEMD_STATE=$'active\nrunning\nsuccess'
+SYSTEMD_ACTIVE_STATE=active
+SYSTEMD_SUB_STATE=running
+SYSTEMD_RESULT=success
 
 mkdir -p "${OMK_ROOT}/services/broute-meter/config"
 cp "${HELPER_SOURCE}" "${HELPER_DEST}"
@@ -41,7 +43,14 @@ systemctl() {
     is-enabled) return 0 ;;
     is-active) "${SERVICE_ACTIVE}" ;;
     start|restart|stop) return "${START_RESULT}" ;;
-    show) printf '%s\n' "${SYSTEMD_STATE}" ;;
+    show)
+      case "$*" in
+        *' ActiveState '*) printf '%s\n' "${SYSTEMD_ACTIVE_STATE}" ;;
+        *' SubState '*) printf '%s\n' "${SYSTEMD_SUB_STATE}" ;;
+        *' Result '*) printf '%s\n' "${SYSTEMD_RESULT}" ;;
+        *) return 1 ;;
+      esac
+      ;;
     daemon-reload) return 0 ;;
     *) return 0 ;;
   esac
@@ -72,12 +81,21 @@ serial:
   port: "/dev/serial/by-id/usb-FTDI_FT230X_Basic_UART_fixture-if00-port0"
 EOF
 
+# Individual property queries make this healthy result independent of the
+# ordering used by systemctl when multiple properties are requested.
+healthy_output="$(verify_installation)"
+[[ "${healthy_output}" == *'enabled and healthy'* ]]
+
 # An immediately exiting process must not produce the active PASS message.
-SYSTEMD_STATE=$'activating\nauto-restart\nexit-code'
+SYSTEMD_ACTIVE_STATE=activating
+SYSTEMD_SUB_STATE=auto-restart
+SYSTEMD_RESULT=exit-code
 unstable_output="$(verify_installation)"
 [[ "${unstable_output}" == *'enabled but not active'* ]]
 [[ "${unstable_output}" != *'enabled and healthy'* ]]
-SYSTEMD_STATE=$'active\nrunning\nsuccess'
+SYSTEMD_ACTIVE_STATE=active
+SYSTEMD_SUB_STATE=running
+SYSTEMD_RESULT=success
 
 # Every normal setup installs the B-route package, so an active service must
 # restart even when its unit is unchanged.
@@ -92,10 +110,21 @@ verify_installation
 
 # A normal systemd start still initializing the adapter is healthy, unlike
 # auto-restart/exit-code and must not be reported as a startup failure.
-SYSTEMD_STATE=$'activating\nstart\nsuccess'
+SYSTEMD_ACTIVE_STATE=activating
+SYSTEMD_SUB_STATE=start
+SYSTEMD_RESULT=success
 initializing_output="$(verify_installation)"
 [[ "${initializing_output}" == *'enabled and healthy'* ]]
-SYSTEMD_STATE=$'active\nrunning\nsuccess'
+
+# A failed unit is never healthy, even if a stale Result happens to be
+# success. Restore the normal state before later service-state assertions.
+SYSTEMD_ACTIVE_STATE=failed
+SYSTEMD_SUB_STATE=failed
+failed_output="$(verify_installation)"
+[[ "${failed_output}" == *'enabled but not active'* ]]
+[[ "${failed_output}" != *'enabled and healthy'* ]]
+SYSTEMD_ACTIVE_STATE=active
+SYSTEMD_SUB_STATE=running
 
 # A changed unit still reloads systemd before restarting the active service.
 UNIT_CHANGED=true

@@ -517,10 +517,13 @@ ensure_service_state() {
 }
 
 service_has_healthy_start() {
-  local state
+  local active_state sub_state result
   sleep 1
-  state="$("${SUDO[@]}" systemctl show --property=ActiveState,SubState,Result --value "${SERVICE}" 2>/dev/null || true)"
-  [[ "${state}" == $'active\nrunning\nsuccess' || "${state}" == $'activating\nstart\nsuccess' ]]
+  active_state="$("${SUDO[@]}" systemctl show -p ActiveState --value "${SERVICE}" 2>/dev/null || true)"
+  sub_state="$("${SUDO[@]}" systemctl show -p SubState --value "${SERVICE}" 2>/dev/null || true)"
+  result="$("${SUDO[@]}" systemctl show -p Result --value "${SERVICE}" 2>/dev/null || true)"
+  [[ ( "${active_state}" == active && "${sub_state}" == running && "${result}" == success ) ||
+     ( "${active_state}" == activating && "${sub_state}" == start && "${result}" == success ) ]]
 }
 
 verify_installation() {
