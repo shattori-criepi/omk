@@ -2,6 +2,7 @@
   "source": "Anonymized snapshots from actual OMK development measurements",
   "captured_date": "2026-09-03",
   "values": {
+    "grid_power": "-0.01",
     "pv_power": "0.19",
     "load_power": "1.33",
     "grid_import": "0.00",

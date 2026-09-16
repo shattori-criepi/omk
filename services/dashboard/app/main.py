@@ -24,7 +24,7 @@ from app.display_items import DisplayItem, catalog_items_with_latest, display_ca
 from app.recommendations import BROUTE_GROUP, clock_item_ids, recommended_blocks
 from app.view_models import FreshnessStatus, format_timestamp_seconds, worst_freshness
 from app.view_models import get_display_view_model
-from app.demo import apply_demo_fallback
+from app.demo import apply_demo_fallback, demo_candidates
 
 APP_DIR = Path(__file__).parent
 _DERIVED_ENERGY_CACHE: tuple[datetime, list[DisplayItem]] | None = None
@@ -163,13 +163,19 @@ def get_dashboard_view_model(mode_override: str | None = None):
         settings = _settings_for(candidates)
         now = datetime.now(JST)
         current_candidates = _dashboard_candidates(now)
-        if settings.demo_enabled:
-            current_candidates = apply_demo_fallback(current_candidates)
         mode = mode_override or settings.mode
+        if settings.demo_enabled:
+            # Settings and admin candidates must always come from real sources.
+            # This overlay exists only for this HTML/API response.
+            current_candidates = (apply_demo_fallback(current_candidates) if mode == "custom"
+                                  else demo_candidates(current_candidates))
         if mode == "clock":
-            supplemental = _clock_supplemental(settings.clock_item_ids, current_candidates)
+            item_ids = clock_item_ids(current_candidates) if settings.demo_enabled else settings.clock_item_ids
+            supplemental = _clock_supplemental(item_ids, current_candidates)
             return _clock_dashboard(now, supplemental)
         active_blocks = settings.recommended_blocks if mode == "recommended" else settings.custom_blocks
+        if settings.demo_enabled and mode == "recommended":
+            active_blocks = tuple(recommended_blocks(current_candidates))
         blocks = selected_blocks(display_repository, active_blocks, now, current_candidates)
         statuses = [FreshnessStatus(block.freshness) for block in blocks] or [FreshnessStatus.UNAVAILABLE]
         updated = max((block.last_received_at for block in blocks if block.last_received_at), default="")
@@ -550,7 +556,8 @@ async def display_api(demo_mode: str | None = None) -> dict:
     """Return the current dashboard snapshot for in-page refreshes."""
     if demo_mode is not None and demo_mode not in {"custom", "clock", "recommended"}:
         raise HTTPException(400, "表示モードが正しくありません")
-    return get_dashboard_view_model((demo_mode or "custom") if _demo_enabled() else None).as_dict()
+    enabled = _demo_enabled()
+    return {**get_dashboard_view_model((demo_mode or "custom") if enabled else None).as_dict(), "demo_enabled": enabled}
 
 
 @app.post("/api/admin/dashboard-settings/demo")

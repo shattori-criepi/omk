@@ -14,6 +14,30 @@ const WEEKDAY_ARIA_NAMES = ["日曜日", "月曜日", "火曜日", "水曜日", 
 let displayFetchInProgress = false;
 const demoEnabled = document.body?.dataset.demoEnabled === "true";
 const demoMode = document.body?.dataset.demoMode || "custom";
+const demoSnapshot = document.querySelector("#demo-snapshot");
+const initialDemoStructure = demoSnapshot ? displayStructure(JSON.parse(demoSnapshot.textContent)) : null;
+
+function displayStructure(data) {
+  return JSON.stringify(data.mode === "clock"
+    ? data.supplemental.map(item => item.id)
+    : data.blocks.map(block => [block.id, block.title, block.size, block.layout_pattern,
+      block.primary.id, ...block.secondary.map(item => item.id)]));
+}
+
+function updateSourceKind(container, sourceKind) {
+  if (!demoEnabled) return;
+  const badge = container.querySelector('[data-role="source-kind"]');
+  if (badge) {
+    badge.dataset.sourceKind = sourceKind;
+    badge.textContent = sourceKind === "demo" ? "模擬" : "実測";
+  }
+}
+
+function updateReadingLabel(container, item) {
+  const label = container.querySelector(demoEnabled ? '[data-role="label-text"]' : '[data-role="label"]');
+  if (label) label.textContent = item.short_label || item.label;
+  updateSourceKind(container, item.source_kind);
+}
 
 function updateCurrentDatetime() {
   if (!currentDatetime && !clockDate && !clockTime) return;
@@ -95,6 +119,10 @@ function responseDisplayMode(data) {
 }
 
 function updateDisplay(data) {
+  if (typeof data.demo_enabled === "boolean" && data.demo_enabled !== demoEnabled) {
+    window.location.reload();
+    return;
+  }
   // A newly discovered catalog can change the server from the legacy template
   // to Block Dashboard between page load and the first poll. Their DOM shapes
   // differ, so updating values in place would leave old stale badges visible.
@@ -106,6 +134,12 @@ function updateDisplay(data) {
     else window.location.reload();
     return;
   }
+  // Automatic demo presets can change when a real device starts reporting.
+  // Render new membership before applying ordinary value-only updates.
+  if (initialDemoStructure !== null && displayStructure(data) !== initialDemoStructure) {
+    window.location.assign(`/display?demo_mode=${demoMode}`);
+    return;
+  }
   if (data.mode === "clock" && Array.isArray(data.supplemental)) {
     if (clockDate && data.date) clockDate.textContent = data.date;
     if (clockTime && data.time) clockTime.textContent = data.time;
@@ -114,10 +148,9 @@ function updateDisplay(data) {
     data.supplemental.forEach((item) => {
       const reading = document.querySelector(`[data-item-id="${CSS.escape(item.id)}"]`);
       if (!reading) return;
-      const label = reading.querySelector('[data-role="label"]');
       const value = reading.querySelector('[data-role="value"]');
       const unit = reading.querySelector('[data-role="unit"]');
-      if (label) label.textContent = item.short_label || item.label;
+      updateReadingLabel(reading, item);
       if (value) value.textContent = item.value;
       if (unit) { unit.textContent = displayUnitText(item); unit.hidden = false; }
       reading.className = `clock-reading clock-reading--${item.freshness}`;
@@ -132,10 +165,9 @@ function updateDisplay(data) {
       items.forEach((item) => {
         const itemCard = document.querySelector(`[data-item-id="${CSS.escape(item.id)}"]`);
         if (!itemCard) return;
-        const label = itemCard.querySelector('[data-role="label"]');
         const value = itemCard.querySelector('[data-role="value"]');
         const unit = itemCard.querySelector('[data-role="unit"]');
-        if (label) label.textContent = item.short_label || item.label;
+        updateReadingLabel(itemCard, item);
         if (value) value.textContent = item.value;
         if (unit) {
           unit.textContent = displayUnitText(item);
@@ -154,6 +186,7 @@ function updateDisplay(data) {
           auxiliary.querySelector('[data-role="auxiliary-label"]').textContent = block.auxiliary_label;
           auxiliary.querySelector('[data-role="auxiliary-value"]').textContent = block.auxiliary_value;
           auxiliary.querySelector('[data-role="auxiliary-unit"]').textContent = block.auxiliary_unit;
+          updateSourceKind(auxiliary, block.auxiliary_source_kind);
         }
       }
       const badge = card.querySelector('[data-role="freshness"]');
