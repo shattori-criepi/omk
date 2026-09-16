@@ -10,6 +10,12 @@ document.addEventListener("DOMContentLoaded", async () => {
     panel.hidden = !panel.hidden;
     entry.setAttribute("aria-expanded", String(!panel.hidden));
   });
+  const modeRoot = document.querySelector("#display-modes");
+  if (modeRoot && entry && panel) modeRoot.addEventListener("click", event => {
+    if (!event.target.closest("[data-mode]")) return;
+    panel.hidden = true;
+    entry.setAttribute("aria-expanded", "false");
+  });
   try {
     const response = await fetch("/api/admin/dashboard-settings", {cache: "no-store"});
     if (!response.ok) throw new Error();

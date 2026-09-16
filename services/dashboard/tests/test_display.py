@@ -2551,12 +2551,14 @@ def test_multi_item_cards_stack_only_small_and_preserve_reading_elements(size, p
             assert 'data-role="source-kind"' not in markup
 
 
-def test_small_stacked_css_has_one_column_and_separates_labels_from_values():
+def test_small_stacked_css_uses_full_width_rows_with_label_and_reading_columns():
     css = (Path(__file__).parents[1] / "app" / "static" / "display.css").read_text()
     card = css.split(".display-card--small.display-card--stacked {", 1)[1].split("}", 1)[0]
     rows = css.split(".display-card-stacked-items {", 1)[1].split("}", 1)[0]
     reading = css.split(".display-stacked-item {", 1)[1].split("}", 1)[0]
-    assert all("grid-template-columns: minmax(0, 1fr);" in rule for rule in (card, rows, reading))
+    assert all("grid-template-columns: minmax(0, 1fr);" in rule for rule in (card, rows))
+    assert "grid-template-columns: minmax(0, 1fr) minmax(0, 1.8fr);" in reading
+    assert "width: 100%;" in reading
     assert "grid-auto-rows: minmax(min-content, 1fr);" in rows
     assert "overflow-y: auto;" in rows  # Constrained screens scroll instead of overlapping rows.
     labels = css.split('.display-card--small.display-card--stacked .display-stacked-item [data-role="label"] {', 1)[1].split("}", 1)[0]
@@ -2646,7 +2648,7 @@ def test_display_settings_hidden_modes_and_dynamic_summary():
 
 def test_small_card_css_scales_by_item_count_and_card_dimensions():
     css = (Path(__file__).parents[1] / "app/static/display.css").read_text()
-    for count, size in [(1, "min(24cqw, 32cqh, 96px)"), (2, "min(22cqw, 21cqh, 72px)"), (3, "min(20cqw, 14cqh, 56px)")]:
+    for count, size in [(1, "min(24cqw, 32cqh, 96px)"), (2, "min(18cqw, 24cqh, 64px)"), (3, "min(16cqw, 20cqh, 56px)")]:
         assert f".display-card--small.display-card--items-{count} {{\n  --small-value-size: {size};" in css
         if count > 1:
             assert f"grid-template-rows: repeat({count}, minmax(min-content, 1fr));" in css
@@ -2744,8 +2746,9 @@ const handlers = {}, requests = [];
 const input = {checked: false, addEventListener(name, fn) {handlers[name] = fn;}};
 const entry = {textContent: "デモ用", addEventListener(name, fn) {handlers[name] = fn;}, setAttribute(name, value) {this[name] = value;}};
 const panel = {hidden: true}, status = {};
+const modes = {addEventListener(name, fn) {handlers.modeClick = fn;}};
 let ready, ok = true;
-global.document = {addEventListener(name, fn) {ready = fn;}, querySelector(selector) {return {"#demo-enabled": input, "#demo-entry": entry, "#demo-settings": panel, "#settings-status": status}[selector];}};
+global.document = {addEventListener(name, fn) {ready = fn;}, querySelector(selector) {return {"#demo-enabled": input, "#demo-entry": entry, "#demo-settings": panel, "#settings-status": status, "#display-modes": modes}[selector];}};
 global.fetch = async (path, options) => {requests.push([path, options]); return {ok, json: async () => ({mode: "clock", demo: {enabled: true}})};};
 vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8"));
 (async () => {
@@ -2772,7 +2775,51 @@ vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8"));
   handlers.click();
   assert.strictEqual(panel.hidden, true);
   assert.strictEqual(entry["aria-expanded"], "false");
+  for (const mode of ["recommended", "custom", "clock"]) {
+    handlers.click();
+    assert.strictEqual(panel.hidden, false);
+    const count = requests.length;
+    handlers.modeClick({target: {closest(selector) {assert.strictEqual(selector, "[data-mode]"); return {dataset: {mode}};}}});
+    assert.strictEqual(panel.hidden, true);
+    assert.strictEqual(entry["aria-expanded"], "false");
+    assert.strictEqual(input.checked, true);
+    assert.strictEqual(entry.textContent, "デモ用（使用中）");
+    assert.strictEqual(requests.length, count);
+  }
   assert(!requests.some(([path]) => path.endsWith("/mode")));
 })().catch(error => {console.error(error); process.exitCode = 1;});
 '''
     subprocess.run(["node", "-e", harness, str(dashboard_main.APP_DIR / "static/demo_settings.js")], check=True, capture_output=True, text=True)
+
+
+def test_small_labels_and_units_remain_readable_and_long_readings_can_wrap():
+    css = (dashboard_main.APP_DIR / "static/display.css").read_text()
+    for count, font in [(1, "clamp(22px, 8cqw, 30px)"), (2, "clamp(20px, 7cqw, 28px)"), (3, "clamp(20px, 6.5cqw, 26px)")]:
+        rule = css.split(f".display-card--small.display-card--items-{count} {{", 1)[1].split("}", 1)[0]
+        assert f"--small-label-size: {font};" in rule
+    assert "--small-unit-size: clamp(18px, 6cqw, 24px);" in css
+    single_reading = css.split(".display-card--small.display-card--items-1 :is(.display-card-reading, .display-compact-reading) {", 1)[1].split("}", 1)[0]
+    assert "flex-wrap: wrap;" in single_reading
+    single_unit = css.split('.display-card--small.display-card--items-1 [data-role="unit"] {', 1)[1].split("}", 1)[0]
+    assert "overflow-wrap: anywhere;" in single_unit
+    assert "font-size: min(6cqw, 5cqh, 20px)" not in css
+    reading = css.split(".display-stacked-reading {", 1)[1].split("}", 1)[0]
+    assert "justify-content: flex-end;" in reading
+    assert "flex-wrap: wrap;" in reading
+    for role in ("value", "unit"):
+        rule = css.split(f'.display-stacked-reading [data-role="{role}"] {{', 1)[1].split("}", 1)[0]
+        assert "max-width: 100%;" in rule
+        assert "overflow-wrap: anywhere;" in rule
+        assert "white-space: normal;" in rule
+
+
+def test_demo_controls_have_a_separate_muted_palette_and_respect_hidden():
+    css = (dashboard_main.APP_DIR / "static/display.css").read_text()
+    template = (dashboard_main.APP_DIR / "templates/admin_display.html").read_text()
+    assert '<div class="demo-entry-group"><button id="demo-entry"' in template
+    assert ".demo-entry-group {\n  border-left: 1px solid #b08938;" in css
+    for selector in (".demo-entry", ".display-settings-main > .demo-settings"):
+        rule = css.split(selector + " {", 1)[1].split("}", 1)[0]
+        assert "#b08938" in rule
+        assert "background: rgb(176 137 56 / .14);" in rule
+    assert ".display-settings-page [hidden] { display: none !important; }" in css
