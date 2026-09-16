@@ -159,12 +159,12 @@ def get_dashboard_view_model(mode_override: str | None = None):
     display_repository = get_display_repository()
     candidates = _dashboard_candidates()
     selectable = [item for item in candidates if item.selectable]
-    if selectable or mode_override is not None:
+    if selectable or mode_override is not None or get_settings_repository().path.exists():
         settings = _settings_for(candidates)
         now = datetime.now(JST)
         current_candidates = _dashboard_candidates(now)
         mode = mode_override or settings.mode
-        active_blocks = settings.recommended_blocks if mode == "recommended" else settings.custom_blocks
+        active_blocks = settings.custom_blocks
         if settings.demo_enabled:
             # Settings and admin candidates must always come from real sources.
             # This overlay exists only for this HTML/API response.
@@ -173,10 +173,10 @@ def get_dashboard_view_model(mode_override: str | None = None):
             else:
                 current_candidates = demo_candidates(current_candidates)
         if mode == "clock":
-            item_ids = clock_item_ids(current_candidates) if settings.demo_enabled else settings.clock_item_ids
+            item_ids = clock_item_ids(current_candidates)
             supplemental = _clock_supplemental(item_ids, current_candidates)
             return _clock_dashboard(now, supplemental)
-        if settings.demo_enabled and mode == "recommended":
+        if mode == "recommended":
             active_blocks = tuple(recommended_blocks(current_candidates))
         blocks = selected_blocks(display_repository, active_blocks, now, current_candidates)
         statuses = [FreshnessStatus(block.freshness) for block in blocks] or [FreshnessStatus.UNAVAILABLE]
@@ -185,14 +185,6 @@ def get_dashboard_view_model(mode_override: str | None = None):
             blocks=blocks, updated_at=format_timestamp_seconds(updated) if updated else "--",
             updated_at_iso=updated, freshness=worst_freshness(*statuses),
         )
-    # A persisted clock configuration remains useful even when no source is
-    # presently discoverable: the clock itself must never depend on a sensor.
-    repository = get_settings_repository()
-    if repository.path.exists():
-        settings = _settings_for(candidates)
-        if settings.mode == "clock":
-            now = datetime.now(JST)
-            return _clock_dashboard(now, [])
     return get_display_view_model(get_latest_repository(), get_parquet_repository())
 
 
@@ -369,7 +361,7 @@ async def display_items() -> dict:
 async def dashboard_settings() -> dict:
     candidates = _dashboard_candidates()
     settings = _settings_for(candidates)
-    return {**settings.as_dict(), "capacity": 6}
+    return {**settings.as_dict(), "capacity": 6, "current_recommended_blocks": [block.as_dict() for block in recommended_blocks(candidates)]}
 
 
 @app.put("/api/admin/dashboard-settings")
@@ -390,7 +382,7 @@ async def update_dashboard_settings(request: Request) -> dict:
         raise HTTPException(400, str(error)) from error
     except (OSError, ValueError) as error:
         raise HTTPException(500, "表示設定を保存できません") from error
-    return {**settings.as_dict(), "capacity": 6}
+    return {**settings.as_dict(), "capacity": 6, "current_recommended_blocks": [block.as_dict() for block in recommended_blocks(candidates)]}
 
 
 @app.post("/api/admin/dashboard-settings/mode")
@@ -402,15 +394,15 @@ async def update_dashboard_mode(request: Request) -> dict:
             raise SettingsError("この表示モードはまだ利用できません")
         settings = _settings_for(candidates)
         selectable = [item for item in candidates if item.selectable]
-        # Mode changes only select a stored preset.  The explicit refresh action
-        # is responsible for replacing the recommendation snapshot.
+        # Retain the stored snapshot for v3 clients; display recommendations
+        # are generated independently from current candidates.
         recommended = settings.recommended_blocks
         clock_items = clock_item_ids(selectable) if mode == "clock" else settings.clock_item_ids
         updated = DashboardSettings(mode, settings.custom_blocks, recommended, clock_items, settings.demo_enabled)
         get_settings_repository().save(updated, _available_display_groups(candidates))
     except (SettingsError, ValueError, AttributeError) as error:
         raise HTTPException(400, str(error)) from error
-    return {**updated.as_dict(), "capacity": 6}
+    return {**updated.as_dict(), "capacity": 6, "current_recommended_blocks": [block.as_dict() for block in recommended_blocks(candidates)]}
 
 
 @app.post("/api/admin/dashboard-settings/recommended")
@@ -422,7 +414,7 @@ async def refresh_recommended_dashboard() -> dict:
         get_settings_repository().save(updated, _available_display_groups(candidates))
     except (SettingsError, OSError) as error:
         raise HTTPException(400, str(error)) from error
-    return {**updated.as_dict(), "capacity": 6}
+    return {**updated.as_dict(), "capacity": 6, "current_recommended_blocks": [block.as_dict() for block in recommended_blocks(candidates)]}
 
 @app.get("/api/admin/nodes")
 async def nodes() -> dict:
@@ -580,7 +572,6 @@ async def update_dashboard_demo(request: Request) -> dict:
     except (SettingsError, ValueError, AttributeError) as error:
         raise HTTPException(400, str(error)) from error
     return {**updated.as_dict(), "capacity": 6}
-
 
 @app.get("/health")
 async def health() -> dict[str, str]:

@@ -20,6 +20,10 @@ CLOCK_ENVIRONMENT_ROLES = frozenset({"temperature", "humidity", "co2"})
 OTHER_ROLE_SCORE = {"device_power": 15, "contact": 10, "motion": 8}
 
 
+def _automatic_candidates(candidates: list[DisplayItem]) -> list[DisplayItem]:
+    return [item for item in candidates if item.selectable and item.freshness in {"normal", "delayed"}]
+
+
 def _items_by_group(candidates: list[DisplayItem]) -> dict[str, list[DisplayItem]]:
     groups: dict[str, list[DisplayItem]] = defaultdict(list)
     for item in candidates:
@@ -43,8 +47,8 @@ def _ordered_environment_items(items: list[DisplayItem]) -> list[DisplayItem]:
 
 
 def clock_item_ids(candidates: list[DisplayItem]) -> tuple[str, ...]:
-    """Persist the clock's sparse readings using the same environment ranking."""
-    groups = _items_by_group(candidates)
+    """Select current clock readings using the same availability and ranking."""
+    groups = _items_by_group(_automatic_candidates(candidates))
     broute = groups.get(BROUTE_GROUP, [])
     environments = [(environment_group_score(items), group, items) for group, items in groups.items() if group not in {BROUTE_GROUP, "パワコン"}]
     environments = [entry for entry in environments if entry[0] > 0]
@@ -88,11 +92,12 @@ def _broute_block(items: list[DisplayItem], today_import: DisplayItem | None, in
 
 
 def recommended_blocks(candidates: list[DisplayItem]) -> list[DisplayBlock]:
-    """Produce at most three persisted blocks without using transient readings.
+    """Produce at most three blocks from currently usable readings.
 
     Ichijo power-flow data remains available to custom layouts, but is purposely
     excluded here because it is specialist information for a general dashboard.
     """
+    candidates = _automatic_candidates(candidates)
     groups = _items_by_group(candidates)
     broute = groups.pop(BROUTE_GROUP, [])
     today_import = next((item for item in candidates if item.semantic_role == "today_import_energy"), None)

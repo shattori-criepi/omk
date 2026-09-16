@@ -181,7 +181,7 @@ def test_environment_full_or_partial_prioritizes_real_readings(gateway, partial,
     assert files(root) == before
 
 
-def test_catalog_without_latest_uses_fixture_and_restores_unavailable_when_off(gateway):
+def test_catalog_without_latest_uses_fixture_and_leaves_recommended_when_off(gateway):
     client, root = gateway
     item_id = write_reading(root, "temperature_celsius", 21.3)
     (root / "latest" / "items" / f"{item_id}.json").unlink()
@@ -191,8 +191,10 @@ def test_catalog_without_latest_uses_fixture_and_restores_unavailable_when_off(g
         assert temperature["value"] == "27.9"
         assert temperature["source_kind"] == "demo"
     assert client.post("/api/admin/dashboard-settings/demo", json={"enabled": False}).status_code == 200
-    temperature = next(item for item in readings(snapshot(client, "recommended")) if item["id"] == item_id)
-    assert temperature["value"] == "--"
+    assert item_id not in {item["id"] for item in readings(snapshot(client, "recommended"))}
+    # Missing readings remain available to the custom editor.
+    items = client.get("/api/admin/display-items").json()
+    temperature = next(item for group in items["groups"] for item in group["items"] if item["id"] == item_id)
     assert temperature["freshness"] == "unavailable"
 
 

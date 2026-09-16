@@ -4,6 +4,7 @@ import re
 import shutil
 import stat
 import subprocess
+from dataclasses import replace
 from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -100,7 +101,7 @@ def _block_payload(*blocks: dict) -> dict:
 def _recommended_item(item_id: str, group: str, role: str | None) -> object:
     return SimpleNamespace(
         id=item_id, group=group, semantic_role=role, selectable=True,
-        short_label=item_id, label=item_id,
+        short_label=item_id, label=item_id, freshness="normal",
     )
 
 
@@ -475,7 +476,7 @@ def test_demo_manual_modes_preserve_settings(tmp_path: Path, monkeypatch: pytest
     for enabled in (False, True):
         assert client.post("/api/admin/dashboard-settings/demo", json={"enabled": enabled}).status_code == 200
         assert json.loads(path.read_text())["mode"] == saved_mode
-        normal_mode = saved_mode if with_candidates or saved_mode == "clock" else None
+        normal_mode = saved_mode
         assert client.get("/api/display").json().get("mode") == ("custom" if enabled else normal_mode)
         for endpoint in ("/display", "/api/display"):
             assert client.get(endpoint + "?demo_mode=invalid").status_code == 400
@@ -1607,7 +1608,7 @@ def test_admin_display_css_allows_vertical_scroll_without_changing_kiosk_overflo
     assert "overflow: hidden;" in stylesheet
 
 
-def test_admin_display_keeps_demo_settings_after_normal_display_settings() -> None:
+def test_admin_display_keeps_demo_entry_separate_near_normal_modes() -> None:
     template = (Path(__file__).parents[1] / "app" / "templates" / "admin_display.html").read_text(encoding="utf-8")
     demo_script = (Path(__file__).parents[1] / "app" / "static" / "demo_settings.js").read_text(encoding="utf-8")
 
@@ -1615,8 +1616,12 @@ def test_admin_display_keeps_demo_settings_after_normal_display_settings() -> No
     assert mode_buttons == sorted(mode_buttons)
     assert 'class="display-settings-main"' in template
     assert 'class="demo-settings"' in template
-    assert template.index('id="save-settings"') < template.index('class="demo-settings"')
-    assert template.index('id="demo-enabled"') > template.index('id="save-settings"')
+    assert mode_buttons[-1] < template.index('id="demo-entry"') < template.index('id="demo-settings"') < template.index('id="recommended-summary"')
+    assert re.findall(r'data-mode="([^"]+)"', template) == ["recommended", "custom", "clock"]
+    entry = re.search(r'<button id="demo-entry"[^>]+>', template).group(0)
+    assert 'aria-controls="demo-settings"' in entry and 'aria-expanded="false"' in entry
+    assert 'data-mode' not in entry
+    assert 'id="demo-settings" class="demo-settings" hidden' in template
     assert '展示・説明時の利用を想定した機能です。' in template
     assert 'querySelector("#demo-enabled")' in demo_script
     assert '"/api/admin/dashboard-settings/demo"' in demo_script
@@ -2499,7 +2504,7 @@ def test_usb_setup_proxy_uses_fixed_endpoint_and_returns_202(monkeypatch):
 
 @pytest.mark.parametrize("size", ["small", "medium", "large"])
 @pytest.mark.parametrize("pattern", ["hero", "strip", "compact"])
-@pytest.mark.parametrize("item_count", [2, 3])
+@pytest.mark.parametrize("item_count", [1, 2, 3])
 @pytest.mark.parametrize("demo_enabled", [False, True])
 def test_multi_item_cards_stack_only_small_and_preserve_reading_elements(size, pattern, item_count, demo_enabled):
     items = [
@@ -2522,7 +2527,9 @@ def test_multi_item_cards_stack_only_small_and_preserve_reading_elements(size, p
     )
     card = re.search(r'<article.*?</article>', html, re.DOTALL).group(0)
     assert re.findall(r'data-item-id="([^"]+)"', card) == [item.id for item in items]
-    if size == "small":
+    assert f"display-card--items-{item_count}" in card
+    assert f'data-item-count="{item_count}"' in card
+    if size == "small" and item_count > 1:
         assert "display-card--stacked" in card
         assert 'class="display-card-stacked-items"' in card
         assert card.count('class="display-stacked-item"') == item_count
@@ -2568,3 +2575,204 @@ def test_usb_reinitialize_proxy_keeps_destructive_request_separate(monkeypatch):
     monkeypatch.setattr(dashboard_main, '_system_manager_request', request)
     assert client.post('/api/admin/setup/usb-reinitialize', json=body).status_code == 202
     assert calls == [('POST', '/api/nodes/usb-reinitialize', body)]
+
+
+@pytest.mark.parametrize("stored_id", [None, "old-gateway-temperature"])
+def test_recommended_uses_current_candidates_without_rewriting_presets(tmp_path, monkeypatch, stored_id):
+    current = []
+    monkeypatch.setattr(dashboard_main, "_dashboard_candidates", lambda now=None: list(current))
+    monkeypatch.setenv("OMK_LATEST_DATA_ROOT", str(tmp_path / "latest"))
+    repository = dashboard_main.get_settings_repository()
+    initial = client.get("/api/admin/dashboard-settings").json()
+    assert initial["presets"]["recommended"]["blocks"] == []
+    custom = DisplayBlock("custom", "環境", "自分の表示", "small", "custom-temperature", ("custom-temperature",), "compact")
+    stored = () if stored_id is None else (DisplayBlock("old", "環境", "以前のおすすめ", "small", stored_id, (stored_id,), "compact"),)
+    repository.save(DashboardSettings("recommended", (custom,), stored), {})
+    saved_bytes = repository.path.read_bytes()
+    assert client.get("/api/display").json()["blocks"] == []
+
+    current.append(DisplayItem("current-temperature", "温度", "環境", "", "new-gateway", "temperature_c", "number", "℃", "環境", "temperature", True, datetime.now(JST).isoformat(), "25.1", "normal", short_label="温度"))
+    response = client.get("/api/display")
+    assert response.status_code == 200
+    assert response.json()["blocks"][0]["primary"]["id"] == "current-temperature"
+    html = client.get("/display").text
+    assert 'data-item-id="current-temperature"' in html
+    snapshot = json.loads(re.search(r'<script id="recommended-snapshot" type="application/json">(.*?)</script>', html).group(1))
+    assert snapshot["blocks"][0]["primary"]["id"] == "current-temperature"
+    settings = client.get("/api/admin/dashboard-settings").json()
+    assert settings["current_recommended_blocks"][0]["item_ids"] == ["current-temperature"]
+    assert settings["presets"]["recommended"]["blocks"] == [block.as_dict() for block in stored]
+    assert repository.path.read_bytes() == saved_bytes
+
+    switched = client.post("/api/admin/dashboard-settings/mode", json={"mode": "custom"})
+    assert switched.status_code == 200
+    assert switched.json()["presets"]["standard"]["blocks"] == [custom.as_dict()]
+    custom_display = client.get("/api/display").json()
+    assert custom_display["mode"] == "custom"
+    assert custom_display["blocks"][0]["primary"]["id"] == "custom-temperature"
+    assert custom_display["blocks"][0]["primary"]["freshness"] == "unavailable"
+    refreshed = client.post("/api/admin/dashboard-settings/recommended")
+    assert refreshed.status_code == 200
+    assert refreshed.json()["presets"]["standard"]["blocks"] == [custom.as_dict()]
+
+
+@pytest.mark.parametrize("freshness", ["normal", "delayed", "unavailable"])
+@pytest.mark.parametrize("selectable", [True, False])
+def test_recommended_filters_freshness_and_selectability_including_derived(freshness, selectable):
+    candidates = [_recommended_item("grid", "電力メーター（Bルート）", "grid_power")]
+    for item_id, group, role in [("temperature", "環境", "temperature"), ("daily", "パワコン", "today_import_energy")]:
+        item = _recommended_item(item_id, group, role)
+        item.freshness = freshness
+        item.selectable = selectable
+        candidates.append(item)
+    ids = {item_id for block in recommended_blocks(candidates) for item_id in block.item_ids}
+    assert ids == ({"grid", "temperature", "daily"} if selectable and freshness in {"normal", "delayed"} else {"grid"})
+
+
+def test_display_settings_hidden_modes_and_dynamic_summary():
+    root = Path(__file__).parents[1] / "app"
+    css = (root / "static/display.css").read_text()
+    js = (root / "static/admin_display.js").read_text()
+    html = client.get("/admin/display").text
+    assert ".display-settings-page [hidden] { display: none !important; }" in css
+    for mode, element, variable in [("custom", "custom-editor", "customRoot"), ("recommended", "recommended-summary", "recommendedRoot"), ("clock", "clock-summary", "clockRoot")]:
+        assert re.search(fr'<section id="{element}"[^>]*\bhidden', html)
+        assert f'{variable}.hidden = mode !== "{mode}"' in js
+        assert f'data-mode="{mode}"' in html
+    assert "currentRecommendedBlocks.map" in js
+    assert "settings.current_recommended_blocks" in js
+    assert "refresh-recommended" not in html + js + css
+
+
+def test_small_card_css_scales_by_item_count_and_card_dimensions():
+    css = (Path(__file__).parents[1] / "app/static/display.css").read_text()
+    for count, size in [(1, "min(24cqw, 32cqh, 96px)"), (2, "min(22cqw, 21cqh, 72px)"), (3, "min(20cqw, 14cqh, 56px)")]:
+        assert f".display-card--small.display-card--items-{count} {{\n  --small-value-size: {size};" in css
+        if count > 1:
+            assert f"grid-template-rows: repeat({count}, minmax(min-content, 1fr));" in css
+    assert "container-type: size;" in css
+    assert 'font-size: var(--small-value-size) !important;' in css
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is required for display polling tests")
+@pytest.mark.parametrize("initial_ids,updated_ids", [([], ["new"]), (["old"], ["new"]), (["old"], []), (["old"], ["old", "new"]), (["old"], ["old"])])
+@pytest.mark.parametrize("mode", ["recommended", "clock"])
+def test_automatic_polling_reloads_only_for_membership_changes(initial_ids, updated_ids, mode):
+    def snapshot(ids):
+        if mode == "clock":
+            return {"mode": mode, "supplemental": [{"id": item_id} for item_id in ids]}
+        return {"mode": "recommended", "blocks": [{"id": "recommended_1", "title": "環境", "size": "small", "layout_pattern": "compact", "primary": {"id": ids[0]}, "secondary": [{"id": item_id} for item_id in ids[1:]]}] if ids else []}
+
+    initial, updated = snapshot(initial_ids), snapshot(updated_ids)
+    harness = r'''
+const fs = require("fs"), vm = require("vm");
+const [initial, updated] = JSON.parse(process.argv[2]);
+let reloads = 0;
+global.document = {
+  body: {dataset: {demoEnabled: "false", dashboardMode: initial.mode}},
+  documentElement: {classList: {add() {}}},
+  querySelector(selector) { return selector === `#${initial.mode}-snapshot` ? {textContent: JSON.stringify(initial)} : null; },
+};
+global.CSS = {escape(value) {return value;}};
+global.window = {setInterval() {}, location: {reload() {reloads++;}, assign() {throw Error("unexpected navigation");}}};
+global.fetch = () => new Promise(() => {});
+vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8"));
+updateDisplay(updated);
+console.log(JSON.stringify({reloads}));
+'''
+    result = subprocess.run(["node", "-e", harness, str(dashboard_main.APP_DIR / "static/display.js"), json.dumps([initial, updated])], check=True, capture_output=True, text=True)
+    assert json.loads(result.stdout)["reloads"] == int(initial_ids != updated_ids)
+
+
+@pytest.mark.parametrize("stored_ids", [(), ("old-gateway",)])
+def test_clock_automatically_adds_and_removes_current_readings_without_saving(monkeypatch, stored_ids):
+    candidates = []
+    monkeypatch.setattr(dashboard_main, "_dashboard_candidates", lambda now=None: list(candidates))
+    repo = dashboard_main.get_settings_repository()
+    custom = DisplayBlock("custom", "room", "自分の表示", "small", "custom-item", ("custom-item",), "compact")
+    repo.save(DashboardSettings("clock", (custom,), (), stored_ids), {})
+    original = repo.path.read_bytes()
+
+    def assert_clock(ids):
+        response = client.get("/api/display")
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["mode"] == "clock"
+        assert re.fullmatch(r"\d{2}:\d{2}", payload["time"])
+        assert [item["id"] for item in payload["supplemental"]] == ids
+        html = client.get("/display").text
+        assert 'id="clock-time"' in html
+        snapshot = json.loads(re.search(r'<script id="clock-snapshot" type="application/json">(.*?)</script>', html).group(1))
+        assert [item["id"] for item in snapshot["supplemental"]] == ids
+        assert repo.path.read_bytes() == original
+
+    assert_clock([])
+    temperature = _clock_item("temperature", "room", "temperature")
+    candidates.append(temperature)
+    assert_clock(["temperature"])
+    grid = replace(_clock_item("grid", "電力メーター（Bルート）", "grid_power"), freshness="delayed")
+    candidates.append(grid)
+    assert_clock(["grid", "temperature"])
+    candidates[:] = [replace(temperature, freshness="unavailable"), grid]
+    assert_clock(["grid"])
+    candidates.clear()
+    assert_clock([])
+    settings = client.get("/api/admin/dashboard-settings").json()
+    assert settings["presets"]["clock"]["item_ids"] == list(stored_ids)
+    assert settings["presets"]["standard"]["blocks"] == [custom.as_dict()]
+    for enabled in (True, False):
+        saved = client.post("/api/admin/dashboard-settings/demo", json={"enabled": enabled}).json()
+        assert saved["mode"] == "clock"
+        assert saved["demo"]["enabled"] is enabled
+        assert saved["presets"] == settings["presets"]
+    assert client.post("/api/admin/dashboard-settings/mode", json={"mode": "demo"}).status_code == 400
+
+
+@pytest.mark.parametrize("freshness", ["normal", "delayed", "unavailable"])
+@pytest.mark.parametrize("selectable", [True, False])
+def test_clock_filters_current_candidates(freshness, selectable):
+    candidates = [replace(_clock_item(item_id, group, role), freshness=freshness, selectable=selectable)
+                  for item_id, group, role in [("grid", "電力メーター（Bルート）", "grid_power"), ("temperature", "room", "temperature")]]
+    assert clock_item_ids(candidates) == (("grid", "temperature") if selectable and freshness in {"normal", "delayed"} else ())
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is required for demo UI tests")
+def test_demo_entry_opens_settings_and_only_changes_demo_state():
+    harness = r'''
+const fs = require("fs"), vm = require("vm"), assert = require("assert");
+const handlers = {}, requests = [];
+const input = {checked: false, addEventListener(name, fn) {handlers[name] = fn;}};
+const entry = {textContent: "デモ用", addEventListener(name, fn) {handlers[name] = fn;}, setAttribute(name, value) {this[name] = value;}};
+const panel = {hidden: true}, status = {};
+let ready, ok = true;
+global.document = {addEventListener(name, fn) {ready = fn;}, querySelector(selector) {return {"#demo-enabled": input, "#demo-entry": entry, "#demo-settings": panel, "#settings-status": status}[selector];}};
+global.fetch = async (path, options) => {requests.push([path, options]); return {ok, json: async () => ({mode: "clock", demo: {enabled: true}})};};
+vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8"));
+(async () => {
+  await ready();
+  assert.strictEqual(entry.textContent, "デモ用（使用中）");
+  handlers.click();
+  assert.strictEqual(panel.hidden, false);
+  assert.strictEqual(entry["aria-expanded"], "true");
+  assert.strictEqual(requests.length, 1);
+  for (const enabled of [false, true]) {
+    input.checked = enabled;
+    await handlers.change();
+    const [path, options] = requests.at(-1);
+    assert.strictEqual(path, "/api/admin/dashboard-settings/demo");
+    assert.deepStrictEqual(JSON.parse(options.body), {enabled});
+    assert.strictEqual(entry.textContent, enabled ? "デモ用（使用中）" : "デモ用");
+  }
+  ok = false;
+  input.checked = false;
+  await handlers.change();
+  assert.strictEqual(input.checked, true);
+  assert.strictEqual(input.disabled, false);
+  assert.strictEqual(entry.textContent, "デモ用（使用中）");
+  handlers.click();
+  assert.strictEqual(panel.hidden, true);
+  assert.strictEqual(entry["aria-expanded"], "false");
+  assert(!requests.some(([path]) => path.endsWith("/mode")));
+})().catch(error => {console.error(error); process.exitCode = 1;});
+'''
+    subprocess.run(["node", "-e", harness, str(dashboard_main.APP_DIR / "static/demo_settings.js")], check=True, capture_output=True, text=True)

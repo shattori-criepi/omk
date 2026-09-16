@@ -14,8 +14,8 @@ const WEEKDAY_ARIA_NAMES = ["日曜日", "月曜日", "火曜日", "水曜日", 
 let displayFetchInProgress = false;
 const demoEnabled = document.body?.dataset.demoEnabled === "true";
 const demoMode = document.body?.dataset.demoMode || "custom";
-const demoSnapshot = document.querySelector("#demo-snapshot");
-const initialDemoStructure = demoSnapshot ? displayStructure(JSON.parse(demoSnapshot.textContent)) : null;
+const initialSnapshot = document.querySelector("#demo-snapshot") || document.querySelector("#recommended-snapshot") || document.querySelector("#clock-snapshot");
+const initialDisplayStructure = initialSnapshot ? displayStructure(JSON.parse(initialSnapshot.textContent)) : null;
 
 function displayStructure(data) {
   return JSON.stringify(data.mode === "clock"
@@ -134,10 +134,11 @@ function updateDisplay(data) {
     else window.location.reload();
     return;
   }
-  // Automatic demo presets can change when a real device starts reporting.
+  // Automatic presets can change when a device starts or stops reporting.
   // Render new membership before applying ordinary value-only updates.
-  if (initialDemoStructure !== null && displayStructure(data) !== initialDemoStructure) {
-    window.location.assign(`/display?demo_mode=${demoMode}`);
+  if (initialDisplayStructure !== null && displayStructure(data) !== initialDisplayStructure) {
+    if (demoEnabled) window.location.assign(`/display?demo_mode=${demoMode}`);
+    else window.location.reload();
     return;
   }
   if (data.mode === "clock" && Array.isArray(data.supplemental)) {
