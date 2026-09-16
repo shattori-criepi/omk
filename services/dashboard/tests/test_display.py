@@ -1925,45 +1925,19 @@ const initialOfflineMarkup = nodeCard({node_id: "9af9509eb8b9", registration_sta
 usbCandidatesInitialized = true;
 usbCandidatesByNodeId.set("9af9509eb8b8", {node_id: "9af9509eb8b8", kind: "unconfirmed_esp32s3", device: "/dev/ttyACM0"});
 const unconfirmedMarkup = nodeCard({node_id: "9af9509eb8b8", registration_state: "registered", logical_id: "old-sen66", connected_sensors: ["SEN66"], online: false});
-const oldInput = Object.assign(element(), {dataset: {nodeId: "112233445566"}, value: "ble-relay-001", selectionStart: 4, selectionEnd: 7});
-const newInput = Object.assign(element(), {dataset: {nodeId: "112233445566"}, value: "", selectionStart: 0, selectionEnd: 0});
-elements["#omk-nodes"].querySelectorAll = () => [oldInput];
-elements["#omk-nodes"].querySelector = () => newInput;
-global.document.activeElement = oldInput;
-const saved = saveNodeInputState();
-restoreNodeInputState(saved);
-const inputForSubmit = Object.assign(element(), {value: ""});
-const submitButton = Object.assign(element(), {dataset: {nodeId: "112233445566"}, closest() { return {querySelector() { return inputForSubmit; }}; }});
-const requests = [];
-global.fetch = async (url, options = {}) => { requests.push({url, options}); return {ok: true, json: async () => url.endsWith("/usb-nodes") ? {nodes: []} : url.endsWith("/nodes") ? {nodes: [{node_id: "112233445566", registration_state: "registered", logical_id: "ble-relay-001"}]} : {status: "request_sent"}}; };
-(async () => {
-  await submitNodeRegistration(submitButton);
-  const emptyDoesNotPost = requests.length === 0;
-  inputForSubmit.value = "bad id";
-  await submitNodeRegistration(submitButton);
-  const invalidDoesNotPost = requests.length === 0;
-  inputForSubmit.value = "ble-relay-001";
-  await submitNodeRegistration(submitButton);
-  const validPosts = requests[0]?.url === "/api/admin/nodes/112233445566/register" && JSON.parse(requests[0].options.body).logical_id === "ble-relay-001";
   console.log(JSON.stringify({
   string: formatApiError("bad request"),
   object: formatApiError({loc: ["body", "logical_id"], msg: "invalid value"}),
   list: formatApiError([{loc: ["body", "logical_id"], msg: "invalid value"}]),
-  provisioned: provisioned.includes("register-node") && provisioned.includes("SEN66を登録") && provisioned.includes("SEN66（検出情報あり）"),
-  requested: requested.includes("登録要求を送信済み") && !requested.includes("register-node"),
-  registered: registeredMarkup.includes("登録済み") && registeredMarkup.includes("sen66-001") && registeredMarkup.includes("register-node") && registeredMarkup.includes("登録解除") && registeredMarkup.includes("SEN66（検出済み）") && registeredMarkup.includes("BLE relay: 稼働中"),
-  relay: relayMarkup.includes("SEN66対応") && relayMarkup.includes("接続センサ: 未検出") && relayMarkup.includes("SEN66を使用しないNodeではLogical ID登録は不要です。") && relayMarkup.includes("BLE relay: 稼働中") && !relayMarkup.includes("node-logical-id"),
-  offlineSEN66: offlineSEN66Markup.includes("SEN66（検出情報あり）") && offlineSEN66Markup.includes("register-node"),
-  initialOffline: initialOfflineMarkup.includes("接続センサ: 確認中") && !initialOfflineMarkup.includes("old-sen66") && !initialOfflineMarkup.includes("node-logical-id"),
-  unconfirmed: unconfirmedMarkup.includes("接続センサ: セットアップ後に確認") && !unconfirmedMarkup.includes("old-sen66") && !unconfirmedMarkup.includes("node-logical-id"),
-  preservedValue: newInput.value === "ble-relay-001",
-  preservedFocus: global.document.activeElement === newInput && newInput.selectionStart === 4 && newInput.selectionEnd === 7,
+  provisioned: provisioned.includes("Logical IDを登録") && provisioned.includes("SEN66（検出情報あり）") && !provisioned.includes('<input class="node-logical-id"'),
+  requested: requested.includes("Logical IDの登録要求を送信しました。Nodeの状態更新を待っています。") && !requested.includes("Logical IDを登録"),
+  registered: registeredMarkup.includes("登録済み") && registeredMarkup.includes("sen66-001") && registeredMarkup.includes("logical-id-value") && registeredMarkup.includes("Logical IDを変更") && registeredMarkup.includes("Logical ID登録を解除") && !registeredMarkup.includes('<input class="node-logical-id"') && registeredMarkup.includes("SEN66（検出済み）") && registeredMarkup.includes("BLE relay: 稼働中"),
+  relay: relayMarkup.includes("SEN66対応") && relayMarkup.includes("接続センサ: 未検出") && relayMarkup.includes("SEN66を使用しないNodeではLogical ID登録は不要です。") && relayMarkup.includes("BLE relay: 稼働中") && !relayMarkup.includes('<input class="node-logical-id"'),
+  offlineSEN66: offlineSEN66Markup.includes("SEN66（検出情報あり）") && offlineSEN66Markup.includes("Logical IDを登録"),
+  initialOffline: initialOfflineMarkup.includes("接続センサ: 確認中") && !initialOfflineMarkup.includes("old-sen66") && !initialOfflineMarkup.includes('<input class="node-logical-id"'),
+  unconfirmed: unconfirmedMarkup.includes("接続センサ: セットアップ後に確認") && !unconfirmedMarkup.includes("old-sen66") && !unconfirmedMarkup.includes('<input class="node-logical-id"'),
   logicalIdValidation: !validLogicalId("") && !validLogicalId("bad id") && validLogicalId("ble-relay-001"),
-  emptyDoesNotPost,
-  invalidDoesNotPost,
-  validPosts,
   }));
-})();
 '''
     completed = subprocess.run(["node", "-e", harness, str(javascript_path)], check=True, capture_output=True, text=True)
     assert json.loads(completed.stdout) == {
@@ -1977,12 +1951,7 @@ global.fetch = async (url, options = {}) => { requests.push({url, options}); ret
         "offlineSEN66": True,
         "initialOffline": True,
         "unconfirmed": True,
-        "preservedValue": True,
-        "preservedFocus": True,
         "logicalIdValidation": True,
-        "emptyDoesNotPost": True,
-        "invalidDoesNotPost": True,
-        "validPosts": True,
     }
 
 

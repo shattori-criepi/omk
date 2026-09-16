@@ -35,10 +35,18 @@ window.createSoftwareKeyboard = function createSoftwareKeyboard(elements, option
   function clear() { if (!state) return; state.value = ""; state.selectionStart = state.selectionEnd = 0; renderState(); }
   function close(restore) {
     if (!state) return;
+    const closedState = state;
     const input = target();
-    if (restore && input) input.value = format(state.original, state.length);
+    if (restore && input) input.value = format(closedState.original, closedState.length);
     state = null;
     elements.overlay.hidden = true;
+    if (restore) closedState.onCancel?.(closedState);
+  }
+  function confirm() {
+    if (!state) return;
+    const confirmedState = state;
+    close(false);
+    confirmedState.onConfirm?.(confirmedState.value, confirmedState);
   }
   function renderKeys() {
     elements.keys.textContent = "";
@@ -72,16 +80,16 @@ window.createSoftwareKeyboard = function createSoftwareKeyboard(elements, option
     const start = config.appendAtEnd ? value.length : rawPosition(input.value, input.selectionStart ?? input.value.length);
     const end = config.appendAtEnd ? value.length : rawPosition(input.value, input.selectionEnd ?? input.selectionStart ?? input.value.length);
     state = {target: config.target || (() => input), label: config.label, length: config.length, value, original: value,
-             selectionStart: start, selectionEnd: end, uppercase: false};
+             selectionStart: start, selectionEnd: end, uppercase: false, onConfirm: config.onConfirm, onCancel: config.onCancel};
     elements.overlay.hidden = false;
     renderKeys(); renderState();
   }
   elements.cancel.addEventListener("click", () => close(true));
-  elements.confirm.addEventListener("click", () => close(false));
+  elements.confirm.addEventListener("click", confirm);
   document.addEventListener("keydown", event => {
     if (!state) return;
     if (event.key === "Backspace") { event.preventDefault(); backspace(); }
-    else if (event.key === "Enter") { event.preventDefault(); close(false); }
+    else if (event.key === "Enter") { event.preventDefault(); confirm(); }
     else if (event.key === "Escape") { event.preventDefault(); close(true); }
     else if (keyAllowed(event.key)) { event.preventDefault(); insert(event.key); }
   });

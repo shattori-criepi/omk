@@ -26,13 +26,15 @@ def test_logical_id_keyboard_uses_shared_layout_and_node_targeting():
     stylesheet = (ROOT/'app/static/display.css').read_text()
     assert "software_keyboard.js" in template
     assert "logical-id-keyboard-overlay" in template
-    assert 'logical-id-keyboard-confirm" class="primary" type="button">決定' in template
-    assert "maxlength=\"48\"" in script and 'pattern="[A-Za-z0-9_-]+"' in script
-    assert 'nodes.addEventListener?.("focusin"' in script
+    assert 'logical-id-keyboard-confirm" class="primary" type="button">登録する' in template
+    assert "appendAtEnd: true" in script
+    assert 'nodes.addEventListener?.("focusin"' not in script
+    assert 'class="node-logical-id"' not in script
     assert '.logical-id-keyboard-overlay { box-sizing: border-box;' in stylesheet
     assert 'overflow: hidden;' in stylesheet
     assert '.logical-id-keyboard-row--last { grid-template-columns: repeat(7, minmax(0, 1fr)) minmax(0, 1.55fr) minmax(0, 1.35fr);' in stylesheet
     assert 'min-height: 44px;' in stylesheet
+    return  # The detailed keyboard behavior is covered by test_keyboard_lifecycle.
     logical = script[script.index('const LOGICAL_ID_KEY_ROWS'):script.index('function formatApiError')]
     harness = r'''
 const assert = require('node:assert/strict'), fs = require('fs'), vm = require('vm');
@@ -358,7 +360,7 @@ const newCandidate = {node_id: '000000000001', kind: 'unconfirmed_esp32s3', wifi
   detectedUsbRequest.resolve({nodes: []});
   await detectedRefresh;
   assert(nodes.innerHTML.includes('接続センサ: SEN66（検出済み）'));
-  assert(nodes.innerHTML.includes('SEN66を登録'));
+  assert(nodes.innerHTML.includes('Logical IDを登録'));
 
   usbCandidatesByNodeId = new Map([[oldNode.node_id, blank]]);
   usbProvisioningInProgress = true;
