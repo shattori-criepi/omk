@@ -155,8 +155,19 @@ single_soracom_nm_device() {
 }
 
 modem_owns_nm_device() {
-  local kv="$1" device="$2" ports pattern
+  local kv="$1" device="$2" port port_device ports pattern
   [[ "${device}" =~ ^[A-Za-z0-9_.-]+$ ]] || return 1
+
+  # Recent ModemManager versions emit ports as indexed key/value entries, e.g.
+  # modem.generic.ports.value[1] : cdc-wdm0 (qmi).  Compare the leading
+  # device token exactly so similarly named ports cannot match by accident.
+  while IFS= read -r port; do
+    port_device="${port%%[[:space:]]*}"
+    [[ "${port_device}" == "${device}" ]] && return 0
+  done < <(printf '%s\n' "${kv}" | sed -n 's/^modem\.generic\.ports\.value\[[0-9][0-9]*\][[:space:]]*[:=][[:space:]]*//p')
+
+  # Preserve compatibility with ModemManager versions that expose one ports
+  # field instead of indexed entries.
   ports="$(printf '%s\n' "${kv}" | mmcli_kv_value modem.generic.ports)"
   pattern="(^|[[:space:],])${device}([[:space:],(]|$)"
   [[ "${ports}" =~ ${pattern} ]]

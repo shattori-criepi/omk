@@ -5,6 +5,7 @@ SCRIPT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)/setup-soracom-
 
 # Load production parsing functions without entering the host-mutating main flow.
 source <(sed -n '/^mmcli_kv_value()/,/^}$/p' "${SCRIPT}")
+source <(sed -n '/^modem_owns_nm_device()/,/^}$/p' "${SCRIPT}")
 source <(sed -n '/^modem_paths_from_list()/,/^}$/p' "${SCRIPT}")
 source <(sed -n '/^modem_is_connected()/,/^}$/p' "${SCRIPT}")
 source <(sed -n '/^redact_modem_identifiers()/,/^}$/p' "${SCRIPT}")
@@ -28,6 +29,14 @@ modem_is_connected "$(valid_kv roaming attached)"
 ! modem_is_connected "$(valid_kv denied attached)"
 ! modem_is_connected "$(valid_kv home detached)"
 ! modem_is_connected $'modem.generic.state: connected\nmodem.generic.sim: /\nmodem.3gpp.registration-state: home\nmodem.3gpp.packet-service-state: attached'
+
+ports_array_kv=$'modem.generic.ports.length : 6\nmodem.generic.ports.value[1] : cdc-wdm0 (qmi)\nmodem.generic.ports.value[2] : ttyUSB0 (ignored)\nmodem.generic.ports.value[6] : wwan0 (net)'
+modem_owns_nm_device "${ports_array_kv}" cdc-wdm0
+modem_owns_nm_device "${ports_array_kv}" wwan0
+! modem_owns_nm_device "${ports_array_kv}" cdc-wdm1
+! modem_owns_nm_device $'modem.generic.ports.value[1] : cdc-wdm00 (qmi)' cdc-wdm0
+! modem_owns_nm_device '' cdc-wdm0
+! modem_owns_nm_device $'modem.generic.ports.length : 1\nmodem.generic.ports.value[x] : cdc-wdm0 (qmi)' cdc-wdm0
 
 # Human-readable tables are diagnostics only; success checks use -K fields.
 grep -Fq -- '--output-keyvalue' "${SCRIPT}"
