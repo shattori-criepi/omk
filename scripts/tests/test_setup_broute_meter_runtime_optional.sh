@@ -13,6 +13,7 @@ trap 'rm -rf -- "${TEMP_DIR}"' EXIT
 source "${SETUP}"
 
 SUDO=()
+VENV_PYTHON="$(command -v python3)"
 TARGET_USER="$(id -un)"
 TARGET_GROUP="$(id -gn)"
 OMK_ROOT="${TEMP_DIR}/omk"

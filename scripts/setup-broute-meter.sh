@@ -220,10 +220,8 @@ migrate_legacy_runtime_config() {
 settings_has_serial_port() {
   local value
   [[ -f "${SETTINGS_PATH}" ]] || return 1
-  value="$(sed -n 's/^[[:space:]]*port:[[:space:]]*//p' "${SETTINGS_PATH}" | head -n 1)"
-  value="${value%%#*}"
-  value="${value//[[:space:]]/}"
-  [[ -n "${value}" && "${value}" != null && "${value}" != '~' && "${value}" != '""' && "${value}" != "''" ]]
+  value="$(configured_serial_port)" || fail 'Cannot read B-route serial settings safely.'
+  [[ -n "${value}" ]]
 }
 
 render_gateway_settings() {
@@ -238,7 +236,7 @@ render_gateway_settings() {
 initialize_settings_for_adapter() {
   local -a candidates=()
   local candidate response temporary
-  [[ -e "${SETTINGS_PATH}" ]] && return 0
+  settings_has_serial_port && return 0
   [[ -f "${SETTINGS_EXAMPLE}" ]] || fail "B-route settings template is missing: ${SETTINGS_EXAMPLE}"
 
   for candidate in "${SERIAL_BY_ID_DIRECTORY}"/usb-FTDI_FT230X_Basic_UART_*-if00-port0; do
@@ -249,7 +247,32 @@ initialize_settings_for_adapter() {
     printf 'Use this FT230X serial adapter as RS-WSUHA-P? %s [y/N] ' "${candidate}" >&2
     if IFS= read -r response && [[ "${response}" =~ ^[Yy]([Ee][Ss])?$ ]]; then
       temporary="$(mktemp "${SETTINGS_PATH}.XXXXXX")"
-      render_gateway_settings "${candidate}" >"${temporary}"
+      if [[ -e "${SETTINGS_PATH}" ]]; then
+        # Retain all existing settings; only the unconfigured serial port changes.
+        if ! "${VENV_PYTHON}" - "${SETTINGS_PATH}" "${candidate}" >"${temporary}" <<'PYTHON'
+import sys
+import yaml
+
+try:
+    with open(sys.argv[1], encoding="utf-8") as stream:
+        settings = yaml.safe_load(stream)
+    serial = settings.get("serial")
+    if serial is None:
+        serial = settings["serial"] = {}
+    if serial.get("port") not in (None, ""):
+        raise ValueError("port already configured")
+    serial["port"] = sys.argv[2]
+    sys.stdout.write(yaml.safe_dump(settings, sort_keys=False, allow_unicode=True))
+except (OSError, ValueError, TypeError, AttributeError, yaml.YAMLError):
+    sys.exit("Cannot update B-route serial settings safely; existing settings were preserved.")
+PYTHON
+        then
+          rm -f -- "${temporary}"
+          fail 'B-route serial settings were not changed.'
+        fi
+      else
+        render_gateway_settings "${candidate}" >"${temporary}"
+      fi
       "${SUDO[@]}" install -o "${TARGET_USER}" -g "${TARGET_GROUP}" -m 0600 "${temporary}" "${SETTINGS_PATH}"
       rm -f -- "${temporary}"
       log "Configured the confirmed RS-WSUHA-P stable serial path."
@@ -261,6 +284,7 @@ initialize_settings_for_adapter() {
   else
     warn "No FT230X serial adapter was found; B-route service will remain idle until setup is re-run with the adapter connected."
   fi
+  [[ -e "${SETTINGS_PATH}" ]] && return 0
   temporary="$(mktemp "${SETTINGS_PATH}.XXXXXX")"
   render_gateway_settings null >"${temporary}"
   "${SUDO[@]}" install -o "${TARGET_USER}" -g "${TARGET_GROUP}" -m 0600 "${temporary}" "${SETTINGS_PATH}"
@@ -288,12 +312,21 @@ migrate_legacy_omk_mqtt() {
 }
 
 configured_serial_port() {
-  local value
-  value="$(sed -n 's/^[[:space:]]*port:[[:space:]]*//p' "${SETTINGS_PATH}" | head -n 1)"
-  value="${value%%#*}"
-  value="${value//[[:space:]]/}"
-  value="${value#\"}"; value="${value%\"}"
-  printf '%s\n' "${value}"
+  "${VENV_PYTHON}" - "${SETTINGS_PATH}" <<'PYTHON'
+import sys
+import yaml
+
+try:
+    with open(sys.argv[1], encoding="utf-8") as stream:
+        settings = yaml.safe_load(stream)
+    serial = settings.get("serial")
+    port = None if serial is None else serial.get("port")
+    if port is not None and not isinstance(port, str):
+        raise ValueError("invalid serial port")
+    print(port or "")
+except (OSError, ValueError, TypeError, AttributeError, yaml.YAMLError):
+    sys.exit("Cannot read B-route serial settings safely.")
+PYTHON
 }
 
 wait_for_adapter_replug() {
@@ -646,8 +679,8 @@ main() {
   exec > >(tee -a "${LOG_FILE}") 2>&1
   log "B-route meter setup started. Log file: ${LOG_FILE}"
   migrate_legacy_runtime_config
-  initialize_settings_for_adapter
   ensure_python_runtime
+  initialize_settings_for_adapter
   migrate_legacy_omk_mqtt
   "${VENV_PYTHON}" "${SCRIPT_DIR}/lib/check-host-mqtt-config.py" "${SETTINGS_PATH}" || fail "B-route MQTT configuration must be migrated before service changes."
   ensure_runtime_directory "${OMK_ROOT}/data/broute-meter"

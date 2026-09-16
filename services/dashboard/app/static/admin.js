@@ -37,7 +37,7 @@ function formatApiError(value) {
   return "通信エラー";
 }
 
-function modelName(model) { return model === "temperature_humidity_sensor" ? "温湿度計" : model === "co2_sensor" ? "CO2センサー" : model === "waterproof_sensor" ? "防水温湿度計" : model === "plug_sensor" ? "プラグミニ" : model === "presence_sensor" ? "Presence Sensor Pro" : model === "motion_sensor" ? "Motion Sensor" : model === "contact_sensor" ? "開閉センサー" : text(model); }
+function modelName(model) { return model === "temperature_humidity_sensor" ? "温湿度計" : model === "co2_sensor" ? "CO2センサー" : model === "waterproof_sensor" ? "防水温湿度計" : model === "plug_sensor" ? "プラグミニ" : model === "presence_sensor" ? "Presence Sensor Pro" : model === "motion_sensor" ? "人感センサー" : model === "contact_sensor" ? "開閉センサー" : text(model); }
 function vendorName(vendor) { return vendor === "switchbot" ? "SwitchBot" : text(vendor); }
 function unconfirmedModelName(model) { return model === "temperature_humidity_sensor" ? "SwitchBot 温湿度計" : model === "co2_sensor" ? "SwitchBot CO₂センサー" : model === "waterproof_sensor" ? "SwitchBot 防水温湿度計" : model === "motion_sensor" ? "SwitchBot 人感センサー" : `SwitchBot ${modelName(model)}`; }
 function unconfirmedRegistrationName(model) { return ["presence_sensor"].includes(model) ? `${unconfirmedModelName(model)} ` : unconfirmedModelName(model); }

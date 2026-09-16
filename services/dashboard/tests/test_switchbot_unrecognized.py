@@ -41,6 +41,27 @@ assert(!document.querySelector("#edit-physical-info").textContent.includes("cont
     subprocess.run(["node", "-e", harness, str(script)], check=True, capture_output=True, text=True)
 
 
+def test_motion_sensor_uses_product_name_in_registered_card_and_edit_details():
+    script = Path(__file__).parents[1] / "app/static/admin.js"
+    harness = r'''
+const fs = require("fs"), vm = require("vm"), assert = require("assert");
+const elements = new Map();
+function element() { return {addEventListener() {}, querySelectorAll() { return []; }, textContent: "", innerHTML: "", disabled: false, hidden: true, checked: false, required: false, value: "", dataset: {}, showModal() {}, close() {}, reset() {}, focus() {}}; }
+global.document = {querySelector: key => { if (!elements.has(key)) elements.set(key, element()); return elements.get(key); }};
+global.window = {setInterval() {}, confirm() { return false; }};
+global.fetch = async () => ({ok: true, json: async () => ({sensors: [], nodes: [], stage: "idle"})});
+vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8"));
+const sensor = {device_key: "switchbot:020000000040", sensor_id: "motion-001", display_name: "玄関", vendor: "switchbot", model: "motion_sensor", sensor_type: "motion", location: "玄関", online: true, status: "normal", latest: {received_at: "now", rssi: -50, values: {motion_state: 1}}};
+assert(card({...sensor, values: {motion_state: 1}}, true).includes("SwitchBot 人感センサー"));
+assert(!card({...sensor, values: {motion_state: 1}}, true).includes("Motion Sensor"));
+assert(registeredCard(sensor).includes("SwitchBot 人感センサー"));
+registered.onclick({target: {closest: () => ({dataset: {sensor: encodeURIComponent(JSON.stringify(sensor))}})}});
+assert(document.querySelector("#edit-physical-info").textContent.includes("SwitchBot 人感センサー · motion"));
+assert(!document.querySelector("#edit-physical-info").textContent.includes("motion_sensor"));
+'''
+    subprocess.run(["node", "-e", harness, str(script)], check=True, capture_output=True, text=True)
+
+
 def test_presence_manual_registration_ui_requires_confirmation_and_resets_choice():
     script = Path(__file__).parents[1] / "app/static/admin.js"
     harness = r'''
