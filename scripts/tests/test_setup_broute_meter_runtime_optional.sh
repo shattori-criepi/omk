@@ -16,6 +16,8 @@ SUDO=()
 TARGET_USER="$(id -un)"
 TARGET_GROUP="$(id -gn)"
 OMK_ROOT="${TEMP_DIR}/omk"
+SETTINGS_PATH="${OMK_ROOT}/services/broute-meter/config/settings.yaml"
+SETTINGS_EXAMPLE="${ROOT}/services/broute-meter/config/settings.example.yaml"
 HELPER_DEST="${TEMP_DIR}/reset-rs-wsuha-p-usb"
 VBUS_HELPER_DEST="${TEMP_DIR}/cycle-gateway-usb-vbus"
 SUDOERS_DEST="${TEMP_DIR}/omk-rs-wsuha-p-reset"
@@ -24,6 +26,7 @@ SERVICE_ACTIVE=false
 START_RESULT=1
 UNIT_CHANGED=false
 SYSTEMCTL_CALLS=()
+SYSTEMD_STATE=$'active\nrunning\nsuccess'
 
 mkdir -p "${OMK_ROOT}/services/broute-meter/config"
 cp "${HELPER_SOURCE}" "${HELPER_DEST}"
@@ -37,7 +40,8 @@ systemctl() {
   case "$1" in
     is-enabled) return 0 ;;
     is-active) "${SERVICE_ACTIVE}" ;;
-    start|restart) return "${START_RESULT}" ;;
+    start|restart|stop) return "${START_RESULT}" ;;
+    show) printf '%s\n' "${SYSTEMD_STATE}" ;;
     daemon-reload) return 0 ;;
     *) return 0 ;;
   esac
@@ -54,13 +58,26 @@ stat() {
   command stat "$@"
 }
 
-# The same nonzero systemctl start result represents both a missing adapter and
-# missing B-route credentials: neither is an installation failure.
+# A fresh setup without a confirmed adapter enables the unit but never starts
+# an unconfigured runtime that would otherwise fail its port detection.
 SYSTEMCTL_CALLS=()
 ensure_service_state
-[[ " ${SYSTEMCTL_CALLS[*]} " == *" start ${SERVICE} "* ]]
+[[ " ${SYSTEMCTL_CALLS[*]} " != *" start ${SERVICE} "* ]]
 [[ " ${SYSTEMCTL_CALLS[*]} " != *" restart ${SERVICE} "* ]]
 verify_installation
+
+# Once setup has a stable explicit port, normal start/restart behavior applies.
+cat >"${SETTINGS_PATH}" <<'EOF'
+serial:
+  port: "/dev/serial/by-id/usb-FTDI_FT230X_Basic_UART_fixture-if00-port0"
+EOF
+
+# An immediately exiting process must not produce the active PASS message.
+SYSTEMD_STATE=$'activating\nauto-restart\nexit-code'
+unstable_output="$(verify_installation)"
+[[ "${unstable_output}" == *'enabled but not active'* ]]
+[[ "${unstable_output}" != *'enabled and healthy'* ]]
+SYSTEMD_STATE=$'active\nrunning\nsuccess'
 
 # Every normal setup installs the B-route package, so an active service must
 # restart even when its unit is unchanged.
@@ -72,6 +89,13 @@ ensure_service_state
 [[ " ${SYSTEMCTL_CALLS[*]} " == *" restart ${SERVICE} "* ]]
 [[ " ${SYSTEMCTL_CALLS[*]} " != *" daemon-reload "* ]]
 verify_installation
+
+# A normal systemd start still initializing the adapter is healthy, unlike
+# auto-restart/exit-code and must not be reported as a startup failure.
+SYSTEMD_STATE=$'activating\nstart\nsuccess'
+initializing_output="$(verify_installation)"
+[[ "${initializing_output}" == *'enabled and healthy'* ]]
+SYSTEMD_STATE=$'active\nrunning\nsuccess'
 
 # A changed unit still reloads systemd before restarting the active service.
 UNIT_CHANGED=true

@@ -29,6 +29,7 @@ PREFLIGHT_OK=true
 SETTINGS_PATH="${OMK_ROOT}/services/broute-meter/config/settings.yaml"
 SETTINGS_EXAMPLE="${OMK_ROOT}/services/broute-meter/config/settings.example.yaml"
 SERIAL_BY_ID_DIRECTORY="${OMK_SERIAL_BY_ID_DIRECTORY:-/dev/serial/by-id}"
+ADAPTER_REPLUG_TIMEOUT_SECONDS=120
 
 usage() {
   cat <<'EOF'
@@ -225,6 +226,15 @@ settings_has_serial_port() {
   [[ -n "${value}" && "${value}" != null && "${value}" != '~' && "${value}" != '""' && "${value}" != "''" ]]
 }
 
+render_gateway_settings() {
+  local port="$1"
+  if [[ "${port}" == null ]]; then
+    sed -e 's/^  enabled: false$/  enabled: true/' "${SETTINGS_EXAMPLE}"
+  else
+    sed -e "s|^  port: null$|  port: \"${port}\"|" -e 's/^  enabled: false$/  enabled: true/' "${SETTINGS_EXAMPLE}"
+  fi
+}
+
 initialize_settings_for_adapter() {
   local -a candidates=()
   local candidate response temporary
@@ -239,7 +249,7 @@ initialize_settings_for_adapter() {
     printf 'Use this FT230X serial adapter as RS-WSUHA-P? %s [y/N] ' "${candidate}" >&2
     if IFS= read -r response && [[ "${response}" =~ ^[Yy]([Ee][Ss])?$ ]]; then
       temporary="$(mktemp "${SETTINGS_PATH}.XXXXXX")"
-      sed "s|^  port: null$|  port: \"${candidate}\"|" "${SETTINGS_EXAMPLE}" >"${temporary}"
+      render_gateway_settings "${candidate}" >"${temporary}"
       "${SUDO[@]}" install -o "${TARGET_USER}" -g "${TARGET_GROUP}" -m 0600 "${temporary}" "${SETTINGS_PATH}"
       rm -f -- "${temporary}"
       log "Configured the confirmed RS-WSUHA-P stable serial path."
@@ -251,7 +261,78 @@ initialize_settings_for_adapter() {
   else
     warn "No FT230X serial adapter was found; B-route service will remain idle until setup is re-run with the adapter connected."
   fi
-  "${SUDO[@]}" install -o "${TARGET_USER}" -g "${TARGET_GROUP}" -m 0600 "${SETTINGS_EXAMPLE}" "${SETTINGS_PATH}"
+  temporary="$(mktemp "${SETTINGS_PATH}.XXXXXX")"
+  render_gateway_settings null >"${temporary}"
+  "${SUDO[@]}" install -o "${TARGET_USER}" -g "${TARGET_GROUP}" -m 0600 "${temporary}" "${SETTINGS_PATH}"
+  rm -f -- "${temporary}"
+}
+
+settings_has_legacy_omk_mqtt_disabled() {
+  [[ -f "${SETTINGS_PATH}" ]] || return 1
+  grep -Eq '^[[:space:]]*enabled:[[:space:]]*false[[:space:]]*(#.*)?$' "${SETTINGS_PATH}" &&
+    grep -Eq '^[[:space:]]*host:[[:space:]]*(")?127\.0\.0\.1(")?[[:space:]]*(#.*)?$' "${SETTINGS_PATH}" &&
+    grep -Eq '^[[:space:]]*port:[[:space:]]*1883[[:space:]]*(#.*)?$' "${SETTINGS_PATH}" &&
+    grep -Eq '^[[:space:]]*device_id:[[:space:]]*(")?broute-001(")?[[:space:]]*(#.*)?$' "${SETTINGS_PATH}" &&
+    grep -Eq '^[[:space:]]*topic_prefix:[[:space:]]*(")?omk(")?[[:space:]]*(#.*)?$' "${SETTINGS_PATH}" &&
+    grep -Eq '^[[:space:]]*client_id:[[:space:]]*(")?omk-broute-001(")?[[:space:]]*(#.*)?$' "${SETTINGS_PATH}"
+}
+
+migrate_legacy_omk_mqtt() {
+  local temporary
+  settings_has_legacy_omk_mqtt_disabled || return 0
+  temporary="$(mktemp "${SETTINGS_PATH}.mqtt.XXXXXX")"
+  sed -E 's/^([[:space:]]*enabled:[[:space:]]*)false([[:space:]]*(#.*)?)$/\1true\2/' "${SETTINGS_PATH}" >"${temporary}"
+  "${SUDO[@]}" install -o "${TARGET_USER}" -g "${TARGET_GROUP}" -m 0600 "${temporary}" "${SETTINGS_PATH}"
+  rm -f -- "${temporary}"
+  log "Enabled the standard OMK B-route MQTT publisher in the legacy setup configuration."
+}
+
+configured_serial_port() {
+  local value
+  value="$(sed -n 's/^[[:space:]]*port:[[:space:]]*//p' "${SETTINGS_PATH}" | head -n 1)"
+  value="${value%%#*}"
+  value="${value//[[:space:]]/}"
+  value="${value#\"}"; value="${value%\"}"
+  printf '%s\n' "${value}"
+}
+
+wait_for_adapter_replug() {
+  local port="$1" deadline=$((SECONDS + ADAPTER_REPLUG_TIMEOUT_SECONDS)) seen_absent=false
+  warn 'RS-WSUHA-P is present as USB but does not answer commands.'
+  warn 'Unplug only the RS-WSUHA-P, wait a few seconds, then reconnect it to the same USB port.'
+  log 'Waiting for the confirmed RS-WSUHA-P serial path to disappear and reappear.'
+  while ((SECONDS < deadline)); do
+    if [[ ! -e "${port}" ]]; then
+      seen_absent=true
+    elif "${seen_absent}" && [[ -c "${port}" ]]; then
+      log 'RS-WSUHA-P reconnected; retrying communication verification.'
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
+verify_and_trust_adapter() {
+  local port
+  settings_has_serial_port || return 0
+  port="$(configured_serial_port)"
+  [[ "${port}" == "${SERIAL_BY_ID_DIRECTORY}"/* && -c "${port}" ]] || return 0
+  # A re-run may find the existing worker holding the serial device.  Stop it
+  # before the administrative communication check; ensure_service_state()
+  # starts it again only after that check succeeds.
+  if "${SUDO[@]}" systemctl is-active --quiet "${SERVICE}"; then
+    log "Stopping active service before RS-WSUHA-P communication verification: ${SERVICE}"
+    "${SUDO[@]}" systemctl stop "${SERVICE}"
+  fi
+  if (cd "${OMK_ROOT}/services/broute-meter" && "${SUDO[@]}" "${VENV_PYTHON}" -m broute_meter setup-adapter --trust-usb-recovery); then
+    log 'RS-WSUHA-P communication and USB recovery trust registration completed.'
+    return 0
+  fi
+  wait_for_adapter_replug "${port}" || fail 'RS-WSUHA-P did not reappear before timeout; setup stopped without changing credentials. Reconnect the adapter and run setup again.'
+  (cd "${OMK_ROOT}/services/broute-meter" && "${SUDO[@]}" "${VENV_PYTHON}" -m broute_meter setup-adapter --trust-usb-recovery) ||
+    fail 'RS-WSUHA-P did not answer after reconnection; setup stopped without changing credentials. Check the adapter and run setup again.'
+  log 'RS-WSUHA-P communication and USB recovery trust registration completed after reconnection.'
 }
 
 ensure_system_directory() {
@@ -435,11 +516,11 @@ ensure_service_state() {
   fi
 }
 
-service_is_stably_active() {
+service_has_healthy_start() {
   local state
   sleep 1
   state="$("${SUDO[@]}" systemctl show --property=ActiveState,SubState,Result --value "${SERVICE}" 2>/dev/null || true)"
-  [[ "${state}" == $'active\nrunning\nsuccess' ]]
+  [[ "${state}" == $'active\nrunning\nsuccess' || "${state}" == $'activating\nstart\nsuccess' ]]
 }
 
 verify_installation() {
@@ -459,13 +540,13 @@ verify_installation() {
     log "PASS: ${SERVICE} is installed and enabled; it will start after a confirmed RS-WSUHA-P adapter is configured."
     return 0
   fi
-  if ! service_is_stably_active; then
+  if ! service_has_healthy_start; then
     warn "${SERVICE} is enabled but not active. The B-route adapter, B-route ID/PASS, or network may not be ready yet."
     log "Check: sudo systemctl status ${SERVICE} --no-pager"
     log "Check: sudo journalctl -u ${SERVICE} -n 100 --no-pager"
     return 0
   fi
-  log "PASS: ${SERVICE} is enabled and stably active."
+  log "PASS: ${SERVICE} is enabled and healthy (active or initializing)."
 }
 
 main() {
@@ -564,6 +645,7 @@ main() {
   migrate_legacy_runtime_config
   initialize_settings_for_adapter
   ensure_python_runtime
+  migrate_legacy_omk_mqtt
   "${VENV_PYTHON}" "${SCRIPT_DIR}/lib/check-host-mqtt-config.py" "${SETTINGS_PATH}" || fail "B-route MQTT configuration must be migrated before service changes."
   ensure_runtime_directory "${OMK_ROOT}/data/broute-meter"
   ensure_runtime_directory "${OMK_ROOT}/logs/broute-meter"
@@ -576,6 +658,7 @@ main() {
   install_vbus_helper
   install_sudoers "${temporary_sudoers}"
   install_unit "${temporary_unit}"
+  verify_and_trust_adapter
   ensure_service_state
   verify_installation
   log "Installed ${SERVICE}. Check: sudo systemctl status ${SERVICE} --no-pager"
