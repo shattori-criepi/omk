@@ -150,6 +150,62 @@ if grep -Eq 'autoconnect (yes|true|1)' "${TEMP_DIR}/early.nmcli-args"; then
   echo 'Prepare enabled autoconnect before handoff.' >&2; exit 1
 fi
 
+# The activation handoff must not reset a fresh, not-yet-loaded worker. A
+# failed worker is reset before retrying, while a failed start remains fatal.
+cat >"${TEMP_DIR}/bin/systemctl" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ -n "${TEST_SYSTEMCTL_CALLS:-}" ]]; then
+  printf '%s\n' "$*" >>"${TEST_SYSTEMCTL_CALLS}"
+fi
+case "${1:-}" in
+  is-failed)
+    [[ "${AP_ACTIVATION_STATE:-not_loaded}" == failed ]]
+    ;;
+  reset-failed)
+    [[ "${FAIL_RESET_FAILED:-no}" != yes ]]
+    ;;
+  start)
+    [[ "${FAIL_ACTIVATION_START:-no}" != yes ]]
+    ;;
+  cat)
+    cat "${OMK_SYSTEMD_UNIT_DIR}/${2}"
+    ;;
+  show)
+    port=8000; [[ "${2}" == *mqtt* ]] && port=1883
+    printf 'FreeBind=yes\nBindToDevice=wlan0\nAccept=no\nListen=192.168.50.1:%s (Stream)\nActiveState=active\n' "${port}"
+    ;;
+esac
+EOF
+chmod +x "${TEMP_DIR}/bin/systemctl"
+
+run_activation() {
+  local name="$1"
+  shift
+  : >"${TEMP_DIR}/${name}.systemctl"
+  env PATH="${TEMP_DIR}/bin:${PATH}" TEST_SYSTEMCTL_CALLS="${TEMP_DIR}/${name}.systemctl" \
+    OMK_SYSTEMD_UNIT_DIR="${TEMP_DIR}/units" OMK_AP_CONFIRM=yes "$@" \
+    bash "${TEMP_DIR}/scripts/setup-wifi-access-point.sh" --activate >"${TEMP_DIR}/${name}.output" 2>&1 </dev/null
+}
+
+# is-failed returns nonzero for both a fresh unit and the initial "not loaded"
+# state, so reset-failed is not invoked before handing activation to the worker.
+run_activation fresh AP_ACTIVATION_STATE=not_loaded
+grep -Fxq 'start --no-block omk-ap-activation.service' "${TEMP_DIR}/fresh.systemctl"
+if grep -Fq 'reset-failed omk-ap-activation.service' "${TEMP_DIR}/fresh.systemctl"; then
+  echo 'Fresh worker activation unnecessarily reset failed state.' >&2; exit 1
+fi
+
+run_activation failed AP_ACTIVATION_STATE=failed
+reset_line="$(grep -n -Fx 'reset-failed omk-ap-activation.service' "${TEMP_DIR}/failed.systemctl" | cut -d: -f1)"
+start_line="$(grep -n -Fx 'start --no-block omk-ap-activation.service' "${TEMP_DIR}/failed.systemctl" | cut -d: -f1)"
+[[ -n "${reset_line}" && -n "${start_line}" && "${reset_line}" -lt "${start_line}" ]]
+
+if run_activation start_failed AP_ACTIVATION_STATE=not_loaded FAIL_ACTIVATION_START=yes; then
+  echo 'Activation setup accepted a failed worker start.' >&2; exit 1
+fi
+grep -Fxq 'start --no-block omk-ap-activation.service' "${TEMP_DIR}/start_failed.systemctl"
+
 # An already active OMK AP is not cycled during a rerun and keeps autoconnect.
 run_setup active PROFILE_EXISTS=yes PROFILE_ACTIVE=yes PROFILE_PSK='ExistingPskValue1234567890'
 if grep -Eq 'connection (add|delete|down|up)' "${TEMP_DIR}/active.nmcli-args"; then

@@ -417,7 +417,9 @@ if [[ "${START_PROXIES}" == yes ]] || is_yes "${ACTIVATE}"; then
   fi
   "${SCRIPT_DIR}/lib/validate-ap-socket-units.sh" "${unit_dir}" --runtime
   confirm 'Activate omk-ap now? This can disconnect SSH' || { log 'Activation declined.'; exit 1; }
-  "${SUDO[@]}" systemctl reset-failed omk-ap-activation.service
+  if "${SUDO[@]}" systemctl is-failed --quiet omk-ap-activation.service; then
+    "${SUDO[@]}" systemctl reset-failed omk-ap-activation.service
+  fi
   "${SUDO[@]}" systemctl start --no-block omk-ap-activation.service
   log 'AP activation queued; inspect journalctl -u omk-ap-activation.service for its result.'
   exit 0
