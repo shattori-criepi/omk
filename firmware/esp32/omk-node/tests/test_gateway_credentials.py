@@ -79,9 +79,9 @@ def test_sen66_mqtt_failure_does_not_stop_periodic_measurement():
 
 def test_registration_status_payload_has_dedicated_capacity_for_sensor_presence():
     source = (SOURCE / "mqtt_registration.c").read_text()
-    assert "#define OMK_REGISTRATION_PAYLOAD_SIZE 192" in source
+    assert "#define OMK_REGISTRATION_PAYLOAD_SIZE 256" in source
     assert "static char registration_payload[OMK_REGISTRATION_PAYLOAD_SIZE];" in source
-    status = source[source.index("static void publish_registration_status") : source.index("static bool logical_id_is_valid")]
+    status = source[source.index("static void publish_registration_status") : source.index("static bool logical_id_is_valid(const char *logical_id) {")]
     assert '"\\\"connected_sensors\\\":%s%s}"' in status
     assert "esp_mqtt_client_publish(client, registration_topic," in status
     assert "registration_payload, 0, 1, 1" in status
@@ -94,7 +94,7 @@ def test_registration_status_payload_has_dedicated_capacity_for_sensor_presence(
             "capabilities": 3,
             "connected_sensors": sensors,
         }, separators=(",", ":"))
-        assert len(payload) < 192
+        assert len(payload) < 256
         decoded = json.loads(payload)
         assert decoded["registration_state"] == state
         assert decoded["capabilities"] == 3
@@ -104,17 +104,18 @@ def test_registration_status_payload_has_dedicated_capacity_for_sensor_presence(
         "protocol_version": 1,
         "node_id": "09dda0d5a8f2",
         "registration_state": "registered",
+        "logical_id": "a" * 48,
         "capabilities": 3,
         "connected_sensors": ["sen66"],
         "sen66_rc": 4294967295,
         "sen66_to": 4294967295,
     }, separators=(",", ":"))
-    assert len(diagnostics_payload) < 192
+    assert len(diagnostics_payload) < 256
 
 
 def test_registration_status_includes_sen66_recovery_diagnostics_only_after_recovery():
     source = (SOURCE / "mqtt_registration.c").read_text()
-    status = source[source.index("static void publish_registration_status") : source.index("static bool logical_id_is_valid")]
+    status = source[source.index("static void publish_registration_status") : source.index("static bool logical_id_is_valid(const char *logical_id) {")]
 
     assert "if (sen66_diagnostics_available)" in status
     assert "sen66_rc" in status

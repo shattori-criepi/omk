@@ -68,9 +68,9 @@ def test_node_status_has_boot_and_heap_diagnostics_with_capacity():
     assert len(json.dumps(payload, separators=(",", ":"))) < 1152
 
 
-def test_registration_payload_capacity_is_unchanged():
+def test_registration_and_mesh_status_have_separate_payload_capacity():
     source = (SOURCE / "mqtt_registration.c").read_text()
-    assert "#define OMK_REGISTRATION_PAYLOAD_SIZE 192" in source
+    assert "#define OMK_REGISTRATION_PAYLOAD_SIZE 256" in source
     assert "#define OMK_MQTT_MESH_STATUS_PAYLOAD_SIZE 1152" in source
 
 

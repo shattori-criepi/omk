@@ -28,7 +28,8 @@
 #define OMK_MQTT_BLE_RELAY_PAYLOAD_SIZE 512
 #define OMK_MQTT_SEN66_PAYLOAD_SIZE 768
 #define OMK_MQTT_MESH_STATUS_PAYLOAD_SIZE 1152
-#define OMK_REGISTRATION_PAYLOAD_SIZE 192
+/* Includes a maximum-length logical ID and both uint32 SEN66 diagnostics. */
+#define OMK_REGISTRATION_PAYLOAD_SIZE 256
 #define OMK_MQTT_CLIENT_ID_SIZE 32
 static const char *TAG = "omk-mqtt";
 static esp_mqtt_client_handle_t client;
@@ -51,6 +52,8 @@ static bool sen66_connected;
 static bool sen66_diagnostics_available;
 static uint32_t sen66_recovery_count;
 static uint32_t sen66_measurement_timeout_count;
+
+static bool logical_id_is_valid(const char *logical_id);
 
 static bool is_lower_hex_identifier(const char *value, size_t length) {
     if (value == NULL || strlen(value) != length) {
@@ -77,7 +80,23 @@ static bool registration_is_persisted(void) {
 }
 
 static void publish_registration_status(void) {
-    const char *state = registration_is_persisted() ? "registered" : "provisioned";
+    bool registered = registration_is_persisted();
+    const char *state = registered ? "registered" : "provisioned";
+    char logical_id_field[OMK_NODE_LOGICAL_ID_MAX_LENGTH + 20] = {0};
+    if (registered) {
+        char logical_id[OMK_NODE_LOGICAL_ID_MAX_LENGTH + 1];
+        esp_err_t err = node_registration_get_logical_id(logical_id, sizeof(logical_id));
+        if (err != ESP_OK || !logical_id_is_valid(logical_id)) {
+            ESP_LOGW(TAG, "Could not read a valid persisted logical ID for registration status");
+            return;
+        }
+        /* Validation excludes JSON metacharacters; never publish an invalid ID. */
+        int id_written = snprintf(logical_id_field, sizeof(logical_id_field),
+                                  ",\"logical_id\":\"%s\"", logical_id);
+        if (id_written < 0 || id_written >= (int)sizeof(logical_id_field)) {
+            return;
+        }
+    }
     char sen66_diagnostic_fields[96] = {0};
     if (sen66_diagnostics_available) {
         int diagnostic_written = snprintf(
@@ -91,10 +110,10 @@ static void publish_registration_status(void) {
     }
     int written = snprintf(registration_payload, sizeof(registration_payload),
                            "{\"protocol_version\":%u,\"node_id\":\"%s\","
-                           "\"registration_state\":\"%s\",\"capabilities\":%u,"
+                           "\"registration_state\":\"%s\"%s,\"capabilities\":%u,"
                            "\"connected_sensors\":%s%s}",
                            OMK_NODE_PROTOCOL_VERSION, client_id + strlen("omk-node-"),
-                           state, OMK_NODE_CAPABILITIES,
+                           state, logical_id_field, OMK_NODE_CAPABILITIES,
                            sen66_connected ? "[\"sen66\"]" : "[]", sen66_diagnostic_fields);
     if (written < 0 || written >= (int)sizeof(registration_payload)) {
         ESP_LOGE(TAG, "Could not build registration status payload");
@@ -268,6 +287,7 @@ static void process_registration_config(const esp_mqtt_event_handle_t event) {
             publish_device_status("online");
         }
         publish_registration_ack(logical_id->valuestring);
+        publish_registration_status();
     } else {
         ESP_LOGE(TAG, "Could not persist registration: %s", esp_err_to_name(save_err));
     }

@@ -239,10 +239,30 @@ class BleManager:
             status_values = {"protocol_version": 1, "capabilities": capabilities,
                              "connected_sensors": connected_sensors, "registration_state": state,
                              "mqtt_status_seen_at": now_iso()}
-            if state == "provisioned":
-                self.node_registry.clear_registration(parts[2], **status_values)
-            else:
-                self.node_registry.update(parts[2], **status_values)
+            with self._node_registration_lock:
+                if state == "provisioned":
+                    self.node_registry.clear_registration(parts[2], **status_values)
+                else:
+                    # New firmware supplies its NVS identity on every connect.
+                    # Legacy registered status omits it: preserve the saved ID.
+                    if "logical_id" in value:
+                        logical_id = value["logical_id"]
+                        if not self._logical_id_valid(logical_id):
+                            LOGGER.warning("Ignoring invalid OMK Node status logical_id for node_id=%s", parts[2])
+                            return
+                        current = self.node_registry.list().get(parts[2], {})
+                        if current.get("registration_revoked"):
+                            LOGGER.info("Ignoring retained registration status after removal for node_id=%s", parts[2])
+                            return
+                        owner = self._logical_id_owner(logical_id, excluding_node_id=parts[2])
+                        if owner is not None:
+                            LOGGER.error("Ignoring duplicate OMK Node status logical_id=%s from node_id=%s; already assigned to node_id=%s",
+                                         logical_id, parts[2], owner)
+                            return
+                        # A pending edit is still completed only by its ACK.
+                        if current.get("requested_logical_id") is None:
+                            status_values["logical_id"] = logical_id
+                    self.node_registry.update(parts[2], **status_values)
             return
         logical_id = value.get("logical_id")
         if value.get("registration_state") != "registered" or not self._logical_id_valid(logical_id):
