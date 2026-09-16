@@ -17,6 +17,8 @@
     "pm25": "0.9",
     "voc": "110",
     "nox": "1",
+    "outdoor_temperature": "25.1",
+    "outdoor_humidity": "50",
     "pm1_0_ug_m3": "0.7",
     "pm4_0_ug_m3": "1.1",
     "pm10_0_ug_m3": "1.2",

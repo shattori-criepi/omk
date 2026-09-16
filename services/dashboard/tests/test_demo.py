@@ -11,6 +11,7 @@ import subprocess
 from zoneinfo import ZoneInfo
 
 from fastapi.testclient import TestClient
+import httpx
 import pytest
 
 import app.main as dashboard_main
@@ -22,6 +23,25 @@ from app.recommendations import clock_item_ids, recommended_blocks
 NOW = datetime(2026, 9, 16, 12, 0, tzinfo=ZoneInfo("Asia/Tokyo"))
 ENVIRONMENT = {"temperature", "humidity", "co2", "pm25", "voc", "nox"}
 POWER = {"pv_power", "load_power", "grid_import", "grid_export", "battery_soc", "battery_power_bidirectional"}
+OUTDOOR = {"outdoor_temperature", "outdoor_humidity"}
+ASYNC_CLIENT = httpx.AsyncClient
+
+
+def sensor_metadata(monkeypatch, payload=None, *, error=False, status=200):
+    calls = []
+
+    def respond(request):
+        calls.append(request)
+        assert request.method == "GET"
+        assert request.url.path == "/api/sensors"
+        if error:
+            raise httpx.ConnectError("optional manager not installed", request=request)
+        return httpx.Response(status, json=payload)
+
+    monkeypatch.setattr(dashboard_main.httpx, "AsyncClient", lambda **kwargs: ASYNC_CLIENT(
+        transport=httpx.MockTransport(respond), **kwargs,
+    ))
+    return calls
 
 
 @pytest.fixture
@@ -38,6 +58,7 @@ def gateway(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(dashboard_main, "_DERIVED_ENERGY_CACHE", None)
     monkeypatch.setattr(dashboard_main, "_ble_request", no_service)
     monkeypatch.setattr(dashboard_main, "_system_manager_request", no_service)
+    sensor_metadata(monkeypatch, error=True)
     monkeypatch.setenv("OMK_LATEST_DATA_ROOT", str(tmp_path / "latest"))
     monkeypatch.setenv("OMK_PROCESSED_DATA_ROOT", str(tmp_path / "processed"))
     monkeypatch.setenv("OMK_DASHBOARD_SETTINGS_PATH", str(tmp_path / "dashboard" / "settings.json"))
@@ -115,9 +136,15 @@ def test_fresh_gateway_demo_without_any_configuration_data_or_services(gateway):
             response = client.get(f"/display?demo_mode={mode}")
             assert response.status_code == 200
             assert f'data-dashboard-mode="{mode}"' in response.text
-            if mode != "custom":
-                assert 'data-source-kind="demo">模擬</span>' in response.text
-                assert_reading_badges(response.text, readings(snapshot(client, mode)))
+            assert 'data-source-kind="demo">模擬</span>' in response.text
+            assert_reading_badges(response.text, readings(snapshot(client, mode)))
+        custom = snapshot(client, "custom")
+        assert [(block["group"], block["size"]) for block in custom["blocks"]] == [
+            ("パワコン", "large"), ("室内環境", "medium"), ("外気", "small"),
+        ]
+        assert [len([block["primary"], *block["secondary"]]) for block in custom["blocks"]] == [6, 6, 2]
+        assert {item["semantic_role"] for item in readings(custom)} == POWER | ENVIRONMENT | OUTDOOR
+        assert all(item["source_kind"] == "demo" for item in readings(custom))
     assert files(root) == before
     assert not (root / "latest").exists()
     assert not (root / "processed").exists()
@@ -134,7 +161,8 @@ def test_pcs_only_keeps_custom_real_and_fills_automatic_presets(gateway):
     load = next(item for item in custom if item["id"] == load_id)
     assert load["value"] == "2.45"
     assert load["source_kind"] == "real"
-    assert all(item["group"] == "パワコン" and not item["id"].startswith("demo:") for item in custom)
+    assert all(item["source_kind"] == "demo" for item in custom if item["semantic_role"] not in {"load_power", "pv_power"})
+    assert "grid_power" not in {item["semantic_role"] for item in custom}
     for mode in ("recommended", "clock"):
         displayed = readings(snapshot(client, mode))
         assert {"grid_power", "temperature", "humidity", "co2"} <= {item["semantic_role"] for item in displayed}
@@ -262,7 +290,7 @@ def test_normal_beats_delayed_and_split_environment_keeps_all_real_values(gatewa
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is required for display polling tests")
-@pytest.mark.parametrize("mode", ["recommended", "clock"])
+@pytest.mark.parametrize("mode", ["custom", "recommended", "clock"])
 def test_demo_polling_renders_new_real_membership_and_switches_off(gateway, mode):
     client, root = gateway
     enable_demo(client)
@@ -329,9 +357,10 @@ def test_mixed_real_and_demo_sources_have_per_value_badges_only_when_enabled(gat
     by_id = {item["id"]: item for item in displayed}
     assert by_id[temperature]["source_kind"] == "real"
     assert by_id[temperature]["value"] == "21.3"
-    for item_id in (grid, humidity, co2):
+    for item_id in ((humidity, co2) if mode == "custom" else (grid, humidity, co2)):
         assert by_id[item_id]["source_kind"] == "demo"
     if mode == "custom":
+        assert grid not in by_id
         assert by_id[load]["source_kind"] == "real"
         assert by_id[load]["value"] == "2.45"
     html = client.get(f"/display?demo_mode={mode}").text
@@ -406,3 +435,147 @@ for (const [data, source, badge, value] of [[real, "real", "実測", "21.3"], [d
 '''
     subprocess.run(["node", "-e", harness, str(dashboard_main.APP_DIR / "static" / "display.js"),
                     json.dumps([real, demo, temperature])], check=True, capture_output=True, text=True)
+
+
+@pytest.mark.parametrize("device", ["pcs", "sen66", "broute"])
+@pytest.mark.parametrize("age", [0, 420])
+def test_single_device_gateway_has_real_values_only_where_available(gateway, device, age):
+    client, root = gateway
+    fields = {
+        "pcs": {"load_power_w": 2450, "pv_power_w": 820, "grid_import_power_w": 1200,
+                "grid_export_power_w": 0, "battery_soc_percent": 72,
+                "battery_charge_power_w": 0, "battery_discharge_power_w": 430},
+        "sen66": {"temperature_celsius": 21.3, "relative_humidity_percent": 57,
+                  "co2_ppm": 730, "pm2_5_ug_m3": 2.4, "voc_index": 83, "nox_index": 2},
+        "broute": {"net_power_w": 1200},
+    }[device]
+    for field, value in fields.items():
+        write_reading(root, field, value, device=device, age=age)
+    enable_demo(client)
+    before = files(root)
+    real_roles = {"pcs": POWER, "sen66": ENVIRONMENT, "broute": {"grid_power"}}[device]
+    for mode in ("custom", "recommended", "clock", "custom"):
+        payload = snapshot(client, mode)
+        displayed = readings(payload)
+        relevant = [item for item in displayed if item["semantic_role"] in POWER | ENVIRONMENT | OUTDOOR | {"grid_power"}]
+        for item in relevant:
+            assert item["source_kind"] == ("real" if item["semantic_role"] in real_roles else "demo")
+            if item["source_kind"] == "real":
+                assert item["freshness"] == ("delayed" if age else "normal")
+        if mode == "custom":
+            assert len(payload["blocks"]) == 3
+            assert {item["semantic_role"] for item in displayed} == POWER | ENVIRONMENT | OUTDOOR
+        else:
+            assert next(item for item in displayed if item["semantic_role"] == "grid_power")["source_kind"] == ("real" if device == "broute" else "demo")
+        response = client.get(f"/display?demo_mode={mode}")
+        assert response.status_code == 200
+        assert_reading_badges(response.text, displayed)
+    assert files(root) == before
+
+
+@pytest.mark.parametrize("with_sensor", [False, True])
+def test_fixed_demo_custom_is_transient_and_cannot_be_saved(gateway, with_sensor):
+    client, root = gateway
+    item_id = write_reading(root, "temperature_celsius", 21.3) if with_sensor else None
+    settings = client.get("/api/admin/dashboard-settings").json()
+    settings["mode"] = "custom"
+    settings["presets"]["standard"]["blocks"] = ([dict(
+        block_id="my-choice", group="environment", title="元のカスタム", size="small",
+        layout_pattern="strip", primary_item_id=item_id, item_ids=[item_id],
+    )] if with_sensor else [])
+    settings["presets"]["recommended"]["blocks"] = []
+    settings["presets"]["clock"]["item_ids"] = []
+    assert client.put("/api/admin/dashboard-settings", json=settings).status_code == 200
+    normal = client.get("/api/display").json()
+    original_files = files(root)
+    enable_demo(client)
+    before_display = files(root)
+    for _ in range(2):
+        custom = snapshot(client, "custom")
+        assert [(block["size"], block["title"]) for block in custom["blocks"]] == [
+            ("large", "パワコン"), ("medium", "室内環境"), ("small", "外気"),
+        ]
+        snapshot(client, "recommended")
+        snapshot(client, "clock")
+    assert files(root) == before_display
+    # The normal settings endpoint must also reject an attempt to save the overlay.
+    attempted = client.get("/api/admin/dashboard-settings").json()
+    attempted["presets"]["standard"]["blocks"] = [dict(
+        block_id=block["id"], group=block["group"], title=block["title"], size=block["size"],
+        layout_pattern=block["layout_pattern"], primary_item_id=block["primary"]["id"],
+        item_ids=[item["id"] for item in [block["primary"], *block["secondary"]]],
+    ) for block in custom["blocks"]]
+    assert client.put("/api/admin/dashboard-settings", json=attempted).status_code == 400
+    assert files(root) == before_display
+    assert client.post("/api/admin/dashboard-settings/demo", json={"enabled": False}).status_code == 200
+    assert client.get("/api/display").json() == normal
+    assert files(root) == original_files
+
+
+@pytest.mark.parametrize("model", ["waterproof_sensor", "future_environment_sensor"])
+@pytest.mark.parametrize("age", [0, 420, 660, None])
+def test_outdoor_uses_registry_location_and_preserves_source_per_item(gateway, monkeypatch, model, age):
+    client, root = gateway
+    temperature = write_reading(root, "temperature_c", 12.3, device="exterior-custom", age=age or 0)
+    # Deliberately omit humidity: this one must be supplemented even with real temperature.
+    write_reading(root, "temperature_c", 30.0, device="th-001")
+    if age is None:
+        (root / "latest" / "items" / f"{temperature}.json").unlink()
+    calls = sensor_metadata(monkeypatch, {"sensors": [
+        dict(sensor_id="exterior-custom", sensor_type="environment", model=model, location="屋外", enabled=True),
+        dict(sensor_id="th-001", sensor_type="environment", model="waterproof_sensor", location="浴室",
+             display_name="屋外でも使える温湿度計", enabled=True),
+    ]})
+    enable_demo(client)
+    before = files(root)
+    custom = snapshot(client, "custom")
+    outdoor = custom["blocks"][2]
+    assert outdoor["primary"]["id"] == temperature
+    assert outdoor["primary"]["semantic_role"] == "outdoor_temperature"
+    assert outdoor["primary"]["source_kind"] == ("real" if age in {0, 420} else "demo")
+    assert outdoor["primary"]["value"] == ("12.3" if age in {0, 420} else "25.1")
+    assert outdoor["secondary"][0]["value"] == "50"
+    assert outdoor["secondary"][0]["source_kind"] == "demo"
+    indoor = custom["blocks"][1]
+    assert temperature not in [item["id"] for item in [indoor["primary"], *indoor["secondary"]]]
+    html = client.get("/display?demo_mode=custom").text
+    assert_reading_badges(html, readings(custom))
+    assert len(calls) == 2
+    assert files(root) == before
+
+
+@pytest.mark.parametrize("metadata", [
+    {"sensor_type": "environment", "location": "浴室"},
+    {"sensor_type": "environment", "location": ""},
+    {"sensor_type": "environment"},
+    {"sensor_type": "state", "location": "屋外"},
+    {"sensor_type": "environment", "location": "屋外", "enabled": False},
+])
+def test_outdoor_never_guesses_from_id_model_name_or_measurements(gateway, monkeypatch, metadata):
+    client, root = gateway
+    write_reading(root, "temperature_c", 30.0, device="th-001")
+    write_reading(root, "relative_humidity_percent", 85, device="th-001")
+    sensor_metadata(monkeypatch, {"sensors": [dict(
+        sensor_id="th-001", model="waterproof_sensor", display_name="屋外温湿度計", **metadata,
+    )]})
+    enable_demo(client)
+    custom = snapshot(client, "custom")
+    outdoor = custom["blocks"][2]
+    assert [item["value"] for item in [outdoor["primary"], *outdoor["secondary"]]] == ["25.1", "50"]
+    assert all(item["source_kind"] == "demo" for item in [outdoor["primary"], *outdoor["secondary"]])
+
+
+@pytest.mark.parametrize("payload,status,error", [(None, 200, True), ({}, 503, False),
+                                                   ([], 200, False), ({"sensors": {}}, 200, False)])
+def test_outdoor_manager_unavailable_or_malformed_does_not_break_demo(gateway, monkeypatch, payload, status, error):
+    client, root = gateway
+    write_reading(root, "temperature_c", 30.0, device="th-001")
+    sensor_metadata(monkeypatch, payload, status=status, error=error)
+    enable_demo(client)
+    for mode in ("custom", "recommended", "clock"):
+        response = client.get(f"/display?demo_mode={mode}")
+        assert response.status_code == 200
+        displayed = readings(snapshot(client, mode))
+        assert_reading_badges(response.text, displayed)
+        if mode == "custom":
+            assert all(item["source_kind"] == "demo" for item in displayed if item["semantic_role"] in OUTDOOR)

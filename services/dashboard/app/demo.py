@@ -3,6 +3,7 @@ from dataclasses import replace
 import json
 from pathlib import Path
 from app.display_items import DisplayItem
+from app.data.settings_repository import DisplayBlock
 from app.metric_definitions import MetricDefinition, definition_for
 from app.recommendations import BROUTE_GROUP, ENVIRONMENT_ROLE_SCORE, environment_group_score
 
@@ -15,9 +16,52 @@ _ENVIRONMENT_FIELDS = (
     "pm2_5_ug_m3", "voc_index", "nox_index",
 )
 _POWER_FIELDS = (
-    "pv_power_w", "load_power_w", "grid_import_power_w", "grid_export_power_w",
+    "load_power_w", "pv_power_w", "grid_import_power_w", "grid_export_power_w",
     "battery_soc_percent", "battery_power_bidirectional",
 )
+_FRESHNESS_PRIORITY = {"normal": 0, "delayed": 1, "stale": 2, "unavailable": 3}
+
+
+def demo_custom_preset(
+    items: list[DisplayItem], outdoor_device_ids: frozenset[str] = frozenset(),
+) -> tuple[list[DisplayItem], tuple[DisplayBlock, ...]]:
+    """Build the exhibition preset in memory, independently of saved custom.
+
+    Outdoor membership must be explicit; indoor readings must not be reused as
+    outdoor measurements. The medium card intentionally holds six demo values,
+    without changing the limits for user-editable persisted presets.
+    """
+    indoor = [item for item in items if item.device_id not in outdoor_device_ids]
+    outdoor = [item for item in items if item.device_id in outdoor_device_ids]
+    power = [item for item in items if item.group == "パワコン"]
+
+    def select(candidates: list[DisplayItem], field: str, group: str) -> DisplayItem:
+        synthetic = _synthetic_item(field, group)
+        matches = [item for item in candidates if item.selectable and item.semantic_role == synthetic.semantic_role]
+        best = min(matches, key=lambda item: (_FRESHNESS_PRIORITY.get(item.freshness, 3), item.id)) if matches else None
+        return replace(best, group=group) if best else synthetic
+
+    pcs_items = [select(power, field, "パワコン") for field in _POWER_FIELDS]
+    environment_items = [select(indoor, field, "室内環境") for field in _ENVIRONMENT_FIELDS]
+    outdoor_items = []
+    for field, role, label in (("temperature_c", "outdoor_temperature", "外気温"),
+                               ("relative_humidity_percent", "outdoor_humidity", "外気相対湿度")):
+        item = select(outdoor, field, "外気")
+        outdoor_items.append(replace(
+            item, id=f"demo:{role}" if item.source_kind == "demo" else item.id,
+            semantic_role=role, short_label=label, label=f"外気 {label}",
+        ))
+    candidates = apply_demo_fallback(pcs_items + environment_items + outdoor_items)
+    blocks = tuple(
+        DisplayBlock(block_id, group, group, size, values[0].id,
+                     tuple(item.id for item in values), layout_pattern=pattern)
+        for block_id, group, size, pattern, values in (
+            ("demo:custom:pcs", "パワコン", "large", "hero", pcs_items),
+            ("demo:custom:environment", "室内環境", "medium", "compact", environment_items),
+            ("demo:custom:outdoor", "外気", "small", "compact", outdoor_items),
+        )
+    )
+    return candidates, blocks
 
 
 def demo_candidates(items: list[DisplayItem]) -> list[DisplayItem]:
@@ -26,9 +70,9 @@ def demo_candidates(items: list[DisplayItem]) -> list[DisplayItem]:
     Complete the strongest environment group, borrowing the best real reading
     for each role from other groups when necessary. Only these presentation
     copies change group; their IDs, values and source labels remain intact.
-    Custom layouts use apply_demo_fallback directly and retain their membership.
+    Custom exhibition layouts use demo_custom_preset instead.
     """
-    priority = {"normal": 0, "delayed": 1, "stale": 2, "unavailable": 3}
+    priority = _FRESHNESS_PRIORITY
     ranked = sorted(items, key=lambda item: (priority.get(item.freshness, 3), item.id))
     environments: dict[str, list[DisplayItem]] = {}
     for item in ranked:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Literal
 
 from app.data.display_repository import CatalogItem, DisplayRepository, LatestDisplayItem
 from app.data.settings_repository import DisplayBlock, DisplaySelection
@@ -30,6 +31,7 @@ class DisplayItem:
     size: str = "small"
     short_label: str = ""
     source_item_ids: tuple[str, ...] = ()
+    source_kind: Literal["real", "demo"] = "real"
 
     def as_dict(self) -> dict[str, str | bool | None]:
         return self.__dict__.copy()
@@ -51,6 +53,7 @@ class DisplayBlockView:
     auxiliary_unit: str = ""
     auxiliary_flow: str = ""
     auxiliary_supported: bool = False
+    auxiliary_source_kind: Literal["real", "demo"] = "real"
 
     def as_dict(self) -> dict:
         return {
@@ -68,6 +71,7 @@ class DisplayBlockView:
             "auxiliary_unit": self.auxiliary_unit,
             "auxiliary_flow": self.auxiliary_flow,
             "auxiliary_supported": self.auxiliary_supported,
+            "auxiliary_source_kind": self.auxiliary_source_kind,
         }
 
 
@@ -174,7 +178,7 @@ def selected_blocks(
             and block.layout_pattern == "hero"
             and primary.semantic_role == "load_power"
         )
-        auxiliary_label, auxiliary_value, auxiliary_flow = _grid_flow_auxiliary(repository, catalog.values()) if auxiliary_supported else ("", "", "")
+        auxiliary_label, auxiliary_value, auxiliary_flow, auxiliary_source_kind = _grid_flow_auxiliary(repository, catalog.values()) if auxiliary_supported else ("", "", "", "real")
         statuses = [item.freshness for item in values]
         freshness = FreshnessStatus.UNAVAILABLE.value
         if FreshnessStatus.UNAVAILABLE.value not in statuses:
@@ -189,6 +193,7 @@ def selected_blocks(
             auxiliary_label=auxiliary_label, auxiliary_value=auxiliary_value,
             auxiliary_unit="kW" if auxiliary_label else "", auxiliary_flow=auxiliary_flow,
             auxiliary_supported=auxiliary_supported,
+            auxiliary_source_kind=auxiliary_source_kind,
         ))
     return rendered
 
@@ -198,19 +203,27 @@ def _display_block_title(title: str, group: str) -> str:
     return "パワコン" if group == "パワコン" and title in {group, "太陽光・蓄電池"} else title
 
 
-def _grid_flow_auxiliary(repository: DisplayRepository, items) -> tuple[str, str, str]:
+def _grid_flow_auxiliary(repository: DisplayRepository, items) -> tuple[str, str, str, Literal["real", "demo"]]:
     """Reuse the legacy grid-flow order and zero handling for hero blocks."""
     by_role = {item.semantic_role: item for item in items if item.group == "パワコン"}
     import_item, export_item = by_role.get("grid_import"), by_role.get("grid_export")
-    import_latest = repository.item(import_item.id) if import_item and import_item.freshness != FreshnessStatus.UNAVAILABLE.value else None
-    export_latest = repository.item(export_item.id) if export_item and export_item.freshness != FreshnessStatus.UNAVAILABLE.value else None
+    def power_w(item: DisplayItem | None) -> float | None:
+        if item is None or item.freshness == FreshnessStatus.UNAVAILABLE.value:
+            return None
+        if item.source_kind == "demo":
+            # Overlay values are already kW; do not reread stale collector data.
+            value = _numeric_value(item.value)
+            return value * 1000 if value is not None else None
+        latest = repository.item(item.id)
+        return _numeric_value(latest.value) if latest is not None else None
+
     label, value, flow = format_grid_flow_values(
-        _numeric_value(import_latest.value) if import_latest is not None else None,
-        _numeric_value(export_latest.value) if export_latest is not None else None,
+        power_w(import_item), power_w(export_item),
     )
     if label in {"買電中", "売電中"}:
-        return label, value, flow.value
-    return "", "", ""
+        source = export_item if label == "売電中" else import_item
+        return label, value, flow.value, source.source_kind
+    return "", "", "", "real"
 
 
 def _display_item(

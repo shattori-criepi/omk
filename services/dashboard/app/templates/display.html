@@ -10,7 +10,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <title>OMK ダッシュボード</title>
-    <link rel="stylesheet" href="{{ url_for('static', path='/display.css') }}?v=20260916-demo-source-1">
+    <link rel="stylesheet" href="{{ url_for('static', path='/display.css') }}?v=20260916-demo-custom-1">
   </head>
   <body data-demo-enabled="{{ 'true' if demo_enabled else 'false' }}" data-demo-mode="{{ dashboard.mode if demo_enabled else '' }}" data-dashboard-mode="{{ dashboard.mode }}">
     {% if demo_enabled %}
@@ -196,6 +196,6 @@
     </main>
     {% endif %}
 
-    <script src="{{ url_for('static', path='/display.js') }}?v=20260916-demo-source-1" defer></script>
+    <script src="{{ url_for('static', path='/display.js') }}?v=20260916-demo-custom-1" defer></script>
   </body>
 </html>

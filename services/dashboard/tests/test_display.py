@@ -453,6 +453,10 @@ vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8"));
 @pytest.mark.parametrize("saved_mode", ["clock", "recommended"])
 @pytest.mark.parametrize("with_candidates", [False, True])
 def test_demo_manual_modes_preserve_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, saved_mode: str, with_candidates: bool) -> None:
+    async def no_outdoor():
+        return frozenset()
+
+    monkeypatch.setattr(dashboard_main, "_demo_outdoor_device_ids", no_outdoor)
     item = DisplayItem("temp", "温度", "th", "omk/th/environment", "th-demo", "temperature_c", "number", "℃", "環境", "temperature", True, "", "--", "unavailable")
     candidates = [item] if with_candidates else []
     monkeypatch.setattr(dashboard_main, "_dashboard_candidates", lambda now=None: candidates)
@@ -510,6 +514,9 @@ def test_demo_fallback_only_replaces_stale_or_unavailable(freshness: str) -> Non
     result = apply_demo_fallback([item])[0]
     assert item.value == "19.0"
     assert item.freshness == freshness
+    assert item.source_kind == "real"
+    assert result.as_dict()["source_kind"] == ("demo" if freshness in {"stale", "unavailable"} else "real")
+    assert result.short_label == item.short_label
     if freshness in {"normal", "delayed"}:
         assert result is item
     else:
@@ -539,7 +546,8 @@ def test_demo_fixture_uses_anonymized_snapshots_and_keeps_sen66_and_switchbot_di
     switchbot_temperature = DisplayItem("temp", "温度", "th", "omk/th/environment", "th-demo", "temperature_c", "number", "℃", "環境", "temperature", True, "", "--", "unavailable", short_label="温度")
     result = apply_demo_fallback([sen66_pm1, switchbot_temperature])
     assert [item.value for item in result] == ["0.7", "25.1"]
-    assert all("模擬" in item.short_label for item in result)
+    assert all(item.source_kind == "demo" for item in result)
+    assert [item.short_label for item in result] == ["PM1.0", "温度"]
 
 
 def _write_instantaneous_data(
@@ -1399,7 +1407,7 @@ def test_small_plug_block_uses_full_consumption_label_without_ellipsis(tmp_path:
     template = (Path(__file__).parents[1] / "app" / "templates" / "display.html").read_text(encoding="utf-8")
 
     assert rendered.primary.short_label == "消費電力"
-    assert "{{ block.primary.short_label or block.primary.label }}" in template
+    assert "{{ reading_label(block.primary) }}" in template
     assert ".display-card--small.display-card--compact.display-card--items-1 .display-card-compact-items { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }" in stylesheet
     assert ".display-card--small.display-card--compact.display-card--items-1 .display-secondary-item { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); width: 100%; min-width: 0; }" in stylesheet
     assert ".display-card--small.display-card--compact.display-card--items-1 .display-secondary-label { width: 100%; min-width: 0; overflow: visible; text-overflow: clip; white-space: nowrap; }" in stylesheet
@@ -1645,7 +1653,7 @@ def test_display_pattern_css_keeps_only_hero_primary_large_and_fits_the_viewport
     assert ".display-compact-reading { display: flex; align-items: baseline;" in stylesheet
     assert "{% elif block.layout_pattern == 'compact' %}" in template
     assert 'class="display-card-compact-items"' in template
-    assert '{{ block.primary.short_label or block.primary.label }}' in template
+    assert '{{ reading_label(block.primary) }}' in template
     assert ".display-card--small.display-card--compact.display-card--items-1 .display-secondary-item { grid-column: 1 / -1; }" in stylesheet
     assert ".display-card--small.display-card--compact.display-card--items-1 .display-secondary-label { overflow: visible; text-overflow: clip; white-space: nowrap; }" in stylesheet
 
