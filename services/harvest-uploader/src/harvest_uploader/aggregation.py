@@ -11,17 +11,6 @@ from zoneinfo import ZoneInfo
 JST = ZoneInfo("Asia/Tokyo")
 
 AVERAGES = {
-    "sen66": {
-        "temperature_celsius": "sen66_temperature_c",
-        "relative_humidity_percent": "sen66_relative_humidity_percent",
-        "co2_ppm": "sen66_co2_ppm",
-        "pm1_0_ug_m3": "sen66_pm1_0_ug_m3",
-        "pm2_5_ug_m3": "sen66_pm2_5_ug_m3",
-        "pm4_0_ug_m3": "sen66_pm4_0_ug_m3",
-        "pm10_0_ug_m3": "sen66_pm10_0_ug_m3",
-        "voc_index": "sen66_voc_index",
-        "nox_index": "sen66_nox_index",
-    },
     "power": {"net_power_w": "broute_grid_power_w"},
     "power-flow": {
         "pv_power_w": "power_system_pv_power_w",
@@ -45,7 +34,19 @@ ENVIRONMENT_FIELDS = (
     "relative_humidity_percent",
     "co2_ppm",
 )
+SEN66_FIELDS = {
+    "temperature_celsius": "temperature_c",
+    "relative_humidity_percent": "relative_humidity_percent",
+    "co2_ppm": "co2_ppm",
+    "pm1_0_ug_m3": "pm1_0_ug_m3",
+    "pm2_5_ug_m3": "pm2_5_ug_m3",
+    "pm4_0_ug_m3": "pm4_0_ug_m3",
+    "pm10_0_ug_m3": "pm10_0_ug_m3",
+    "voc_index": "voc_index",
+    "nox_index": "nox_index",
+}
 SENSOR_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+SEN66_LOGICAL_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,48}$")
 
 
 def _minute(value: datetime) -> datetime:
@@ -122,7 +123,12 @@ class MinuteAggregator:
                     self._latest[field] = state
                     self._latest_times[field] = received_at
             return completed
-        averages = self._environment_averages(parts[1], payload) if kind == "environment" else AVERAGES.get(kind, {})
+        if kind == "environment":
+            averages = self._environment_averages(sensor_id, payload)
+        elif kind == "sen66":
+            averages = self._sen66_averages(sensor_id, payload)
+        else:
+            averages = AVERAGES.get(kind, {})
         for source, target in averages.items():
             value = _number(payload.get(source))
             if value is not None:
@@ -167,6 +173,8 @@ class MinuteAggregator:
             return False
         if parts[2] in ("environment", "motion", "contact"):
             return SENSOR_ID_RE.fullmatch(parts[1]) is not None
+        if parts[2] == "sen66":
+            return SEN66_LOGICAL_ID_RE.fullmatch(parts[1]) is not None
         return parts[2] in (set(AVERAGES) | set(LATEST))
 
     @staticmethod
@@ -176,4 +184,13 @@ class MinuteAggregator:
             field: f"{sensor_id}_{field}"
             for field in ENVIRONMENT_FIELDS
             if field in payload
+        }
+
+    @staticmethod
+    def _sen66_averages(logical_id: str, payload: dict[str, Any]) -> dict[str, str]:
+        """Map each SEN66 topic's validated Logical ID to independent fields."""
+        return {
+            source: f"{logical_id}_{field}"
+            for source, field in SEN66_FIELDS.items()
+            if source in payload
         }

@@ -27,7 +27,63 @@ def test_aggregation_merges_topics_averages_and_uses_latest_values():
     aggregator.ingest("omk/ichijo-001/power-flow", {"pv_power_w": 6999, "battery_soc_percent": 99, "battery_operating_state": "charging"}, at(30))
     aggregator.ingest("omk/ichijo-001/power-flow", {"pv_power_w": 7001, "battery_soc_percent": 100}, at(50))
     record = aggregator.flush_due(at(0, 35))
-    assert record == {"time": "2026-08-05T10:34:00+09:00", "sen66_temperature_c": 27, "sen66_co2_ppm": 612, "broute_grid_power_w": -5800, "power_system_pv_power_w": 7000, "broute_grid_import_energy_kwh": 10, "broute_grid_export_energy_kwh": 20, "power_system_battery_soc_percent": 100, "broute_grid_import_power_w": 0, "broute_grid_export_power_w": 5800}
+    assert record == {"time": "2026-08-05T10:34:00+09:00", "sen66-001_temperature_c": 27, "sen66-001_co2_ppm": 612, "broute_grid_power_w": -5800, "power_system_pv_power_w": 7000, "broute_grid_import_energy_kwh": 10, "broute_grid_export_energy_kwh": 20, "power_system_battery_soc_percent": 100, "broute_grid_import_power_w": 0, "broute_grid_export_power_w": 5800}
+
+
+def test_sen66_uses_topic_logical_id_for_every_field_and_keeps_nodes_independent():
+    aggregator = MinuteAggregator()
+    first = {
+        "temperature_celsius": 20, "relative_humidity_percent": 40, "co2_ppm": 500,
+        "pm1_0_ug_m3": 1, "pm2_5_ug_m3": 2, "pm4_0_ug_m3": 3, "pm10_0_ug_m3": 4,
+        "voc_index": 10, "nox_index": 20,
+    }
+    second = {
+        "temperature_celsius": 22, "relative_humidity_percent": 44, "co2_ppm": 520,
+        "pm1_0_ug_m3": 3, "pm2_5_ug_m3": 4, "pm4_0_ug_m3": 5, "pm10_0_ug_m3": 6,
+        "voc_index": 12, "nox_index": 22,
+    }
+    other_first = {field: value + 8 for field, value in first.items()}
+    other_second = {field: value + 8 for field, value in second.items()}
+    aggregator.ingest("omk/sen66-001/sen66", first, at(5))
+    aggregator.ingest("omk/sen66-002/sen66", other_first, at(10))
+    aggregator.ingest("omk/sen66-001/sen66", second, at(20))
+    aggregator.ingest("omk/sen66-002/sen66", other_second, at(30))
+
+    record = aggregator.flush_due(at(0, 35))
+    assert record == {
+        "time": "2026-08-05T10:34:00+09:00",
+        "sen66-001_temperature_c": 21,
+        "sen66-001_relative_humidity_percent": 42,
+        "sen66-001_co2_ppm": 510,
+        "sen66-001_pm1_0_ug_m3": 2,
+        "sen66-001_pm2_5_ug_m3": 3,
+        "sen66-001_pm4_0_ug_m3": 4,
+        "sen66-001_pm10_0_ug_m3": 5,
+        "sen66-001_voc_index": 11,
+        "sen66-001_nox_index": 21,
+        "sen66-002_temperature_c": 29,
+        "sen66-002_relative_humidity_percent": 50,
+        "sen66-002_co2_ppm": 518,
+        "sen66-002_pm1_0_ug_m3": 10,
+        "sen66-002_pm2_5_ug_m3": 11,
+        "sen66-002_pm4_0_ug_m3": 12,
+        "sen66-002_pm10_0_ug_m3": 13,
+        "sen66-002_voc_index": 19,
+        "sen66-002_nox_index": 29,
+    }
+    assert "sen66_temperature_c" not in record
+
+
+def test_sen66_rejects_invalid_logical_ids_without_affecting_valid_sensor_data():
+    aggregator = MinuteAggregator()
+    aggregator.ingest("omk/bad.id/sen66", {"temperature_celsius": 99}, at(5))
+    aggregator.ingest(f"omk/{'a' * 49}/sen66", {"temperature_celsius": 98}, at(10))
+    aggregator.ingest("omk/sen66_001/sen66", {"temperature_celsius": 20}, at(15))
+
+    assert aggregator.flush_due(at(0, 35)) == {
+        "time": "2026-08-05T10:34:00+09:00",
+        "sen66_001_temperature_c": 20,
+    }
 
 
 def test_empty_and_invalid_payloads_do_not_create_records():
@@ -62,7 +118,7 @@ def test_environment_sensors_average_independently_and_coexist_with_sen66():
     aggregator.ingest("omk/co2-001/environment", {"temperature_c": 29, "relative_humidity_percent": 41, "co2_ppm": 592}, at(50))
     assert aggregator.flush_due(at(0, 35)) == {
         "time": "2026-08-05T10:34:00+09:00",
-        "sen66_temperature_c": 27,
+        "sen66-001_temperature_c": 27,
         "th-001_temperature_c": 29,
         "th-001_relative_humidity_percent": 42,
         "th-002_temperature_c": 26,
@@ -239,7 +295,7 @@ def test_queue_success_failure_retry_and_expiry(tmp_path: Path):
     sender.fail = False
     now += timedelta(seconds=3)
     uploader.tick()
-    assert queue.count() == 0 and sender.calls[-1]["sen66_temperature_c"] == 20
+    assert queue.count() == 0 and sender.calls[-1]["a_temperature_c"] == 20
     queue.enqueue({"time": "old"}, now - timedelta(seconds=3601))
     assert queue.discard_expired(now, 3600) == 1
 
@@ -306,7 +362,7 @@ def test_mqtt_callback_time_is_used_when_drain_crosses_minute_boundary(tmp_path:
     runtime._drain_inbox()
     uploader.tick()
 
-    assert sender.calls == [{"time": "2026-08-05T10:34:00+09:00", "sen66_temperature_c": 20}]
+    assert sender.calls == [{"time": "2026-08-05T10:34:00+09:00", "a_temperature_c": 20}]
 
 
 def test_mqtt_inbox_fifo_completes_one_old_minute_without_leaking_into_next(tmp_path: Path):
@@ -322,10 +378,10 @@ def test_mqtt_inbox_fifo_completes_one_old_minute_without_leaking_into_next(tmp_
 
     first = queue.next_due(at(1, 35))
     assert first is not None
-    assert first[1] == {"time": "2026-08-05T10:34:00+09:00", "sen66_temperature_c": 15}
+    assert first[1] == {"time": "2026-08-05T10:34:00+09:00", "a_temperature_c": 15}
     now = at(0, 36)
     uploader.tick()
     assert queue.count() == 2
     second = queue.next_due(at(0, 36))
     assert second is not None
-    assert second[1] == {"time": "2026-08-05T10:35:00+09:00", "sen66_temperature_c": 30}
+    assert second[1] == {"time": "2026-08-05T10:35:00+09:00", "a_temperature_c": 30}
