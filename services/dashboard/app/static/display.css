@@ -827,6 +827,43 @@ body[data-demo-enabled="true"] .display-card--medium.display-card--compact.displ
   background: rgb(180 83 9 / .45);
   color: #fef3c7;
 }
+.display-mode-selector {
+  align-items: flex-start;
+  gap: 12px 28px;
+}
+.regular-mode-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.demo-mode-option {
+  display: grid;
+  gap: 4px;
+  min-width: min(100%, 15rem);
+  padding-left: 24px;
+  border-left: 1px solid #b08938;
+}
+.demo-mode-option .demo-mode {
+  justify-self: start;
+}
+.demo-mode-option small {
+  max-width: 18rem;
+  color: #fcd34d;
+  font-size: clamp(12px, 1.25vw, 14px);
+  line-height: 1.35;
+}
+@media (max-width: 600px) {
+  .display-mode-selector {
+    display: grid;
+    gap: 12px;
+  }
+  .regular-mode-buttons {
+    gap: 8px;
+  }
+  .demo-mode-option {
+    padding-left: 16px;
+  }
+}
 
 /* Single readings stay large; long units may use the next line. */
 .display-card--small.display-card--items-1 :is(.display-card-reading, .display-compact-reading) {

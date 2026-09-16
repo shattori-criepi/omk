@@ -1619,6 +1619,10 @@ def test_admin_display_uses_demo_as_a_fourth_mode_without_legacy_controls() -> N
     assert re.findall(r'data-mode="([^"]+)"', template) == ["recommended", "custom", "clock", "demo"]
     assert 'class="demo-mode"' in template
     assert 'aria-label="デモ（展示・動作確認用）"' in template
+    assert '<div class="regular-mode-buttons">' in template
+    assert '<div class="demo-mode-option">' in template
+    assert "展示・動作確認用。模擬データを含む表示を確認できます。" in template
+    assert template.index('class="regular-mode-buttons"') < template.index('class="demo-mode-option"')
     for obsolete in ("demo-entry", "demo-settings", "demo-enabled", "demo_settings.js"):
         assert obsolete not in template
     assert not (Path(__file__).parents[1] / "app" / "static" / "demo_settings.js").exists()
@@ -1626,6 +1630,8 @@ def test_admin_display_uses_demo_as_a_fourth_mode_without_legacy_controls() -> N
     assert 'button.dataset.mode === "demo"' in admin_script
     assert '"/api/admin/dashboard-settings/demo"' in admin_script
     assert ".display-mode-selector .demo-mode" in stylesheet
+    for declaration in (".demo-mode-option {", "padding-left: 24px;", "border-left: 1px solid #b08938;", ".regular-mode-buttons {", "@media (max-width: 600px)"):
+        assert declaration in stylesheet
 
 
 def test_display_pattern_css_keeps_only_hero_primary_large_and_fits_the_viewport() -> None:
