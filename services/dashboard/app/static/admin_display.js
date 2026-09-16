@@ -1,5 +1,5 @@
 const selectedRoot = document.querySelector("#selected-items"), availableRoot = document.querySelector("#available-items"), capacityStatus = document.querySelector("#capacity-status"), statusLine = document.querySelector("#settings-status"), saveButton = document.querySelector("#save-settings");
-const recommendedRoot = document.querySelector("#recommended-summary"), clockRoot = document.querySelector("#clock-summary"), customRoot = document.querySelector("#custom-editor"), modeRoot = document.querySelector("#display-modes");
+const recommendedRoot = document.querySelector("#recommended-summary"), clockRoot = document.querySelector("#clock-summary"), customRoot = document.querySelector("#custom-editor"), demoRoot = document.querySelector("#demo-summary"), modeRoot = document.querySelector("#display-modes");
 let candidates = new Map(), blocks = [], recommendedBlocks = [], currentRecommendedBlocks = [], clockItemIds = [], capacity = 6, mode = "custom", demoEnabled = false, settingsVersion = 2;
 const costs = {large: 3, medium: 2, small: 1};
 const itemLimits = {large: {hero: 6, strip: 6, compact: 5}, medium: {hero: 5, strip: 5, compact: 5}, small: {hero: 3, strip: 3, compact: 3}};
@@ -25,12 +25,14 @@ function itemCheckbox(block, item) {
 
 function render() {
   const selectedMode = demoEnabled ? "demo" : mode;
+  if (capacityStatus) capacityStatus.hidden = demoEnabled || mode !== "custom";
   if (customRoot) customRoot.hidden = demoEnabled || mode !== "custom";
   if (recommendedRoot) {
     recommendedRoot.hidden = demoEnabled || mode !== "recommended";
     recommendedRoot.innerHTML = `<h2>おすすめ</h2><p>接続されているセンサから、見やすい表示を自動で構成します。</p><p>${currentRecommendedBlocks.length ? currentRecommendedBlocks.map(block => `${esc(block.title)}（${block.size === "large" ? "大" : block.size === "medium" ? "中" : "小"}）`).join("、") : "表示できるセンサがありません。"}</p>`;
   }
   if (clockRoot) clockRoot.hidden = demoEnabled || mode !== "clock";
+  if (demoRoot) demoRoot.hidden = !demoEnabled;
   if (modeRoot) modeRoot.querySelectorAll("[data-mode]").forEach(button => { button.classList.toggle("is-selected", button.dataset.mode === selectedMode); button.setAttribute("aria-pressed", String(button.dataset.mode === selectedMode)); });
   if (demoEnabled || mode !== "custom") return;
   const total = used();

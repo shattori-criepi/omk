@@ -1621,7 +1621,8 @@ def test_admin_display_uses_demo_as_a_fourth_mode_without_legacy_controls() -> N
     assert 'aria-label="デモ（展示・動作確認用）"' in template
     assert '<div class="regular-mode-buttons">' in template
     assert '<div class="demo-mode-option">' in template
-    assert "展示・動作確認用。模擬データを含む表示を確認できます。" in template
+    assert "展示・動作確認用です。模擬データを含む表示を確認できます。" in template
+    assert "展示・動作確認用。模擬データを含む表示を確認できます。" not in template
     assert template.index('class="regular-mode-buttons"') < template.index('class="demo-mode-option"')
     for obsolete in ("demo-entry", "demo-settings", "demo-enabled", "demo_settings.js"):
         assert obsolete not in template
@@ -2652,6 +2653,11 @@ def test_display_settings_hidden_modes_and_dynamic_summary():
         assert re.search(fr'<section id="{element}"[^>]*\bhidden', html)
         assert f'{variable}.hidden = demoEnabled || mode !== "{mode}"' in js
         assert f'data-mode="{mode}"' in html
+    assert 'id="capacity-status" class="setup-status" hidden' in html
+    assert 'capacityStatus.hidden = demoEnabled || mode !== "custom"' in js
+    assert 'id="demo-summary" class="display-settings-content demo-mode-summary" hidden' in html
+    assert 'demoRoot.hidden = !demoEnabled' in js
+    assert ".demo-mode-summary" in css
     assert "currentRecommendedBlocks.map" in js
     assert "settings.current_recommended_blocks" in js
     assert "refresh-recommended" not in html + js + css
@@ -2822,7 +2828,7 @@ function element() { return {innerHTML: "", textContent: "", disabled: false, li
 function button(mode) { return {dataset: {mode}, classList: {selected: false, toggle(_name, value) { this.selected = value; }}, setAttribute(name, value) { this[name] = value; }}; }
 const buttons = Object.fromEntries(["recommended", "custom", "clock", "demo"].map(mode => [mode, button(mode)]));
 const modeSelector = {listeners: {}, addEventListener(type, handler) { this.listeners[type] = handler; }, querySelectorAll() { return Object.values(buttons); }};
-const elements = Object.fromEntries(["#selected-items", "#available-items", "#capacity-status", "#settings-status", "#save-settings"].map(key => [key, element()]));
+const elements = Object.fromEntries(["#selected-items", "#available-items", "#capacity-status", "#settings-status", "#save-settings", "#recommended-summary", "#clock-summary", "#custom-editor", "#demo-summary"].map(key => [key, element()]));
 elements["#display-modes"] = modeSelector;
 const requests = [];
 const settings = {version: 3, mode: "custom", demo: {enabled: false}, current_recommended_blocks: [], presets: {standard: {blocks: []}, recommended: {blocks: []}, clock: {item_ids: []}}};
@@ -2838,28 +2844,34 @@ global.fetch = async (url, options = {}) => {
 vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8"));
 setImmediate(async () => {
   const click = async mode => modeSelector.listeners.click({target: {closest(selector) { assert.strictEqual(selector, "[data-mode]"); return buttons[mode]; }}});
+  const visibility = () => Object.fromEntries(["#capacity-status", "#recommended-summary", "#clock-summary", "#custom-editor", "#demo-summary"].map(selector => [selector, elements[selector].hidden]));
   const initial = Object.fromEntries(Object.entries(buttons).map(([mode, button]) => [mode, button.classList.selected]));
+  const initialVisibility = visibility();
   await click("demo");
   const demo = Object.fromEntries(Object.entries(buttons).map(([mode, button]) => [mode, button.classList.selected]));
+  const demoVisibility = visibility();
   const regular = {};
   for (const mode of ["recommended", "custom", "clock"]) {
     await click(mode);
-    regular[mode] = {enabled: settings.demo.enabled, selected: Object.fromEntries(Object.entries(buttons).map(([name, button]) => [name, button.classList.selected]))};
+    regular[mode] = {enabled: settings.demo.enabled, selected: Object.fromEntries(Object.entries(buttons).map(([name, button]) => [name, button.classList.selected])), visibility: visibility()};
   }
-  console.log(JSON.stringify({initial, demo, regular, requests, settings}));
+  console.log(JSON.stringify({initial, initialVisibility, demo, demoVisibility, regular, requests, settings}));
 });
 '''
     completed = subprocess.run(["node", "-e", harness, str(javascript_path)], check=True, capture_output=True, text=True)
     result = json.loads(completed.stdout)
 
     assert result["initial"] == {"recommended": False, "custom": True, "clock": False, "demo": False}
+    assert result["initialVisibility"] == {"#capacity-status": False, "#recommended-summary": True, "#clock-summary": True, "#custom-editor": False, "#demo-summary": True}
     assert result["demo"] == {"recommended": False, "custom": False, "clock": False, "demo": True}
+    assert result["demoVisibility"] == {"#capacity-status": True, "#recommended-summary": True, "#clock-summary": True, "#custom-editor": True, "#demo-summary": False}
     assert result["requests"][2][0].endswith("/dashboard-settings/demo")
     assert json.loads(result["requests"][2][1]["body"]) == {"enabled": True}
     for mode in ("recommended", "custom", "clock"):
         state = result["regular"][mode]
         assert state["enabled"] is False
         assert state["selected"] == {"recommended": mode == "recommended", "custom": mode == "custom", "clock": mode == "clock", "demo": False}
+        assert state["visibility"] == {"#capacity-status": mode != "custom", "#recommended-summary": mode != "recommended", "#clock-summary": mode != "clock", "#custom-editor": mode != "custom", "#demo-summary": True}
     assert result["settings"]["mode"] == "clock"
     assert result["settings"]["demo"]["enabled"] is False
 
