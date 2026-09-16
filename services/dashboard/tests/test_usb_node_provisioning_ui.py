@@ -95,17 +95,21 @@ const api = async (path, options) => requests.push({path, body: JSON.parse(optio
 const pollUsbSetup = async () => {};
 const renderNodes = () => {};
 ''' + rendering + submit + r'''
-const candidate = {device: '/dev/ttyACM0', node_id: '000000000001', kind: 'omk_node', wifi_configured: true};
+const candidate = {device: '/dev/ttyACM0', node_id: '000000000001', kind: 'omk_node', credential_state: 'present', wifi_configured: true};
 usbCandidatesByNodeId.set(candidate.node_id, candidate);
 let card = nodeCard({node_id: candidate.node_id, registration_state: 'registered', logical_id: 'sen66-001', capabilities: ['ble_scan', 'sen66']});
-assert(card.includes('OMK Nodeをセットアップ'));
-assert(card.includes('Gatewayに配置済みのfirmwareを書き込み、Wi-Fiを設定します。'));
+assert(!card.includes('OMK Nodeをセットアップ'));
+assert(card.includes('OMK Nodeを再セットアップ'));
+assert(!card.includes('Gatewayに配置済みのfirmwareを書き込み、Wi-Fiを設定します。'));
+assert(card.includes('Logical IDを変更') && card.includes('Logical ID登録を解除'));
 assert(!card.includes('毎回、Gatewayに配置済み'));
 assert(card.includes('対応機能: BLE relay対応 · SEN66対応'));
 assert(card.includes('sen66-001'));
 candidate.kind = 'unconfirmed_esp32s3';
 card = nodeCard(candidate);
 assert(card.includes('ESP32-S3を検出') && card.includes('class="confirm-atom"'));
+assert(card.includes('OMK Nodeをセットアップ'));
+assert(!card.includes('再セットアップ'));
 assert(card.includes('対応機能: セットアップ後に確認'));
 assert(card.includes('接続センサ: セットアップ後に確認'));
 assert(!card.includes('node-logical-id'));
@@ -232,13 +236,17 @@ let job = {stage: 'validating_firmware', node_id: '000000000001', error: null};
 let posts = 0;
 let acceptPost;
 const api = async (path, options) => {
-  if (options?.method === 'POST') { posts += 1; return new Promise(resolve => { acceptPost = resolve; }); }
+  if (options?.method === 'POST') {
+    assert.equal(path, '/setup/usb-setup');
+    assert.deepEqual(JSON.parse(options.body), {device: '/dev/ttyACM0', node_id: '000000000001', confirm_atom_s3_lite: false});
+    posts += 1; return new Promise(resolve => { acceptPost = resolve; });
+  }
   return job;
 };
 const loadNodes = async () => [];
 const loadUsbNodes = async () => {};
 ''' + rendering + setup_js + r'''
-const existing = {device: '/dev/ttyACM0', node_id: '000000000001', kind: 'omk_node', wifi_configured: true};
+const existing = {device: '/dev/ttyACM0', node_id: '000000000001', kind: 'omk_node', credential_state: 'present', wifi_configured: false};
 const newNode = {device: '/dev/ttyACM1', node_id: '000000000002', kind: 'unconfirmed_esp32s3', wifi_configured: false};
 usbCandidatesByNodeId.set(existing.node_id, existing);
 usbCandidatesByNodeId.set(newNode.node_id, newNode);
@@ -261,11 +269,13 @@ const newButton = {disabled: false, textContent: '', dataset: {device: newNode.d
   await pollUsbSetup(false, true);
   assert.equal(usbProvisioningInProgress, true);
   assert(usbSetupControls(existing).includes('disabled'));
+  existing.wifi_configured = true;
   job = {stage: 'completed', node_id: existing.node_id, error: null};
   await pollUsbSetup(false, true);
   assert.equal(usbProvisioningInProgress, false);
   assert(statusLine.textContent.includes('セットアップ完了'));
-  assert(!usbSetupControls(existing).includes('disabled') && usbSetupControls(existing).includes('OMK Nodeをセットアップ'));
+  assert(!usbSetupControls(existing).includes('disabled') && usbSetupControls(existing).includes('OMK Nodeを再セットアップ'));
+  assert(!usbSetupControls(existing).includes('OMK Nodeをセットアップ'));
   job = {stage: 'failed', node_id: existing.node_id, error: 'firmware_write_failed'};
   await pollUsbSetup(false, true);
   assert.equal(usbProvisioningInProgress, false);
@@ -425,3 +435,59 @@ const button = {disabled: false, dataset: {device: candidate.device, nodeId: can
 })().catch(error => {console.error(error); process.exitCode = 1;});
 '''
     subprocess.run(['node', '-e', javascript], check=True, capture_output=True, text=True, timeout=10)
+
+
+def test_usb_setup_action_matches_credential_and_wifi_state_without_duplicate_buttons():
+    script = (ROOT/'app/static/admin.js').read_text()
+    rendering = script[script.index('function nodeCard'):script.index('function saveNodeInputState')]
+    harness = r'''
+const assert = require('node:assert/strict');
+const text = value => String(value ?? '');
+let usbCandidatesInitialized = true, usbProvisioningInProgress = false, pendingNodeRegistration;
+const usbCandidatesByNodeId = new Map();
+''' + rendering + r'''
+const base = {device: '/dev/ttyACM0', node_id: '000000000001', kind: 'omk_node'};
+const setupLabel = 'OMK Nodeをセットアップ';
+const resetLabel = 'OMK Nodeを再セットアップ';
+const retryLabel = 'OMK Nodeの再セットアップを再試行';
+const cases = [
+  [{kind: 'unconfirmed_esp32s3', credential_state: 'missing', wifi_configured: false}, setupLabel],
+  [{credential_state: 'missing', wifi_configured: true}, resetLabel],
+  [{credential_state: 'missing', wifi_configured: false}, resetLabel],
+  [{credential_state: 'reinitialize_pending', wifi_configured: true}, retryLabel],
+  [{credential_state: 'reinitialize_pending', wifi_configured: false}, retryLabel],
+  [{credential_state: 'present', wifi_configured: true}, resetLabel],
+  [{credential_state: 'present', wifi_configured: false}, setupLabel],
+  [{credential_state: 'invalid', wifi_configured: false}, resetLabel],
+  [{kind: 'recovery_required', credential_state: 'present', wifi_configured: false}, resetLabel],
+  [{kind: 'recovery_required', credential_state: 'reinitialize_pending', wifi_configured: false}, retryLabel],
+];
+assert.equal(usbSetupControls(null), '');
+for (const [fields, expected] of cases) {
+  const candidate = {...base, ...fields};
+  const markup = usbSetupControls(candidate);
+  assert.equal((markup.match(/class="provision-usb-node"/g) || []).length, 1, JSON.stringify(fields));
+  assert(markup.includes(`>${expected}</button>`), JSON.stringify(fields));
+  assert.equal(markup.includes('data-reinitialize="true"'), expected !== setupLabel);
+  assert.equal(markup.includes('class="confirm-atom"'), candidate.kind === 'unconfirmed_esp32s3');
+  if (expected === setupLabel && candidate.kind === 'omk_node') {
+    assert(markup.includes('Wi-Fi設定が未完了'));
+    assert(markup.includes('保存済みの管理情報を維持'));
+  }
+  usbProvisioningInProgress = true;
+  const busy = usbSetupControls(candidate);
+  assert.equal((busy.match(/class="provision-usb-node"/g) || []).length, 1);
+  assert(busy.includes('disabled>セットアップ中…</button>'));
+  usbProvisioningInProgress = false;
+}
+const healthy = {...base, credential_state: 'present', wifi_configured: true};
+usbCandidatesByNodeId.set(base.node_id, healthy);
+const registered = nodeCard({node_id: base.node_id, registration_state: 'registered', logical_id: 'sen66-001', attached_sensors: ['SEN66'], online: true});
+assert(!registered.includes(setupLabel));
+assert(registered.includes(resetLabel));
+for (const label of ['sen66-001', 'Logical IDを変更', 'Logical ID登録を解除']) assert(registered.includes(label));
+const provisioned = nodeCard({node_id: base.node_id, registration_state: 'provisioned', attached_sensors: ['SEN66'], online: true});
+assert(provisioned.includes('Logical IDを登録'));
+assert(provisioned.includes(resetLabel) && !provisioned.includes(setupLabel));
+'''
+    subprocess.run(['node', '-e', harness], check=True, capture_output=True, text=True, timeout=10)
