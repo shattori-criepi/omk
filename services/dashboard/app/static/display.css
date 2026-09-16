@@ -680,3 +680,70 @@ body[data-demo-enabled="true"] .display-card--compact [data-role="label"] {
 body[data-demo-enabled="true"] .display-card--medium.display-card--compact.display-card--items-6 .display-secondary-value {
   font-size: clamp(20px, 2.35vw, 32px) !important;
 }
+
+/* All small multi-item cards use one vertical list, regardless of pattern. */
+.display-card--small.display-card--stacked {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  align-content: stretch;
+}
+.display-card--small.display-card--stacked > .display-card-label {
+  padding-bottom: 0;
+}
+.display-card-stacked-items {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-auto-rows: minmax(min-content, 1fr);
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+}
+.display-stacked-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: center;
+  gap: 3px;
+  min-width: 0;
+  padding: 5px 0;
+}
+.display-stacked-item + .display-stacked-item {
+  border-top: 1px solid rgb(148 163 184 / .35);
+}
+.display-card--small.display-card--stacked .display-stacked-item [data-role="label"] {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-start;
+  gap: .35em;
+  color: #bfdbfe;
+  font-size: clamp(14px, 1.4vw, 18px);
+  line-height: 1.25;
+}
+.display-card--small.display-card--stacked [data-role="label-text"] {
+  overflow: visible;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.display-stacked-reading {
+  display: flex;
+  align-items: baseline;
+  gap: .25em;
+  min-width: 0;
+}
+.display-stacked-reading [data-role="value"] {
+  font-size: clamp(24px, 2.7vw, 34px);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  white-space: nowrap;
+}
+.display-stacked-reading [data-role="unit"] {
+  color: #cbd5e1;
+  font-size: clamp(14px, 1.4vw, 18px);
+  white-space: nowrap;
+}
+.display-stacked-item .display-card-auxiliary {
+  justify-self: start;
+  flex-wrap: wrap;
+  font-size: 14px;
+  white-space: normal;
+}

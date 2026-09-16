@@ -22,17 +22,13 @@ _POWER_FIELDS = (
 _FRESHNESS_PRIORITY = {"normal": 0, "delayed": 1, "stale": 2, "unavailable": 3}
 
 
-def demo_custom_preset(
-    items: list[DisplayItem], outdoor_device_ids: frozenset[str] = frozenset(),
-) -> tuple[list[DisplayItem], tuple[DisplayBlock, ...]]:
+def demo_custom_preset(items: list[DisplayItem]) -> tuple[list[DisplayItem], tuple[DisplayBlock, ...]]:
     """Build the exhibition preset in memory, independently of saved custom.
 
-    Outdoor membership must be explicit; indoor readings must not be reused as
-    outdoor measurements. The medium card intentionally holds six demo values,
+    Outdoor values always use fixed fixtures, without consulting registrations
+    or measured readings. The medium card intentionally holds six demo values,
     without changing the limits for user-editable persisted presets.
     """
-    indoor = [item for item in items if item.device_id not in outdoor_device_ids]
-    outdoor = [item for item in items if item.device_id in outdoor_device_ids]
     power = [item for item in items if item.group == "パワコン"]
 
     def select(candidates: list[DisplayItem], field: str, group: str) -> DisplayItem:
@@ -42,13 +38,13 @@ def demo_custom_preset(
         return replace(best, group=group) if best else synthetic
 
     pcs_items = [select(power, field, "パワコン") for field in _POWER_FIELDS]
-    environment_items = [select(indoor, field, "室内環境") for field in _ENVIRONMENT_FIELDS]
+    environment_items = [select(items, field, "室内環境") for field in _ENVIRONMENT_FIELDS]
     outdoor_items = []
     for field, role, label in (("temperature_c", "outdoor_temperature", "外気温"),
                                ("relative_humidity_percent", "outdoor_humidity", "外気相対湿度")):
-        item = select(outdoor, field, "外気")
+        item = _synthetic_item(field, "外気")
         outdoor_items.append(replace(
-            item, id=f"demo:{role}" if item.source_kind == "demo" else item.id,
+            item, id=f"demo:{role}",
             semantic_role=role, short_label=label, label=f"外気 {label}",
         ))
     candidates = apply_demo_fallback(pcs_items + environment_items + outdoor_items)

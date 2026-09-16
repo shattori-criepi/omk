@@ -19,7 +19,7 @@ from app.data.parquet_repository import LatestPower, ParquetRepository
 from app.data.display_repository import DisplayRepository
 from app.data.settings_repository import DashboardSettings, DisplayBlock, DisplaySelection, SettingsError, SettingsRepository
 from app.demo import apply_demo_fallback
-from app.display_items import DisplayItem, candidate_for, catalog_items_with_latest, display_candidates, display_item_migrations, selected_blocks, selected_items
+from app.display_items import DisplayBlockView, DisplayItem, candidate_for, catalog_items_with_latest, display_candidates, display_item_migrations, selected_blocks, selected_items
 from app.metric_definitions import definition_for, format_value
 from app.recommendations import clock_item_ids, recommended_blocks
 from app.main import app
@@ -453,10 +453,6 @@ vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8"));
 @pytest.mark.parametrize("saved_mode", ["clock", "recommended"])
 @pytest.mark.parametrize("with_candidates", [False, True])
 def test_demo_manual_modes_preserve_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, saved_mode: str, with_candidates: bool) -> None:
-    async def no_outdoor():
-        return frozenset()
-
-    monkeypatch.setattr(dashboard_main, "_demo_outdoor_device_ids", no_outdoor)
     item = DisplayItem("temp", "温度", "th", "omk/th/environment", "th-demo", "temperature_c", "number", "℃", "環境", "temperature", True, "", "--", "unavailable")
     candidates = [item] if with_candidates else []
     monkeypatch.setattr(dashboard_main, "_dashboard_candidates", lambda now=None: candidates)
@@ -1413,7 +1409,7 @@ def test_small_plug_block_uses_full_consumption_label_without_ellipsis(tmp_path:
     assert ".display-card--small.display-card--compact.display-card--items-1 .display-secondary-label { width: 100%; min-width: 0; overflow: visible; text-overflow: clip; white-space: nowrap; }" in stylesheet
     assert ".display-card--small.display-card--compact.display-card--items-1 .display-compact-reading { width: 100%; min-width: 0; }" in stylesheet
     assert ".display-card--small.display-card--compact.display-card--items-1 .display-secondary-item { grid-column: 1 / -1; }" in stylesheet
-    assert ".display-card--small.display-card--compact.display-card--items-2 .display-card-compact-items" not in stylesheet
+    assert ".display-card--small.display-card--stacked {" in stylesheet
     assert re.search(r"display\.css'\) }}\?v=[^\"']+", template)
     assert ".display-card--small.display-card--compact.display-card--items-1 .display-secondary-label { overflow: visible; text-overflow: clip; white-space: nowrap; }" in stylesheet
 
@@ -2499,3 +2495,65 @@ def test_usb_setup_proxy_uses_fixed_endpoint_and_returns_202(monkeypatch):
     assert client.post('/api/admin/setup/usb-setup', json=body).status_code == 202
     assert client.get('/api/admin/setup/usb-setup/status').json()['stage'] == 'flashing_firmware'
     assert calls == [('POST', '/api/nodes/usb-setup', body), ('GET', '/api/nodes/usb-setup/status', None)]
+
+
+@pytest.mark.parametrize("size", ["small", "medium", "large"])
+@pytest.mark.parametrize("pattern", ["hero", "strip", "compact"])
+@pytest.mark.parametrize("item_count", [2, 3])
+@pytest.mark.parametrize("demo_enabled", [False, True])
+def test_multi_item_cards_stack_only_small_and_preserve_reading_elements(size, pattern, item_count, demo_enabled):
+    items = [
+        DisplayItem(id=f"reading-{index}", label=label, short_label=label, group="環境", topic="", device_id="sensor",
+                    field=field, value_type="number", unit=unit, category="環境", semantic_role=role,
+                    selectable=True, last_received_at="", value=value, freshness="normal",
+                    source_kind="real" if index == 0 or not demo_enabled else "demo")
+        for index, (label, field, role, value, unit) in enumerate([
+            ("外気温", "temperature_c", "temperature", "25.1", "℃"),
+            ("外気相対湿度", "relative_humidity_percent", "humidity", "50", "%"),
+            ("CO₂濃度", "co2_ppm", "co2", "615", "ppm"),
+        ][:item_count])
+    ]
+    block = DisplayBlockView(id="readings", title="環境", group="環境", size=size, layout_pattern=pattern,
+                             primary=items[0], secondary=tuple(items[1:]), freshness="normal", last_received_at="")
+    dashboard = dashboard_main.BlockDashboard("custom", [block], "--", "", FreshnessStatus.NORMAL)
+    request = SimpleNamespace(url_for=lambda _name, **params: params["path"])
+    html = dashboard_main.templates.get_template("display.html").render(
+        request=request, dashboard=dashboard, demo_enabled=demo_enabled,
+    )
+    card = re.search(r'<article.*?</article>', html, re.DOTALL).group(0)
+    assert re.findall(r'data-item-id="([^"]+)"', card) == [item.id for item in items]
+    if size == "small":
+        assert "display-card--stacked" in card
+        assert 'class="display-card-stacked-items"' in card
+        assert card.count('class="display-stacked-item"') == item_count
+        assert "display-card-compact-items" not in card
+        assert "display-card-strip-items" not in card
+        assert "display-card-primary" not in card
+    else:
+        assert "stacked" not in card
+        assert {"hero": "display-card-primary", "strip": "display-card-strip-items",
+                "compact": "display-card-compact-items"}[pattern] in card
+    for item in items:
+        markup = re.search(r'data-item-id="' + item.id + r'">(.*?)</div>', card, re.DOTALL).group(1)
+        assert 'data-role="label"' in markup and item.short_label in markup
+        assert 'data-role="value"' in markup and item.value in markup
+        assert 'data-role="unit"' in markup and item.unit in markup
+        if demo_enabled:
+            assert f'data-source-kind="{item.source_kind}">{"模擬" if item.source_kind == "demo" else "実測"}</span>' in markup
+        else:
+            assert 'data-role="source-kind"' not in markup
+
+
+def test_small_stacked_css_has_one_column_and_separates_labels_from_values():
+    css = (Path(__file__).parents[1] / "app" / "static" / "display.css").read_text()
+    card = css.split(".display-card--small.display-card--stacked {", 1)[1].split("}", 1)[0]
+    rows = css.split(".display-card-stacked-items {", 1)[1].split("}", 1)[0]
+    reading = css.split(".display-stacked-item {", 1)[1].split("}", 1)[0]
+    assert all("grid-template-columns: minmax(0, 1fr);" in rule for rule in (card, rows, reading))
+    assert "grid-auto-rows: minmax(min-content, 1fr);" in rows
+    assert "overflow-y: auto;" in rows  # Constrained screens scroll instead of overlapping rows.
+    labels = css.split('.display-card--small.display-card--stacked .display-stacked-item [data-role="label"] {', 1)[1].split("}", 1)[0]
+    assert "flex-wrap: wrap;" in labels
+    assert ".display-stacked-reading {" in css
+    assert '.display-stacked-reading [data-role="value"] {' in css
+    assert '.display-stacked-reading [data-role="unit"] {' in css

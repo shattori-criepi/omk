@@ -4,13 +4,16 @@
 {% macro reading_label(item) -%}
 {% if demo_enabled %}<span data-role="label-text">{{ item.short_label or item.label }}</span>{{ source_badge(item.source_kind) }}{% else %}{{ item.short_label or item.label }}{% endif %}
 {%- endmacro %}
+{% macro auxiliary_reading(block) -%}
+{% if block.auxiliary_supported %}<p class="display-card-auxiliary display-card-auxiliary--{{ block.auxiliary_flow }}" data-role="auxiliary"{% if not block.auxiliary_label %} hidden{% endif %}><span data-role="auxiliary-label">{{ block.auxiliary_label }}</span> <strong data-role="auxiliary-value">{{ block.auxiliary_value }}</strong> <small data-role="auxiliary-unit">{{ block.auxiliary_unit }}</small>{{ source_badge(block.auxiliary_source_kind) }}</p>{% endif %}
+{%- endmacro %}
 <!doctype html>
 <html lang="ja">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <title>OMK ダッシュボード</title>
-    <link rel="stylesheet" href="{{ url_for('static', path='/display.css') }}?v=20260916-demo-custom-1">
+    <link rel="stylesheet" href="{{ url_for('static', path='/display.css') }}?v=20260916-small-stacked-1">
   </head>
   <body data-demo-enabled="{{ 'true' if demo_enabled else 'false' }}" data-demo-mode="{{ dashboard.mode if demo_enabled else '' }}" data-dashboard-mode="{{ dashboard.mode }}">
     {% if demo_enabled %}
@@ -49,9 +52,20 @@
       <section id="display-blocks" class="standard-grid" aria-label="選択した表示ブロック">
         {% for block in dashboard.blocks %}
         {% set item_count = 1 + (block.secondary | length) %}
-        <article class="display-card display-card--{{ block.size }} display-card--{{ block.layout_pattern }} display-card--items-{{ item_count }} display-card--{{ block.freshness }}" data-block-id="{{ block.id }}" data-item-count="{{ item_count }}">
+        {% set stacked = block.size == "small" and item_count > 1 %}
+        <article class="display-card display-card--{{ block.size }} display-card--{{ block.layout_pattern }} display-card--items-{{ item_count }} display-card--{{ block.freshness }}{% if stacked %} display-card--stacked{% endif %}" data-block-id="{{ block.id }}" data-item-count="{{ item_count }}">
           <p class="display-card-label">{{ block.title }}</p>
-          {% if block.layout_pattern == 'strip' %}
+          {% if stacked %}
+          <div class="display-card-stacked-items">
+            {% for item in [block.primary] + (block.secondary | list) %}
+            <div class="display-stacked-item" data-item-id="{{ item.id }}">
+              <span data-role="label">{{ reading_label(item) }}</span>
+              <span class="display-stacked-reading"><strong data-role="value">{{ item.value }}</strong><small data-role="unit"{% if item.freshness == 'unavailable' %} hidden{% endif %}>{{ item.unit }}</small></span>
+              {% if loop.first %}{{ auxiliary_reading(block) }}{% endif %}
+            </div>
+            {% endfor %}
+          </div>
+          {% elif block.layout_pattern == 'strip' %}
           <div class="display-card-strip-items">
             <div class="display-secondary-item" data-item-id="{{ block.primary.id }}"><span class="display-secondary-label" data-role="label">{{ reading_label(block.primary) }}</span><strong class="display-secondary-value" data-role="value">{{ block.primary.value }}</strong><small class="display-secondary-unit" data-role="unit">{{ block.primary.unit if block.primary.unit and block.primary.freshness != 'unavailable' else ' ' }}</small></div>
             {% for item in block.secondary %}<div class="display-secondary-item" data-item-id="{{ item.id }}"><span class="display-secondary-label" data-role="label">{{ reading_label(item) }}</span><strong class="display-secondary-value" data-role="value">{{ item.value }}</strong><small class="display-secondary-unit" data-role="unit">{{ item.unit if item.unit and item.freshness != 'unavailable' else ' ' }}</small></div>{% endfor %}
@@ -65,7 +79,7 @@
           <div class="display-card-primary" data-item-id="{{ block.primary.id }}">
             <p data-role="label">{{ reading_label(block.primary) }}</p>
             <div class="display-card-reading"><strong class="display-card-value" data-role="value">{{ block.primary.value }}</strong>{% if block.primary.unit %}<span class="display-card-unit" data-role="unit"{% if block.primary.freshness == 'unavailable' %} hidden{% endif %}>{{ block.primary.unit }}</span>{% endif %}</div>
-            {% if block.auxiliary_supported %}<p class="display-card-auxiliary display-card-auxiliary--{{ block.auxiliary_flow }}" data-role="auxiliary"{% if not block.auxiliary_label %} hidden{% endif %}><span data-role="auxiliary-label">{{ block.auxiliary_label }}</span> <strong data-role="auxiliary-value">{{ block.auxiliary_value }}</strong> <small data-role="auxiliary-unit">{{ block.auxiliary_unit }}</small>{{ source_badge(block.auxiliary_source_kind) }}</p>{% endif %}
+            {{ auxiliary_reading(block) }}
           </div>
           {% if block.secondary %}<div class="display-card-secondary">
             {% for item in block.secondary %}<div class="display-secondary-item" data-item-id="{{ item.id }}"><span class="display-secondary-label" data-role="label">{{ reading_label(item) }}</span><strong class="display-secondary-value" data-role="value">{{ item.value }}</strong><small class="display-secondary-unit" data-role="unit">{{ item.unit if item.unit and item.freshness != 'unavailable' else ' ' }}</small></div>{% endfor %}
@@ -196,6 +210,6 @@
     </main>
     {% endif %}
 
-    <script src="{{ url_for('static', path='/display.js') }}?v=20260916-demo-custom-1" defer></script>
+    <script src="{{ url_for('static', path='/display.js') }}?v=20260916-small-stacked-1" defer></script>
   </body>
 </html>

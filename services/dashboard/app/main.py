@@ -154,7 +154,7 @@ def _available_display_groups(candidates: list[DisplayItem]) -> dict[str, str | 
     return groups
 
 
-def get_dashboard_view_model(mode_override: str | None = None, *, outdoor_device_ids: frozenset[str] = frozenset()):
+def get_dashboard_view_model(mode_override: str | None = None):
     """Build one consistent snapshot for both HTML and polling API responses."""
     display_repository = get_display_repository()
     candidates = _dashboard_candidates()
@@ -169,7 +169,7 @@ def get_dashboard_view_model(mode_override: str | None = None, *, outdoor_device
             # Settings and admin candidates must always come from real sources.
             # This overlay exists only for this HTML/API response.
             if mode == "custom":
-                current_candidates, active_blocks = demo_custom_preset(current_candidates, outdoor_device_ids)
+                current_candidates, active_blocks = demo_custom_preset(current_candidates)
             else:
                 current_candidates = demo_candidates(current_candidates)
         if mode == "clock":
@@ -232,11 +232,10 @@ async def display(request: Request) -> HTMLResponse:
     if requested_demo_mode not in {None, "custom", "clock", "recommended"}:
         raise HTTPException(400, "表示モードが正しくありません")
     demo_enabled = _demo_enabled()
-    outdoor_device_ids = await _demo_outdoor_device_ids() if demo_enabled and requested_demo_mode in {None, "custom"} else frozenset()
     return templates.TemplateResponse(
         request=request,
         name="display.html",
-        context={"dashboard": get_dashboard_view_model(requested_demo_mode or "custom", outdoor_device_ids=outdoor_device_ids) if demo_enabled else get_dashboard_view_model(), "demo_enabled": demo_enabled},
+        context={"dashboard": get_dashboard_view_model(requested_demo_mode or "custom") if demo_enabled else get_dashboard_view_model(), "demo_enabled": demo_enabled},
     )
 
 
@@ -554,42 +553,13 @@ def _demo_enabled() -> bool:
     return _settings_for(_dashboard_candidates()).demo_enabled
 
 
-async def _demo_outdoor_device_ids() -> frozenset[str]:
-    """Read location metadata when available; demo never requires the manager.
-
-    A waterproof model or a th-* ID alone does not establish outdoor placement.
-    The generic collector catalog intentionally does not contain that metadata.
-    """
-    candidate_ids = {item.device_id for item in _dashboard_candidates()
-                     if item.semantic_role in {"temperature", "humidity"}}
-    if not candidate_ids:
-        return frozenset()
-    try:
-        async with httpx.AsyncClient(timeout=0.5) as client:
-            response = await client.get(f"{BLE_MANAGER_URL}/api/sensors")
-        response.raise_for_status()
-        payload = response.json()
-    except (httpx.HTTPError, ValueError):
-        return frozenset()
-    sensors = payload.get("sensors") if isinstance(payload, dict) else None
-    if not isinstance(sensors, list):
-        return frozenset()
-    return frozenset(
-        sensor["sensor_id"] for sensor in sensors
-        if isinstance(sensor, dict) and isinstance(sensor.get("sensor_id"), str)
-        and sensor["sensor_id"] in candidate_ids and sensor.get("enabled", True) is True
-        and sensor.get("sensor_type") == "environment" and sensor.get("location") == "屋外"
-    )
-
-
 @app.get("/api/display")
 async def display_api(demo_mode: str | None = None) -> dict:
     """Return the current dashboard snapshot for in-page refreshes."""
     if demo_mode is not None and demo_mode not in {"custom", "clock", "recommended"}:
         raise HTTPException(400, "表示モードが正しくありません")
     enabled = _demo_enabled()
-    outdoor_device_ids = await _demo_outdoor_device_ids() if enabled and demo_mode in {None, "custom"} else frozenset()
-    return {**get_dashboard_view_model((demo_mode or "custom") if enabled else None, outdoor_device_ids=outdoor_device_ids).as_dict(), "demo_enabled": enabled}
+    return {**get_dashboard_view_model((demo_mode or "custom") if enabled else None).as_dict(), "demo_enabled": enabled}
 
 
 @app.post("/api/admin/dashboard-settings/demo")
