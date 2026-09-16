@@ -2267,11 +2267,15 @@ def test_admin_menu_has_only_available_management_functions() -> None:
 
 
 def test_management_subpages_link_back_to_admin_menu() -> None:
-    for path in ("/admin/sensors", "/admin/broute", "/admin/system"):
+    for path in ("/admin/display", "/admin/sensors", "/admin/broute", "/admin/system", "/admin/access-point", "/admin/export"):
         response = client.get(path)
 
         assert response.status_code == 200
-        assert "← 管理メニュー" in response.text
+        assert '<a href="/admin" class="back-link">‹ 管理メニューへ戻る</a>' in response.text
+
+    stylesheet = (Path(__file__).parents[1] / "app" / "static" / "display.css").read_text(encoding="utf-8")
+    for declaration in ("display: inline-flex;", "border: 1px solid #64748b;", "border-radius: 10px;", "cursor: pointer;", ".back-link:hover", ".back-link:focus-visible"):
+        assert declaration in stylesheet
 
 
 def test_broute_layout_uses_wide_grid_rows_with_narrow_screen_fallback() -> None:
@@ -2823,3 +2827,46 @@ def test_demo_controls_have_a_separate_muted_palette_and_respect_hidden():
         assert "#b08938" in rule
         assert "background: rgb(176 137 56 / .14);" in rule
     assert ".display-settings-page [hidden] { display: none !important; }" in css
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is required for admin UI tests")
+def test_small_block_disables_layout_editor_without_discarding_its_layout_pattern() -> None:
+    javascript_path = Path(__file__).parents[1] / "app" / "static" / "admin_display.js"
+    harness = r'''
+const fs = require("fs"), vm = require("vm"), assert = require("assert");
+function element() { return {innerHTML: "", textContent: "", disabled: false, listeners: {}, addEventListener(type, handler) { this.listeners[type] = handler; }, closest() { return null; }}; }
+const elements = Object.fromEntries(["#selected-items", "#available-items", "#capacity-status", "#settings-status", "#save-settings"].map(key => [key, element()]));
+let saved = null;
+global.document = {querySelector: selector => elements[selector]};
+global.window = {location: {assign() {}}};
+global.fetch = async (url, options = {}) => {
+  if (options.method === "PUT") { saved = JSON.parse(options.body); return {ok: true, json: async () => ({})}; }
+  return {ok: true, json: async () => url.endsWith("display-items")
+    ? {capacity: 6, groups: [{name: "環境", items: [{id: "temperature", label: "温度", group: "環境", selectable: true}]}]}
+    : {version: 3, mode: "custom", presets: {standard: {blocks: [{block_id: "environment", group: "環境", title: "環境", size: "small", layout_pattern: "strip", primary_item_id: "temperature", item_ids: ["temperature"]}]}, recommended: {blocks: []}, clock: {item_ids: []}}}};
+};
+vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8"));
+setImmediate(async () => {
+  const selectedSmall = elements["#selected-items"].innerHTML;
+  elements["#selected-items"].listeners.change({target: {dataset: {layout: "environment"}, value: "hero"}});
+  const afterIgnoredLayoutChange = elements["#selected-items"].innerHTML;
+  elements["#selected-items"].listeners.change({target: {dataset: {size: "environment"}, value: "medium"}});
+  const selectedMedium = elements["#selected-items"].innerHTML;
+  elements["#selected-items"].listeners.change({target: {dataset: {size: "environment"}, value: "small"}});
+  const selectedSmallAgain = elements["#selected-items"].innerHTML;
+  await elements["#save-settings"].listeners.click();
+  console.log(JSON.stringify({selectedSmall, afterIgnoredLayoutChange, selectedMedium, selectedSmallAgain, saved}));
+});
+'''
+    completed = subprocess.run(["node", "-e", harness, str(javascript_path)], check=True, capture_output=True, text=True)
+    result = json.loads(completed.stdout)
+
+    for markup in (result["selectedSmall"], result["afterIgnoredLayoutChange"], result["selectedSmallAgain"]):
+        assert 'data-layout="environment" disabled' in markup
+        assert "小サイズでは表示形式は自動です" in markup
+        assert 'option value="strip" selected' in markup
+    assert 'data-layout="environment" disabled' not in result["selectedMedium"]
+    assert 'option value="strip" selected' in result["selectedMedium"]
+    block = result["saved"]["presets"]["standard"]["blocks"][0]
+    assert block["size"] == "small"
+    assert block["layout_pattern"] == "strip"
