@@ -627,24 +627,37 @@ update_labwc_config() {
   log "Installed labwc cursor configuration: ${labwc_config}"
 }
 
+labwc_process_path() {
+  local pid="$1" owner path
+  [[ "${pid}" =~ ^[1-9][0-9]*$ ]] || return 1
+  [[ -r "/proc/${pid}/exe" ]] || return 1
+  owner="$(stat -c %u -- "/proc/${pid}" 2>/dev/null || true)"
+  [[ "${owner}" == "${TARGET_UID}" ]] || return 1
+  path="$(readlink -f -- "/proc/${pid}/exe" 2>/dev/null || true)"
+  [[ -n "${path}" && -x "${path}" && "$(basename -- "${path}")" == labwc ]] || return 1
+  printf '%s\n' "${path}"
+}
+
 reconfigure_labwc() {
-  local labwc_path=""
+  local candidate_pid="" source="" labwc_path
   if [[ -n "${LABWC_PID}" ]]; then
-    if [[ -r "/proc/${LABWC_PID}/exe" ]]; then
-      labwc_path="$(readlink -f "/proc/${LABWC_PID}/exe")"
-    else
-      log "WARN: LABWC_PID=${LABWC_PID} is not a running process; skipping labwc reload."
-      return
-    fi
+    candidate_pid="${LABWC_PID}"
+    source='LABWC_PID'
   else
-    labwc_path="$(command -v labwc || true)"
+    candidate_pid="$(user_systemctl show-environment 2>/dev/null | sed -n 's/^LABWC_PID=//p' | head -n 1)"
+    source='user manager LABWC_PID'
   fi
 
-  if [[ -z "${labwc_path}" || ! -x "${labwc_path}" ]]; then
-    log "WARN: labwc executable was not found; the cursor setting will apply after the next GUI session. Set LABWC_PID to reload from SSH."
+  if [[ -z "${candidate_pid}" ]]; then
+    log 'WARN: No verified labwc PID is available; the cursor setting will apply after the next GUI session.'
     return
   fi
-  if "${AS_TARGET[@]}" "${USER_SYSTEMD_ENV[@]}" "WAYLAND_DISPLAY=${WAYLAND_DISPLAY}" "${labwc_path}" --reconfigure; then
+  if ! labwc_path="$(labwc_process_path "${candidate_pid}")"; then
+    log "WARN: ${source}=${candidate_pid} is not a running labwc process owned by ${TARGET_USER}; skipping labwc reload."
+    return
+  fi
+
+  if kill -HUP "${candidate_pid}"; then
     log "Requested labwc configuration reload."
   else
     log "WARN: labwc reload failed; the cursor setting will apply after the next GUI session."
