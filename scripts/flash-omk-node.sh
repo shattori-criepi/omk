@@ -1,7 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
-usage() { echo "usage: $0 <atom-s3-lite> <port>" >&2; }
+usage() {
+  echo "usage: $0 [--initial-setup] <atom-s3-lite> <port>" >&2
+  echo 'Default: update only with a saved Node credential.' >&2
+  echo '--initial-setup: assert a known fresh, never-provisioned AtomS3 Lite; generate and write a NEW credential/PoP. Never use for recovery or an unknown Node.' >&2
+}
 fail() { echo "$*" >&2; exit 1; }
+initial_setup=false
+if [[ "${1:-}" == --initial-setup ]]; then
+  initial_setup=true
+  shift
+fi
+if [[ "${1:-}" == --help || "${1:-}" == -h ]]; then usage; exit 0; fi
 env_name="${1:-}"; port="${2:-}"
 [[ -n "$env_name" ]] || { usage; exit 2; }
 [[ "$env_name" == "atom-s3-lite" ]] || {
@@ -98,10 +108,35 @@ for b in mac: h=((h^b)*1099511628211)&((1<<64)-1)
 print(f'{h & ((1<<48)-1):012x}')
 PY
 )" || fail 'Cannot generate Node ID from ESP MAC.'
+credential="$store/$node_id.json"
+if [[ -e "$credential" || -L "$credential" ]]; then
+  [[ -f "$credential" && ! -L "$credential" ]] || fail 'Saved credential is not a regular file. No firmware or credential/PoP write was started; restore the original credential.'
+  "$initial_setup" && fail 'A saved credential already exists. No firmware or credential/PoP write was started. Use normal update without --initial-setup; do not delete the credential.'
+  # A corrupt/wrong backup is not permission to create a replacement secret.
+  "$platformio_python" - "$credential" "$node_id" <<'PY' || fail 'Saved credential is invalid or unreadable. No firmware or credential/PoP write was started; restore the original credential from the previous Gateway.'
+import json
+import re
+import sys
+
+try:
+    with open(sys.argv[1]) as stream:
+        record = json.load(stream)
+    valid = (isinstance(record, dict)
+             and record.get("node_id") == sys.argv[2]
+             and record.get("board") == "atom-s3-lite"
+             and isinstance(record.get("provisioning_secret"), str)
+             and re.fullmatch(r"[0-9a-fA-F]{64}", record["provisioning_secret"]))
+except (OSError, ValueError):
+    valid = False
+sys.exit(0 if valid else 1)
+PY
+elif ! "$initial_setup"; then
+  fail "No saved Gateway credential for Node ${node_id}. Cannot safely update: missing credential does not prove a fresh Node. No firmware was written; credential/PoP and NVS were not changed by this script. Restore data/provisioning/nodes/${node_id}.json from the previous Gateway or backup, then retry. Only for a known fresh, never-provisioned AtomS3 Lite, use --initial-setup. If its history is unknown, stop; do not initialize or erase it."
+fi
 mkdir -p "$store" || fail 'Cannot create provisioning credential directory.'
 chmod 700 "$root/data/provisioning" "$store" || fail 'Cannot secure provisioning credential directory.'
-credential="$store/$node_id.json"
-if [[ ! -f "$credential" ]]; then
+if "$initial_setup"; then
+  printf '%s\n' 'INITIAL SETUP: you asserted this is a fresh, never-provisioned AtomS3 Lite.' 'A NEW credential/PoP will be generated and written to factory flash; firmware will import it into NVS. This would replace an existing PoP if used on an existing Node. Freshness cannot be verified automatically.' >&2
   umask 077
   record_dir="$(mktemp -d "${TMPDIR:-/tmp}/omk-pop.XXXXXXXX")" || fail 'Cannot create factory record temporary directory.'
   credential_tmp=''
@@ -125,7 +160,9 @@ if [[ ! -f "$credential" ]]; then
   confirm_identity
   # Persist only after identity confirmation, but before a write attempt: a
   # partially successful write must remain recoverable with the same secret.
-  mv -- "$credential_tmp" "$credential" || fail 'Cannot save provisioning credential.'
+  # Exclusive publication: do not replace a credential created meanwhile.
+  ln -T -- "$credential_tmp" "$credential" || fail 'Cannot save provisioning credential without overwriting an existing path; no factory write was started.'
+  rm -f -- "$credential_tmp"
   credential_tmp=''
   "${esptool[@]}" --port "$port" --chip esp32s3 write_flash 0xf000 "$record_dir/record.bin" || fail "Factory provisioning record write failed; credential retained at $credential. Verify factory provisioning before retrying."
 fi

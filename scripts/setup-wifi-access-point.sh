@@ -220,7 +220,7 @@ nm_secret_value() {
   # NetworkManager only returns saved secrets when explicitly requested. Keep
   # its output in memory so an existing PSK can be preserved without exposing
   # it through this script's log or command line.
-  "${SUDO[@]}" nmcli --show-secrets -g "$1" connection show "${CONNECTION_NAME}" 2>/dev/null | head -n 1 || true
+  "${SUDO[@]}" nmcli --show-secrets -g "$1" connection show "${CONNECTION_NAME}" 2>/dev/null | head -n 1
 }
 
 generate_ssid() {
@@ -465,7 +465,11 @@ CURRENT_AUTOCONNECT="$(nm_value connection.autoconnect)"
 CURRENT_MODE="$(nm_value 802-11-wireless.mode)"
 CURRENT_SSID="$(nm_value 802-11-wireless.ssid)"
 CURRENT_KEY_MGMT="$(nm_value 802-11-wireless-security.key-mgmt)"
-CURRENT_PSK="$(nm_secret_value 802-11-wireless-security.psk)"
+CURRENT_PSK=''
+if [[ "${EXISTING}" == yes ]]; then
+  CURRENT_PSK="$(nm_secret_value 802-11-wireless-security.psk)" ||
+    fail 'Cannot read the existing AP PSK; preserving the profile. Check sudo/NetworkManager access and rerun setup.'
+fi
 CURRENT_IPV4_METHOD="$(nm_value ipv4.method)"
 CURRENT_IPV4_ADDRESS="$(nm_value ipv4.addresses)"
 CURRENT_IPV6_METHOD="$(nm_value ipv6.method)"

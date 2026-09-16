@@ -1,0 +1,10 @@
+# The unauthenticated BLE API is for local host/Docker clients only.
+# Docker Compose uses dynamically named br-* interfaces.
+add table inet omk_ble_api
+delete table inet omk_ble_api
+table inet omk_ble_api {
+  chain input {
+    type filter hook input priority -100; policy accept;
+    iifname != "lo" iifname != "docker0" iifname != "br-*" tcp dport 8787 counter drop
+  }
+}

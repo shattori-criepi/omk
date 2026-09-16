@@ -106,10 +106,11 @@ ensure_python_runtime() {
   fi
   if [[ ! -d "${VENV_PATH}" ]]; then
     log "Creating B-route virtual environment: ${VENV_PATH}"
-    if ((EUID == 0)); then runuser -u "${TARGET_USER}" -- python3 -m venv "${VENV_PATH}"; else "${SUDO[@]}" -u "${TARGET_USER}" python3 -m venv "${VENV_PATH}"; fi
   else
     log "B-route virtual environment exists; preserving it: ${VENV_PATH}"
   fi
+  # Repair an interrupted first creation without clearing existing packages.
+  if ((EUID == 0)); then runuser -u "${TARGET_USER}" -- python3 -m venv "${VENV_PATH}"; else "${SUDO[@]}" -u "${TARGET_USER}" python3 -m venv "${VENV_PATH}"; fi
   [[ -x "${VENV_PYTHON}" ]] || fail "B-route venv Python is unavailable: ${VENV_PYTHON}"
   log "Installing B-route runtime dependencies from pyproject.toml."
   if ((EUID == 0)); then

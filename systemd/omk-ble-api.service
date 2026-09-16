@@ -1,0 +1,10 @@
+[Unit]
+Description=Restrict OMK BLE management API to host and Docker bridges
+Before=omk-ble-sensor-manager.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/nft -f /etc/omk/omk-ble-api.nft
+ExecReload=/usr/sbin/nft -f /etc/omk/omk-ble-api.nft
+RemainAfterExit=yes
+# Keep filtering in place on stop; a reload replaces the table atomically.

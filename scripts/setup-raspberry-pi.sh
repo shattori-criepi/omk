@@ -38,10 +38,14 @@ in_group() {
 }
 
 latest_installed_kernel_release() {
-  local module_dir
+  local module_dir release current_kernel
+  current_kernel="$(uname -r)"
 
   [[ -d "${KERNEL_MODULES_DIR}" ]] || return 0
   for module_dir in "${KERNEL_MODULES_DIR}"/*; do
+    release="${module_dir##*/}"
+    # Pi 4 must not wait for a newer Pi 5-only kernel that it cannot boot.
+    [[ "${current_kernel}" != *-rpi-v8 || "${release}" == *-rpi-v8 ]] || continue
     [[ -d "${module_dir}/kernel" ]] || continue
     # A kernel module file avoids treating an empty or partial directory as an
     # installed bootable kernel.

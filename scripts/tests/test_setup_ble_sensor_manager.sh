@@ -10,3 +10,8 @@ grep -Fq 'install -d -o "${TARGET_USER}"' "$setup"
 grep -Fq 'systemctl daemon-reload' "$setup"
 grep -Fq 'systemctl restart "${SERVICE_NAME}"' "$setup"
 if grep -Eqi 'network_provisioning|esp_prov|omk_ap_psk|systemd-creds|nmcli' "$setup"; then echo "Forbidden text or operation detected." >&2; exit 1; fi
+
+grep -Fxq 'Requires=omk-ble-api.service' "$unit"
+grep -Fq 'omk-ble-api.service' "$setup"
+grep -Fq 'systemctl reload-or-restart omk-ble-api.service' "$setup"
+grep -Fq 'ExecReload=/usr/sbin/nft -f /etc/omk/omk-ble-api.nft' "$root/systemd/omk-ble-api.service"

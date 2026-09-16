@@ -61,6 +61,7 @@ set -euo pipefail
 
 printf '%s\n' "$*" >> "${FAKE_NMCLI_ARGS}"
 if [[ "${1:-}" == '--show-secrets' ]]; then
+  [[ "${FAIL_SECRET_READ:-no}" == no ]] || exit 1
   [[ "${PROFILE_EXISTS}" == yes ]] && printf '%s\n' "${PROFILE_PSK}"
   exit 0
 fi
@@ -157,6 +158,17 @@ if grep -Eq 'connection (add|delete|down|up)' "${TEMP_DIR}/active.nmcli-args"; t
 fi
 
 # A saved secret wins over OMK_AP_PSK and causes no PSK editor invocation.
+if run_setup unreadable PROFILE_EXISTS=yes PROFILE_PSK='ExistingPskValue1234567890' FAIL_SECRET_READ=yes; then
+  echo 'An unreadable existing PSK was treated as absent.' >&2
+  exit 1
+fi
+grep -Fq 'Cannot read the existing AP PSK' "${TEMP_DIR}/unreadable.output"
+if grep -Eq 'connection (modify|edit|add|delete|down|up)' "${TEMP_DIR}/unreadable.nmcli-args"; then
+  echo 'PSK read failure changed the profile.' >&2
+  exit 1
+fi
+[[ ! -s "${TEMP_DIR}/unreadable.psk" ]]
+
 existing_psk='ExistingPskValue1234567890'
 run_setup existing PROFILE_EXISTS=yes PROFILE_PSK="${existing_psk}" OMK_AP_PSK='OverridePskValue1234567890'
 [[ ! -s "${TEMP_DIR}/existing.psk" ]]

@@ -104,3 +104,17 @@ PATH="${TEMP_DIR}/bin:${PATH}" repair_dispatcher_routes_without_reconnect yes ye
 grep -Fxq 'wwan0 up' "${TEMP_DIR}/dispatcher.calls"
 
 echo 'PASS: SORACOM Onyx state validation is machine-readable and interface-bound.'
+
+# Execute the actual final NM state check with localized display labels.
+state_check="$(sed -n '/^nmcli -g GENERAL.STATE device show /p' "${SCRIPT}")"
+[[ -n "${state_check}" ]]
+NM_DEVICE=fixture EXIT_GENERAL=1
+fail() { return 1; }
+nmcli() { printf '%s\n' "${TEST_NM_STATE}"; }
+for TEST_NM_STATE in '100 (connected)' '100 (接続済み)' '100 (verbunden)' '100'; do
+  eval "${state_check}"
+done
+for TEST_NM_STATE in '30 (disconnected)' '1000' ''; do
+  if eval "${state_check}"; then echo 'Invalid NM state accepted.' >&2; exit 1; fi
+done
+echo 'PASS: localized NetworkManager state checks use the numeric state.'

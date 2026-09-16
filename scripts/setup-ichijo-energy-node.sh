@@ -194,10 +194,11 @@ ensure_venv_and_dependencies() {
   if [[ -e "${VENV}" && ! -d "${VENV}" ]]; then fail "Virtual environment path is occupied by a non-directory: ${VENV}"; fi
   if [[ ! -d "${VENV}" ]]; then
     log "Creating virtual environment as ${TARGET_USER}: ${VENV}"
-    "${AS_TARGET[@]}" python3 -m venv "${VENV}"
   else
     log "Virtual environment exists; preserving it: ${VENV} ($(directory_state "${VENV}"))"
   fi
+  # Repair an interrupted first creation without clearing existing packages.
+  "${AS_TARGET[@]}" python3 -m venv "${VENV}"
   [[ -x "${VENV}/bin/python" ]] || fail "Virtual environment Python is unavailable: ${VENV}/bin/python"
   target_can_write "${VENV}" || fail "${TARGET_USER} cannot write the existing virtual environment: ${VENV}. Correct its ownership manually; this script will not use chown -R."
   log 'Installing runtime dependencies from requirements.txt (not requirements-dev.txt).'
@@ -223,11 +224,11 @@ ensure_environment_file() {
 }
 
 environment_has_legacy_ichjo_variables() {
-  grep -Eq '^[[:space:]]*ICHJO_[[:alnum:]_]*[[:space:]]*=' "${ENV_DESTINATION}"
+  "${SUDO[@]}" grep -Eq '^[[:space:]]*ICHJO_[[:alnum:]_]*[[:space:]]*=' "${ENV_DESTINATION}"
 }
 
 environment_has_target_ip() {
-  awk '
+  "${SUDO[@]}" awk '
     /^[[:space:]]*ICHIJO_ECHONET_TARGET_IP[[:space:]]*=/ {
       value = $0
       sub(/^[^=]*=/, "", value)
@@ -383,7 +384,9 @@ if "${DRY_RUN}"; then
   CONFIGURATION_READY=false
   if [[ -e "${ENV_DESTINATION}" ]]; then
     log "Would preserve existing environment file: ${ENV_DESTINATION}"
-    if [[ -f "${ENV_DESTINATION}" ]] && environment_has_legacy_ichjo_variables; then
+    if [[ ! -r "${ENV_DESTINATION}" ]]; then
+      warn 'Environment validation needs root access; dry-run leaves it unchecked. Normal setup validates it using sudo.'
+    elif [[ -f "${ENV_DESTINATION}" ]] && environment_has_legacy_ichjo_variables; then
       warn "Would stop before systemd changes: migrate legacy ICHJO_* settings to ICHIJO_*."
     elif [[ -f "${ENV_DESTINATION}" ]] && environment_has_target_ip; then
       CONFIGURATION_READY=true

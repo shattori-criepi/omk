@@ -1,6 +1,7 @@
 [Unit]
 Description=OMK BLE sensor manager (passive BlueZ receiver)
-After=bluetooth.service mosquitto.service network-online.target
+After=bluetooth.service network-online.target omk-ble-api.service
+Requires=omk-ble-api.service
 Wants=bluetooth.service network-online.target
 
 [Service]

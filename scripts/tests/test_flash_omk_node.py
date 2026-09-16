@@ -20,6 +20,9 @@ with open(os.environ["EVENTS"], "a") as log:
     if "read_mac" in args:
         index = pathlib.Path(os.environ["EVENTS"]).read_text().splitlines().count("mac")
         log.write("mac\\n")
+        if index == 1 and os.environ.get("CONCURRENT_CREDENTIAL"):
+            target = pathlib.Path(os.environ["FIXTURE_ROOT"]) / "data/provisioning/nodes/6e6005821cda.json"
+            target.write_text(os.environ["CONCURRENT_CREDENTIAL"])
         if os.environ.get("FAIL_AT") == "mac": sys.exit(1)
         inspections = json.loads(os.environ.get("INSPECTIONS", "[]"))
         if inspections:
@@ -118,12 +121,12 @@ print("ab" * 32)
     class Flash:
         credential = root / f"data/provisioning/nodes/{NODE_ID}.json"
 
-        def run(self, args=None, **overrides):
+        def run(self, args=None, *, initial=False, **overrides):
             run_env = {**env, **overrides}
             run_env = {k: v for k, v in run_env.items() if v is not None}
             result = subprocess.run(
                 [shutil.which("bash"), str(root / "scripts/flash-omk-node.sh"),
-                 *(args if args is not None else ["atom-s3-lite", "/dev/fake port"])],
+                 *(args if args is not None else [*(["--initial-setup"] if initial else []), "atom-s3-lite", "/dev/fake port"])],
                 env=run_env, capture_output=True, text=True,
             )
             assert SECRET not in result.stdout + result.stderr
@@ -172,7 +175,7 @@ def test_missing_default_pio(flash):
 
 def test_first_build_installs_package_before_resolution_and_factory_flash(flash):
     assert not flash.package.exists()
-    result = flash.run()
+    result = flash.run(initial=True)
     assert result.returncode == 0, result.stderr
     assert flash.events() == ["build", "resolve", "mac", "secret", "mac", "factory", "mac", "upload"]
     assert json.loads(flash.credential.read_text()) == {
@@ -185,7 +188,7 @@ def test_first_build_installs_package_before_resolution_and_factory_flash(flash)
 
 def test_existing_credential_is_preserved_without_factory_write(flash):
     flash.credential.parent.mkdir(parents=True)
-    original = '{"provisioning_secret": "existing-secret"}\n'
+    original = json.dumps({"node_id": NODE_ID, "board": "atom-s3-lite", "provisioning_secret": "cd" * 32}) + "\n"
     flash.credential.write_text(original)
     result = flash.run(FAIL_AT="secret")
     assert result.returncode == 0, result.stderr
@@ -198,7 +201,7 @@ def test_python_and_esptool_overrides(flash):
     wrapper = flash.bin / "wrapper"
     wrapper.write_text(f'#!/bin/bash\nexec "{sys.executable}" "{flash.pio}" "$@"\n')
     wrapper.chmod(0o755)
-    result = flash.run(PLATFORMIO_CMD=str(wrapper), PLATFORMIO_PYTHON=sys.executable,
+    result = flash.run(initial=True, PLATFORMIO_CMD=str(wrapper), PLATFORMIO_PYTHON=sys.executable,
                        ESPTOOL_PY=str(flash.source), FAIL_AT="missing_esptool")
     assert result.returncode == 0, result.stderr
     assert flash.events() == ["build", "mac", "secret", "mac", "factory", "mac", "upload"]
@@ -214,7 +217,7 @@ def test_python_and_esptool_overrides(flash):
     ("upload", ["build", "resolve", "mac", "secret", "mac", "factory", "mac", "upload"], "firmware upload failed"),
 ])
 def test_failures_stop_at_the_expected_step_and_clean_up(flash, step, expected, message):
-    result = flash.run(FAIL_AT=step)
+    result = flash.run(initial=True, FAIL_AT=step)
     assert result.returncode != 0
     assert message in result.stderr
     assert flash.events() == expected
@@ -234,14 +237,14 @@ def test_identical_mac_reports_allow_factory_write_and_upload(flash, copies):
     # Locally administered synthetic MAC, never taken from a physical Node.
     output = "\nUploading stub...\nRunning stub...\nStub running...\n".join(
         ["MAC: 02:00:00:00:00:ab"] * copies)
-    result = flash.run(MAC_OUTPUT=output)
+    result = flash.run(initial=True, MAC_OUTPUT=output)
     assert result.returncode == 0, result.stderr
     assert flash.events() == ["build", "resolve", "mac", "secret", "mac", "factory", "mac", "upload"]
     assert len(list(flash.credential.parent.glob("*.json"))) == 1
 
 
 def test_same_mac_with_different_hex_case_is_one_identity(flash):
-    result = flash.run(MAC_OUTPUT="MAC: 02:00:00:00:00:ab\nMAC: 02:00:00:00:00:AB")
+    result = flash.run(initial=True, MAC_OUTPUT="MAC: 02:00:00:00:00:ab\nMAC: 02:00:00:00:00:AB")
     assert result.returncode == 0, result.stderr
     assert flash.events()[-3:] == ["factory", "mac", "upload"]
 
@@ -257,7 +260,7 @@ def test_same_mac_with_different_hex_case_is_one_identity(flash):
     ("MAC: 02:00:00:00:00:01 extra", "Cannot read a valid ESP MAC"),
 ])
 def test_missing_ambiguous_or_malformed_mac_reports_stop_before_writes(flash, output, message):
-    result = flash.run(MAC_OUTPUT=output)
+    result = flash.run(initial=True, MAC_OUTPUT=output)
     assert result.returncode != 0
     assert message in result.stderr
     assert flash.events() == ["build", "resolve", "mac"]
@@ -275,7 +278,7 @@ def test_esptool_failure_is_not_hidden_by_valid_duplicate_mac_reports(flash):
 def test_credential_directory_failure_stops_before_factory_write(flash):
     flash.credential.parent.parent.parent.mkdir(parents=True)
     flash.credential.parent.parent.write_text("not a directory")
-    result = flash.run()
+    result = flash.run(initial=True)
     assert result.returncode != 0
     assert "Cannot create provisioning credential directory" in result.stderr
     assert flash.events() == ["build", "resolve", "mac"]
@@ -317,7 +320,7 @@ def test_missing_malformed_or_ambiguous_chip_never_writes(flash, output):
 @pytest.mark.parametrize("replacement,message", BAD_INSPECTIONS)
 @pytest.mark.parametrize("boundary", ["factory", "upload", "existing"])
 def test_identity_recheck_stops_writes(flash, replacement, message, boundary):
-    original = '{"provisioning_secret": "existing-secret"}\n'
+    original = json.dumps({"node_id": NODE_ID, "board": "atom-s3-lite", "provisioning_secret": "cd" * 32}) + "\n"
     if boundary == "existing":
         flash.credential.parent.mkdir(parents=True)
         flash.credential.write_text(original)
@@ -325,7 +328,7 @@ def test_identity_recheck_stops_writes(flash, replacement, message, boundary):
     if boundary == "upload":
         inspections.append(IDENTITY_A)
     inspections.append(replacement)
-    result = flash.run(INSPECTIONS=json.dumps(inspections))
+    result = flash.run(initial=boundary != "existing", INSPECTIONS=json.dumps(inspections))
     assert result.returncode != 0
     assert message in result.stderr
     assert "02:00:00:00:00:" not in result.stdout + result.stderr
@@ -341,7 +344,7 @@ def test_identity_recheck_stops_writes(flash, replacement, message, boundary):
 
 def test_rechecks_normalize_case_and_duplicate_mac(flash):
     repeated = IDENTITY_A + "\nUploading stub...\nMAC: 02:00:00:00:00:AB"
-    result = flash.run(INSPECTIONS=json.dumps([IDENTITY_A, repeated, repeated]))
+    result = flash.run(initial=True, INSPECTIONS=json.dumps([IDENTITY_A, repeated, repeated]))
     assert result.returncode == 0, result.stderr
     assert flash.events().count("mac") == 3
     assert flash.events().count("factory") == 1
@@ -349,7 +352,7 @@ def test_rechecks_normalize_case_and_duplicate_mac(flash):
 
 
 def test_retry_original_node_after_post_factory_swap_preserves_secret(flash):
-    result = flash.run(INSPECTIONS=json.dumps([IDENTITY_A, IDENTITY_A, IDENTITY_B]))
+    result = flash.run(initial=True, INSPECTIONS=json.dumps([IDENTITY_A, IDENTITY_A, IDENTITY_B]))
     assert result.returncode != 0
     original = flash.credential.read_bytes()
     result = flash.run(FAIL_AT="secret")
@@ -359,3 +362,84 @@ def test_retry_original_node_after_post_factory_swap_preserves_secret(flash):
     assert flash.events().count("factory") == 1
     assert flash.events().count("upload") == 1
     assert flash.events()[-5:] == ["build", "resolve", "mac", "mac", "upload"]
+
+
+@pytest.mark.parametrize("history", ["existing", "unknown", "fresh-unconfirmed"])
+def test_missing_credential_never_authorizes_update(flash, history):
+    # None of these histories can be distinguished by ROM MAC/chip inspection.
+    # No USB application response (or Wi-Fi state) is used as proof of freshness.
+    result = flash.run()
+    assert result.returncode != 0
+    assert flash.events() == ["build", "resolve", "mac"]
+    assert not flash.credential.parent.exists()
+    for message in ("No saved Gateway credential", "No firmware was written",
+                    "credential/PoP and NVS were not changed", "previous Gateway or backup",
+                    "--initial-setup", "history is unknown"):
+        assert message in result.stderr
+
+
+def test_backup_restored_after_block_allows_only_normal_update(flash):
+    assert flash.run().returncode != 0
+    flash.credential.parent.mkdir(parents=True)
+    original = json.dumps(dict(node_id=NODE_ID, board="atom-s3-lite", provisioning_secret="cd" * 32))
+    flash.credential.write_text(original)
+    assert flash.run(FAIL_AT="secret").returncode == 0
+    assert flash.credential.read_text() == original
+    assert "secret" not in flash.events()
+    assert "factory" not in flash.events()
+    assert flash.events().count("upload") == 1
+
+
+@pytest.mark.parametrize("initial", [False, True])
+@pytest.mark.parametrize("kind", ["directory", "dangling-symlink", "empty", "invalid-json", "wrong-node", "wrong-board", "missing-secret"])
+def test_invalid_saved_credential_never_becomes_fresh(flash, initial, kind):
+    flash.credential.parent.mkdir(parents=True)
+    record = dict(node_id=NODE_ID, board="atom-s3-lite", provisioning_secret="cd" * 32)
+    if kind == "directory":
+        flash.credential.mkdir()
+    elif kind == "dangling-symlink":
+        flash.credential.symlink_to("absent-backup")
+    else:
+        if kind == "wrong-node": record["node_id"] = "000000000000"
+        if kind == "wrong-board": record["board"] = "m5stick-c"
+        if kind == "missing-secret": del record["provisioning_secret"]
+        flash.credential.write_text("" if kind == "empty" else "broken" if kind == "invalid-json" else json.dumps(record))
+    result = flash.run(initial=initial)
+    assert result.returncode != 0
+    assert flash.events() == ["build", "resolve", "mac"]
+    assert "No firmware or credential/PoP write was started" in result.stderr
+    assert "cd" * 32 not in result.stdout + result.stderr
+
+
+def test_initial_setup_cannot_rotate_saved_credential(flash):
+    flash.credential.parent.mkdir(parents=True)
+    original = json.dumps(dict(node_id=NODE_ID, board="atom-s3-lite", provisioning_secret="cd" * 32))
+    flash.credential.write_text(original)
+    result = flash.run(initial=True)
+    assert result.returncode != 0
+    assert flash.credential.read_text() == original
+    assert flash.events() == ["build", "resolve", "mac"]
+    assert "Use normal update without --initial-setup" in result.stderr
+
+
+def test_initial_setup_warns_about_new_pop(flash):
+    result = flash.run(initial=True)
+    assert result.returncode == 0
+    assert "A NEW credential/PoP" in result.stderr
+    assert "Freshness cannot be verified automatically" in result.stderr
+
+
+def test_unknown_chip_stops_normal_update_without_creating_credential(flash):
+    result = flash.run(CHIP_OUTPUT="")
+    assert result.returncode != 0
+    assert flash.events() == ["build", "resolve", "mac"]
+    assert not flash.credential.parent.exists()
+
+
+def test_concurrent_credential_creation_stops_before_factory_write(flash):
+    original = json.dumps(dict(node_id=NODE_ID, board="atom-s3-lite", provisioning_secret="cd" * 32))
+    result = flash.run(initial=True, CONCURRENT_CREDENTIAL=original)
+    assert result.returncode != 0
+    assert flash.credential.read_text() == original
+    assert flash.events() == ["build", "resolve", "mac", "secret", "mac"]
+    assert "no factory write was started" in result.stderr

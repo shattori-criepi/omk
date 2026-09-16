@@ -420,7 +420,8 @@ fi
 ONYX_USB_SYSPATH="${ONYX_USB_CANDIDATES[0]}"
 log 'One supported Quectel USB candidate was detected; waiting for its ModemManager object.'
 
-PACKAGES=(network-manager modemmanager usb-modeswitch usbutils curl ca-certificates)
+# The vendor's first-install script calls ifconfig; our dispatcher uses Python.
+PACKAGES=(network-manager modemmanager usb-modeswitch usbutils curl ca-certificates net-tools python3)
 log "Updating package indexes and installing: ${PACKAGES[*]}"
 omk_apt "${SUDO[@]}" apt-get update
 omk_apt "${SUDO[@]}" apt-get install -y "${PACKAGES[@]}"
@@ -546,7 +547,7 @@ modem_is_connected "${MODEM_KV}" || fail "${EXIT_NETWORK_NOT_REGISTERED}" 'Cellu
 nmcli -g NAME connection show --active | grep -Fxq soracom || fail "${EXIT_GENERAL}" 'The soracom profile is not active.'
 NM_DEVICE="$(single_soracom_nm_device)" || fail "${EXIT_GENERAL}" 'The active soracom connection does not have exactly one NetworkManager device.'
 [[ -n "${NM_DEVICE}" && "${NM_DEVICE}" != -- ]] || fail "${EXIT_GENERAL}" 'The active soracom connection has no NetworkManager device.'
-nmcli -g GENERAL.STATE device show "${NM_DEVICE}" 2>/dev/null | grep -Eq '^100 \(connected\)$|^connected$' || fail "${EXIT_GENERAL}" "The soracom NetworkManager device is not connected: ${NM_DEVICE}."
+nmcli -g GENERAL.STATE device show "${NM_DEVICE}" 2>/dev/null | grep -Eq '^100([[:space:]]|$)' || fail "${EXIT_GENERAL}" "The soracom NetworkManager device is not connected: ${NM_DEVICE}."
 modem_owns_nm_device "${MODEM_KV}" "${NM_DEVICE}" || fail "${EXIT_GENERAL}" 'The active soracom connection is not owned by the selected Onyx modem.'
 CELLULAR_INTERFACE="$(nmcli -g GENERAL.IP-IFACE device show "${NM_DEVICE}" 2>/dev/null)"
 [[ -n "${CELLULAR_INTERFACE}" && "${CELLULAR_INTERFACE}" != -- && "${CELLULAR_INTERFACE}" != *,* ]] || fail "${EXIT_GENERAL}" 'The selected Onyx modem has no unique IP interface.'

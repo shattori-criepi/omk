@@ -65,6 +65,9 @@ grep -Fq "install -d -o ${TARGET_USER} -g ${TARGET_GROUP} -m 0775 ${LOG_DIR}" "$
 chmod 700 "${parent_dir}"
 
 ENV_DESTINATION="${TEST_ROOT}/env"
+# The production file is root:root 0600. Verify that both readers use SUDO,
+# without actually granting this test root access or printing file contents.
+mock_sudo() { printf '%s\n' "$1" >>"${capture_file}"; "$@"; }
 ENV_CREATED=false
 service_calls=0
 ensure_service_state() { service_calls=$((service_calls + 1)); }
@@ -95,6 +98,8 @@ printf 'ICHIJO_ECHONET_TARGET_IP=192.0.2.10\n' > "${ENV_DESTINATION}"
 validate_environment_configuration
 ensure_service_state
 [[ "${service_calls}" == 1 ]]
+grep -Fxq grep "${capture_file}"
+grep -Fxq awk "${capture_file}"
 
 LOG_DIR="${TEST_ROOT}/not-a-directory"
 : > "${LOG_DIR}"

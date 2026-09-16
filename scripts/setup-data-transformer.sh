@@ -126,10 +126,11 @@ ensure_directory "${OMK_ROOT}/data/errors/transform"
 VENV="${OMK_ROOT}/services/data-transformer/.venv"
 if [[ ! -d "${VENV}" ]]; then
   log "Creating virtual environment: ${VENV}"
-  "${AS_TARGET[@]}" python3 -m venv "${VENV}"
 else
   log "Virtual environment exists; preserving it: ${VENV}"
 fi
+# Repair partial creation too; venv does not clear existing packages or data.
+"${AS_TARGET[@]}" python3 -m venv "${VENV}"
 if [[ ! -x "${VENV}/bin/python" ]]; then
   log "ERROR: Virtual environment Python is unavailable: ${VENV}/bin/python"
   exit 1

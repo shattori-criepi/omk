@@ -20,7 +20,7 @@ if ((EUID != 0)); then
   "${SUDO[@]}" -v
 fi
 missing_packages=()
-for package in bluez rfkill python3 python3-venv python3-pip; do
+for package in bluez rfkill python3 python3-venv python3-pip nftables; do
   dpkg-query -W -f='${db:Status-Abbrev}' "${package}" 2>/dev/null | grep -q '^ii' || missing_packages+=("${package}")
 done
 if ((${#missing_packages[@]})); then
@@ -56,8 +56,12 @@ else
   "${SUDO[@]}" -u "${TARGET_USER}" "${VENV_PATH}/bin/pip" install -r "${OMK_ROOT}/services/ble-sensor-manager/requirements.txt"
 fi
 log "Installing systemd unit."
+"${SUDO[@]}" install -d -o root -g root -m 0755 /etc/omk
+"${SUDO[@]}" install -o root -g root -m 0644 "${OMK_ROOT}/systemd/omk-ble-api.nft" /etc/omk/omk-ble-api.nft
+"${SUDO[@]}" install -o root -g root -m 0644 "${OMK_ROOT}/systemd/omk-ble-api.service" /etc/systemd/system/omk-ble-api.service
 sed -e "s|@OMK_USER@|${TARGET_USER}|g" -e "s|@OMK_GROUP@|$(id -gn "${TARGET_USER}")|g" -e "s|@OMK_ROOT@|${OMK_ROOT}|g" "${SERVICE_SOURCE}" | "${SUDO[@]}" tee "/etc/systemd/system/${SERVICE_NAME}" >/dev/null
 "${SUDO[@]}" systemctl daemon-reload
+"${SUDO[@]}" systemctl reload-or-restart omk-ble-api.service
 "${SUDO[@]}" systemctl enable "${SERVICE_NAME}"
 "${SUDO[@]}" systemctl restart "${SERVICE_NAME}"
 "${SUDO[@]}" systemctl --no-pager --full status "${SERVICE_NAME}"

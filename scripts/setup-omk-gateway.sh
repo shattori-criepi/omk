@@ -220,10 +220,18 @@ preflight_before_ap_activation() {
 }
 
 base_reboot_is_required() {
-  local current_kernel latest_kernel
+  local current_kernel latest_kernel module_dir release
   [[ -e "${OMK_REBOOT_REQUIRED_PATH:-/var/run/reboot-required}" ]] && return 0
   current_kernel="$(uname -r)"
-  latest_kernel="$(find /lib/modules -mindepth 2 -maxdepth 2 -type d -name kernel -printf '%h\n' 2>/dev/null | sed 's|.*/||' | sort -V | tail -n 1)"
+  latest_kernel="$(
+    for module_dir in "${OMK_KERNEL_MODULES_DIR:-/lib/modules}"/*; do
+      release="${module_dir##*/}"
+      [[ "${current_kernel}" != *-rpi-v8 || "${release}" == *-rpi-v8 ]] || continue
+      [[ -d "${module_dir}/kernel" ]] || continue
+      find "${module_dir}/kernel" -type f -print -quit 2>/dev/null | grep -q . || continue
+      printf '%s\n' "${release}"
+    done | sort -V | tail -n 1
+  )"
   [[ -n "${latest_kernel}" && "${latest_kernel}" != "${current_kernel}" ]] || return 1
   [[ "$(printf '%s\n%s\n' "${current_kernel}" "${latest_kernel}" | sort -V | tail -n 1)" == "${latest_kernel}" ]]
 }
