@@ -402,7 +402,11 @@ def decode(address: str, rssi: int, manufacturer_data: dict[int, bytes], service
     )
 
 
-UNCONFIRMED_MODEL_NAMES = ("presence_sensor", "temperature_humidity_sensor", "co2_sensor")
+# Manufacturer-only advertisements remain unknown until an operator confirms a
+# model.  Every supported manufacturer decoder participates so an overlapping
+# layout (for example Plug Mini and Waterproof Sensor) cannot be presented as
+# a false one-model choice.
+UNCONFIRMED_MODEL_NAMES = ("presence_sensor", *MANUFACTURER_DECODERS)
 
 
 def _validated_unconfirmed_model(
@@ -410,9 +414,9 @@ def _validated_unconfirmed_model(
 ) -> DecodedAdvertisement | None:
     """Decode an operator-selectable legacy form without identifying it.
 
-    C: Presence ``00/20``, Meter, and CO2 manufacturer-only layouts are
-    observed, not unique identifiers. Validation provides a preview and a
-    user-confirmed registration choice, never automatic model selection.
+    Manufacturer-only layouts are observed, not unique identifiers.
+    Validation provides a preview and a user-confirmed registration choice,
+    never automatic model selection.
     """
     if (model not in UNCONFIRMED_MODEL_NAMES or candidate.vendor != "switchbot"
             or candidate.model != "unknown_switchbot"):

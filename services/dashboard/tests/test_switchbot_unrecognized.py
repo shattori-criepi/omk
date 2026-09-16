@@ -149,6 +149,27 @@ assert(rendered.includes("RSSI -51 dBm") && rendered.includes("最終受信: now
     subprocess.run(["node", "-e", harness, str(script)], check=True, capture_output=True, text=True)
 
 
+def test_waterproof_and_motion_manual_registration_ui_use_product_names_and_preview_values():
+    script = Path(__file__).parents[1] / "app/static/admin.js"
+    harness = r'''
+const fs = require("fs"), vm = require("vm"), assert = require("assert");
+function element() { return {addEventListener() {}, querySelectorAll() { return []; }, textContent: "", innerHTML: "", disabled: false, hidden: true, checked: false, required: false, value: "", dataset: {}, showModal() {}, close() {}, reset() {}, focus() {}}; }
+global.document = {querySelector: () => element()};
+global.window = {setInterval() {}, confirm() { return false; }};
+global.fetch = async () => ({ok: true, json: async () => ({sensors: [], nodes: [], stage: "idle"})});
+vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8"));
+const waterproof = card({model: "unknown_switchbot", sensor_type: "unknown", device_key: "switchbot:020000000040", rssi: -51, received_at: "now", values: {}, manual_registration_models: ["waterproof_sensor"], unconfirmed_preview: {model: "waterproof_sensor", values: {temperature_c: 24, relative_humidity_percent: 52}}}, true);
+assert(waterproof.includes("SwitchBot 防水温湿度計候補（未確認）"));
+assert(waterproof.includes("温度: <strong>24℃</strong>") && waterproof.includes("相対湿度: <strong>52%</strong>"));
+assert(waterproof.includes("SwitchBot 防水温湿度計と確認して登録"));
+const motion = card({model: "unknown_switchbot", sensor_type: "unknown", device_key: "switchbot:020000000041", rssi: -50, received_at: "now", values: {}, manual_registration_models: ["motion_sensor"], unconfirmed_preview: {model: "motion_sensor", values: {motion_state: 1}}}, true);
+assert(motion.includes("SwitchBot 人感センサー候補（未確認）"));
+assert(motion.includes("検知状態: <strong>検出</strong>"));
+assert(motion.includes("SwitchBot 人感センサーと確認して登録"));
+'''
+    subprocess.run(["node", "-e", harness, str(script)], check=True, capture_output=True, text=True)
+
+
 def test_candidate_poll_reloads_uncached_preview_without_resetting_registration_dialog():
     script = Path(__file__).parents[1] / "app/static/admin.js"
     harness = r'''

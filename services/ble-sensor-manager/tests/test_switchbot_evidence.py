@@ -70,6 +70,7 @@ def test_two_valid_layouts_are_resolved_by_service_not_code_order(service, expec
     monkeypatch.setattr(sb, "MANUFACTURER_DECODERS", dict(reversed(list(sb.MANUFACTURER_DECODERS.items()))))
     assert packet(tail, service).model == expected
     unknown(packet(tail))
+    assert sb.unconfirmed_model_options(packet(tail)) == {}
 
 
 @pytest.mark.parametrize("hint,service", [("plug_sensor", "770064"), ("waterproof_sensor", "6a0064")])
@@ -471,7 +472,7 @@ def test_registered_presence_uses_normal_values_not_preview(tmp_path):
     }
 
 
-def test_motion_manufacturer_only_stays_unknown_without_confirmation_ui(tmp_path):
+def test_motion_manufacturer_only_requires_confirmation_before_registration(tmp_path):
     registry = SensorRegistry(tmp_path / "sensors.json")
     publisher = Publisher()
     manager = BleManager(registry, publisher)
@@ -481,7 +482,8 @@ def test_motion_manufacturer_only_stays_unknown_without_confirmation_ui(tmp_path
     manager.record_advertisement(inactive)
     listed = manager.candidate_list()[0]
     assert listed["model"] == "unknown_switchbot" and listed["values"] == {}
-    assert "manual_registration_models" not in listed and "unconfirmed_preview" not in listed
+    assert listed["manual_registration_models"] == ["motion_sensor"]
+    assert listed["unconfirmed_preview"] == {"model": "motion_sensor", "values": {"motion_state": 0}}
     assert publisher.messages == [] and registry.list() == []
 
 
@@ -516,9 +518,57 @@ def test_registered_motion_still_decodes_manufacturer_only_and_direct_relay_matc
     assert manager.registered_list()[0]["latest"]["values"] == {"motion_state": 1}
 
 
-def test_unconfirmed_options_exclude_motion_manufacturer_only():
+def test_unconfirmed_options_include_unique_motion_manufacturer_only_form():
     assert list(sb.unconfirmed_model_options(packet("208c0004008c", "0020640110ccc8"))) == ["presence_sensor"]
-    assert sb.unconfirmed_model_options(packet("376c0001")) == {}
+    assert list(sb.unconfirmed_model_options(packet("376c0001"))) == ["motion_sensor"]
+
+
+@pytest.mark.parametrize(("model", "tail", "sensor_id", "topic", "values"), [
+    ("waterproof_sensor", "d20b019dca00", "th-001", "omk/th-001/environment", {"temperature_c": 29.1, "relative_humidity_percent": 74}),
+    ("motion_sensor", "376c0001", "motion-001", "omk/motion-001/motion", {"motion_state": 1}),
+])
+def test_manufacturer_only_waterproof_and_motion_require_confirmation_then_publish(
+    tmp_path, model, tail, sensor_id, topic, values,
+):
+    registry = SensorRegistry(tmp_path / "sensors.json")
+    publisher = Publisher()
+    manager = BleManager(registry, publisher)
+    manager.scanning = True
+    observed = packet(tail)
+    unknown(observed)
+    manager.record_advertisement(observed)
+    item = manager.candidate_list()[0]
+    assert item["model"] == "unknown_switchbot" and item["values"] == {}
+    assert item["manual_registration_models"] == [model]
+    assert item["unconfirmed_preview"] == {"model": model, "values": values}
+    with pytest.raises(ValueError):
+        manager.register({"device_key": observed.device_key, "sensor_id": sensor_id, "display_name": "Test"})
+
+    registered = manager.register({
+        "device_key": observed.device_key, "sensor_id": sensor_id, "display_name": "Test", "confirmed_model": model,
+    })
+    assert registered.model == model
+    restarted = BleManager(SensorRegistry(registry.path), publisher)
+    manufacturer, service = fields(tail, None)
+    restarted._on_detection(
+        SimpleNamespace(address=ADDRESS),
+        SimpleNamespace(rssi=-50, manufacturer_data=manufacturer, service_data=service),
+    )
+    assert restarted.observations[observed.device_key].values == values
+    assert publisher.messages[-1][0] == topic
+    assert all(publisher.messages[-1][1][key] == value for key, value in values.items())
+
+
+@pytest.mark.parametrize("tail", [
+    "d20b019dca01",  # Waterproof reserved marker is invalid.
+    "d20b019dca",    # Waterproof length is invalid.
+    "37000001",      # Motion status low bits are invalid.
+    "376c00",        # Motion length is invalid.
+])
+def test_invalid_waterproof_and_motion_manufacturer_packets_have_no_confirmation_option(tail):
+    candidate = packet(tail)
+    unknown(candidate)
+    assert sb.unconfirmed_model_options(candidate) == {}
 
 
 @pytest.mark.parametrize("service", ["540064009834", "690064009834"])
