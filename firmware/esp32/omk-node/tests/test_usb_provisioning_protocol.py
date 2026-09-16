@@ -33,6 +33,7 @@ def handler(tmp_path_factory):
 #include <stdint.h>
 #include <inttypes.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "cJSON.h"
 typedef int esp_err_t;
@@ -41,11 +42,30 @@ typedef int esp_err_t;
 #define ESP_LOGW(...) ((void)0)
 #define ESP_LOGE(...) ((void)0)
 typedef struct { struct { uint8_t ssid[32]; uint8_t password[64]; } sta; } wifi_config_t;
+#define NODE_PROVISIONING_POP_LENGTH 32
+#define NODE_NVS_NAMESPACE "omk"
+#define NODE_NVS_PROVISIONING_POP_KEY "prov_pop"
+#define NVS_READONLY 0
+#define OMK_NODE_PROVISIONING_STATE_REGISTERED 2
+#define OMK_NODE_PROVISIONING_STATE_UNREGISTERED 0
+typedef int nvs_handle_t;
+static int nvs_open(const char *name, int mode, nvs_handle_t *handle) {
+    (void)name; (void)mode; *handle = 1; return ESP_OK;
+}
+static int nvs_get_blob(nvs_handle_t nvs, const char *key, void *value, size_t *size) {
+    (void)nvs; (void)key; memset(value, 0xab, *size); return ESP_OK;
+}
+static void nvs_close(nvs_handle_t nvs) { (void)nvs; }
+static bool saved_wifi;
+static uint8_t saved_state;
+static int node_registration_get_provisioning_state(bool wifi, uint8_t *state) {
+    (void)wifi; *state = saved_state; return ESP_OK;
+}
 static unsigned saves, clears;
 static int usb_serial_jtag_write_bytes(const char *value, size_t length, int timeout) {
     (void)timeout; return (int)fwrite(value, 1, length, stdout);
 }
-static esp_err_t wifi_station_has_saved_credentials(bool *configured) { *configured = false; return ESP_OK; }
+static esp_err_t wifi_station_has_saved_credentials(bool *configured) { *configured = saved_wifi; return ESP_OK; }
 static esp_err_t wifi_station_clear_saved_credentials(void) { ++clears; return ESP_OK; }
 static esp_err_t wifi_station_save_credentials(const uint8_t *ssid, size_t sl, const uint8_t *psk, size_t pl) {
     (void)ssid; (void)sl; (void)psk; (void)pl; ++saves; return ESP_OK;
@@ -54,7 +74,9 @@ static esp_err_t wifi_station_save_credentials(const uint8_t *ssid, size_t sl, c
     harness += handlers
     harness += r'''
 int main(int argc, char **argv) {
-    if (argc != 2) return 2;
+    if (argc != 4) return 2;
+    saved_wifi = atoi(argv[2]);
+    saved_state = atoi(argv[3]);
     provision_node_id = UINT64_C(0x020000000001);
     handle_line(argv[1]);
     printf("{\"saves\":%u,\"clears\":%u,\"reboot\":%s}\n", saves, clears, reboot_scheduled ? "true" : "false");
@@ -66,8 +88,8 @@ int main(int argc, char **argv) {
     binary = directory / "handler"
     subprocess.run([compiler, "-std=c99", "-Wall", "-Wextra", "-Werror", "-Wno-unused-variable",
                     "-I", str(cjson), str(path), str(cjson / "cJSON.c"), "-lm", "-o", str(binary)], check=True, capture_output=True, text=True)
-    def run(request):
-        result = subprocess.run([str(binary), json.dumps(request)], check=True, capture_output=True, text=True)
+    def run(request, wifi=False, registered=False):
+        result = subprocess.run([str(binary), json.dumps(request), str(int(wifi)), str(2 if registered else 0)], check=True, capture_output=True, text=True)
         assert "synthetic-secret" not in result.stdout + result.stderr
         return [json.loads(line) for line in result.stdout.splitlines()]
     return run
@@ -106,3 +128,26 @@ def test_legacy_identify_is_read_only_and_advertises_v2(handler):
     response, state = handler({"protocol_version": 1, "command": "identify"})
     assert response["protocol_version"] == 2 and response["status"] == "ok"
     assert state == {"saves": 0, "clears": 0, "reboot": False}
+
+
+@pytest.mark.parametrize("secret,expected", [("ab" * 32, "accepted"), ("cd" * 32, "storage_error"), (None, "storage_error")])
+def test_reinitialize_verification_proves_pop_without_mutation_or_reboot(handler, secret, expected):
+    response, state = handler(dict(protocol_version=2, command="verify_reinitialize",
+                                   expected_node_id=NODE_ID, provisioning_secret=secret))
+    assert response["status"] == expected
+    assert state == {"saves": 0, "clears": 0, "reboot": False}
+    assert secret is None or secret not in json.dumps(response)
+
+
+@pytest.mark.parametrize("wifi,registered", [(True, False), (False, True), (True, True)])
+def test_reinitialize_verification_rejects_residual_wifi_or_registration(handler, wifi, registered):
+    response, state = handler(dict(protocol_version=2, command="verify_reinitialize",
+                                   expected_node_id=NODE_ID, provisioning_secret="ab" * 32), wifi, registered)
+    assert response["status"] == "storage_error"
+    assert state == {"saves": 0, "clears": 0, "reboot": False}
+
+
+def test_reinitialize_verification_rejects_wrong_physical_node(handler):
+    response, _ = handler(dict(protocol_version=2, command="verify_reinitialize",
+                               expected_node_id="020000000002", provisioning_secret="ab" * 32))
+    assert response["status"] == "node_identity_changed"

@@ -10,7 +10,7 @@ def test_usb_setup_ui_contract_and_token_boundary():
     template = (ROOT/'app/templates/admin_sensors.html').read_text()
     script = (ROOT/'app/static/admin.js').read_text()
     assert re.search(r"admin\.js'\) }}\?v=[^\"']+", template)
-    for expected in ('OMK Nodeをセットアップ', '/setup/usb-setup', '/setup/usb-setup/status', 'confirm_atom_s3_lite: confirmed', 'pollUsbSetup();'):
+    for expected in ('OMK Nodeをセットアップ', '/setup/usb-setup', '/setup/usb-setup/status', 'body.confirm_atom_s3_lite = confirmed', 'pollUsbSetup();'):
         assert expected in script
     assert 'Bearer ' not in script and 'OMK_SYSTEM_MANAGER_TOKEN' not in script
     assert 'confirmUsbProvisionFailure' not in script  # Wi-Fi configured is not setup success.
@@ -118,8 +118,10 @@ const button = {disabled: false, dataset: {device: candidate.device, nodeId: can
  assert.deepEqual(requests[0], {path: '/setup/usb-setup', body: {device: candidate.device, node_id: candidate.node_id, confirm_atom_s3_lite: true}});
  await submitUsbProvision(button);
  assert.equal(requests.length, 1);
+ usbProvisioningInProgress = false;
  candidate.kind = 'recovery_required';
- assert(!usbSetupControls(candidate).includes('<button'));
+ assert(usbSetupControls(candidate).includes('OMK Nodeを再セットアップ'));
+ assert(!usbSetupControls(candidate).includes('OMK Nodeをセットアップ'));
 })().catch(error => {console.error(error); process.exitCode = 1;});
 '''
     subprocess.run(['node', '-e', javascript], check=True, capture_output=True, text=True)
@@ -387,3 +389,39 @@ const newCandidate = {node_id: '000000000001', kind: 'unconfirmed_esp32s3', wifi
     subprocess.run(['node', '-e', harness], check=True, capture_output=True, text=True, timeout=10)
     assert 'Promise.all([loadNodes(), loadUsbNodes()])' not in script
     assert 'loadRegistered(); loadNodes(); window.setInterval' in script
+
+
+def test_reinitialize_requires_destructive_confirmation_and_separate_request():
+    script = (ROOT/'app/static/admin.js').read_text()
+    controls = script[script.index('function usbSetupControls'):script.index('function saveNodeInputState')]
+    submit = script[script.index('async function submitUsbProvision'):script.index('// Restore progress')]
+    javascript = r'''
+const assert = require('node:assert/strict');
+const text = value => String(value ?? '');
+let usbProvisioningInProgress = false, usbSetupPoll;
+let approved = false, confirmation, requests = [];
+const window = {confirm(message) {confirmation = message; return approved;}};
+const statusLine = {};
+const renderNodes = () => {};
+const pollUsbSetup = async () => {};
+const api = async (path, options) => requests.push({path, body: JSON.parse(options.body)});
+''' + controls + submit + r'''
+const candidate = {device: '/dev/ttyACM0', node_id: '000000000001', kind: 'omk_node', credential_state: 'missing'};
+assert(usbSetupControls(candidate).includes('OMK Nodeを再セットアップ'));
+assert(!usbSetupControls(candidate).includes('OMK Nodeをセットアップ'));
+candidate.credential_state = 'reinitialize_pending';
+assert(usbSetupControls(candidate).includes('再試行'));
+const button = {disabled: false, dataset: {device: candidate.device, nodeId: candidate.node_id, reinitialize: 'true'}, closest: () => ({querySelector: () => null})};
+(async () => {
+ await submitUsbProvision(button);
+ assert.equal(requests.length, 0);
+ assert(!usbProvisioningInProgress && !button.disabled);
+ for (const text of [candidate.node_id, 'provisioning credential', '置換', 'Wi-Fi', '新Gateway', 'Logical ID', 'Node・接続センサ']) assert(confirmation.includes(text));
+ approved = true;
+ await submitUsbProvision(button);
+ assert.deepEqual(requests, [{path: '/setup/usb-reinitialize', body: {device: candidate.device, node_id: candidate.node_id, confirm_reinitialize: true}}]);
+ await submitUsbProvision(button);
+ assert.equal(requests.length, 1);
+})().catch(error => {console.error(error); process.exitCode = 1;});
+'''
+    subprocess.run(['node', '-e', javascript], check=True, capture_output=True, text=True, timeout=10)

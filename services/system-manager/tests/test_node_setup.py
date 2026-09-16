@@ -58,6 +58,13 @@ def hardware(monkeypatch):
     return calls
 
 
+def saved_credential(tmp_path):
+    credential = tmp_path/'store/nodes'/f'{NODE}.json'
+    credential.parent.mkdir(parents=True, exist_ok=True)
+    credential.write_text(json.dumps(dict(node_id=NODE, board='atom-s3-lite', provisioning_secret='ab'*32)))
+    return credential
+
+
 def execute(package, tmp_path, confirmed=False):
     setup.setup(DEVICE, NODE, confirmed, lambda stage: None, package=package, store=tmp_path/'store/nodes')
 
@@ -101,15 +108,15 @@ def test_invalid_package_never_touches_usb(package, tmp_path, monkeypatch, mutat
     with pytest.raises(ProvisioningError): execute(package, tmp_path)
 
 
-def test_existing_missing_credential_writes_only_three_segments(package, tmp_path, hardware):
-    execute(package, tmp_path)
-    assert len(hardware) == 1
-    args, _ = hardware[0]
-    assert args[3::2] == ['0x00000000', '0x00008000', '0x00010000']
+def test_existing_missing_credential_requires_explicit_reinitialize(package, tmp_path, hardware):
+    with pytest.raises(ProvisioningError, match='reinitialize_required'):
+        execute(package, tmp_path)
+    assert hardware == []
     assert not (tmp_path/'store').exists()
 
 
 def test_setup_uses_long_fresh_registration_wait(package, tmp_path, hardware, monkeypatch):
+    saved_credential(tmp_path)
     waited = []
 
     def wait_for_registration(node_id, **kwargs):
@@ -125,10 +132,10 @@ def test_setup_uses_long_fresh_registration_wait(package, tmp_path, hardware, mo
 
 
 def test_existing_credential_is_unchanged(package, tmp_path, hardware):
-    credential = tmp_path/'store/nodes'/f'{NODE}.json'; credential.parent.mkdir(parents=True)
-    credential.write_text('preserve-existing-secret')
+    credential = saved_credential(tmp_path)
+    original = credential.read_bytes()
     execute(package, tmp_path, True)
-    assert len(hardware) == 1 and credential.read_text() == 'preserve-existing-secret'
+    assert len(hardware) == 1 and credential.read_bytes() == original
 
 
 def test_new_confirmation_and_recovery(package, tmp_path, hardware, monkeypatch):
@@ -162,7 +169,8 @@ def test_new_factory_record_and_credential(package, tmp_path, hardware, monkeypa
 
 @pytest.mark.parametrize('existing,boundary', [(False,1), (False,2), (False,3), (True,1)])
 def test_mac_change_at_write_boundary(package, tmp_path, hardware, monkeypatch, existing, boundary):
-    if not existing: monkeypatch.setattr(setup.usb, 'identify', lambda *a: None)
+    if existing: saved_credential(tmp_path)
+    else: monkeypatch.setattr(setup.usb, 'identify', lambda *a: None)
     calls = 0
     def mac(device, **kw):
         nonlocal calls
@@ -172,10 +180,11 @@ def test_mac_change_at_write_boundary(package, tmp_path, hardware, monkeypatch, 
     with pytest.raises(ProvisioningError, match='identity_changed'): execute(package, tmp_path, True)
     attempted_factory = not existing and boundary == 3
     assert len(hardware) == int(attempted_factory)
-    assert (tmp_path/'store/nodes'/f'{NODE}.json').exists() == attempted_factory
+    assert (tmp_path/'store/nodes'/f'{NODE}.json').exists() == (existing or attempted_factory)
 
 
 def test_disappears_before_write(package, tmp_path, hardware, monkeypatch):
+    saved_credential(tmp_path)
     values = iter([True, False]); monkeypatch.setattr(setup, 'allowed', lambda device: next(values))
     with pytest.raises(ProvisioningError, match='not_available'): execute(package, tmp_path)
     assert hardware == []
@@ -265,6 +274,7 @@ def test_wait_for_same_node_never_follows_other_ports(monkeypatch, response, cod
 
 
 def test_snapshot_prevents_package_replacement_after_validation(package, tmp_path, hardware, monkeypatch):
+    saved_credential(tmp_path)
     original = (package/'firmware.bin').read_bytes()
     def identity(*a):
         (package/'firmware.bin').write_bytes(b'replaced-after-validation')
@@ -324,6 +334,7 @@ def test_inventory_does_not_publish_mac_in_by_id_path(monkeypatch):
 
 
 def test_public_tty_resolves_to_stable_allowlisted_path(package, tmp_path, hardware, monkeypatch):
+    saved_credential(tmp_path)
     devices = []
     def tool(device, arguments, code):
         devices.append(device)
@@ -355,6 +366,7 @@ def test_hash_mismatch_stops_all_esptool_calls(package, tmp_path, monkeypatch):
 
 
 def test_existing_setup_actual_subprocess_argv_is_fixed(package, tmp_path, hardware, monkeypatch, caplog):
+    saved_credential(tmp_path)
     commands = []
     monkeypatch.setattr(setup, 'esptool', RUN_ESPTOOL)
     monkeypatch.setattr(setup, 'read_mac', READ_MAC)
@@ -372,4 +384,169 @@ def test_existing_setup_actual_subprocess_argv_is_fixed(package, tmp_path, hardw
     assert [Path(value).name for value in writes[0][9::2]] == ['bootloader.bin', 'partitions.bin', 'firmware.bin']
     assert all('0xf000' not in argv and '0x9000' not in argv and 'erase_flash' not in argv for argv in commands)
     assert MAC not in caplog.text and 'private-psk' not in str(commands)
-    assert not (tmp_path/'store').exists()
+    assert (tmp_path/'store/nodes'/f'{NODE}.json').exists()
+
+
+@pytest.fixture
+def reset_package(package):
+    firmware = package/'firmware.bin'
+    firmware.write_bytes(firmware.read_bytes() + b'verify_reinitialize\x00')
+    manifest = package/'manifest.json'
+    value = json.loads(manifest.read_text())
+    value['segments'][2].update(size=firmware.stat().st_size, sha256=hashlib.sha256(firmware.read_bytes()).hexdigest())
+    manifest.write_text(json.dumps(value))
+    return package
+
+
+def reinitialize(package, tmp_path, confirmed=True):
+    setup.setup(DEVICE, NODE, confirmed, lambda stage: None, package=package,
+                store=tmp_path/'store/nodes', reinitialize=True)
+
+
+@pytest.mark.parametrize('existing', [False, True])
+@pytest.mark.parametrize('responds', [False, True])
+def test_reinitialize_replaces_pop_verifies_node_and_provisions_new_gateway(reset_package, tmp_path, hardware, monkeypatch, existing, responds):
+    if not responds: monkeypatch.setattr(setup.usb, 'identify', lambda *a: None)
+    if existing: saved_credential(tmp_path)
+    events = []
+    store = tmp_path/'store/nodes'
+    def tool(device, args, code):
+        assert device == DEVICE
+        events.append(code)
+        assert 'erase_flash' not in args
+        assert '0x9000' not in args
+        if code == 'factory_write_failed':
+            saved = setup.read_credential(store, NODE)
+            assert saved['setup_state'] == 'reinitialize_pending'
+            assert saved['provisioning_secret'] != 'ab'*32
+            assert Path(args[-1]).read_bytes() == b'OMKR' + bytes.fromhex(saved['provisioning_secret'])
+            assert (store/f'{NODE}.json').stat().st_mode & 0o777 == 0o600
+        return ''
+    monkeypatch.setattr(setup, 'esptool', tool)
+    def verify(device, secret, *, expected_node_id):
+        assert device == DEVICE and expected_node_id == NODE
+        assert secret == setup.read_credential(store, NODE)['provisioning_secret']
+        events.append('verify')
+    def provision(device, ssid, psk, *, expected_node_id):
+        assert expected_node_id == NODE and (ssid, psk) == ('NEW-AP', 'new-synthetic-password')
+        assert events[-1] == 'verify'
+        events.append('wifi')
+    monkeypatch.setattr(setup.usb, 'verify_reinitialize', verify)
+    monkeypatch.setattr(setup.usb, 'read_gateway_wifi', lambda: ('NEW-AP', 'new-synthetic-password'))
+    monkeypatch.setattr(setup.usb, 'provision', provision)
+    def wait(node_id, **kwargs):
+        assert node_id == NODE and kwargs['expected_state'] == 'provisioned' and kwargs['fresh']
+        events.append('mqtt')
+    monkeypatch.setattr(setup.usb, 'wait_for_registration_status', wait)
+    reinitialize(reset_package, tmp_path)
+    assert events == ['factory_write_failed', 'firmware_write_failed', 'verify', 'wifi', 'mqtt']
+    assert 'setup_state' not in setup.read_credential(store, NODE)
+
+
+@pytest.mark.parametrize('failure', ['factory_write_failed', 'firmware_write_failed', 'node_reappearance_timeout', 'verification_failed', 'set_wifi_failed', 'mqtt_registration_timeout'])
+def test_reinitialize_partial_failure_reuses_same_durable_credential_on_retry(reset_package, tmp_path, hardware, monkeypatch, failure):
+    original_tool = setup.esptool
+    original_wait = setup.wait_for_node
+    original_wifi = setup.usb.provision
+    original_mqtt = setup.usb.wait_for_registration_status
+    def fail(*args, **kwargs): raise ProvisioningError(failure)
+    monkeypatch.setattr(setup.usb, 'verify_reinitialize', lambda *a, **kw: NODE)
+    if failure.endswith('write_failed'):
+        def tool(device, args, code):
+            if code == failure: fail()
+            return ''
+        monkeypatch.setattr(setup, 'esptool', tool)
+    elif failure == 'node_reappearance_timeout': monkeypatch.setattr(setup, 'wait_for_node', fail)
+    elif failure == 'verification_failed': monkeypatch.setattr(setup.usb, 'verify_reinitialize', fail)
+    elif failure == 'set_wifi_failed': monkeypatch.setattr(setup.usb, 'provision', fail)
+    else: monkeypatch.setattr(setup.usb, 'wait_for_registration_status', fail)
+    with pytest.raises(ProvisioningError, match=failure): reinitialize(reset_package, tmp_path)
+    pending = setup.read_credential(tmp_path/'store/nodes', NODE)
+    assert pending['setup_state'] == 'reinitialize_pending'
+    with pytest.raises(ProvisioningError): execute(reset_package, tmp_path)
+    monkeypatch.setattr(setup, 'esptool', original_tool)
+    monkeypatch.setattr(setup, 'wait_for_node', original_wait)
+    monkeypatch.setattr(setup.usb, 'verify_reinitialize', lambda *a, **kw: NODE)
+    monkeypatch.setattr(setup.usb, 'provision', original_wifi)
+    monkeypatch.setattr(setup.usb, 'wait_for_registration_status', original_mqtt)
+    monkeypatch.setattr(setup.secrets, 'token_hex', lambda *a: pytest.fail('retry rotated PoP'))
+    reinitialize(reset_package, tmp_path)
+    saved = setup.read_credential(tmp_path/'store/nodes', NODE)
+    assert saved['provisioning_secret'] == pending['provisioning_secret']
+    assert 'setup_state' not in saved
+
+
+def test_reinitialize_requires_confirmation_and_supported_firmware(package, reset_package, tmp_path, hardware, monkeypatch):
+    with pytest.raises(ProvisioningError, match='confirmation'):
+        reinitialize(reset_package, tmp_path, False)
+    assert hardware == [] and not (tmp_path/'store').exists()
+    files = setup.validate_package(reset_package)
+    files['firmware.bin'] = b'old firmware without reset support'
+    monkeypatch.setattr(setup, 'validate_package', lambda *a: files)
+    monkeypatch.setattr(setup.usb, 'identify', lambda *a: pytest.fail('unsupported package accessed USB'))
+    with pytest.raises(ProvisioningError, match='reinitialize_firmware_required'):
+        reinitialize(reset_package, tmp_path)
+    assert hardware == [] and not (tmp_path/'store').exists()
+
+
+def test_reinitialize_gateway_wifi_failure_precedes_destruction(reset_package, tmp_path, hardware, monkeypatch):
+    credential = saved_credential(tmp_path)
+    original = credential.read_bytes()
+    def fail(): raise ProvisioningError('gateway_credential_unavailable')
+    monkeypatch.setattr(setup.usb, 'read_gateway_wifi', fail)
+    with pytest.raises(ProvisioningError, match='gateway_credential_unavailable'):
+        reinitialize(reset_package, tmp_path)
+    assert hardware == [] and credential.read_bytes() == original
+
+
+@pytest.mark.parametrize('boundary', [1, 2, 3, 4])
+def test_reinitialize_identity_change_stops_further_writes(reset_package, tmp_path, hardware, monkeypatch, boundary):
+    calls = 0
+    def mac(*a, **kw):
+        nonlocal calls
+        calls += 1
+        return MAC if calls <= boundary else '02:00:00:00:00:02'
+    monkeypatch.setattr(setup, 'read_mac', mac)
+    with pytest.raises(ProvisioningError, match='identity_changed'):
+        reinitialize(reset_package, tmp_path)
+    assert len(hardware) == max(0, boundary-2)
+
+
+def test_inventory_distinguishes_missing_present_and_partial_credential(tmp_path, hardware, monkeypatch):
+    store = tmp_path/'store/nodes'
+    monkeypatch.setattr(setup, 'STORE', store)
+    assert setup.setup_candidates()[0]['credential_state'] == 'missing'
+    credential = saved_credential(tmp_path)
+    assert setup.setup_candidates()[0]['credential_state'] == 'present'
+    saved = setup.read_credential(store, NODE)
+    saved['setup_state'] = 'reinitialize_pending'
+    setup.save_reinitialize_credential(store, saved)
+    assert setup.setup_candidates()[0]['credential_state'] == 'reinitialize_pending'
+    credential.write_text('{}')
+    assert setup.setup_candidates()[0]['credential_state'] == 'invalid'
+
+
+@pytest.mark.parametrize('state,logical_id', [('registered', 'old-sen66'), ('provisioned', 'old-sen66'), ('provisioned', None)])
+def test_reinitialize_completion_requires_provisioned_without_old_id(monkeypatch, state, logical_id):
+    class Process:
+        returncode = 0
+        def communicate(self, **kwargs):
+            return json.dumps(dict(node_id=NODE, registration_state=state, logical_id=logical_id)), ''
+    monkeypatch.setattr(setup.subprocess, 'Popen', lambda *a, **kw: Process())
+    if state == 'provisioned' and logical_id is None:
+        setup.usb.wait_for_registration_status(NODE, expected_state='provisioned')
+    else:
+        with pytest.raises(ProvisioningError, match='mqtt_registration_timeout'):
+            setup.usb.wait_for_registration_status(NODE, expected_state='provisioned')
+
+
+def test_reinitialize_credential_persistence_failure_never_writes_node(reset_package, tmp_path, hardware, monkeypatch):
+    credential = saved_credential(tmp_path)
+    before = credential.read_bytes()
+    def fail(*a): raise OSError('simulated storage failure')
+    monkeypatch.setattr(setup.os, 'replace', fail)
+    with pytest.raises(OSError):
+        reinitialize(reset_package, tmp_path)
+    assert hardware == []
+    assert credential.read_bytes() == before
+    assert list(credential.parent.iterdir()) == [credential]

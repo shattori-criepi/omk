@@ -13,6 +13,10 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "wifi_station.h"
+#include "node_registration.h"
+#include "node_state.h"
+#include "node_protocol.h"
+#include "nvs.h"
 
 #define USB_PROVISIONING_PROTOCOL_VERSION 2
 #define USB_PROVISIONING_LINE_MAX 256
@@ -105,6 +109,35 @@ static void handle_line(char *line) {
     if (reboot_scheduled) {
         cJSON_Delete(root);
         write_status("busy");
+        return;
+    }
+    if (strcmp(command->valuestring, "verify_reinitialize") == 0) {
+        /* Prove factory import completed before the host sends new Wi-Fi.
+         * Never return the PoP or log the credential-bearing request. */
+        const cJSON *secret = cJSON_GetObjectItemCaseSensitive(root, "provisioning_secret");
+        uint8_t saved[NODE_PROVISIONING_POP_LENGTH];
+        char saved_hex[NODE_PROVISIONING_POP_LENGTH * 2 + 1];
+        nvs_handle_t nvs;
+        esp_err_t err = nvs_open(NODE_NVS_NAMESPACE, NVS_READONLY, &nvs);
+        size_t length = sizeof(saved);
+        if (err == ESP_OK) {
+            err = nvs_get_blob(nvs, NODE_NVS_PROVISIONING_POP_KEY, saved, &length);
+            nvs_close(nvs);
+        }
+        bool valid = err == ESP_OK && length == sizeof(saved) && cJSON_IsString(secret);
+        if (valid) {
+            for (size_t i = 0; i < sizeof(saved); ++i) snprintf(saved_hex + i * 2, 3, "%02x", saved[i]);
+            valid = strcmp(saved_hex, secret->valuestring) == 0;
+        }
+        bool configured = true;
+        uint8_t state = OMK_NODE_PROVISIONING_STATE_REGISTERED;
+        valid = valid && wifi_station_has_saved_credentials(&configured) == ESP_OK && !configured &&
+                node_registration_get_provisioning_state(false, &state) == ESP_OK &&
+                state == OMK_NODE_PROVISIONING_STATE_UNREGISTERED;
+        memset(saved, 0, sizeof(saved));
+        memset(saved_hex, 0, sizeof(saved_hex));
+        cJSON_Delete(root);
+        write_status(valid ? "accepted" : "storage_error");
         return;
     }
     if (strcmp(command->valuestring, "clear_wifi") == 0) {

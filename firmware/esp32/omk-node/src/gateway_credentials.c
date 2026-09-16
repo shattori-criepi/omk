@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "nvs.h"
+#include "esp_wifi.h"
 
 #define OMK_GATEWAY_CREDENTIALS_NAMESPACE "omk_net"
 #define OMK_GATEWAY_CREDENTIALS_KEY "gw_cred"
@@ -94,6 +95,44 @@ esp_err_t gateway_credentials_clear(void) {
         else if (err == ESP_OK) err = ESP_FAIL;
     }
     if (nvs != 0) nvs_close(nvs);
+    return err;
+}
+
+/* The marker survives a power cut between factory import and Wi-Fi init.
+ * Clear ESP-IDF's STA configuration before any legacy migration or Mesh start.
+ * Do not erase the Wi-Fi namespace (calibration and other state may live there). */
+esp_err_t gateway_credentials_reset_for_setup(void) {
+    nvs_handle_t nvs;
+    esp_err_t err = nvs_open(OMK_GATEWAY_CREDENTIALS_NAMESPACE, NVS_READWRITE, &nvs);
+    if (err != ESP_OK) return err;
+    err = nvs_set_u8(nvs, "reset_sta", 1);
+    if (err == ESP_OK) err = nvs_commit(nvs);
+    uint8_t verified = 0;
+    if (err == ESP_OK) err = nvs_get_u8(nvs, "reset_sta", &verified);
+    nvs_close(nvs);
+    if (err != ESP_OK) return err;
+    if (verified != 1) return ESP_FAIL;
+    return gateway_credentials_clear();
+}
+
+esp_err_t gateway_credentials_clear_legacy_for_setup(void) {
+    nvs_handle_t nvs;
+    esp_err_t err = nvs_open(OMK_GATEWAY_CREDENTIALS_NAMESPACE, NVS_READWRITE, &nvs);
+    if (err != ESP_OK) return err;
+    uint8_t pending = 0;
+    err = nvs_get_u8(nvs, "reset_sta", &pending);
+    if (err == ESP_ERR_NVS_NOT_FOUND) err = ESP_OK;
+    if (err == ESP_OK && pending == 1) {
+        wifi_config_t empty = {0}, verified = {0};
+        err = esp_wifi_set_config(WIFI_IF_STA, &empty);
+        if (err == ESP_OK) err = esp_wifi_get_config(WIFI_IF_STA, &verified);
+        if (err == ESP_OK && (memcmp(empty.sta.ssid, verified.sta.ssid, sizeof(empty.sta.ssid)) != 0 ||
+                             memcmp(empty.sta.password, verified.sta.password, sizeof(empty.sta.password)) != 0 ||
+                             verified.sta.bssid_set)) err = ESP_FAIL;
+        if (err == ESP_OK) err = nvs_erase_key(nvs, "reset_sta");
+        if (err == ESP_OK) err = nvs_commit(nvs);
+    }
+    nvs_close(nvs);
     return err;
 }
 

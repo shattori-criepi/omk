@@ -306,6 +306,12 @@ static void mqtt_event_handler(void *arg, esp_event_base_t event_base,
         mqtt_disconnected_since_us = 0;
         mesh_network_log_diagnostics("MQTT connected", 0);
         ESP_LOGI(TAG, "MQTT connected");
+        if (!registration_is_persisted()) {
+            /* A reset Node must not replay an old broker's retained assignment.
+             * Publish deletions before subscribing on this ordered connection. */
+            clear_retained_registration_ack();
+            clear_retained_registration_config();
+        }
         if (esp_mqtt_client_subscribe(client, registration_config_topic, 1) < 0) {
             ESP_LOGW(TAG, "Could not subscribe to registration config");
         }

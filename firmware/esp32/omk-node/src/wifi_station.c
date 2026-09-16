@@ -47,6 +47,9 @@ esp_err_t wifi_station_prepare(bool *has_saved_credentials) {
         return err;
     }
 
+    err = gateway_credentials_clear_legacy_for_setup();
+    if (err != ESP_OK) return err;
+
     omk_gateway_credentials_t credentials;
     err = gateway_credentials_load(&credentials);
     if (err == ESP_OK) {

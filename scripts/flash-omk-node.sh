@@ -1,16 +1,23 @@
 #!/usr/bin/env bash
 set -euo pipefail
 usage() {
-  echo "usage: $0 [--initial-setup] <atom-s3-lite> <port>" >&2
+  echo "usage: $0 [--initial-setup | --reinitialize] <atom-s3-lite> <port>" >&2
   echo 'Default: update only with a saved Node credential.' >&2
   echo '--initial-setup: assert a known fresh, never-provisioned AtomS3 Lite; generate and write a NEW credential/PoP. Never use for recovery or an unknown Node.' >&2
+  echo '--reinitialize: DESTRUCTIVE re-setup of an existing AtomS3 Lite. Replace its PoP, clear Logical ID and old Wi-Fi, and provision this Gateway AP over USB. Node and attached sensors must be registered again. No old credential backup required. Retry with this same option after failure.' >&2
 }
 fail() { echo "$*" >&2; exit 1; }
 initial_setup=false
+reinitialize=false
 if [[ "${1:-}" == --initial-setup ]]; then
   initial_setup=true
   shift
 fi
+if [[ "${1:-}" == --reinitialize ]]; then
+  reinitialize=true
+  shift
+fi
+if "$initial_setup" && "$reinitialize"; then usage; exit 2; fi
 if [[ "${1:-}" == --help || "${1:-}" == -h ]]; then usage; exit 0; fi
 env_name="${1:-}"; port="${2:-}"
 [[ -n "$env_name" ]] || { usage; exit 2; }
@@ -37,6 +44,12 @@ fi
 # A first build installs the platform and its tools. Do not resolve esptool
 # before this step: a new PlatformIO Core directory need not contain it yet.
 "${pio[@]}" run -d "$project" -e "$env_name" || fail 'PlatformIO firmware build failed; flashing was not started.'
+if "$reinitialize"; then
+  printf '%s\n' 'REINITIALIZE: replacing Node provisioning credential, clearing Logical ID and old Wi-Fi, and configuring this Gateway Wi-Fi. Register the Node/attached sensors again afterward.' >&2
+  setup_python="${SYSTEM_MANAGER_PYTHON:-$root/services/system-manager/.venv/bin/python}"
+  [[ -x "$setup_python" ]] || fail 'System-manager Python is required (esptool installed); set SYSTEM_MANAGER_PYTHON.'
+  exec "$setup_python" "$root/scripts/reinitialize_omk_node.py" --reinitialize --device "$port" --build-dir "$project/.pio/build/$env_name"
+fi
 esptool_py="${ESPTOOL_PY:-}"
 if [[ -z "$esptool_py" ]]; then
   # Use the same package resolver as espressif32's uploader, including project
@@ -113,7 +126,7 @@ if [[ -e "$credential" || -L "$credential" ]]; then
   [[ -f "$credential" && ! -L "$credential" ]] || fail 'Saved credential is not a regular file. No firmware or credential/PoP write was started; restore the original credential.'
   "$initial_setup" && fail 'A saved credential already exists. No firmware or credential/PoP write was started. Use normal update without --initial-setup; do not delete the credential.'
   # A corrupt/wrong backup is not permission to create a replacement secret.
-  "$platformio_python" - "$credential" "$node_id" <<'PY' || fail 'Saved credential is invalid or unreadable. No firmware or credential/PoP write was started; restore the original credential from the previous Gateway.'
+  "$platformio_python" - "$credential" "$node_id" <<'PY' || fail 'Saved credential is invalid, unreadable or re-setup is pending. No firmware or credential/PoP write was started; use --reinitialize to explicitly reset or retry this Node.'
 import json
 import re
 import sys
@@ -124,6 +137,7 @@ try:
     valid = (isinstance(record, dict)
              and record.get("node_id") == sys.argv[2]
              and record.get("board") == "atom-s3-lite"
+             and record.get("setup_state") != "reinitialize_pending"
              and isinstance(record.get("provisioning_secret"), str)
              and re.fullmatch(r"[0-9a-fA-F]{64}", record["provisioning_secret"]))
 except (OSError, ValueError):
@@ -131,7 +145,7 @@ except (OSError, ValueError):
 sys.exit(0 if valid else 1)
 PY
 elif ! "$initial_setup"; then
-  fail "No saved Gateway credential for Node ${node_id}. Cannot safely update: missing credential does not prove a fresh Node. No firmware was written; credential/PoP and NVS were not changed by this script. Restore data/provisioning/nodes/${node_id}.json from the previous Gateway or backup, then retry. Only for a known fresh, never-provisioned AtomS3 Lite, use --initial-setup. If its history is unknown, stop; do not initialize or erase it."
+  fail "No saved Gateway credential for Node ${node_id}. Cannot safely update: missing credential does not prove a fresh Node. No firmware was written; credential/PoP and NVS were not changed by this script. To intentionally replace this existing Node's credential and clear Wi-Fi/Logical ID, use --reinitialize. Only for a known fresh, never-provisioned AtomS3 Lite, use --initial-setup."
 fi
 mkdir -p "$store" || fail 'Cannot create provisioning credential directory.'
 chmod 700 "$root/data/provisioning" "$store" || fail 'Cannot secure provisioning credential directory.'

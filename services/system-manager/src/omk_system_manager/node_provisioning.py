@@ -334,6 +334,11 @@ def clear_wifi(device: str, timeout: float = 10, *, expected_node_id: str) -> st
     return _change_wifi(device, expected_node_id, "clear_wifi", {}, timeout)
 
 
+def verify_reinitialize(device: str, secret: str, *, expected_node_id: str) -> str:
+    return _change_wifi(device, expected_node_id, "verify_reinitialize",
+                        {"provisioning_secret": secret}, 10)
+
+
 def wait_for_rebooted_identify(device: str, node_id: str, timeout: float = 60) -> None:
     """Wait past the scheduled reboot, then prove the same USB Node returned."""
     deadline = time.monotonic() + timeout
@@ -355,7 +360,7 @@ def find_usb_node_by_id(node_id: str, timeout: float = 3) -> tuple[str, str]:
     return str(matches[0]["device"]), node_id
 
 
-def wait_for_registration_status(node_id: str, broker: str = DEFAULT_MQTT_BROKER, timeout: float = 60, *, fresh: bool = False) -> None:
+def wait_for_registration_status(node_id: str, broker: str = DEFAULT_MQTT_BROKER, timeout: float = 60, *, fresh: bool = False, expected_state: str | None = None) -> None:
     process = subprocess.Popen(["mosquitto_sub", *(["-R"] if fresh else []), "-h", broker, "-C", "1", "-W", str(int(timeout)), "-t", f"omk/node/{node_id}/registration/status"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
     try:
         message, _ = process.communicate(timeout=timeout + 2)
@@ -368,7 +373,9 @@ def wait_for_registration_status(node_id: str, broker: str = DEFAULT_MQTT_BROKER
         status = json.loads(message)
     except json.JSONDecodeError:
         raise ProvisioningError("mqtt_registration_timeout") from None
-    if status.get("node_id") != node_id or status.get("registration_state") not in {"provisioned", "registered"}:
+    if (status.get("node_id") != node_id or status.get("registration_state") not in {"provisioned", "registered"}
+            or (expected_state is not None and status.get("registration_state") != expected_state)
+            or (expected_state == "provisioned" and status.get("logical_id") is not None)):
         raise ProvisioningError("mqtt_registration_timeout")
 
 

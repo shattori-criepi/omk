@@ -579,3 +579,23 @@ def test_usb_setup_job_auth_conflicts_and_polling(tmp_path, monkeypatch):
         assert 'secret-psk' not in status.text and '02:00' not in status.text
         assert not client.app.state.usb_node_serial_access_lock.locked()
         assert not client.app.state.usb_node_provision_operation_lock.locked()
+
+
+def test_reinitialize_api_requires_explicit_typed_confirmation_and_separate_route(tmp_path, monkeypatch):
+    from omk_system_manager import node_setup
+    calls = []
+    def work(device, node_id, confirmed, stage, **kwargs):
+        calls.append((device, node_id, confirmed, kwargs))
+    monkeypatch.setattr(node_setup, 'setup', work)
+    body = dict(device='/dev/ttyACM0', node_id='000000000001')
+    with client_for(tmp_path) as client:
+        endpoint = '/api/nodes/usb-reinitialize'
+        assert client.post(endpoint, json={**body, 'confirm_reinitialize': True}).status_code == 401
+        for fields in ({}, {'confirm_reinitialize': False}, {'confirm_reinitialize': 'true'}, {'confirm_reinitialize': 1}, {'confirm_atom_s3_lite': True}):
+            assert client.post(endpoint, headers=headers(), json={**body, **fields}).status_code == 400
+        assert client.post('/api/nodes/usb-setup', headers=headers(), json={**body, 'confirm_reinitialize': True}).status_code == 400
+        assert calls == []
+        assert client.post(endpoint, headers=headers(), json={**body, 'confirm_reinitialize': True}).status_code == 202
+        client.app.state.usb_node_setup.worker.join(3)
+        assert calls == [(body['device'], body['node_id'], True, {'reinitialize': True})]
+        assert client.get('/api/nodes/usb-setup/status', headers=headers()).json()['stage'] == 'completed'

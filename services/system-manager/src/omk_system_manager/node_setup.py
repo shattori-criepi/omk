@@ -120,6 +120,58 @@ def selected_device(device: str) -> str:
     raise ProvisioningError('node_not_available')
 
 
+def read_credential(store: Path, node_id: str) -> dict | None:
+    path = store / f'{node_id}.json'
+    if not os.path.lexists(path):
+        return None
+    try:
+        value = json.loads(regular_bytes(path, 4096))
+        if (not isinstance(value, dict) or value.get('node_id') != node_id or
+                value.get('board') != 'atom-s3-lite' or
+                not isinstance(value.get('provisioning_secret'), str) or
+                not re.fullmatch('[0-9a-fA-F]{64}', value['provisioning_secret'])):
+            raise ValueError('credential')
+        return value
+    except (OSError, ValueError, ProvisioningError):
+        raise ProvisioningError('credential_store_invalid') from None
+
+
+def credential_state(store: Path, node_id: str) -> str:
+    try:
+        value = read_credential(store, node_id)
+    except ProvisioningError:
+        return 'invalid'
+    if value is None:
+        return 'missing'
+    return 'reinitialize_pending' if value.get('setup_state') == 'reinitialize_pending' else 'present'
+
+
+def save_reinitialize_credential(store: Path, value: dict) -> None:
+    """Durable publication before hardware writes; pending retries reuse this PoP."""
+    target = store / f"{value['node_id']}.json"
+    if any(path.is_symlink() for path in (target, store, *store.parents)):
+        raise ProvisioningError('credential_store_invalid')
+    store.mkdir(parents=True, exist_ok=True, mode=0o700)
+    store.chmod(0o700)
+    store.parent.chmod(0o700)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode='w', dir=store, delete=False) as stream:
+            temporary = Path(stream.name)
+            json.dump(value, stream)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, target)
+        directory = os.open(store, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
 def setup_candidates(timeout: float = 3) -> list[dict]:
     result = []
     seen = set()
@@ -140,7 +192,8 @@ def setup_candidates(timeout: float = 3) -> list[dict]:
             raise ProvisioningError('ambiguous_node_identity')
         seen.add(node_id)
         result.append(dict(device=canonical, node_id=node_id, kind=kind,
-                           wifi_configured=bool(identity and identity.get('wifi_configured'))))
+                           wifi_configured=bool(identity and identity.get('wifi_configured')),
+                           credential_state=credential_state(STORE, node_id)))
     return result
 
 
@@ -168,9 +221,15 @@ def wait_for_node(device: str, node_id: str, timeout: float = 60) -> None:
 
 
 def setup(device: str, node_id: str, confirmed: bool, stage, *, package: Path = PACKAGE,
-          store: Path = STORE) -> None:
+          store: Path = STORE, reinitialize: bool = False) -> None:
+    if reinitialize and confirmed is not True:
+        raise ProvisioningError('reinitialize_confirmation_required')
     stage('validating_firmware')
     files = validate_package(package)  # Before any USB access, even identify.
+    if reinitialize and b'verify_reinitialize\x00' not in files['firmware.bin']:
+        raise ProvisioningError('reinitialize_firmware_required')
+    # Fetch AP configuration before any destructive operation.
+    new_wifi = usb.read_gateway_wifi() if reinitialize else None
     stage('checking_device')
     device = selected_device(device)
     if not usb.valid_node_id(node_id) or not allowed(device):
@@ -180,7 +239,11 @@ def setup(device: str, node_id: str, confirmed: bool, stage, *, package: Path = 
     if node_id_from_mac(mac) != node_id or (identity and identity['node_id'] != node_id):
         raise ProvisioningError('node_identity_changed')
     credential = store / f'{node_id}.json'
-    if not identity:
+    if not reinitialize and identity:
+        state = credential_state(store, node_id)
+        if state != 'present':
+            raise ProvisioningError('reinitialize_required' if state == 'missing' else 'credential_store_invalid')
+    elif not reinitialize:
         if os.path.lexists(credential):
             raise ProvisioningError('recovery_required')
         if confirmed is not True:
@@ -189,7 +252,22 @@ def setup(device: str, node_id: str, confirmed: bool, stage, *, package: Path = 
         snapshot = Path(temporary)
         for filename, content in files.items():
             (snapshot / filename).write_bytes(content)
-        if not identity:
+        if reinitialize:
+            # Explicit consent permits replacement; a partial retry never rotates again.
+            state = credential_state(store, node_id)
+            saved = read_credential(store, node_id) if state == 'reinitialize_pending' else None
+            if saved is None:
+                saved = dict(node_id=node_id, provisioning_secret=secrets.token_hex(32),
+                             board='atom-s3-lite', setup_state='reinitialize_pending')
+            confirm_identity(device, mac)
+            save_reinitialize_credential(store, saved)
+            record = snapshot / 'factory.bin'
+            record.write_bytes(b'OMKR' + bytes.fromhex(saved['provisioning_secret']))
+            record.chmod(0o600)
+            stage('reinitializing_node')
+            confirm_identity(device, mac)
+            esptool(device, ['--after', 'no_reset', '--chip', 'esp32s3', 'write_flash', '0xf000', str(record)], 'factory_write_failed')
+        elif not identity:
             secret = secrets.token_bytes(32)
             record = snapshot / 'factory.bin'
             record.write_bytes(b'OMKP' + secret)
@@ -232,8 +310,11 @@ def setup(device: str, node_id: str, confirmed: bool, stage, *, package: Path = 
         # eFuse continuity after re-enumeration; read_mac reboots the device again.
         confirm_identity(device, mac, stay_in_bootloader=False)
         wait_for_node(device, node_id)
+        if reinitialize:
+            stage('verifying_reinitialize')
+            usb.verify_reinitialize(device, saved['provisioning_secret'].lower(), expected_node_id=node_id)
         stage('configuring_wifi')
-        ssid, password = usb.read_gateway_wifi()
+        ssid, password = new_wifi if new_wifi is not None else usb.read_gateway_wifi()
         try:
             usb.provision(device, ssid, password, expected_node_id=node_id)
         except ProvisioningError:
@@ -242,8 +323,12 @@ def setup(device: str, node_id: str, confirmed: bool, stage, *, package: Path = 
             raise ProvisioningError('set_wifi_failed') from None
         stage('waiting_for_registration')
         usb.wait_for_registration_status(
-            node_id, timeout=MQTT_REGISTRATION_TIMEOUT_SECONDS, fresh=True
+            node_id, timeout=MQTT_REGISTRATION_TIMEOUT_SECONDS, fresh=True,
+            **({'expected_state': 'provisioned'} if reinitialize else {})
         )
+        if reinitialize:
+            saved.pop('setup_state', None)
+            save_reinitialize_credential(store, saved)
 
 
 class SetupController:
@@ -262,12 +347,12 @@ class SetupController:
         with self.lock:
             self.state['stage'] = value
 
-    def start(self, device, node_id, confirmed):
+    def start(self, device, node_id, confirmed, *, reinitialize=False):
         if not self.operation_lock.acquire(blocking=False):
             return False
         with self.lock:
             self.state = {'stage': 'validating_firmware', 'node_id': node_id, 'error': None}
-        self.worker = threading.Thread(target=self.run, args=(device, node_id, confirmed), daemon=True)
+        self.worker = threading.Thread(target=self.run, args=(device, node_id, confirmed, reinitialize), daemon=True)
         try:
             self.worker.start()
         except Exception:
@@ -276,12 +361,12 @@ class SetupController:
             raise
         return True
 
-    def run(self, device, node_id, confirmed):
+    def run(self, device, node_id, confirmed, reinitialize=False):
         try:
             if not self.serial_lock.acquire(timeout=30):
                 raise ProvisioningError('serial_busy')
             try:
-                setup(device, node_id, confirmed, self.stage)
+                setup(device, node_id, confirmed, self.stage, **({"reinitialize": True} if reinitialize else {}))
             finally:
                 self.serial_lock.release()
             self.stage('completed')

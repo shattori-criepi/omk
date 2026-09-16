@@ -16,12 +16,14 @@
 #include "sensor_manager.h"
 #include "usb_provisioning.h"
 #include "wifi_station.h"
+#include "gateway_credentials.h"
 
 #ifdef OMK_DEVELOPMENT_SET_WIFI_CREDENTIALS
 #include "development_wifi_config.h"
 #endif
 
 #define FACTORY_MAGIC "OMKP"
+#define REINITIALIZE_MAGIC "OMKR"
 #define POP_BYTES 32
 static const char *TAG = "omk-node";
 
@@ -32,7 +34,16 @@ typedef struct __attribute__((packed)) { char magic[4]; unsigned char pop[POP_BY
 static void import_factory_pop(void) {
     const esp_partition_t *part = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, 0x40, "factory_secret");
     factory_secret_t source, verified;
-    if (!part || esp_partition_read(part, 0, &source, sizeof(source)) != ESP_OK || memcmp(source.magic, FACTORY_MAGIC, 4)) return;
+    if (!part || esp_partition_read(part, 0, &source, sizeof(source)) != ESP_OK) return;
+    bool reinitialize = memcmp(source.magic, REINITIALIZE_MAGIC, 4) == 0;
+    if (!reinitialize && memcmp(source.magic, FACTORY_MAGIC, 4)) return;
+    /* OMKR is written only after explicit destructive confirmation. Keep the
+     * record until every selective reset and PoP read-back succeeds. Retrying
+     * after power loss is safe, even if the new PoP was already committed. */
+    if (reinitialize) {
+        ESP_ERROR_CHECK(node_registration_clear());
+        ESP_ERROR_CHECK(gateway_credentials_reset_for_setup());
+    }
     nvs_handle_t nvs;
     ESP_ERROR_CHECK(nvs_open(NODE_NVS_NAMESPACE, NVS_READWRITE, &nvs));
     size_t length = sizeof(verified.pop);

@@ -295,7 +295,7 @@ def test_existing_node_identify_uses_fresh_response_without_inspection(monkeypat
     monkeypatch.setattr(setup, 'read_mac', lambda *_: pytest.fail('identified OMK Node inspected'))
     monkeypatch.setattr(setup, 'STORE', tmp_path)
     assert setup.setup_candidates(timeout=3) == [{'device': '/dev/ttyACM0', 'node_id': identity['node_id'],
-                                                      'kind': 'omk_node', 'wifi_configured': True}]
+                                                      'kind': 'omk_node', 'wifi_configured': True, 'credential_state': 'missing'}]
     assert_closed(serial_env)
 
 
@@ -422,7 +422,7 @@ def test_repeated_blank_scans_flush_before_close_and_inspection(monkeypatch, ser
         candidates = scan_usb_candidates_with_serial_lock(serial_lock, lambda: setup.setup_candidates(timeout=3))
         assert serial_env.clock.now - started == pytest.approx(3)
         assert candidates == [{'device': '/dev/ttyACM0', 'node_id': setup.node_id_from_mac('00:11:22:33:44:55'),
-                               'kind': 'unconfirmed_esp32s3', 'wifi_configured': False}]
+                               'kind': 'unconfirmed_esp32s3', 'wifi_configured': False, 'credential_state': 'missing'}]
         assert not serial_lock.locked()
     assert len(inspected) == 3
 

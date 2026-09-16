@@ -373,8 +373,8 @@ def test_missing_credential_never_authorizes_update(flash, history):
     assert flash.events() == ["build", "resolve", "mac"]
     assert not flash.credential.parent.exists()
     for message in ("No saved Gateway credential", "No firmware was written",
-                    "credential/PoP and NVS were not changed", "previous Gateway or backup",
-                    "--initial-setup", "history is unknown"):
+                    "credential/PoP and NVS were not changed", "--reinitialize",
+                    "--initial-setup", "clear Wi-Fi/Logical ID"):
         assert message in result.stderr
 
 
@@ -443,3 +443,38 @@ def test_concurrent_credential_creation_stops_before_factory_write(flash):
     assert flash.credential.read_text() == original
     assert flash.events() == ["build", "resolve", "mac", "secret", "mac"]
     assert "no factory write was started" in result.stderr
+
+
+def test_reinitialize_dispatches_only_explicit_operation_to_shared_setup(flash):
+    runner = flash.bin / 'setup-python'
+    runner.write_text(f'#!{sys.executable}\n' + '''import os, pathlib, sys
+args = sys.argv[1:]
+assert pathlib.Path(args[0]).name == 'reinitialize_omk_node.py'
+assert args[1:4] == ['--reinitialize', '--device', '/dev/fake port']
+assert args[4] == '--build-dir'
+assert args[5].endswith('/firmware/esp32/omk-node/.pio/build/atom-s3-lite')
+with open(os.environ['EVENTS'], 'a') as log: log.write('reinitialize\\n')
+''')
+    runner.chmod(0o755)
+    result = flash.run(['--reinitialize', 'atom-s3-lite', '/dev/fake port'], SYSTEM_MANAGER_PYTHON=str(runner))
+    assert result.returncode == 0, result.stderr
+    assert flash.events() == ['build', 'reinitialize']
+    for message in ('REINITIALIZE', 'Logical ID', 'Wi-Fi', 'Register the Node/attached sensors'):
+        assert message in result.stderr
+
+
+def test_initial_and_reinitialize_cannot_be_combined(flash):
+    result = flash.run(['--initial-setup', '--reinitialize', 'atom-s3-lite', '/dev/fake port'])
+    assert result.returncode != 0
+    assert flash.events() == []
+
+
+def test_pending_reinitialize_cannot_be_completed_as_ordinary_update(flash):
+    flash.credential.parent.mkdir(parents=True)
+    original = json.dumps(dict(node_id=NODE_ID, provisioning_secret=SECRET, board='atom-s3-lite', setup_state='reinitialize_pending'))
+    flash.credential.write_text(original)
+    result = flash.run()
+    assert result.returncode != 0
+    assert flash.credential.read_text() == original
+    assert not {'upload', 'factory', 'secret'} & set(flash.events())
+    assert '--reinitialize' in result.stderr

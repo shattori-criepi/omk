@@ -161,3 +161,16 @@ def test_old_retained_status_cannot_undo_explicit_removal(manager):
     manager.request_node_registration(NODE, "sen66-002")
     ack(manager, "sen66-002")
     assert manager.node_registry.list()[NODE]["logical_id"] == "sen66-002"
+
+
+def test_reinitialized_node_detects_sen66_and_can_register_again(manager):
+    status(manager, logical_id='old-sen66')
+    status(manager, registration_state='provisioned', connected_sensors=['sen66'])
+    node = manager.node_list()[0]
+    assert node['registration_state'] == 'provisioned'
+    assert node.get('logical_id') is None
+    assert node['attached_sensors'] == ['SEN66']
+    manager.request_node_registration(NODE, 'sen66-001')
+    ack(manager, 'sen66-001')
+    status(manager, logical_id='sen66-001')
+    assert manager.node_registry.list()[NODE]['logical_id'] == 'sen66-001'

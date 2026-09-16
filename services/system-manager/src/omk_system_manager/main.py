@@ -130,6 +130,10 @@ class UsbNodeSetupRequest(UsbNodeProvisionRequest):
     confirm_atom_s3_lite: bool = Field(default=False, strict=True)
 
 
+class UsbNodeReinitializeRequest(UsbNodeProvisionRequest):
+    confirm_reinitialize: bool = Field(strict=True)
+
+
 USB_NODE_MESSAGES = {
     "node_not_available": "対象のUSB接続Nodeを確認できません。接続を確認して再読み込みしてください。",
     "gateway_credential_unavailable": "GatewayのWi-Fi設定を取得できませんでした。",
@@ -354,6 +358,14 @@ def create_app(
     @app.get("/api/nodes/usb-setup/status", dependencies=[Depends(authenticated)])
     def setup_usb_node_status(request: Request) -> dict:
         return request.app.state.usb_node_setup.status()
+
+    @app.post("/api/nodes/usb-reinitialize", dependencies=[Depends(authenticated)], status_code=202)
+    def reinitialize_usb_node(request: Request, body: UsbNodeReinitializeRequest) -> dict:
+        if body.confirm_reinitialize is not True:
+            raise HTTPException(400, detail="Nodeの既存設定を消去する再セットアップの確認が必要です")
+        if not request.app.state.usb_node_setup.start(body.device, body.node_id, True, reinitialize=True):
+            raise HTTPException(409, detail="別のNodeを設定中です")
+        return {"accepted": True, "node_id": body.node_id}
 
     @app.post("/api/nodes/usb-provision", dependencies=[Depends(authenticated)])
     def provision_usb_node(request: Request, body: UsbNodeProvisionRequest) -> dict[str, str | bool]:

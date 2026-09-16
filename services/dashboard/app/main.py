@@ -452,6 +452,11 @@ async def usb_setup_status() -> dict:
     return await _system_manager_request("GET", "/api/nodes/usb-setup/status")
 
 
+@app.post("/api/admin/setup/usb-reinitialize", status_code=202)
+async def reinitialize_usb_node(request: Request) -> dict:
+    return await _system_manager_request("POST", "/api/nodes/usb-reinitialize", await request.json())
+
+
 @app.post("/api/admin/setup/usb-provision")
 async def provision_usb_node(request: Request) -> dict:
     return await _system_manager_request("POST", "/api/nodes/usb-provision", await request.json())

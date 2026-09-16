@@ -2557,3 +2557,14 @@ def test_small_stacked_css_has_one_column_and_separates_labels_from_values():
     assert ".display-stacked-reading {" in css
     assert '.display-stacked-reading [data-role="value"] {' in css
     assert '.display-stacked-reading [data-role="unit"] {' in css
+
+
+def test_usb_reinitialize_proxy_keeps_destructive_request_separate(monkeypatch):
+    body = dict(device='/dev/ttyACM0', node_id='000000000001', confirm_reinitialize=True)
+    calls = []
+    async def request(method, path, payload=None):
+        calls.append((method, path, payload))
+        return {'accepted': True}
+    monkeypatch.setattr(dashboard_main, '_system_manager_request', request)
+    assert client.post('/api/admin/setup/usb-reinitialize', json=body).status_code == 202
+    assert calls == [('POST', '/api/nodes/usb-reinitialize', body)]

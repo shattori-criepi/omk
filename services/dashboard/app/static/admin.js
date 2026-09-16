@@ -60,10 +60,13 @@ async function loadRegistered() { try { const data = await api("/sensors"); regi
 function nodeCard(node) { const caps = (node.capabilities || []).map(cap => cap === "ble_scan" ? "BLE relay対応" : cap === "sen66" ? "SEN66対応" : cap).join(" · ") || "なし"; const usbCandidate = usbCandidatesByNodeId.get(node.node_id); const unconfirmedUsbCandidate = usbCandidate?.kind === "unconfirmed_esp32s3"; const usbStatePending = !usbCandidatesInitialized && !node.online; const capabilities = unconfirmedUsbCandidate ? "セットアップ後に確認" : caps; const state = usbCandidate ? (usbCandidate.wifi_configured ? "Wi-Fi設定済み" : "未設定") : usbStatePending ? "確認中" : node.registration_state === "registered" ? "登録済み" : node.registration_state === "provisioned" ? "Wi-Fi設定済み" : "未設定"; const pending = pendingNodeRegistration?.nodeId === node.node_id || node.request_state === "request_sent"; const attachedSensors = unconfirmedUsbCandidate || usbStatePending ? [] : (node.attached_sensors?.length ? node.attached_sensors : (node.connected_sensors || [])); const hasAttachedSensor = attachedSensors.length > 0; const logicalControlsAvailable = !unconfirmedUsbCandidate && !usbStatePending && !usbProvisioningInProgress; const body = !logicalControlsAvailable ? "" : node.registration_state === "provisioned" ? !hasAttachedSensor ? "<p>SEN66を接続している場合は自動検出を待っています。検出後にLogical ID登録操作が表示されます。SEN66を使用しないNodeではLogical ID登録は不要です。</p>" : pending ? "<p>Logical IDの登録要求を送信しました。Nodeの状態更新を待っています。</p>" : `<div class="logical-id-summary"><p class="logical-id-label">Logical ID: 未登録</p></div><button class="edit-node-logical-id register-node" data-node-id="${text(node.node_id)}">Logical IDを登録</button>` : node.registration_state === "registered" ? `<div class="logical-id-summary"><p class="logical-id-label">Logical ID</p><p class="logical-id-value">${text(node.logical_id)}</p></div><button class="edit-node-logical-id register-node" data-node-id="${text(node.node_id)}" data-logical-id="${text(node.logical_id)}">Logical IDを変更</button><button class="remove-node-registration" data-node-id="${text(node.node_id)}" data-logical-id="${text(node.logical_id)}">Logical ID登録を解除</button>` : ""; const sensors = unconfirmedUsbCandidate ? "セットアップ後に確認" : usbStatePending ? "確認中" : hasAttachedSensor ? `SEN66（${node.online ? "検出済み" : "検出情報あり"}）` : "未検出"; return `<article class="sensor-card"><h2>OMK Node</h2><p>Node ID: ${text(node.node_id)}</p><p>接続: ${usbCandidate ? "USB接続" : node.online ? "オンライン" : "最終状態のみ"} · Wi-Fi: ${state}</p><p>対応機能: ${capabilities}</p><p>接続センサ: ${sensors}</p><p>BLE relay: ${node.relay_active ? "稼働中" : "未確認"}</p><p>最終検出: ${text(node.last_seen || node.mqtt_status_seen_at)}</p><span class="sensor-state sensor-state--${node.online ? "normal" : "offline"}">${state}</span>${usbSetupControls(usbCandidate)}${body}</article>`; }
 function usbSetupControls(candidate) {
     if (!candidate) return "";
-    if (candidate.kind === "recovery_required") return "<p>復旧が必要です。保存済みcredentialがあるため初回書込みを停止しました。</p>";
     const unconfirmed = candidate.kind === "unconfirmed_esp32s3";
     const deviceAttribute = String(candidate.device).replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
-    return `${unconfirmed ? `<p>USB接続されたNode候補：ESP32-S3を検出 · OMK firmware未確認</p><label><input type="checkbox" class="confirm-atom" data-node-id="${text(candidate.node_id)}" ${usbProvisioningInProgress ? "disabled" : ""}>接続した機器が未セットアップのAtomS3 Liteであることを確認しました</label>` : ''}<p>Gatewayに配置済みのfirmwareを書き込み、Wi-Fiを設定します。</p><button class="provision-usb-node" data-device="${deviceAttribute}" data-node-id="${text(candidate.node_id)}" data-unconfirmed="${unconfirmed}" ${usbProvisioningInProgress ? "disabled" : ""}>${usbProvisioningInProgress ? "セットアップ中…" : "OMK Nodeをセットアップ"}</button>`;
+    const blocked = candidate.kind === "recovery_required" || (!unconfirmed && candidate.credential_state && candidate.credential_state !== "present");
+    const resetLabel = candidate.credential_state === "reinitialize_pending" ? "OMK Nodeの再セットアップを再試行" : "OMK Nodeを再セットアップ";
+    const reset = `<button class="provision-usb-node" data-device="${deviceAttribute}" data-node-id="${text(candidate.node_id)}" data-reinitialize="true" ${usbProvisioningInProgress ? "disabled" : ""}>${usbProvisioningInProgress ? "セットアップ中…" : resetLabel}</button>`;
+    if (blocked) return `<p>既存または途中状態のNodeです。通常セットアップに必要な管理情報がない、または未完了のため、明示的な再セットアップで設定をやり直せます。</p>${reset}`;
+    return `${unconfirmed ? `<p>USB接続されたNode候補：ESP32-S3を検出 · OMK firmware未確認</p><label><input type="checkbox" class="confirm-atom" data-node-id="${text(candidate.node_id)}" ${usbProvisioningInProgress ? "disabled" : ""}>接続した機器が未セットアップのAtomS3 Liteであることを確認しました</label>` : ''}<p>Gatewayに配置済みのfirmwareを書き込み、Wi-Fiを設定します。</p><button class="provision-usb-node" data-device="${deviceAttribute}" data-node-id="${text(candidate.node_id)}" data-unconfirmed="${unconfirmed}" ${usbProvisioningInProgress ? "disabled" : ""}>${usbProvisioningInProgress ? "セットアップ中…" : "OMK Nodeをセットアップ"}</button>${reset}`;
 }
 function saveNodeInputState() { const saved = {}; nodes.querySelectorAll(".confirm-atom").forEach(input => { saved[input.dataset.nodeId] = {confirmAtom: input.checked}; }); return saved; }
 function restoreNodeInputState(saved) { Object.entries(saved).forEach(([nodeId, state]) => { const confirmation = nodes.querySelector(`.confirm-atom[data-node-id="${nodeId}"]`); if (confirmation && state.confirmAtom === true) confirmation.checked = true; }); }
@@ -110,8 +113,12 @@ start.onclick = async () => { try { await api("/setup/scan", {method: "POST"}); 
 stop.onclick = async () => { await api("/setup/scan", {method: "DELETE"}); finish("探索を中止しました。"); };
 candidates.onclick = async (event) => { const button = event.target.closest(".register"); if (!button) return; selectedDeviceKey = button.dataset.key; confirmedModel = button.dataset.confirmedModel || null; document.querySelector("#register-device").textContent = `対象: ${selectedDeviceKey}`; registerError.hidden = true; form.reset(); const confirmation = document.querySelector("#confirm-unconfirmed-model"); confirmation.checked = false; confirmation.required = Boolean(confirmedModel); document.querySelector("#unconfirmed-model-confirmation").hidden = !confirmedModel; document.querySelector("#confirmed-model-name").textContent = confirmedModel ? unconfirmedModelName(confirmedModel) : ""; try { document.querySelector("#sensor-id").value = (await api(`/setup/suggested-sensor-id?device_key=${encodeURIComponent(selectedDeviceKey)}${confirmedModel ? "&confirmed_model=" + encodeURIComponent(confirmedModel) : ""}`)).sensor_id; } catch (error) { registerError.textContent = error.message; registerError.hidden = false; } dialog.showModal(); document.querySelector("#sensor-id").focus(); };
 async function submitNodeRegistration(nodeId, logicalId, changing) { if (pendingNodeRegistration) return; if (!validLogicalId(logicalId)) { statusLine.textContent = "Logical IDは1〜48文字の英数字、-、_で入力してください。"; statusLine.className = "setup-status error"; return; } try { await api(`/nodes/${encodeURIComponent(nodeId)}/register`, {method: "POST", body: JSON.stringify({logical_id: logicalId})}); statusLine.className = "setup-status"; statusLine.textContent = changing ? "Logical IDを変更しています…" : "Logical IDを登録しています…"; beginRegistrationPoll(nodeId, logicalId, changing); await pollRegistration(); } catch (error) { statusLine.textContent = error.message; statusLine.className = "setup-status error"; } }
-const usbSetupStages = {idle: "待機中", validating_firmware: "firmware package確認", checking_device: "USB機器確認", flashing_factory: "初回factory設定", flashing_firmware: "firmware書込み", waiting_for_node: "Node再起動／再認識", configuring_wifi: "Wi-Fi設定", waiting_for_registration: "OMK接続確認", completed: "セットアップ完了", failed: "セットアップ失敗"};
+const usbSetupStages = {reinitializing_node: "Nodeの既存設定を初期化しています", verifying_reinitialize: "新しい管理情報と登録解除を確認しています", idle: "待機中", validating_firmware: "firmware package確認", checking_device: "USB機器確認", flashing_factory: "初回factory設定", flashing_firmware: "firmware書込み", waiting_for_node: "Node再起動／再認識", configuring_wifi: "Wi-Fi設定", waiting_for_registration: "OMK接続確認", completed: "セットアップ完了", failed: "セットアップ失敗"};
 const usbSetupErrors = {
+    reinitialize_required: "管理情報がない既存Nodeです。「再セットアップ」から設定をやり直してください。",
+    reinitialize_confirmation_required: "既存設定を消去する再セットアップの確認が必要です。",
+    reinitialize_firmware_required: "配置済みfirmwareが再セットアップに未対応です。対応packageを配置してください。",
+    credential_store_invalid: "管理情報が不正または再セットアップが途中です。再セットアップから再試行してください。",
     firmware_package_missing: "Gatewayのfirmware packageがありません。管理者に配置を確認してください。",
     firmware_package_invalid: "Gatewayのfirmware packageを検証できません。管理者に確認してください。",
     node_not_available: "対象のUSB機器が見つかりません。接続を確認してください。",
@@ -120,15 +127,14 @@ const usbSetupErrors = {
     ambiguous_mac: "機器を一意に識別できません。対象機器の接続を確認してください。",
     node_identity_changed: "対象機器の同一性を確認できないため停止しました。",
     atom_s3_lite_confirmation_required: "未セットアップのAtomS3 Lite実物確認が必要です。",
-    recovery_required: "保存済みの管理情報があります。削除せず管理者に復旧を依頼してください。",
-    credential_store_invalid: "管理情報の保存先が不正です。管理者に確認してください。",
-    factory_write_failed: "初回の秘密情報書込みに失敗しました。保存済みの管理情報を残して復旧してください。",
+    recovery_required: "初回セットアップはできません。既存Nodeとして再セットアップを選択してください。",
+    factory_write_failed: "初回/再セットアップの管理情報書込みに失敗しました。保存済み情報を残し、再セットアップから再試行できます。",
     firmware_write_failed: "firmware書込みに失敗しました。管理情報を削除せず接続を確認してください。",
     node_reappearance_timeout: "再起動後のNodeを確認できませんでした。接続を確認してください。",
     unsupported_usb_protocol: "NodeのUSB設定protocolを確認できませんでした。",
     gateway_credential_unavailable: "GatewayのWi-Fi設定を取得できませんでした。",
     set_wifi_failed: "NodeへWi-Fi設定を送信できませんでした。",
-    storage_error: "NodeがWi-Fi設定を保存できませんでした。",
+    storage_error: "Nodeの設定保存または再セットアップの検証に失敗しました。",
     restart_error: "Nodeが再起動を開始できませんでした。",
     invalid_request: "Nodeが設定要求を受け付けませんでした。",
     busy: "Nodeが別の処理を実行中です。",
@@ -165,7 +171,9 @@ async function pollUsbSetup(submissionFailed = false, showTerminal = false) {
 async function submitUsbProvision(button) {
     if (button.disabled || usbProvisioningInProgress) return;
     const confirmed = button.closest("article").querySelector(".confirm-atom")?.checked === true;
-    if (button.dataset.unconfirmed === "true" && !confirmed) {
+    const reinitialize = button.dataset.reinitialize === "true";
+    if (reinitialize && !window.confirm(`OMK Nodeを再セットアップしますか？\nNode ID: ${button.dataset.nodeId}\n\n接続した機器がAtomS3 Liteであることを確認してください。\n既存provisioning credentialを新しいcredentialへ置換します。\nWi-Fi設定を消去し、新Gateway用に再設定します。\nLogical IDを消去するため、Node・接続センサの設定を再度行う必要があります。\n\n途中失敗した場合は同じ「再セットアップ」操作で再試行できます。`)) return;
+    if (!reinitialize && button.dataset.unconfirmed === "true" && !confirmed) {
         statusLine.textContent = "未セットアップのAtomS3 Lite実物確認が必要です。";
         return;
     }
@@ -176,7 +184,10 @@ async function submitUsbProvision(button) {
     clearTimeout(usbSetupPoll);
     let submissionFailed = false;
     try {
-        await api("/setup/usb-setup", {method: "POST", body: JSON.stringify({device: button.dataset.device, node_id: button.dataset.nodeId, confirm_atom_s3_lite: confirmed})});
+        const body = {device: button.dataset.device, node_id: button.dataset.nodeId};
+        if (reinitialize) body.confirm_reinitialize = true;
+        else body.confirm_atom_s3_lite = confirmed;
+        await api(reinitialize ? "/setup/usb-reinitialize" : "/setup/usb-setup", {method: "POST", body: JSON.stringify(body)});
     } catch (error) { submissionFailed = true; }
     await pollUsbSetup(submissionFailed, true);
 }
