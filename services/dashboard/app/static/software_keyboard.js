@@ -7,6 +7,14 @@ window.createSoftwareKeyboard = function createSoftwareKeyboard(elements, option
   const displayPosition = options.displayPosition || ((_, position) => position);
 
   function target() { return state?.target?.() || null; }
+  function syncNativeInput() {
+    if (!state || !options.nativeInput) return;
+    const input = target();
+    if (!input) return;
+    state.value = input.value;
+    state.selectionStart = input.selectionStart ?? input.value.length;
+    state.selectionEnd = input.selectionEnd ?? state.selectionStart;
+  }
   function renderState() {
     if (!state) return;
     const input = target();
@@ -19,13 +27,15 @@ window.createSoftwareKeyboard = function createSoftwareKeyboard(elements, option
     input.setSelectionRange?.(position, displayPosition(state.value, state.selectionEnd, state.length));
   }
   function insert(key) {
-    if (!state || !keyAllowed(key) || state.value.length >= state.length) return;
+    syncNativeInput();
+    if (!state || !keyAllowed(key) || (state.value.length >= state.length && state.selectionStart === state.selectionEnd)) return;
     const before = state.value.slice(0, state.selectionStart), after = state.value.slice(state.selectionEnd);
     state.value = (before + key + after).slice(0, state.length);
     state.selectionStart = state.selectionEnd = Math.min(before.length + key.length, state.length);
     renderState();
   }
   function backspace() {
+    syncNativeInput();
     if (!state) return;
     if (state.selectionStart !== state.selectionEnd) state.value = state.value.slice(0, state.selectionStart) + state.value.slice(state.selectionEnd);
     else if (state.selectionStart > 0) { state.value = state.value.slice(0, state.selectionStart - 1) + state.value.slice(state.selectionEnd); state.selectionStart -= 1; }
@@ -43,6 +53,7 @@ window.createSoftwareKeyboard = function createSoftwareKeyboard(elements, option
     if (restore) closedState.onCancel?.(closedState);
   }
   function confirm() {
+    syncNativeInput();
     if (!state) return;
     const confirmedState = state;
     close(false);
@@ -87,11 +98,12 @@ window.createSoftwareKeyboard = function createSoftwareKeyboard(elements, option
   elements.cancel.addEventListener("click", () => close(true));
   elements.confirm.addEventListener("click", confirm);
   document.addEventListener("keydown", event => {
-    if (!state) return;
+    // Native text editors retain browser cursor, clipboard and IME handling.
+    if (!state || options.nativeInput) return;
     if (event.key === "Backspace") { event.preventDefault(); backspace(); }
     else if (event.key === "Enter") { event.preventDefault(); confirm(); }
     else if (event.key === "Escape") { event.preventDefault(); close(true); }
     else if (keyAllowed(event.key)) { event.preventDefault(); insert(event.key); }
   });
-  return {open, insert, backspace, clear, close, refresh: () => { if (!state) return; renderKeys(); renderState(); }};
+  return {open, insert, backspace, clear, close, refresh: () => { if (!state) return; syncNativeInput(); renderKeys(); renderState(); }};
 };

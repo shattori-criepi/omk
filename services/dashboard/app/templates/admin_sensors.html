@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <title>OMK 機器管理</title>
     <link rel="stylesheet" href="{{ url_for('static', path='/display.css') }}?v=20260916-logical-id-flow-1">
-    <script src="{{ url_for('static', path='/software_keyboard.js') }}?v=20260916-logical-id-flow-1" defer></script>
-    <script src="{{ url_for('static', path='/admin.js') }}?v=20260916-switchbot-motion-name-1" defer></script>
+    <script src="{{ url_for('static', path='/software_keyboard.js') }}?v=20260918-sensor-keyboard-1" defer></script>
+    <script src="{{ url_for('static', path='/admin.js') }}?v=20260918-sensor-keyboard-1" defer></script>
   </head>
   <body class="admin-body">
     <main class="admin-page sensor-management-page" aria-label="OMK 機器管理">
@@ -68,5 +68,17 @@
         <button type="button" id="delete-sensor" class="danger">センサ登録を削除</button>
       </form>
     </dialog>
+    <section id="sensor-keyboard-overlay" class="broute-keyboard-overlay logical-id-keyboard-overlay" aria-labelledby="sensor-keyboard-title" hidden>
+      <header class="broute-keyboard-header">
+        <h2 id="sensor-keyboard-title">テキスト入力</h2>
+        <p id="sensor-keyboard-count" class="broute-keyboard-count"></p>
+        <input id="sensor-keyboard-value" class="broute-keyboard-value" type="text" aria-labelledby="sensor-keyboard-title" autocomplete="off" maxlength="64">
+      </header>
+      <div id="sensor-keyboard-keys" class="broute-keyboard-keys"></div>
+      <footer class="broute-keyboard-actions">
+        <button id="sensor-keyboard-cancel" type="button">キャンセル</button>
+        <button id="sensor-keyboard-confirm" type="button" class="primary">入力を反映</button>
+      </footer>
+    </section>
   </body>
 </html>

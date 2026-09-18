@@ -53,7 +53,7 @@ def demo_custom_preset(items: list[DisplayItem]) -> tuple[list[DisplayItem], tup
                      tuple(item.id for item in values), layout_pattern=pattern)
         for block_id, group, size, pattern, values in (
             ("demo:custom:pcs", "パワコン", "large", "hero", pcs_items),
-            ("demo:custom:environment", "室内環境", "medium", "compact", environment_items),
+            ("demo:custom:environment", "室内環境", "medium", "strip", environment_items),
             ("demo:custom:outdoor", "外気", "small", "compact", outdoor_items),
         )
     )

@@ -140,7 +140,9 @@ def _dashboard_candidates(now: datetime | None = None) -> list[DisplayItem]:
 def _settings_for(candidates: list[DisplayItem]):
     selectable = [item for item in candidates if item.selectable]
     return get_settings_repository().load_or_create(
-        _available_display_groups(candidates), _default_blocks(selectable),
+        # Custom is an explicit user choice. Discovery (including unavailable
+        # derived items) and demo toggles must never seed a custom layout.
+        _available_display_groups(candidates), [],
         display_item_migrations(candidates), recommended_blocks(selectable),
     )
 

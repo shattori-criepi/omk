@@ -24,6 +24,54 @@ function openLogicalKeyboard(button) {
   });
 }
 
+// Put the editor inside the active modal: a body-level overlay is inert while
+// showModal() is active. Explicit buttons leave normal input/IME use untouched.
+const sensorKeyboardOverlay = document.querySelector("#sensor-keyboard-overlay"), sensorKeyboardInput = document.querySelector("#sensor-keyboard-value");
+let sensorKeyboardKana = false;
+const SENSOR_KANA_ROWS = [Array.from("あいうえおかきくけこ"), Array.from("さしすせそたちつてと"), Array.from("なにぬねのはひふへほ"), Array.from("まみむめもやゆよらり"), Array.from("るれろわをんー ゛゜")];
+const sensorKeyboard = window.createSoftwareKeyboard?.({
+  overlay: sensorKeyboardOverlay, title: document.querySelector("#sensor-keyboard-title"), count: document.querySelector("#sensor-keyboard-count"), value: sensorKeyboardInput, keys: document.querySelector("#sensor-keyboard-keys"), cancel: document.querySelector("#sensor-keyboard-cancel"), confirm: document.querySelector("#sensor-keyboard-confirm")
+}, {
+  nativeInput: true,
+  keyAllowed: key => key.length === 1,
+  keyRows: state => sensorKeyboardKana ? SENSOR_KANA_ROWS : LOGICAL_ID_KEY_ROWS.map(row => row.map(key => state.uppercase ? key.toUpperCase() : key)),
+  extraActions: state => [
+    ["かな/英数", () => { sensorKeyboardKana = !sensorKeyboardKana; sensorKeyboard.refresh(); }, ""],
+    [state.uppercase ? "小文字" : "大文字", () => { state.uppercase = !state.uppercase; sensorKeyboard.refresh(); }, ""],
+  ],
+});
+sensorKeyboardInput.addEventListener("input", () => {
+  document.querySelector("#sensor-keyboard-count").textContent = `${sensorKeyboardInput.value.length} / ${sensorKeyboardInput.maxLength}文字`;
+});
+for (const [id, label] of [["sensor-id", "OMK センサID"], ["display-name", "表示名"], ["location", "設置場所"], ["edit-sensor-id", "OMK センサID"], ["edit-display-name", "表示名"], ["edit-location", "設置場所"]]) {
+  const input = document.querySelector(`#${id}`);
+  if (!sensorKeyboard || !input) continue;
+  const button = document.createElement("button");
+  button.type = "button";
+  button.textContent = `${label}をキーボードで入力`;
+  input.parentElement.append(button);
+  button.addEventListener("click", () => {
+    sensorKeyboardKana = false;
+    input.closest("dialog").append(sensorKeyboardOverlay);
+    sensorKeyboardInput.value = input.value;
+    sensorKeyboardInput.maxLength = input.maxLength > 0 ? input.maxLength : 64;
+    sensorKeyboard.open(sensorKeyboardInput, {
+      label, length: sensorKeyboardInput.maxLength, appendAtEnd: true,
+      onConfirm: value => { input.value = value; input.dispatchEvent(new Event("input", {bubbles: true})); input.focus(); },
+      onCancel: () => input.focus(),
+    });
+    sensorKeyboardInput.focus();
+  });
+}
+for (const modal of [dialog, editDialog]) {
+  modal.addEventListener("close", () => sensorKeyboard?.close(true));
+  modal.addEventListener("cancel", event => {
+    if (sensorKeyboard && !sensorKeyboardOverlay.hidden) {
+      event.preventDefault(); sensorKeyboard.close(true);
+    }
+  });
+}
+
 function formatApiError(value) {
   if (typeof value === "string" && value) return value;
   if (Array.isArray(value)) return value.map(formatApiError).filter(Boolean).join("; ") || "通信エラー";

@@ -77,6 +77,23 @@ def enable_demo(client: TestClient) -> None:
     assert client.post("/api/admin/dashboard-settings/demo", json={"enabled": True}).status_code == 200
 
 
+@pytest.mark.parametrize("visit_settings_first", [False, True])
+@pytest.mark.parametrize("with_sensor", [False, True])
+def test_first_demo_toggle_does_not_seed_custom_from_derived_candidates(gateway, visit_settings_first, with_sensor):
+    client, root = gateway
+    assert files(root) == {}
+    if with_sensor:
+        write_reading(root, "temperature_celsius", 21.3)
+    if visit_settings_first:
+        assert client.get("/api/admin/dashboard-settings").status_code == 200
+    enable_demo(client)
+    assert client.post("/api/admin/dashboard-settings/demo", json={"enabled": False}).status_code == 200
+    result = client.post("/api/admin/dashboard-settings/mode", json={"mode": "custom"})
+    assert result.status_code == 200
+    assert result.json()["presets"]["standard"]["blocks"] == []
+    assert client.get("/api/display").json()["blocks"] == []
+
+
 def snapshot(client: TestClient, mode: str) -> dict:
     response = client.get(f"/api/display?demo_mode={mode}")
     assert response.status_code == 200
@@ -125,6 +142,7 @@ def test_fresh_gateway_demo_without_any_configuration_data_or_services(gateway):
             assert 'data-source-kind="demo">模擬</span>' in response.text
             assert_reading_badges(response.text, readings(snapshot(client, mode)))
         custom = snapshot(client, "custom")
+        assert [block["layout_pattern"] for block in custom["blocks"]] == ["hero", "strip", "compact"]
         assert [(block["group"], block["size"]) for block in custom["blocks"]] == [
             ("パワコン", "large"), ("室内環境", "medium"), ("外気", "small"),
         ]

@@ -1977,7 +1977,7 @@ def test_sensor_management_ui_renders_presence_sensor_values_and_safe_missing_va
     javascript_path = Path(__file__).parents[1] / "app" / "static" / "admin.js"
     harness = r'''
 const fs = require("fs"), vm = require("vm");
-function element() { return {hidden: false, textContent: "", className: "", value: "", onclick: null, onsubmit: null, closest() { return null; }, querySelector() { return element(); }, querySelectorAll() { return []; }, focus() {}, showModal() {}, close() {}}; }
+function element() { return {hidden: false, textContent: "", className: "", value: "", onclick: null, onsubmit: null, addEventListener() {}, closest() { return null; }, querySelector() { return element(); }, querySelectorAll() { return []; }, focus() {}, showModal() {}, close() {}}; }
 const selectors = ["#setup-status", "#candidates", "#registered-sensors", "#omk-nodes", "#start-scan", "#stop-scan", "#register-dialog", "#register-form", "#register-error", "#edit-dialog", "#edit-form", "#edit-error", "#cancel-register", "#cancel-edit", "#delete-sensor"];
 const elements = Object.fromEntries(selectors.map(key => [key, element()]));
 global.document = {querySelector: selector => elements[selector] || element()};
