@@ -998,11 +998,19 @@ def test_presence_sensor_pro_hint_requires_supported_packet_encoding() -> None:
     malformed_packets = (
         ({SWITCHBOT_COMPANY_ID: bytes.fromhex("020000000003208c000400")}, service),
         ({SWITCHBOT_COMPANY_ID: bytes.fromhex("020000000003208c0004008c")}, {METER_SERVICE_UUID: bytes.fromhex("0020640110cc")}),
-        ({SWITCHBOT_COMPANY_ID: bytes.fromhex("020000000003208c0004008c")}, {}),
     )
     for manufacturer_data, service_data in malformed_packets:
         decoded = decode("02:00:00:00:00:03", -40, manufacturer_data, service_data, "now", model_hint="presence_sensor")
         assert decoded is not None and decoded.model == "unknown_switchbot"
+
+    manufacturer_only = decode(
+        "02:00:00:00:00:03", -40,
+        {SWITCHBOT_COMPANY_ID: bytes.fromhex("0200000000030a8c00350091")}, {}, "now",
+        model_hint="presence_sensor",
+    )
+    assert manufacturer_only is not None and manufacturer_only.values == {
+        "motion_state": 0, "light_level": 1,
+    }
 
 
 def test_presence_sensor_pro_does_not_collide_with_existing_12_byte_layouts() -> None:

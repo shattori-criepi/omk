@@ -111,6 +111,23 @@ vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8"));
     assert 'id="confirm-unconfirmed-model" type="checkbox"' in template
 
 
+def test_presence_manufacturer_only_preview_omits_battery_cleanly():
+    script = Path(__file__).parents[1] / "app/static/admin.js"
+    harness = r'''
+const fs = require("fs"), vm = require("vm"), assert = require("assert");
+function element() { return {addEventListener() {}, querySelectorAll() { return []; }, textContent: "", innerHTML: "", disabled: false, hidden: true, checked: false, required: false, value: "", dataset: {}, showModal() {}, close() {}, reset() {}, focus() {}}; }
+global.document = {querySelector: () => element()};
+global.window = {setInterval() {}, confirm() { return false; }};
+global.fetch = async () => ({ok: true, json: async () => ({sensors: [], nodes: [], stage: "idle"})});
+vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8"));
+const item = {model: "unknown_switchbot", sensor_type: "unknown", device_key: "switchbot:020000000040", rssi: -51, received_at: "now", values: {}, manual_registration_models: ["presence_sensor"], unconfirmed_preview: {model: "presence_sensor", values: {motion_state: 0, light_level: 1}}};
+const rendered = card(item, true);
+assert(rendered.includes("未検出") && rendered.includes("照度レベル: <strong>1</strong>"));
+assert(!rendered.includes("バッテリー"));
+'''
+    subprocess.run(["node", "-e", harness, str(script)], check=True, capture_output=True, text=True)
+
+
 def test_presence_model_choice_is_forwarded_by_suggestion_proxy(monkeypatch):
     import asyncio
     from urllib.parse import parse_qs, urlsplit

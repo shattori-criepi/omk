@@ -54,7 +54,8 @@ def test_manufacturer_layout_never_discovers_model(kind, model, tail, service, v
     # A hint is separately supplied by physical registration, not inferred here.
     hinted = packet(tail, hint=model)
     if kind == "presence":
-        unknown(hinted)
+        assert hinted.model == model
+        assert hinted.values == {"motion_state": 0, "light_level": 12}
     else:
         assert hinted.model == model
         assert hinted.values
@@ -145,7 +146,6 @@ def test_presence_same_length_service_is_not_unique_model_evidence(service):
 @pytest.mark.parametrize("tail,service", [
     ("208c0004008c", "0020650110ccc8"),  # battery 101
     ("20ff0004008c", "0020640110ccc8"),  # undefined status bits
-    ("208c000400fc", "0020640110ccc8"),  # undefined light encoding bits
     ("208c0004008c", "0020640110cc"),    # truncated service
     ("208c000400", "0020640110ccc8"),    # truncated manufacturer
     ("208c0004008c", "ffffffffffffff"),
@@ -332,7 +332,6 @@ def test_conflicting_registration_does_not_publish_or_display_values_as_old_mode
     ("208c0004008c", "0020640110ccc8"),  # historical unoccupied capture
     ("1bcc0008008c", "0020640110ccc8"),  # historical occupied capture
     ("21c800040087", "00203c0110ccc8"),  # synthetic battery/light/status variant
-    ("000000000000", "0020000110ccc8"),  # valid values still do not prove identity
 ])
 def test_legacy_presence_requires_operator_choice_and_survives_restart(tmp_path, monkeypatch, tail, service):
     from omk_ble import main as ble_main
@@ -374,7 +373,6 @@ def test_legacy_presence_requires_operator_choice_and_survives_restart(tmp_path,
 @pytest.mark.parametrize("tail,service", [
     ("208c0004008c", "0020650110ccc8"),
     ("20ff0004008c", "0020640110ccc8"),
-    ("208c000400fc", "0020640110ccc8"),
     ("208c0004008c", "0020640110cc"),
     ("208c000400", "0020640110ccc8"),
     ("208c0004008c", "0120640110ccc8"),
@@ -442,10 +440,51 @@ def test_presence_preview_updates_without_hint_or_telemetry(tmp_path):
     assert manager.observations[item["device_key"]].model == "unknown_switchbot"
 
 
+def test_presence_manufacturer_only_requires_confirmation_then_publishes_without_battery(tmp_path, monkeypatch):
+    """Anonymous Pi 4 capture: fd3d service data was consistently absent."""
+    from omk_ble import main as ble_main
+
+    registry = SensorRegistry(tmp_path / "sensors.json")
+    publisher = Publisher()
+    manager = BleManager(registry, publisher)
+    manager.scanning = True
+    inactive = packet("0a8c00350091")
+    unknown(inactive)
+    manager.record_advertisement(inactive)
+    item = manager.candidate_list()[0]
+    assert item["manual_registration_models"] == ["presence_sensor"]
+    assert item["unconfirmed_preview"] == {"model": "presence_sensor", "values": {
+        "motion_state": 0, "light_level": 1,
+    }}
+    monkeypatch.setattr(ble_main, "manager", manager)
+    registered = ble_main.register(ble_main.RegisterRequest(
+        device_key=inactive.device_key, sensor_id="test-presence", display_name="Test",
+        confirmed_model="presence_sensor",
+    ))
+    assert registered["model"] == "presence_sensor"
+
+    active = packet("0fcc00010091", hint="presence_sensor")
+    assert active.model == "presence_sensor"
+    assert active.raw["classification"]["evidence"] == "registered_hint"
+    assert active.values == {"motion_state": 1, "light_level": 1}
+    manager.record_advertisement(active)
+    assert publisher.messages[-1][1]["motion_state"] == 1
+    assert "battery_percent" not in publisher.messages[-1][1]
+
+
+@pytest.mark.parametrize("tail", [
+    "358010360029",  # Plug Mini fixture
+    "d20b019dca00",  # Waterproof Sensor fixture
+])
+def test_existing_12_byte_plug_and_waterproof_forms_are_not_presence_choices(tail):
+    candidate = packet(tail)
+    unknown(candidate)
+    assert "presence_sensor" not in sb.unconfirmed_model_options(candidate)
+
+
 @pytest.mark.parametrize("tail,service", [
     ("208c0004008c", "0020650110ccc8"),  # invalid battery
     ("20ff0004008c", "0020640110ccc8"),  # invalid status bits
-    ("208c000400fc", "0020640110ccc8"),  # invalid light bits
     ("358010360029", "0020640110ccc8"),  # Plug-shaped manufacturer payload
     ("d20b019dca00", "0020640110ccc8"),  # Outdoor-shaped manufacturer payload
     ("376c0001", "734064000002"),         # explicit Motion type

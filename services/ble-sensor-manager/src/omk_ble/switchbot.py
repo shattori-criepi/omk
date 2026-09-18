@@ -59,10 +59,9 @@ CONTACT_MANUFACTURER_STATUS_INDEX = 7
 PLUG_MANUFACTURER_LENGTH = 12
 PLUG_STATE_INDEX = 7
 
-# Presence Sensor Pro advertisements combine a 12-byte manufacturer payload
-# with a 7-byte SwitchBot fd3d service payload. This joint structure is the
-# observed layout, NOT a unique classifier. The observed 00-prefixed form
-# requires an existing physical-device hint; lengths alone never establish it.
+# Presence Sensor Pro has both a 12+7-byte manufacturer/service form and an
+# observed manufacturer-only form. Neither layout is a unique classifier: the
+# latter is decoded only after a physical-device hint or operator confirmation.
 PRESENCE_MANUFACTURER_LENGTH = 12
 PRESENCE_SERVICE_DATA_LENGTH = 7
 PRESENCE_STATUS_INDEX = 7
@@ -127,21 +126,32 @@ def _decode_contact_service_data(data: bytes | None) -> tuple[str, str, dict[str
 def _decode_presence_sensor_data(
     manufacturer_data: bytes | None, service_data: bytes | None,
 ) -> tuple[str, str, dict[str, Any]] | None:
-    """Validate the supported Presence encoding AFTER model selection."""
+    """Validate a Presence layout AFTER model selection.
+
+    Pi internal Bluetooth can receive the 12-byte manufacturer advertisement
+    without fd3d service data. That form has no battery value.
+    """
     if (
         manufacturer_data is None
-        or service_data is None
         or len(manufacturer_data) != PRESENCE_MANUFACTURER_LENGTH
-        or len(service_data) != PRESENCE_SERVICE_DATA_LENGTH
         or manufacturer_data[PRESENCE_STATUS_INDEX] & ~0xCC
-        or manufacturer_data[PRESENCE_LIGHT_LEVEL_INDEX] & ~0x8F
     ):
         return None
-    return "presence_sensor", "motion", {
-        "motion_state": 1 if manufacturer_data[PRESENCE_STATUS_INDEX] & 0x40 else 0,
-        "battery_percent": service_data[PRESENCE_BATTERY_PERCENT_INDEX] & 0x7F,
-        "light_level": manufacturer_data[PRESENCE_LIGHT_LEVEL_INDEX] & 0x0F,
-    }
+    if service_data is not None and len(service_data) != PRESENCE_SERVICE_DATA_LENGTH:
+        return None
+    motion_state = 1 if manufacturer_data[PRESENCE_STATUS_INDEX] & 0x40 else 0
+    light_level = manufacturer_data[PRESENCE_LIGHT_LEVEL_INDEX] & 0x0F
+    # Bit 7 is LED state; bits 4..6 are currently uninterpreted. They are not
+    # validity bits and must not discard an otherwise valid advertisement.
+    if service_data is not None:
+        values = {
+            "motion_state": motion_state,
+            "battery_percent": service_data[PRESENCE_BATTERY_PERCENT_INDEX] & 0x7F,
+            "light_level": light_level,
+        }
+    else:
+        values = {"motion_state": motion_state, "light_level": light_level}
+    return "presence_sensor", "motion", values
 
 
 def _decode_meter_expression(fraction: int, signed_integer: int, humidity: int) -> tuple[float, int] | None:
@@ -340,7 +350,7 @@ def _decode_selected(
         if service_result is None or not _values_valid(service_result[2]):
             return None
     if model == "presence_sensor":
-        return None  # battery/encoding cannot be validated without service data
+        return _decode_presence_sensor_data(company, None)
     # Up to six bytes can carry identification only. Motion is an exception:
     # service type 0x73 identifies the model, while OMK captures show its
     # manufacturer status changing later than the service snapshot. A malformed
@@ -426,7 +436,7 @@ def _validated_unconfirmed_model(
                         for key, value in candidate.raw["manufacturer_data"].items()}
         service = {key: bytes.fromhex(value) for key, value in candidate.raw["service_data"].items()}
         supported = [value for key, value in service.items() if key.lower() == METER_SERVICE_UUID]
-        supported_format = (len(supported) == 1 and supported[0].startswith(b"\x00\x20")
+        supported_format = ((not service) or (len(supported) == 1 and supported[0].startswith(b"\x00\x20"))
                             if model == "presence_sensor" else not service)
         if not supported_format:
             return None
@@ -448,6 +458,20 @@ def unconfirmed_model_options(candidate: DecodedAdvertisement) -> dict[str, Deco
         for model in UNCONFIRMED_MODEL_NAMES
         if (validated := _validated_unconfirmed_model(candidate, model, "unconfirmed_preview")) is not None
     }
+    if "presence_sensor" in options:
+        # A service field that only Presence currently understands must not hide
+        # an independently valid Plug/Outdoor/etc. manufacturer layout. The
+        # layout remains a manual choice only when no other model validates it.
+        try:
+            manufacturer = {int(key, 16): bytes.fromhex(value)
+                            for key, value in candidate.raw["manufacturer_data"].items()}
+            company = manufacturer.get(SWITCHBOT_COMPANY_ID)
+            if company is not None and any(
+                decoder(company) is not None for decoder in MANUFACTURER_DECODERS.values()
+            ):
+                return {}
+        except (KeyError, TypeError, ValueError, AttributeError):
+            return {}
     return options if len(options) == 1 else {}
 
 
