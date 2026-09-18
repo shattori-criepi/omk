@@ -48,7 +48,8 @@ for (const [id, label] of [["sensor-id", "OMK センサID"], ["display-name", "�
   if (!sensorKeyboard || !input) continue;
   const button = document.createElement("button");
   button.type = "button";
-  button.textContent = `${label}をキーボードで入力`;
+  button.className = "sensor-keyboard-trigger";
+  button.textContent = `${label}をソフトウェアキーボードで入力`;
   input.parentElement.append(button);
   button.addEventListener("click", () => {
     sensorKeyboardKana = false;

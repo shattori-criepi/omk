@@ -13,7 +13,7 @@ _FIXTURE = Path(__file__).parent / "demo" / "readings.json"
 # use display units (kW rather than the collector's watts).
 _ENVIRONMENT_FIELDS = (
     "temperature_celsius", "relative_humidity_percent", "co2_ppm",
-    "pm2_5_ug_m3", "voc_index", "nox_index",
+    "pm2_5_ug_m3", "voc_index",
 )
 _POWER_FIELDS = (
     "load_power_w", "pv_power_w", "grid_import_power_w", "grid_export_power_w",
@@ -26,7 +26,7 @@ def demo_custom_preset(items: list[DisplayItem]) -> tuple[list[DisplayItem], tup
     """Build the exhibition preset in memory, independently of saved custom.
 
     Outdoor values always use fixed fixtures, without consulting registrations
-    or measured readings. The medium card intentionally holds six demo values,
+    or measured readings. The medium card intentionally holds five demo values,
     without changing the limits for user-editable persisted presets.
     """
     power = [item for item in items if item.group == "パワコン"]
@@ -82,7 +82,7 @@ def demo_candidates(items: list[DisplayItem]) -> list[DisplayItem]:
         best = min(matches, key=lambda item: (priority.get(item.freshness, 3), item.group != group, item.id)) if matches else None
         selected.append(replace(best, group=group) if best else _synthetic_item(field, group))
     selected_ids = {item.id for item in selected}
-    overlay = [item for item in ranked if item.id not in selected_ids and not (
+    overlay = [item for item in ranked if item.semantic_role != "nox" and item.id not in selected_ids and not (
         item.group == group and item.selectable and item.semantic_role in ENVIRONMENT_ROLE_SCORE
     )] + selected
     for field, target_group in [("net_power_w", BROUTE_GROUP), *((field, "パワコン") for field in _POWER_FIELDS)]:

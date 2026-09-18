@@ -57,7 +57,7 @@
         {% for block in dashboard.blocks %}
         {% set item_count = 1 + (block.secondary | length) %}
         {% set stacked = block.size == "small" and item_count > 1 %}
-        <article class="display-card display-card--{{ block.size }} display-card--{{ block.layout_pattern }} display-card--items-{{ item_count }} display-card--{{ block.freshness }}{% if stacked %} display-card--stacked{% endif %}" data-block-id="{{ block.id }}" data-item-count="{{ item_count }}">
+        <article class="display-card display-card--{{ block.size }} display-card--{{ block.layout_pattern }} display-card--items-{{ item_count }} display-card--{{ block.freshness }}{% if stacked %} display-card--stacked{% endif %}" data-block-id="{{ block.id }}" data-group="{{ block.group }}" data-item-count="{{ item_count }}">
           <p class="display-card-label">{{ block.title }}</p>
           {% if stacked %}
           <div class="display-card-stacked-items">

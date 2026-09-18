@@ -96,3 +96,9 @@ for (const id of ids) {
         assert re.search(r'id="' + prefix + r'sensor-id"[^>]*required pattern="\[a-z\]\[a-z0-9-\]\{0,63\}"', template)
         for field in ("display-name", "location"):
             assert re.search(r'id="' + prefix + field + r'"[^>]*maxlength="64"', template)
+    assert 'button.textContent = `${label}をソフトウェアキーボードで入力`;' in script
+    assert 'button.className = "sensor-keyboard-trigger";' in script
+    stylesheet = (ROOT / "app/static/display.css").read_text()
+    style = stylesheet.split(".sensor-keyboard-trigger {", 1)[1].split("}", 1)[0]
+    assert "min-height: 36px;" in style
+    assert "background: #334155;" in style

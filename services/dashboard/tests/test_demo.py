@@ -21,7 +21,7 @@ from app.display_items import display_candidates
 from app.recommendations import clock_item_ids, recommended_blocks
 
 NOW = datetime(2026, 9, 16, 12, 0, tzinfo=ZoneInfo("Asia/Tokyo"))
-ENVIRONMENT = {"temperature", "humidity", "co2", "pm25", "voc", "nox"}
+ENVIRONMENT = {"temperature", "humidity", "co2", "pm25", "voc"}
 POWER = {"pv_power", "load_power", "grid_import", "grid_export", "battery_soc", "battery_power_bidirectional"}
 OUTDOOR = {"outdoor_temperature", "outdoor_humidity"}
 ASYNC_CLIENT = httpx.AsyncClient
@@ -146,13 +146,40 @@ def test_fresh_gateway_demo_without_any_configuration_data_or_services(gateway):
         assert [(block["group"], block["size"]) for block in custom["blocks"]] == [
             ("パワコン", "large"), ("室内環境", "medium"), ("外気", "small"),
         ]
-        assert [len([block["primary"], *block["secondary"]]) for block in custom["blocks"]] == [6, 6, 2]
+        assert [len([block["primary"], *block["secondary"]]) for block in custom["blocks"]] == [6, 5, 2]
         assert {item["semantic_role"] for item in readings(custom)} == POWER | ENVIRONMENT | OUTDOOR
         assert all(item["source_kind"] == "demo" for item in readings(custom))
     assert files(root) == before
     assert not (root / "latest").exists()
     assert not (root / "processed").exists()
     assert not (root / "registered_sensors.json").exists()
+
+
+def test_demo_environment_omits_nox_and_stacks_only_its_source_badges(gateway):
+    client, root = gateway
+    write_reading(root, "nox_index", 17)
+    enable_demo(client)
+
+    for mode in ("custom", "recommended", "clock"):
+        displayed = readings(snapshot(client, mode))
+        assert "nox" not in {item["semantic_role"] for item in displayed}
+
+    response = client.get("/display?demo_mode=custom")
+    environment = re.search(
+        r'<article[^>]*data-group="室内環境"[^>]*>(.*?)</article>', response.text, re.DOTALL,
+    )
+    assert environment is not None
+    markup = environment.group(1)
+    assert "NOx" not in markup
+    for label in ("VOC", "PM2.5", "CO₂"):
+        assert label in markup
+    assert markup.count('data-role="source-kind"') == 5
+
+    stylesheet = (Path(__file__).parents[1] / "app/static/display.css").read_text()
+    selector = 'body[data-demo-enabled="true"] .display-card[data-group="室内環境"].display-card--strip'
+    assert selector + ' [data-role="label"]' in stylesheet
+    assert "flex-direction: column;" in stylesheet
+    assert "text-overflow: clip;" in stylesheet
 
 
 def test_pcs_only_keeps_custom_real_and_fills_automatic_presets(gateway):
