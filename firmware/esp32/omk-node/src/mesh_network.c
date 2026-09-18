@@ -19,6 +19,7 @@
 #include "mesh_credentials.h"
 #include "mesh_liveness.h"
 #include "mesh_netif.h"
+#include "mesh_root_recovery.h"
 #include "mqtt_registration.h"
 #include "node_identity.h"
 
@@ -42,6 +43,7 @@ static bool started;
 static bool parent_connected;
 static esp_ip4_addr_t current_ip;
 static int64_t mqtt_liveness_since_us;
+static omk_mesh_root_recovery_t root_recovery;
 
 static esp_err_t configure_parent_rssi_thresholds(void) {
     const mesh_rssi_threshold_t configured = {
@@ -82,6 +84,29 @@ static esp_err_t disable_root_conflicts(void) {
 
 static uint32_t uptime_seconds(void) {
     return (uint32_t)(esp_timer_get_time() / 1000000);
+}
+
+static uint32_t uptime_milliseconds(void) {
+    return (uint32_t)(esp_timer_get_time() / 1000);
+}
+
+/* esp_mesh_waive_root() is documented by the bundled ESP-IDF as root-only. Keep
+ * this call in the periodic control path, rather than in a disconnect event:
+ * a request observed while disconnected remains pending until the root has a
+ * parent again. */
+static void try_root_reelection(void) {
+    uint32_t now_ms = uptime_milliseconds();
+    if (!mesh_root_recovery_should_execute(&root_recovery, now_ms, esp_mesh_is_root(),
+                                           parent_connected, is_rootless)) return;
+    const char *reason = mesh_root_recovery_reason_name(root_recovery.reason);
+    ESP_LOGI(TAG, "root reelection requested: %s", reason);
+    esp_err_t err = esp_mesh_waive_root(NULL, MESH_VOTE_REASON_ROOT_INITIATED);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "root reelection deferred: %s (%s)", reason, esp_err_to_name(err));
+        return;
+    }
+    mesh_root_recovery_mark_executed(&root_recovery, now_ms);
+    ESP_LOGI(TAG, "root reelection executed: %s", reason);
 }
 
 void mesh_network_log_diagnostics(const char *event, uint32_t reason) {
@@ -128,7 +153,10 @@ static void check_mqtt_liveness(void) {
     if (mqtt_liveness_since_us == 0) mqtt_liveness_since_us = now_us;
     state.mqtt_disconnected_duration_s =
         (uint32_t)((now_us - mqtt_liveness_since_us) / 1000000);
-    if (!mesh_mqtt_liveness_should_recover(&state)) return;
+    /* A root handover has a brief, expected MQTT interruption.  Prefer that
+     * recovery path before falling back to the existing 180-second reboot. */
+    if (mesh_root_recovery_in_grace(&root_recovery, uptime_milliseconds()) ||
+        !mesh_mqtt_liveness_should_recover(&state)) return;
 
     mesh_network_log_diagnostics("mesh_mqtt_liveness_timeout: software restart", 0);
     boot_diagnostics_record_restart_reason("mesh_mqtt_liveness_timeout");
@@ -158,6 +186,10 @@ static void publish_status(void *argument) {
     int rssi = 0;
     bool rssi_valid = esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK;
     if (rssi_valid) rssi = ap_info.rssi;
+    mesh_root_recovery_observe_link(&root_recovery, uptime_milliseconds(), esp_mesh_is_root(),
+                                    rssi_valid, rssi, parent_disconnect_count,
+                                    mqtt_registration_get_disconnect_count());
+    try_root_reelection();
     char ip_text[16];
     snprintf(ip_text, sizeof(ip_text), IPSTR, IP2STR(&current_ip));
     uint64_t node_id;
@@ -299,6 +331,21 @@ static void mesh_event_handler(void *argument, esp_event_base_t base, int32_t id
         rootless_since_s = 0;
         observe_root_role();
         break;
+    case MESH_EVENT_ROUTING_TABLE_ADD:
+        /* This is the Mesh-stack event for a newly joined descendant.  On the
+         * current root it covers a node joining or returning after maintenance;
+         * wait for topology stabilization before asking Mesh to vote again. */
+        if (esp_mesh_is_root()) {
+            uint32_t now_ms = uptime_milliseconds();
+            if (root_recovery.has_executed &&
+                (int32_t)(now_ms - root_recovery.cooldown_until_ms) < 0) {
+                ESP_LOGI(TAG, "root reelection deferred: cooldown");
+            } else {
+                mesh_root_recovery_note_topology_change(&root_recovery, now_ms, true);
+                ESP_LOGI(TAG, "root reelection requested: topology_change (stabilizing)");
+            }
+        }
+        break;
     default:
         break;
     }
@@ -306,6 +353,7 @@ static void mesh_event_handler(void *argument, esp_event_base_t base, int32_t id
 
 esp_err_t mesh_network_start_prepared(void) {
     if (started) return ESP_ERR_INVALID_STATE;
+    mesh_root_recovery_init(&root_recovery);
     if (!mesh_credentials_test_vector_matches()) return ESP_FAIL;
     omk_gateway_credentials_t gateway = {0};
     esp_err_t err = gateway_credentials_load(&gateway);
