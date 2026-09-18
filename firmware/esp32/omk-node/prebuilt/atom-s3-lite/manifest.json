@@ -2,7 +2,7 @@
   "schema_version": 1,
   "target": "atom-s3-lite",
   "chip": "esp32s3",
-  "source_commit": "3005b9c71436505be471ad68b040ca49055d20d3",
+  "source_commit": "56d8bfb9503f03f75f2372aaf8de59010864fa69",
   "segments": [
     {
       "filename": "bootloader.bin",
