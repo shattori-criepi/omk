@@ -1,0 +1,250 @@
+使用、複製および頒布に関する条件
+
+1. 定義
+
+「ライセンス」とは、本書の第1条から第7条までに定める、使用、
+複製および頒布に関する条件をいいます。
+
+「ライセンサー」とは、著作権者、
+または著作権者から本ライセンスを付与する権限を与えられた者をいいます。
+
+「法人」とは、行為主体である法人と、その法人を支配する、
+同法人に支配される、
+または同法人と共通の支配下にあるその他すべての法人の集合をいいます。
+この定義において「支配」とは、(i) 契約その他の方法を問わず、
+直接または間接に当該法人の指揮または経営を行わせる権限、
+(ii) 発行済株式の50％以上の所有、
+または (iii) 当該法人の受益所有をいいます。
+
+「あなた」とは、
+本ライセンスによって付与される許諾を行使する個人または法人をいいます。
+
+「ソース」形式とは、ソフトウェアのソースコード、
+文書のソースおよび設定ファイルなど、
+変更を行うために適した形式をいいます。
+
+「オブジェクト」形式とは、コンパイル済みオブジェクトコード、
+生成された文書、他の媒体形式への変換物など、
+ソース形式を機械的に変換または翻訳した結果として生じる形式をいいます。
+
+「成果物」とは、ソース形式かオブジェクト形式かを問わず、
+本ライセンスに基づいて提供され、
+著作権が一般財団法人電力中央研究所に帰属している著作物をいいます。
+
+「派生成果物」とは、ソース形式かオブジェクト形式かを問わず、
+成果物を基礎として、または成果物から派生して作成された著作物であって、
+編集上の改訂、注釈、
+加筆その他の変更が全体として独自の著作物を構成するものをいいます。
+本ライセンスにおいて、成果物またはその派生成果物から分離可能な著作物、
+あるいはそれらのインターフェースに単にリンクし、
+または名称によって結合するだけの著作物は、派生成果物に含まれません。
+
+「貢献物」とは、成果物の原版、
+成果物またはその派生成果物に対する変更もしくは追加を含む著作物であって、
+著作権者または著作権者を代理して提出する権限を有する個人もしくは法人により、
+成果物への組込みを目的としてライセンサーに意図的に提出されたものをいいます。
+この定義における「提出」とは、
+成果物の検討および改善を目的としてライセンサーまたはその代理人に送付される電子的、
+口頭または書面によるあらゆる通信をいい、
+ライセンサー自身またはライセンサーのために管理される電子メーリングリスト、
+ソースコード管理システムおよび課題追跡システム上の通信を含みます。
+ただし、著作権者が「貢献物ではない」旨を明瞭に表示し、
+または書面で指定した通信は除きます。
+
+「貢献者」とは、ライセンサー、
+およびその者のためにライセンサーが貢献物を受領し、
+後に成果物へ組み込んだ個人または法人をいいます。
+
+2. 著作権ライセンスの許諾　本ライセンスの条件に従い、
+各貢献者はあなたに対し、
+成果物およびその派生成果物をソース形式またはオブジェクト形式で複製し、
+派生成果物を作成し、公に表示し、公に実演し、サブライセンスし、
+頒布するための、永続的、全世界的、非独占的、無償、
+ロイヤルティ不要かつ取消不能の著作権ライセンスを許諾します。
+
+3. 再頒布　あなたは、次の条件を満たす場合、変更の有無を問わず、
+ソース形式またはオブジェクト形式の成果物またはその派生成果物の複製物を、
+任意の媒体で複製し頒布することができます。
+
+（a）成果物または派生成果物の受領者に、
+本ライセンスの写しを交付すること。
+
+（b）変更したファイルには、
+あなたが当該ファイルを変更した旨の明瞭な表示を付すこと。
+
+（c）頒布する派生成果物のソース形式には、
+成果物のソース形式に含まれる著作権および帰属に関するすべての表示を保持すること。
+ただし、派生成果物のいずれの部分にも関係しない表示は除きます。
+
+あなたは、自らの変更部分に独自の著作権表示を追加し、
+その変更部分または派生成果物全体の使用、複製もしくは頒布について、
+追加の、または異なるライセンス条件を定めることができます。ただし、
+成果物の使用、複製および頒布については、
+それ以外の点で本ライセンスに定める条件を遵守しなければなりません。
+
+4. 貢献物の提出　あなたが明示的に別段の意思を示さない限り、
+成果物への組込みを目的としてあなたがライセンサーに意図的に提出した貢献物には、
+追加の条件を付すことなく、本ライセンスの条件が適用されます。ただし、
+上記の規定は、
+その貢献物についてあなたとライセンサーとの間で締結された別個の
+ライセンス契約の条件に優先し、
+またはこれを変更するものではありません。
+
+5. 保証の否認　適用法により義務付けられる場合、
+または書面で合意された場合を除き、ライセンサーは成果物を、
+各貢献者はその貢献物を、「現状有姿」で提供します。
+明示または黙示を問わず、権原、非侵害性、
+商品性または特定目的適合性を含むいかなる種類の保証または条件も付されません。
+成果物の使用または再頒布が適切かどうかを判断する責任は、
+すべてあなたにあり、
+本ライセンスに基づく許諾の行使に伴う一切のリスクをあなたが負うものとします。
+
+6. 責任の制限　適用法により義務付けられる場合（故意または重大な過失による行為など）、
+または書面で合意された場合を除き、不法行為（過失を含みます）、
+契約その他の法理論のいずれに基づくかを問わず、いかなる場合も、貢献者は、
+本ライセンスまたは成果物の使用もしくは使用不能に起因して生じる損害について、
+あなたに対して責任を負いません。これには、直接損害、間接損害、特別損害、
+付随的損害または結果的損害（信用の喪失、業務の中断、
+コンピューターの故障または不具合、
+その他一切の商業上の損害または損失を含みますが、
+これらに限られません）が含まれます。これは、
+当該貢献者がそのような損害の可能性を知らされていた場合であっても同様です。
+
+7. 保証または追加責任の引受け　成果物またはその派生成果物を再頒布する際、
+あなたは、本ライセンスに反しない範囲で、サポート、保証、
+補償その他の責任上の義務または権利を引き受ける旨を申し出て、
+その対価を請求することができます。ただし、
+そのような義務を引き受ける場合、
+あなたは自らの名義と責任においてのみ行動し、
+他の貢献者を代理してはなりません。また、
+その保証または追加責任を引き受けたことにより各貢献者に生じた責任、
+または各貢献者に対して主張された請求について、各貢献者を補償し、防御し、
+免責することに同意しなければなりません。
+
+以上、条件の終わり
+
+---
+
+TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
+
+1. Definitions.
+
+"License" shall mean the terms and conditions for use, reproduction, and
+distribution as defined by Sections 1 through 7 of this document.
+
+"Licensor" shall mean the copyright owner or entity authorized by the
+copyright owner that is granting the License.
+
+"Legal Entity" shall mean the union of the acting entity and all other
+entities that control, are controlled by, or are under common control with
+that entity. For the purposes of this definition, "control" means (i) the
+power, direct or indirect, to cause the direction or management of such
+entity, whether by contract or otherwise, or (ii) ownership of fifty percent
+(50%) or more of the outstanding shares, or (iii) beneficial ownership of such
+entity.
+
+"You" (or "Your") shall mean an individual or Legal Entity exercising
+permissions granted by this License.
+
+"Source" form shall mean the preferred form for making modifications,
+including but not limited to software source code, documentation source, and
+configuration files.
+
+"Object" form shall mean any form resulting from mechanical transformation or
+translation of a Source form, including but not limited to compiled object
+code, generated documentation, and conversions to other media types.
+
+"Work" shall mean the work of authorship, whether in Source or Object form,
+made available under the License, and the copyright of which belongs to the
+Central Research Institute of Electric Power Industry.
+
+"Derivative Works" shall mean any work, whether in Source or Object form, that
+is based on (or derived from) the Work and for which the editorial revisions,
+annotations, elaborations, or other modifications represent, as a whole, an
+original work of authorship. For the purposes of this License, Derivative
+Works shall not include works that remain separable from, or merely link (or
+bind by name) to the interfaces of, the Work and Derivative Works thereof.
+
+"Contribution" shall mean any work of authorship, including the original
+version of the Work and any modifications or additions to that Work or
+Derivative Works thereof, that is intentionally submitted to Licensor for
+inclusion in the Work by the copyright owner or by an individual or Legal
+Entity authorized to submit on behalf of the copyright owner. For the purposes
+of this definition, "submitted" means any form of electronic, verbal, or
+written communication sent to the Licensor or its representatives, including
+but not limited to communication on electronic mailing lists, source code
+control systems, and issue tracking systems that are managed by, or on behalf
+of, the Licensor for the purpose of discussing and improving the Work, but
+excluding communication that is conspicuously marked or otherwise designated
+in writing by the copyright owner as "Not a Contribution."
+
+"Contributor" shall mean Licensor and any individual or Legal Entity on behalf
+of whom a Contribution has been received by Licensor and subsequently
+incorporated within the Work.
+
+2. Grant of Copyright License. Subject to the terms and conditions of this
+License, each Contributor hereby grants to You a perpetual, worldwide,
+non-exclusive, no-charge, royalty-free, irrevocable copyright license to
+reproduce, prepare Derivative Works of, publicly display, publicly perform,
+sublicense, and distribute the Work and such Derivative Works in Source or
+Object form.
+
+3. Redistribution. You may reproduce and distribute copies of the Work or
+Derivative Works thereof in any medium, with or without modifications, and in
+Source or Object form, provided that You meet the following conditions:
+
+(a) You must give any other recipients of the Work or Derivative Works a copy
+of this License; and
+
+(b) You must cause any modified files to carry prominent notices stating that
+You changed the files; and
+
+(c) You must retain, in the Source form of any Derivative Works that You
+distribute, all copyright and attribution notices from the Source form of the
+Work, excluding those notices that do not pertain to any part of the
+Derivative Works; and
+
+You may add Your own copyright statement to Your modifications and may provide
+additional or different license terms and conditions for use, reproduction, or
+distribution of Your modifications, or for any such Derivative Works as a
+whole, provided Your use, reproduction, and distribution of the Work otherwise
+complies with the conditions stated in this License.
+
+4. Submission of Contributions. Unless You explicitly state otherwise, any
+Contribution intentionally submitted for inclusion in the Work by You to the
+Licensor shall be under the terms and conditions of this License, without any
+additional terms or conditions. Notwithstanding the above, nothing herein
+shall supersede or modify the terms of any separate license agreement you may
+have executed with Licensor regarding such Contributions.
+
+5. Disclaimer of Warranty. Unless required by applicable law or agreed to in
+writing, Licensor provides the Work (and each Contributor provides its
+Contributions) on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied, including, without limitation, any warranties
+or conditions of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
+PARTICULAR PURPOSE. You are solely responsible for determining the
+appropriateness of using or redistributing the Work and assume any risks
+associated with Your exercise of permissions under this License.
+
+6. Limitation of Liability. In no event and under no legal theory, whether in
+tort (including negligence), contract, or otherwise, unless required by
+applicable law (such as deliberate and grossly negligent acts) or agreed to in
+writing, shall any Contributor be liable to You for damages, including any
+direct, indirect, special, incidental, or consequential damages of any
+character arising as a result of this License or out of the use or inability
+to use the Work (including but not limited to damages for loss of goodwill,
+work stoppage, computer failure or malfunction, or any and all other
+commercial damages or losses), even if such Contributor has been advised of
+the possibility of such damages.
+
+7. Accepting Warranty or Additional Liability. While redistributing the Work
+or Derivative Works thereof, You may choose to offer, and charge a fee for,
+acceptance of support, warranty, indemnity, or other liability obligations
+and/or rights consistent with this License. However, in accepting such
+obligations, You may act only on Your own behalf and on Your sole
+responsibility, not on behalf of any other Contributor, and only if You agree
+to indemnify, defend, and hold each Contributor harmless for any liability
+incurred by, or claims asserted against, such Contributor by reason of your
+accepting any such warranty or additional liability.
+
+END OF TERMS AND CONDITIONS
