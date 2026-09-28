@@ -118,8 +118,9 @@ def test_meter_alarm_scale_bits_are_not_decimal_or_humidity():
 
 
 @pytest.mark.parametrize("ppm,valid", [(399, False), (400, True), (10000, True), (10001, False), (65535, False)])
-def test_co2_range_is_value_validation(ppm, valid):
-    tail = "0ae4029c250334" + ppm.to_bytes(2, "big").hex() + "00"
+@pytest.mark.parametrize("last_byte", ["00", "40"])
+def test_co2_range_is_value_validation(ppm, valid, last_byte):
+    tail = "0ae4029c250334" + ppm.to_bytes(2, "big").hex() + last_byte
     result = packet(tail, "350064")
     if valid:
         assert result.values["co2_ppm"] == ppm
@@ -128,7 +129,7 @@ def test_co2_range_is_value_validation(ppm, valid):
     unknown(packet(tail))  # A normal ppm value does not establish a model.
 
 
-@pytest.mark.parametrize("tail", ["0ae40a9c250334022600", "0ae402ff250334022600", "0ae4029c650334022600", "0ae4029c250334022601"])
+@pytest.mark.parametrize("tail", ["0ae40a9c250334022600", "0ae402ff250334022600", "0ae4029c650334022600", "0ae4029c2503340226", "0ae4029c25033402260000"])
 def test_co2_invalid_manufacturer_is_rejected_with_known_type_or_hint(tail):
     unknown(packet(tail, "350064"))
     unknown(packet(tail, hint="co2_sensor"))
@@ -690,6 +691,29 @@ def co2_observed_packet(payload=CO2_OBSERVED, service=None, hint=None):
                      {} if service is None else {sb.METER_SERVICE_UUID: bytes.fromhex(service)}, NOW, hint)
 
 
+@pytest.mark.parametrize("payload,ppm", [
+    ("b0e9fe5815ccffe4019a31002502ec00", 748),
+    ("b0e9fe5815cc01e4019a3100250e8040", 3712),
+])
+@pytest.mark.parametrize("service,hint", [("350064", None), (None, "co2_sensor")])
+def test_co2_observed_normal_and_high_concentrations_decode(payload, ppm, service, hint):
+    result = co2_observed_packet(payload, service, hint)
+    assert result is not None
+    assert result.device_key == "switchbot:b0e9fe5815cc"
+    assert (result.model, result.sensor_type) == ("co2_sensor", "environment")
+    assert result.raw["classification"]["status"] == "decoded"
+    assert result.values == {"temperature_c": 26.1, "relative_humidity_percent": 49, "co2_ppm": ppm}
+
+
+@pytest.mark.parametrize("last_byte", ["00", "01", "40", "ff"])
+def test_co2_last_byte_does_not_affect_unconfirmed_model_options(last_byte):
+    observed = co2_observed_packet(CO2_OBSERVED[:-2] + last_byte)
+    unknown(observed)
+    options = sb.unconfirmed_model_options(observed)
+    assert list(options) == ["co2_sensor"]
+    assert options["co2_sensor"].values["co2_ppm"] == 766
+
+
 def test_co2_explicit_service_still_auto_identifies_the_observed_layout():
     result = co2_observed_packet(service="350064")
     assert result.model == "co2_sensor"
@@ -740,7 +764,7 @@ def test_co2_manufacturer_only_preview_requires_confirmation_and_persists_hint(t
 
 
 @pytest.mark.parametrize("payload,service", [
-    (CO2_OBSERVED[:-2] + "01", None),       # invalid terminator
+    (CO2_OBSERVED[:-2], None),             # truncated manufacturer
     (CO2_OBSERVED[:16] + "0a992d003b02fe00", None),  # fractional digit > 9
     (CO2_OBSERVED[:20] + "65003b02fe00", None),  # relative humidity > 100
     (CO2_OBSERVED[:26] + "018f00", None),   # CO2 below 400 ppm

@@ -222,7 +222,7 @@ def test_pi_captured_co2_manufacturer_packets_decode_environment_measurements() 
     "0200000000060ae4029c650334022600",  # invalid humidity
     "0200000000060ae4029c250334018f00",  # CO2 < 400 ppm
     "0200000000060ae4029c250334271100",  # CO2 > 10,000 ppm
-    "0200000000060ae4029c250334022601",  # non-zero terminator
+    "0200000000060ae4029c25033402260000",  # len > 16
 ))
 def test_invalid_co2_manufacturer_packets_remain_unknown(packet: str) -> None:
     decoded = decode(

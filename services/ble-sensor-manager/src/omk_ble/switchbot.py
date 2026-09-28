@@ -24,9 +24,9 @@ METER_MANUFACTURER_LENGTH = 11
 METER_MANUFACTURER_LAYOUT_MARKER_INDEX = 7
 METER_MANUFACTURER_LAYOUT_MARKER = 0x03
 
-# Captured Meter Pro CO2 layout is 16 bytes. Bytes 6, 7, 11, and 12 vary
+# Captured Meter Pro CO2 layout is 16 bytes. Bytes 6, 7, 11, 12, and 15 vary
 # between captures; validate the Meter-compatible temperature/humidity triplet,
-# big-endian CO2 value, and zero terminator instead.
+# and big-endian CO2 value. Byte 15 is uninterpreted and not a validity condition.
 CO2_MANUFACTURER_LENGTH = 16
 CO2_TEMPERATURE_HUMIDITY_OFFSET = 8
 CO2_MIN_PPM = 400
@@ -182,8 +182,6 @@ def _decode_meter_manufacturer_data(data: bytes) -> tuple[str, str, dict[str, An
 def _decode_co2_manufacturer_data(data: bytes) -> tuple[str, str, dict[str, Any]] | None:
     """Decode the observed two-device CO2 layout without a MAC-specific rule."""
     if len(data) != CO2_MANUFACTURER_LENGTH:
-        return None
-    if data[15] != 0:
         return None
     measurement = _decode_meter_expression(*data[CO2_TEMPERATURE_HUMIDITY_OFFSET:11])
     if measurement is None:

@@ -39,7 +39,7 @@ Aは公式BLE仕様、Bは複数実機、Cは1個体の実測、Dは固有性未
 | --- | --- | --- |
 | Meter / `temperature_humidity_sensor` | A: service `0x54` | 6-byte serviceの温湿度・battery。C: manufacturer 11 bytes / index 7=`03`は既存hint時の形式条件だけ |
 | Meter Plus / 同上 | A: service `0x69` | Meterと同じ6-byte値形式。service typeは区別できるがOMK schemaは意図的に共通。別個体実測の根拠は今回確認できていない |
-| Meter Pro CO2 / `co2_sensor` | 参照した公式実装: service `0x35`、既存hint、または利用者明示確認 | B: 2個体・6 captureの16-byte manufacturer形式。可変index 6/7/11/12を固定しない。末尾`00`は観測上の形式条件で、固有model IDではない。7-byte serviceの別broadcast modeは未対応 |
+| Meter Pro CO2 / `co2_sensor` | 参照した公式実装: service `0x35`、既存hint、または利用者明示確認 | B: 2個体の16-byte manufacturer形式。可変index 6/7/11/12/15を固定しない。byte 15は意味未特定で、classifier・validity条件に使用しない。7-byte serviceの別broadcast modeは未対応 |
 | Motion / `motion_sensor` | A: service `0x73`、または既存hint | 公式6-byte service単独でも復号可能。C: manufacturer 10 bytes / status下位6 bit=`2c`はhint時の対応形式。index 8の`da`等も受容 |
 | Presence Sensor Pro / `presence_sensor` | 参照した公式実装: service `0x70`。実測の`00 20` service付き・manufacturer-only形式は既存hintまたは利用者明示確認が必須 | C: 12+7 bytes、およびPi4内蔵Bluetoothで得た12-byte manufacturer-only。公式実装のstatus/照度のbit解釈と実測を使用する。長さの組合せだけで初回識別しない。`0x70`形式は参照実装由来の合成テストであり、今回の実機確認ではない |
 | Contact / `contact_sensor` | A: service `0x64`、または既存hint | 完全な9-byte service。暗号化bit付きは未対応。manufacturer 13 bytes / status下位nibble=`c`は既存fixture系列に基づくC相当で個体差未確認。serviceの状態が古い実測があるため、同じmodelに選択した後は妥当なmanufacturer状態を優先 |
@@ -254,7 +254,11 @@ Presence Sensor Proと確認した1個体で行われた。Pi内蔵Bluetoothで�
   766 ppm / 25.5 ℃ / 45 %が本体表示と一致すると報告した。これはCO₂値のlayout解釈を補強する
   B相当の実測であり、16-byte長、末尾`00`、正常値、可変byteを組み合わせても機種固有の
   discriminatorにはならない。
-- service dataが空で、既存CO₂ decoderの16-byte長、末尾terminator、Meter互換温湿度
+- 同じ個体の追加観測で、`b0e9fe5815ccffe4019a31002502ec00`は748 ppm、
+  `b0e9fe5815cc01e4019a3100250e8040`は3712 ppmだった。byte 15は`00`から`40`に
+  変動するため、classifier・validity条件には使用しない。意味は現時点で特定しない。
+  CO₂値は従来どおり`data[13:15]`のbig-endian値を使用する。
+- service dataが空で、既存CO₂ decoderの16-byte長、Meter互換温湿度
   expression、温度・湿度・CO₂の値範囲をすべて検証できる未登録candidateだけに
   `co2_sensor`の明示登録選択肢を付ける。candidate本体は`unknown_switchbot`のままとし、
   Dashboardは「SwitchBot CO₂センサー候補（未確認）」でCO₂濃度・温度・相対湿度を参考値として
