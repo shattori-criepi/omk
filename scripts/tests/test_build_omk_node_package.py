@@ -36,12 +36,29 @@ else: sys.exit(3)
     pio.write_text('''#!/usr/bin/env python3
 import os, sys
 from pathlib import Path
-assert sys.argv[1:] == ['run', '-d', os.environ['FIXTURE_REPO']+'/firmware/esp32/omk-node', '-e', 'atom-s3-lite']
+
+base = ['run', '-d', os.environ['FIXTURE_REPO']+'/firmware/esp32/omk-node', '-e', 'atom-s3-lite']
+args = sys.argv[1:]
+clean_event = Path(os.environ['CLEAN_EVENT'])
+
+if args == base + ['-t', 'clean']:
+    clean_event.write_text('cleaned')
+    sys.exit(0)
+
+assert args == base
+assert clean_event.exists()
 Path(os.environ['BUILD_EVENT']).write_text('built')
 if os.environ.get('BUILD_FAIL'): sys.exit(1)
 '''); pio.chmod(0o755)
     event = tmp_path/'build-event'
-    env = {**os.environ, 'PATH': str(commands)+':'+os.environ['PATH'], 'FIXTURE_REPO': str(repository), 'BUILD_EVENT': str(event)}
+    clean_event = tmp_path/'clean-event'
+    env = {
+        **os.environ,
+        'PATH': str(commands)+':'+os.environ['PATH'],
+        'FIXTURE_REPO': str(repository),
+        'BUILD_EVENT': str(event),
+        'CLEAN_EVENT': str(clean_event),
+    }
     def run(**extra):
         return subprocess.run(['bash', str(ROOT/'scripts/build-omk-node-package.sh')], cwd=repository, env={**env, **extra}, capture_output=True, text=True)
     return run, repository, event
