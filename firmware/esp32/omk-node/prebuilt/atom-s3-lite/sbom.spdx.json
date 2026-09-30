@@ -1,0 +1,436 @@
+{
+  "spdxVersion": "SPDX-2.2",
+  "dataLicense": "CC0-1.0",
+  "SPDXID": "SPDXRef-DOCUMENT",
+  "name": "OMK Node AtomS3 Lite reviewed binary SBOM",
+  "documentNamespace": "https://spdx.org/spdxdocs/omk-node-d465d22e-78e4-4a91-a910-d2b5c266f575",
+  "creationInfo": {
+    "creators": [
+      "Tool: esp-idf-sbom-1.4.0",
+      "Tool: OMK-local-license-audit"
+    ],
+    "created": "2026-09-30T23:30:10Z",
+    "licenseListVersion": "3.27"
+  },
+  "documentComment": "Reviewed and supplemented inventory, not unmodified esp-idf-sbom output. Inputs: clean build at 9a167edbd13f24b46f342b9ffa865da30ab60cd1, both linker maps, compiler include dependencies, installed source/license texts. Component-directory false positives were removed and runtime and embedded third-party portions added. Retained archive means nonzero-address, nonzero-size input section in the memory-map portion, excluding discarded sections and cross references. Archive hashes describe build inputs; file hashes identify the actual distributed binaries. Complete copyright and license notices are in THIRD_PARTY_NOTICES.md. Build tools and ROM-resident code are excluded.",
+  "packages": [
+    {
+      "SPDXID": "SPDXRef-OMK-Node",
+      "name": "OMK Node AtomS3 Lite prebuilt distribution",
+      "versionInfo": "sha256:6f63d8fd6c243c07851b40af795bae373d71365dcf0b39db55cc802ed56bcad0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "copyrightText": "NOASSERTION",
+      "licenseComments": "OMK has its own root LICENSE; it is not Apache-2.0. Third-party licenses are recorded separately. See ../../LICENSE_AUDIT.md for build provenance and metadata-only comparison with the distributed binaries."
+    },
+    {
+      "SPDXID": "SPDXRef-esp-idf",
+      "name": "ESP-IDF components and Espressif binary libraries",
+      "versionInfo": "6.0.1",
+      "downloadLocation": "https://github.com/espressif/esp-idf/tree/v6.0.1",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0",
+      "licenseDeclared": "Apache-2.0",
+      "copyrightText": "Copyright 2010-2026 Espressif Systems (Shanghai) CO LTD",
+      "sourceInfo": "app: .pio/build/atom-s3-lite/esp-idf/esp_hw_support/libesp_hw_support.a; archive SHA256 6aca37150c582014b26dc08efe5a069db17acdb29efc26c66f0df7502fb04be1; retained members: adc_share_hw_ctrl.c.o, brownout.c.o, chip_info.c.o, clk_ctrl_os.c.o, cpu.c.o, cpu_region_protect.c.o, esp_clk.c.o, esp_clk_tree.c.o, esp_clk_tree_common.c.o, esp_cpu_intr.c.o, esp_gpio_reserve.c.o, esp_memory_utils.c.o, esp_memprot.c.o, esp_memprot_conv.c.o, heap_align_hw.c.o, hw_random.c.o, intr_alloc.c.o, mac_addr.c.o, mspi_timing_config.c.o, mspi_timing_tuning.c.o, periph_ctrl.c.o, regi2c_ctrl.c.o, rtc_clk.c.o, rtc_init.c.o, rtc_module.c.o, rtc_sleep.c.o, rtc_time.c.o, sar_periph_ctrl.c.o, sar_tsens_ctrl.c.o, sleep_gpio.c.o, sleep_modes.c.o, spi_bus_lock.c.o, systimer.c.o\napp: .pio/build/atom-s3-lite/esp-idf/esp_driver_i2c/libesp_driver_i2c.a; archive SHA256 edf4a893f9ae9c76f6375026a8cc1807e7bdda5b656b324c453bf545082e9b77; retained members: i2c_common.c.o, i2c_master.c.o\napp: .pio/build/atom-s3-lite/esp-idf/esp_coex/libesp_coex.a; archive SHA256 ae4e9e725fbacd7b52ed328382f091f7f6ec622b0a7fd64ce074a21dd15b5bba; retained members: coexist.c.o, esp_coex_adapter.c.o, lib_printf.c.o\napp: .pio/build/atom-s3-lite/esp-idf/esp_driver_usb_serial_jtag/libesp_driver_usb_serial_jtag.a; archive SHA256 5c434b640a6853789edffbfd421e2208ad777ac078d2a1ec8249d2e7cd03745f; retained members: usb_serial_jtag.c.o, usb_serial_jtag_connection_monitor.c.o, usb_serial_jtag_vfs.c.o\napp: .pio/build/atom-s3-lite/esp-idf/esp_libc/libesp_libc.a; archive SHA256 0dab062943082e8f0c8af50aa92df5ba27202c604ee711f59ea6d88afcec1f0e; retained members: abort.c.o, assert.c.o, bufio_setvbuf.c.o, errno.c.o, esp_time_impl.c.o, getentropy.c.o, heap.c.o, init.c.o, locks.c.o, picolibc_init.c.o, pthread.c.o, random.c.o, reent_syscalls.c.o, stdatomic.c.o, syscalls.c.o, time.c.o\napp: .pio/build/atom-s3-lite/esp-idf/esp_phy/libesp_phy.a; archive SHA256 29a348495c8b2fac7c3808eb9912f0d58792acb26038d8805fc1949f800f0bb8; retained members: lib_printf.c.o, phy_common.c.o, phy_init.c.o, phy_init_data.c.o, phy_override.c.o\napp: .pio/build/atom-s3-lite/esp-idf/esp_system/libesp_system.a; archive SHA256 8e97d2e93dcb767c37498b902300b210be3050732f83e395839d0f490a8ec431; retained members: apb_backup_dma.c.o, cache_err_int.c.o, clk.c.o, cpu_start.c.o, crosscore_int.c.o, debug_helpers.c.o, debug_helpers_asm.S.o, esp_err.c.o, esp_ipc.c.o, esp_ipc_isr.c.o, esp_ipc_isr_handler.S.o, esp_ipc_isr_port.c.o, esp_system.c.o, esp_system_chip.c.o, freertos_hooks.c.o, highint_hdl.S.o, int_wdt.c.o, panic.c.o, panic_arch.c.o, panic_handler.c.o, panic_handler_asm.S.o, reset_reason.c.o, startup.c.o, startup_funcs.c.o, system_internal.c.o, task_wdt.c.o, task_wdt_impl_timergroup.c.o, ubsan.c.o\napp: .pio/build/atom-s3-lite/esp-idf/esp_timer/libesp_timer.a; archive SHA256 3eefa550826b20a347284b6862a0ccda631f8ce50768b3af8af01a143044f1c9; retained members: esp_timer.c.o, esp_timer_impl_common.c.o, esp_timer_impl_systimer.c.o, esp_timer_init.c.o, ets_timer_legacy.c.o, system_time.c.o\napp: .pio/build/atom-s3-lite/esp-idf/esp_wifi/libesp_wifi.a; archive SHA256 ad734624484dbbd927a45fa77adf0a8710b595c327e66beffd7c7f30397d1eee; retained members: esp_adapter.c.o, esp_wifi_regulatory.c.o, lib_printf.c.o, mesh_event.c.o, wifi_default.c.o, wifi_init.c.o, wifi_netif.c.o\napp: .pio/build/atom-s3-lite/esp-idf/hal/libhal.a; archive SHA256 8beb4e453f60bb76d80c72f1def80c8a9ea770e3514c762e9417dfcf8a9d7a52; retained members: cache_hal.c.o, efuse_hal.c.o, mmu_hal.c.o, systimer_hal.c.o\napp: .pio/build/atom-s3-lite/esp-idf/heap/libheap.a; archive SHA256 c8d5f093bde47281c434977fc6b7d4d19f13758ca90946d89bf4cc930ddae976; retained members: heap_caps.c.o, heap_caps_base.c.o, heap_caps_init.c.o, memory_layout.c.o, memory_layout_utils.c.o, multi_heap.c.o, tlsf.c.o\napp: .pio/build/atom-s3-lite/esp-idf/spi_flash/libspi_flash.a; archive SHA256 515a2b3a994004712acc137c77db434f7239eeb916c1b87578e0091b3f477281; retained members: cache_utils.c.o, esp_flash_api.c.o, esp_flash_spi_init.c.o, flash_brownout_hook.c.o, flash_mmap.c.o, flash_ops.c.o, memspi_host_driver.c.o, spi_flash_chip_boya.c.o, spi_flash_chip_drivers.c.o, spi_flash_chip_gd.c.o, spi_flash_chip_generic.c.o, spi_flash_chip_issi.c.o, spi_flash_chip_mxic.c.o, spi_flash_chip_mxic_opi.c.o, spi_flash_chip_th.c.o, spi_flash_chip_winbond.c.o, spi_flash_hpm_enable.c.o, spi_flash_oct_flash_init.c.o, spi_flash_os_func_app.c.o, spi_flash_os_func_noos.c.o\napp: .pio/build/atom-s3-lite/esp-idf/bootloader_support/libbootloader_support.a; archive SHA256 e05338de01707008b58cef5c66857255143bd03d2ced00c2637feda7e6a2351b; retained members: bootloader_flash.c.o, bootloader_flash_config_esp32s3.c.o, bootloader_mem.c.o\napp: .pio/build/atom-s3-lite/esp-idf/esp_mm/libesp_mm.a; archive SHA256 843ed2595431a0d060a4b644eaa548740649d649ed47fe4d456e6ba3c2ebe96c; retained members: esp_cache_msync.c.o, esp_cache_utils.c.o, esp_mmu_map.c.o, ext_mem_layout.c.o\napp: .pio/build/atom-s3-lite/esp-idf/esp_hal_dma/libesp_hal_dma.a; archive SHA256 c8ed0f59af796c7b6ce6811ecd10d02b541850f239c9fcd19cbaed3137b97e9a; retained members: gdma_hal_ahb_v1.c.o, gdma_hal_top.c.o\napp: .pio/build/atom-s3-lite/esp-idf/esp_hal_mspi/libesp_hal_mspi.a; archive SHA256 827a63bec2cd1b9327c0ff2ba0ea8f8e9cf7fa7b6259b12510d0b127e135484d; retained members: spi_flash_encrypt_hal_iram.c.o, spi_flash_hal.c.o, spi_flash_hal_gpspi.c.o, spi_flash_hal_iram.c.o\napp: .pio/build/atom-s3-lite/esp-idf/esp_ringbuf/libesp_ringbuf.a; archive SHA256 65d458587bc57566e6859e32e043836c84f9585bced296e3e4cf5339137f57fc; retained members: ringbuf.c.o\napp: .pio/build/atom-s3-lite/esp-idf/esp_rom/libesp_rom.a; archive SHA256 703ba33bcbb4919c7615ad5196f000681d6e27c22272557b6aefe484433eb7c9; retained members: esp_rom_cache_esp32s2_esp32s3.c.o, esp_rom_efuse.c.o, esp_rom_spiflash.c.o, esp_rom_sys.c.o\napp: .pio/build/atom-s3-lite/esp-idf/log/liblog.a; archive SHA256 557a2d662cc7e44a9bae5c94b6653415a789982f3385e196e03c1c425694eefc; retained members: log.c.o, log_binary_heap.c.o, log_level.c.o, log_linked_list.c.o, log_lock.c.o, log_timestamp.c.o, log_write.c.o, tag_log_level.c.o, util.c.o\napp: $IDF_PATH/components/bt/controller/lib_esp32c3_family/esp32s3/libbtdm_app.a; archive SHA256 ff3538c403108897cf34a74b45251ad2a3d0e1beab70979c2e332832cbf04a6e; retained members: aes.o, arch_main.o, ble_util_buf.o, bt_rw_v9.o, coex_schm.o, emi.o, flash.o, hci.o, hci_msg.o, hci_tl.o, hl_itf.o, intc.o, ip_funcs.o, ke_msg.o, ke_task.o, llc.o, llc_chmap_upd.o, llc_con_upd.o, llc_dl_upd.o, llc_encrypt.o, llc_hci.o, llc_le_ping.o, llc_llcp.o, llc_phy_upd.o, lld.o, lld_adv.o, lld_con.o, lld_init.o, lld_scan.o, lld_test.o, llm.o, llm_adv.o, llm_hci.o, llm_init.o, llm_scan.o, modules_funcs.o, nvds.o, osi.o, plf_funcs.o, rf_coexist.o, rf_coexist_hook.o, rf_espressif.o, rf_txpwr.o, rwble.o, rwip.o, rwip_driver.o, sch_arb.o, sch_plan.o, sch_prog.o, sdk_config.o, task.o, vhci.o, vshci_task.o\napp: $IDF_PATH/components/esp_phy/lib/esp32s3/libbtbb.a; archive SHA256 80d9976d6347be8b974e963d1a6b6a2f58bb4cff08cb5b0bbbb78e9841e8a018; retained members: bt_bb_v2.o\napp: $IDF_PATH/components/esp_phy/lib/esp32s3/libphy.a; archive SHA256 29dcc18a035801bd41486d5d59f3caeb62f8ed153533c488828bffef1abb99fd; retained members: phy_analog_cal.o, phy_api.o, phy_basic.o, phy_debug.o, phy_feature.o, phy_hw_freq.o, phy_i2c.o, phy_init.o, phy_pbus.o, phy_pwdet.o, phy_reg.o, phy_rfpll.o, phy_rx_cal.o, phy_rx_gain.o, phy_track.o, phy_tsens.o, phy_tx_cal.o, phy_tx_gain.o\napp: $IDF_PATH/components/esp_coex/lib/esp32s3/libcoexist.a; archive SHA256 a5a83cd6114127a453054929d7ff762c3c4d2241d2192294ba4dedcff75e949d; retained members: coexist_api.o, coexist_core.o, coexist_dbg.o, coexist_param.o, coexist_scheme.o\napp: $IDF_PATH/components/esp_wifi/lib/esp32s3/libpp.a; archive SHA256 5e74f8b482f542851dfa595700aa4c6aba4e5152e3bf63659d4f09a70b9fff41; retained members: esf_buf.o, hal_ampdu.o, hal_coex.o, hal_crypto.o, hal_mac.o, hal_mac_rx.o, hal_mac_tx.o, hal_sniffer.o, hal_tsf.o, if_hwctrl.o, lmac.o, pm.o, pm_beacon_offset.o, pm_coex.o, pp.o, pp_debug.o, pp_timer.o, rate_control.o, trc.o, wdev.o\napp: .pio/build/atom-s3-lite/esp-idf/efuse/libefuse.a; archive SHA256 be631ccf7c4aafbf6282d8486caf773dc00b6c8880141ab2001396d39cfa3e27; retained members: esp_efuse_api.c.o, esp_efuse_api_key.c.o, esp_efuse_fields.c.o, esp_efuse_startup.c.o, esp_efuse_table.c.o, esp_efuse_utility.c.o\napp: .pio/build/atom-s3-lite/esp-idf/esp_driver_dma/libesp_driver_dma.a; archive SHA256 d2b260a734cc6bf1aebddd6f88892e45eee492d832c40ed986acd605ff89783a; retained members: gdma.c.o\napp: $IDF_PATH/components/esp_wifi/lib/esp32s3/libnet80211.a; archive SHA256 2be2c71c0f6126dc0467097294d4aa6eb49df90cce734d0a5d61802c9b42d8cd; retained members: ieee80211.o, ieee80211_action.o, ieee80211_action_vendor.o, ieee80211_api.o, ieee80211_crypto.o, ieee80211_crypto_ccmp.o, ieee80211_crypto_gcmp.o, ieee80211_crypto_sms4.o, ieee80211_crypto_tkip.o, ieee80211_crypto_wep.o, ieee80211_debug.o, ieee80211_ets.o, ieee80211_ftm.o, ieee80211_hostap.o, ieee80211_ht.o, ieee80211_ie_vendor.o, ieee80211_input.o, ieee80211_ioctl.o, ieee80211_mesh_quick.o, ieee80211_nvs.o, ieee80211_output.o, ieee80211_phy.o, ieee80211_power.o, ieee80211_proto.o, ieee80211_regdomain.o, ieee80211_rfid.o, ieee80211_scan.o, ieee80211_sta.o, ieee80211_supplicant.o, ieee80211_timer.o, wl_chm.o, wl_cnx.o, wl_offchan.o\napp: .pio/build/atom-s3-lite/esp-idf/esp_driver_gpio/libesp_driver_gpio.a; archive SHA256 9464c9f9632e7f587523a56905db857aa6e2f31e5d5a26b6e4016445f74dff1f; retained members: gpio.c.o, rtc_io.c.o\napp: .pio/build/atom-s3-lite/esp-idf/esp_netif/libesp_netif.a; archive SHA256 665c92688d0f78be46a31ccc6b2585692454ae8f9a75c76f212091f455373d69; retained members: esp_netif_defaults.c.o, esp_netif_handlers.c.o, esp_netif_lwip.c.o, esp_netif_lwip_defaults.c.o, esp_netif_objects.c.o, wlanif.c.o\napp: .pio/build/atom-s3-lite/esp-idf/pthread/libpthread.a; archive SHA256 de9876ac1e11988612d31b3edf4fac7d5c738faa417b25aa09f01f2b50ce6a7a; retained members: pthread.c.o, pthread_cond_var.c.o, pthread_local_storage.c.o, pthread_rwlock.c.o, pthread_semaphore.c.o\napp: .pio/build/atom-s3-lite/esp-idf/vfs/libvfs.a; archive SHA256 68d17632aa4481ddcce07e9a006342ca4f5eda7402e32a6e36f36ed34b287be8; retained members: nullfs.c.o, vfs.c.o, vfs_calls.c.o\napp: $IDF_PATH/components/esp_wifi/lib/esp32s3/libmesh.a; archive SHA256 395c3e893660e20ca23f65e400a5f5b2aa3cf46ad7b13b61c2149366ddc22b05; retained members: mesh.o, mesh_common.o, mesh_config.o, mesh_io.o, mesh_main.o, mesh_network.o, mesh_parent.o, mesh_quick.o, mesh_route.o, mesh_schedule.o, mesh_sleep.o, mesh_timer.o, mesh_utilities.o, mesh_wifi.o\napp: $IDF_PATH/components/esp_wifi/lib/esp32s3/libespnow.a; archive SHA256 206d8682d1c1406a682d87b6229d291e448f7e5f7801d8ba30eff649c04c9fd8; retained members: manatick.o\napp: .pio/build/atom-s3-lite/esp-idf/esp_hal_ana_conv/libesp_hal_ana_conv.a; archive SHA256 ab55de731e5d180b30b9b495a3a21405fb91e2ec26eb7d381889dcb2dcca979c; retained members: temperature_sensor_hal.c.o, temperature_sensor_periph.c.o\napp: .pio/build/atom-s3-lite/esp-idf/esp-tls/libesp-tls.a; archive SHA256 137ade2a84ebc9f64462bf6b6e32ae239544fac4afaa67a7429c5812efdc0b58; retained members: esp_tls.c.o, esp_tls_crypto.c.o, esp_tls_error_capture.c.o, esp_tls_mbedtls.c.o, esp_tls_platform_port.c.o\napp: .pio/build/atom-s3-lite/esp-idf/esp_app_format/libesp_app_format.a; archive SHA256 38144d04655d0455a972d457d029f7abf8b236d402deea3a6bb6efb457d70032; retained members: esp_app_desc.c.o\napp: .pio/build/atom-s3-lite/esp-idf/esp_event/libesp_event.a; archive SHA256 fac4ec97dff78198351dfe40f7d8d874a66699d3aa15490b6ad000b772654e69; retained members: default_event_loop.c.o, esp_event.c.o\napp: .pio/build/atom-s3-lite/esp-idf/esp_partition/libesp_partition.a; archive SHA256 73157797f39e937f005c0d7f208f3ec545cbac47f22d27dabc9bf87e46d308ec; retained members: partition.c.o, partition_target.c.o\napp: .pio/build/atom-s3-lite/esp-idf/esp_stdio/libesp_stdio.a; archive SHA256 b67a85fdb7f510a77d37d66c8efdc6e2f7840faf39e5a2ad3493a10153418a1f; retained members: stdio_vfs.c.o\napp: .pio/build/atom-s3-lite/esp-idf/nvs_flash/libnvs_flash.a; archive SHA256 aeb604dfbbc623881796687b85106c16658903f92457a8e67a2e071b7c9eb408; retained members: nvs_api.cpp.o, nvs_handle_simple.cpp.o, nvs_item_hash_list.cpp.o, nvs_page.cpp.o, nvs_pagemanager.cpp.o, nvs_partition.cpp.o, nvs_partition_lookup.cpp.o, nvs_partition_manager.cpp.o, nvs_platform.cpp.o, nvs_storage.cpp.o, nvs_types.cpp.o\napp: .pio/build/atom-s3-lite/esp-idf/app_update/libapp_update.a; archive SHA256 cff0c62d4218847236e51e5c80591aab2f6eeae7fe4ce9c8acd41b4b50b5281d; retained members: esp_ota_ops.c.o\napp: .pio/build/atom-s3-lite/esp-idf/esp_security/libesp_security.a; archive SHA256 68d28ca43ab78473b3a9fe07616353b717c834386f67b7f366aeff1f902859d0; retained members: esp_crypto_lock.c.o, esp_crypto_periph_clk.c.o, esp_ds.c.o, esp_hmac.c.o, init.c.o\napp: $IDF_PATH/components/esp_wifi/lib/esp32s3/libcore.a; archive SHA256 9cd4fdd28486c9708f427a1cd5d5c64e432972949e6564f142ade89d8f8a597e; retained members: misc_nvs.o\napp: .pio/build/atom-s3-lite/esp-idf/esp_common/libesp_common.a; archive SHA256 def3b0ae133fba23a4a423a8c7ac16a3925ab7cdbe2265ad8c2783444f8ceb01; retained members: esp_err_to_name.c.o\napp: .pio/build/atom-s3-lite/esp-idf/esp_hal_i2c/libesp_hal_i2c.a; archive SHA256 fa60ab6a4e0f85cc6a62fa2944e96030c19efd1a7cf1d1efd2d3dd2534ec99f2; retained members: i2c_hal.c.o, i2c_periph.c.o\napp: .pio/build/atom-s3-lite/esp-idf/tcp_transport/libtcp_transport.a; archive SHA256 35a1613e8efbf82898382d8a5bb71d1134e06dd3355992e89c1c08b1fa2a6c3e; retained members: transport.c.o, transport_internal.c.o, transport_ssl.c.o, transport_ws.c.o\napp: .pio/build/atom-s3-lite/esp-idf/esp_hal_clock/libesp_hal_clock.a; archive SHA256 aedb151061f841f1c4907b9a1e6d42f829358127243a136e3f775d8e0f8f7a01; retained members: clk_tree_hal.c.o\napp: .pio/build/atom-s3-lite/esp-idf/esp_hal_security/libesp_hal_security.a; archive SHA256 0ea5687b9ca472591fe8335e06fd83df628889a48cd208641a3f489ddb4c70df; retained members: aes_hal.c.o, ds_hal.c.o, hmac_hal.c.o, mpi_hal.c.o, mpu_hal.c.o, sha_hal.c.o\napp: .pio/build/atom-s3-lite/esp-idf/esp_hal_pmu/libesp_hal_pmu.a; archive SHA256 98926e30fe16dc5024a113edaff5df982b0d204230851477420f8b8f81220b61; retained members: brownout_hal.c.o\napp: .pio/build/atom-s3-lite/esp-idf/cxx/libcxx.a; archive SHA256 6ddebd430586f9122ce331508de3258cba0e2769ec2ab963a4673945b6ab8e3d; retained members: cxx_exception_stubs.cpp.o, cxx_guards.cpp.o, cxx_init.cpp.o\napp: .pio/build/atom-s3-lite/esp-idf/nvs_sec_provider/libnvs_sec_provider.a; archive SHA256 210cc66fd7370a71d8cf705393eb81eb55ce63e908c79f732bad40404a7f8da5; retained members: nvs_sec_provider.c.o\napp: .pio/build/atom-s3-lite/esp-idf/soc/libsoc.a; archive SHA256 ee6ab74cc18023a61cc66a9a16c3351d779353519147adc4e702fe7452f7c7bf; retained members: dport_access_common.c.o, gpio_periph.c.o, interrupts.c.o, mpi_periph.c.o\napp: .pio/build/atom-s3-lite/esp-idf/esp_hal_gpio/libesp_hal_gpio.a; archive SHA256 1240c93c661d760679199f03312c3dae3fdd03d9788944411d9db6a2d1f96925; retained members: rtc_io_periph.c.o\nbootloader: .pio/build/atom-s3-lite/bootloader/esp-idf/bootloader_support/libbootloader_support.a; archive SHA256 cb7728cc107eb4f42f9be7cc49aaa69c349264cfa370ce1cd161d5c54d18427a; retained members: bootloader_clock_init.c.o, bootloader_common_loader.c.o, bootloader_console.c.o, bootloader_console_loader.c.o, bootloader_esp32s3.c.o, bootloader_flash.c.o, bootloader_flash_config_esp32s3.c.o, bootloader_init.c.o, bootloader_mem.c.o, bootloader_panic.c.o, bootloader_random.c.o, bootloader_random_esp32s3.c.o, bootloader_sha.c.o, bootloader_soc.c.o, bootloader_utility.c.o, esp_image_format.c.o, flash_partitions.c.o\nbootloader: .pio/build/atom-s3-lite/bootloader/esp-idf/esp_hw_support/libesp_hw_support.a; archive SHA256 9b59d01e8b28ca6b8cae28c9bd63abe3cb85f9c85ab040ed4eaf7443fb601ea8; retained members: cpu_region_protect.c.o, rtc_clk.c.o, rtc_clk_init.c.o, rtc_init.c.o, rtc_time.c.o\nbootloader: .pio/build/atom-s3-lite/bootloader/esp-idf/esp_rom/libesp_rom.a; archive SHA256 a1cf6a2d672650156d2baef198deeab4484b5b26ba514d78b83198db57c36e8c; retained members: esp_rom_serial_output.c.o, esp_rom_sys.c.o\nbootloader: .pio/build/atom-s3-lite/bootloader/esp-idf/log/liblog.a; archive SHA256 d21535ecb4ffee60e65e567227db388dae8293003bdba18cf89952b3a5dd5506; retained members: log_timestamp.c.o\nbootloader: .pio/build/atom-s3-lite/bootloader/esp-idf/hal/libhal.a; archive SHA256 25b9da0b47f8c3ac4feb0aac18e87ac2a6f3a08ff677f921a2fe25aecc26984a; retained members: cache_hal.c.o, efuse_hal.c.o, mmu_hal.c.o\nbootloader: .pio/build/atom-s3-lite/bootloader/esp-idf/efuse/libefuse.a; archive SHA256 070ef1ddab42a48c57423e182b38c85841fab5aea1823975afb1e309e9520773; retained members: esp_efuse_fields.c.o\nbootloader: .pio/build/atom-s3-lite/bootloader/esp-idf/esp_bootloader_format/libesp_bootloader_format.a; archive SHA256 d1f86546babb2a306acfee1fdf85e49fe98b6a5a26b91e83ede40803f40fef2e; retained members: esp_bootloader_desc.c.o\nbootloader: .pio/build/atom-s3-lite/bootloader/esp-idf/main/libmain.a; archive SHA256 2b24dd30c608224bbaa7885b0851a736be45e575b06cf5434da6e0d104b3314e; retained members: bootloader_start.c.o\nbootloader: .pio/build/atom-s3-lite/bootloader/esp-idf/esp_hal_uart/libesp_hal_uart.a; archive SHA256 888edd99957eab134c8b66feba66e8f2832a69fb08b12f2b7f06a9a2a506f555; retained members: uart_periph.c.o\nbootloader: .pio/build/atom-s3-lite/bootloader/esp-idf/esp_hal_security/libesp_hal_security.a; archive SHA256 06f29be3995541567f4eb90d93bf01aa2ca7990e7ce909ef12cfad03c4d17088; retained members: mpu_hal.c.o",
+      "licenseComments": "Full notices and applicable permission texts: THIRD_PARTY_NOTICES.md. See LICENSE_AUDIT.md for obligations and scope."
+    },
+    {
+      "SPDXID": "SPDXRef-bluedroid",
+      "name": "Bluedroid",
+      "versionInfo": "ESP-IDF 6.0.1",
+      "downloadLocation": "https://github.com/espressif/esp-idf/tree/v6.0.1/components/bt/host/bluedroid",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0",
+      "licenseDeclared": "Apache-2.0",
+      "copyrightText": "Copyright (C) 1999-2014 Broadcom Corporation; Copyright (C) 2014-2015 Google, Inc.; Espressif Systems",
+      "sourceInfo": "app: .pio/build/atom-s3-lite/esp-idf/bt/libbt.a; archive SHA256 4385254146dd17c5287f21c51e1b0451788b12d9ea8049c59665c5e4970a0cf6; retained members: aes_encrypt.c.o, alarm.c.o, allocator.c.o, att_protocol.c.o, bdaddr.c.o, bt.c.o, bta_dm_act.c.o, bta_dm_api.c.o, bta_dm_cfg.c.o, bta_dm_co.c.o, bta_dm_main.c.o, bta_gatt_common.c.o, bta_gattc_act.c.o, bta_gattc_api.c.o, bta_gattc_cache.c.o, bta_gattc_co.c.o, bta_gattc_main.c.o, bta_gattc_utils.c.o, bta_gatts_act.c.o, bta_gatts_api.c.o, bta_gatts_co.c.o, bta_gatts_main.c.o, bta_gatts_utils.c.o, bta_sys_main.c.o, btc_alarm.c.o, btc_ble_storage.c.o, btc_config.c.o, btc_dev.c.o, btc_dm.c.o, btc_gap_ble.c.o, btc_gatt_common.c.o, btc_gatt_util.c.o, btc_gattc.c.o, btc_gatts.c.o, btc_main.c.o, btc_manage.c.o, btc_storage.c.o, btc_task.c.o, btc_util.c.o, bte_init.c.o, bte_main.c.o, btm_acl.c.o, btm_ble.c.o, btm_ble_addr.c.o, btm_ble_bgconn.c.o, btm_ble_gap.c.o, btm_ble_privacy.c.o, btm_dev.c.o, btm_devctl.c.o, btm_inq.c.o, btm_main.c.o, btm_sec.c.o, btu_hcif.c.o, btu_init.c.o, btu_task.c.o, cmac_mode.c.o, config.c.o, controller.c.o, ecc.c.o, ecc_dh.c.o, esp_bluedroid_hci.c.o, esp_bt_main.c.o, esp_gap_ble_api.c.o, fixed_pkt_queue.c.o, fixed_queue.c.o, future.c.o, gap_api.c.o, gap_ble.c.o, gatt_api.c.o, gatt_attr.c.o, gatt_auth.c.o, gatt_cl.c.o, gatt_db.c.o, gatt_main.c.o, gatt_sr.c.o, gatt_sr_hash.c.o, gatt_utils.c.o, hash_functions.c.o, hash_map.c.o, hci_hal_h4.c.o, hci_layer.c.o, hci_packet_factory.c.o, hci_packet_parser.c.o, hciblecmds.c.o, hcicmds.c.o, interop.c.o, l2c_api.c.o, l2c_ble.c.o, l2c_csm.c.o, l2c_link.c.o, l2c_main.c.o, l2c_utils.c.o, list.c.o, mutex.c.o, osi.c.o, packet_fragmenter.c.o, pkt_queue.c.o, semaphore.c.o, smp_act.c.o, smp_api.c.o, smp_cmac.c.o, smp_keys.c.o, smp_l2c.c.o, smp_main.c.o, smp_utils.c.o, stack_config.c.o, thread.c.o, utils.c.o",
+      "licenseComments": "Full notices and applicable permission texts: THIRD_PARTY_NOTICES.md. See LICENSE_AUDIT.md for obligations and scope."
+    },
+    {
+      "SPDXID": "SPDXRef-tinycrypt",
+      "name": "TinyCrypt including micro-ecc",
+      "versionInfo": "ESP-IDF 6.0.1",
+      "downloadLocation": "https://github.com/espressif/esp-idf/tree/v6.0.1/components/bt/common/tinycrypt",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 AND BSD-3-Clause AND BSD-2-Clause",
+      "licenseDeclared": "Apache-2.0 AND BSD-3-Clause AND BSD-2-Clause",
+      "copyrightText": "Copyright (c) 2017 Intel Corporation; Copyright (c) 2014 Kenneth MacKay; Copyright 2025 Espressif Systems",
+      "sourceInfo": "libbt.a: aes_encrypt.c.o, cmac_mode.c.o, ecc.c.o, ecc_dh.c.o, utils.c.o",
+      "licenseComments": "Full notices and applicable permission texts: THIRD_PARTY_NOTICES.md. See LICENSE_AUDIT.md for obligations and scope."
+    },
+    {
+      "SPDXID": "SPDXRef-freertos",
+      "name": "FreeRTOS Kernel",
+      "versionInfo": "10.5.1",
+      "downloadLocation": "https://github.com/espressif/esp-idf/tree/v6.0.1/components/freertos",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT AND Apache-2.0",
+      "licenseDeclared": "MIT AND Apache-2.0",
+      "copyrightText": "Copyright (C) 2021 Amazon.com, Inc. or its affiliates; Cadence Design Systems; Espressif Systems",
+      "sourceInfo": "app: .pio/build/atom-s3-lite/esp-idf/freertos/libfreertos.a; archive SHA256 7e3f3b9849ec3f5e40562ada928e095ddb81e24aafc59d96b0346b03fd33604e; retained members: app_startup.c.o, event_groups.c.o, heap_idf.c.o, idf_additions.c.o, list.c.o, port.c.o, port_common.c.o, port_systick.c.o, portasm.S.o, queue.c.o, tasks.c.o",
+      "licenseComments": "Full notices and applicable permission texts: THIRD_PARTY_NOTICES.md. See LICENSE_AUDIT.md for obligations and scope."
+    },
+    {
+      "SPDXID": "SPDXRef-xtensa",
+      "name": "Xtensa port and HAL",
+      "versionInfo": "ESP-IDF 6.0.1",
+      "downloadLocation": "https://github.com/espressif/esp-idf/tree/v6.0.1/components/xtensa",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT AND Apache-2.0",
+      "licenseDeclared": "MIT AND Apache-2.0",
+      "copyrightText": "Copyright Tensilica Inc.; Cadence Design Systems, Inc.; Espressif Systems",
+      "sourceInfo": "app: .pio/build/atom-s3-lite/esp-idf/xtensa/libxtensa.a; archive SHA256 17b467aba23ccee378c7998151395224e8c3c2fa361082df2da82cbc5bc4bd7e; retained members: xtensa_context.S.o, xtensa_intr.c.o, xtensa_intr_asm.S.o, xtensa_vectors.S.o\napp: $IDF_PATH/components/xtensa/esp32s3/libxt_hal.a; archive SHA256 4823e6c657199a6726f3163f15e1222edb85a8a33eeaafd2aad0cc06150cc4ec; retained members: interrupts--intlevel.o, state_asm--restore_extra_nw.o, state_asm--save_extra_nw.o, windowspill_asm.o",
+      "licenseComments": "Full notices and applicable permission texts: THIRD_PARTY_NOTICES.md. See LICENSE_AUDIT.md for obligations and scope."
+    },
+    {
+      "SPDXID": "SPDXRef-lwip",
+      "name": "lwIP and ESP netif glue",
+      "versionInfo": "2.2.0",
+      "downloadLocation": "https://github.com/espressif/esp-lwip",
+      "filesAnalyzed": false,
+      "licenseConcluded": "BSD-3-Clause AND Apache-2.0",
+      "licenseDeclared": "BSD-3-Clause AND Apache-2.0",
+      "copyrightText": "Copyright Swedish Institute of Computer Science; Adam Dunkels; Leon Woestenberg; Axon Digital Design; CITEL; Inico; MINIX 3 Project; Espressif Systems. Additional header copyrights are preserved in THIRD_PARTY_NOTICES.md.",
+      "sourceInfo": "app: .pio/build/atom-s3-lite/esp-idf/lwip/liblwip.a; archive SHA256 56e5821f1446b7d058dec17d7374ed7bad68dc2e5b76370d18dc9455a1937ae9; retained members: acd_dhcp_check.c.o, api_lib.c.o, api_msg.c.o, def.c.o, dhcp.c.o, dhcpserver.c.o, dns.c.o, err.c.o, etharp.c.o, ethernet.c.o, ethip6.c.o, icmp.c.o, icmp6.c.o, igmp.c.o, inet_chksum.c.o, init.c.o, ip.c.o, ip4.c.o, ip4_addr.c.o, ip4_frag.c.o, ip4_napt.c.o, ip6.c.o, ip6_addr.c.o, ip6_frag.c.o, lwip_default_hooks.c.o, mem.c.o, memp.c.o, mld6.c.o, nd6.c.o, netbuf.c.o, netdb.c.o, netif.c.o, pbuf.c.o, raw.c.o, sockets.c.o, sockets_ext.c.o, sys_arch.c.o, tcp.c.o, tcp_in.c.o, tcp_isn_default.c.o, tcp_out.c.o, tcpip.c.o, timeouts.c.o, udp.c.o, vfs_lwip.c.o\nlibesp_netif.a: wlanif.c.o; lwIP hooks and headers",
+      "licenseComments": "Full notices and applicable permission texts: THIRD_PARTY_NOTICES.md. See LICENSE_AUDIT.md for obligations and scope."
+    },
+    {
+      "SPDXID": "SPDXRef-wpa",
+      "name": "wpa_supplicant",
+      "versionInfo": "2.10",
+      "downloadLocation": "https://github.com/espressif/esp-idf/tree/v6.0.1/components/wpa_supplicant",
+      "filesAnalyzed": false,
+      "licenseConcluded": "BSD-3-Clause AND Apache-2.0",
+      "licenseDeclared": "BSD-3-Clause AND Apache-2.0",
+      "copyrightText": "Copyright (c) 2002-2022 Jouni Malinen and contributors; Cozybit, Inc.; The Linux Foundation; Espressif Systems",
+      "sourceInfo": "app: .pio/build/atom-s3-lite/esp-idf/wpa_supplicant/libwpa_supplicant.a; archive SHA256 7651108276e56fc75c00e34f0c25749e5ee88d8ae8c6b8a343871f3916e7f357; retained members: aes-ccm.c.o, aes-gcm.c.o, aes-siv.c.o, aes-unwrap.c.o, aes-wrap.c.o, ap_config.c.o, ccmp.c.o, comeback_token.c.o, common.c.o, crypto_mbedtls-bignum.c.o, crypto_mbedtls-ec.c.o, crypto_mbedtls.c.o, crypto_ops.c.o, dh_groups.c.o, dragonfly.c.o, eloop.c.o, esp_common.c.o, esp_eap_client.c.o, esp_hostap.c.o, esp_owe.c.o, esp_wpa3.c.o, esp_wpa_main.c.o, esp_wpas_glue.c.o, esp_wps.c.o, fastpsk.c.o, ieee802_11.c.o, ieee802_11_common.c.o, os_xtensa.c.o, pmksa_cache.c.o, pmksa_cache_auth.c.o, rc4.c.o, sae.c.o, sae_pk.c.o, sha1-prf.c.o, sha256-kdf.c.o, sha256-prf.c.o, sta_info.c.o, wpa.c.o, wpa_auth.c.o, wpa_auth_ie.c.o, wpa_common.c.o, wpa_ie.c.o, wpabuf.c.o",
+      "licenseComments": "Full notices and applicable permission texts: THIRD_PARTY_NOTICES.md. See LICENSE_AUDIT.md for obligations and scope."
+    },
+    {
+      "SPDXID": "SPDXRef-tlsf",
+      "name": "TLSF allocator",
+      "versionInfo": "ESP-IDF 6.0.1",
+      "downloadLocation": "https://github.com/espressif/tlsf",
+      "filesAnalyzed": false,
+      "licenseConcluded": "BSD-3-Clause",
+      "licenseDeclared": "BSD-3-Clause",
+      "copyrightText": "Copyright (c) 2006-2016 Matthew Conte",
+      "sourceInfo": "libheap.a: tlsf.c.o; ROM allocator calls are not distributed ROM code",
+      "licenseComments": "Full notices and applicable permission texts: THIRD_PARTY_NOTICES.md. See LICENSE_AUDIT.md for obligations and scope."
+    },
+    {
+      "SPDXID": "SPDXRef-cjson",
+      "name": "cJSON",
+      "versionInfo": "1.7.19~2",
+      "downloadLocation": "https://components.espressif.com/components/espressif/cjson/versions/1.7.19~2",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "copyrightText": "Copyright (c) 2009-2017 Dave Gamble and cJSON contributors",
+      "sourceInfo": "app: .pio/build/atom-s3-lite/esp-idf/espressif__cjson/libespressif__cjson.a; archive SHA256 f7dee83432d03e7ede6079d504eb46a35633b6476a9cee27ec596259b166a72a; retained members: cJSON.c.o",
+      "licenseComments": "Full notices and applicable permission texts: THIRD_PARTY_NOTICES.md. See LICENSE_AUDIT.md for obligations and scope."
+    },
+    {
+      "SPDXID": "SPDXRef-mqtt",
+      "name": "ESP-MQTT including mqtt_msg",
+      "versionInfo": "1.1.0",
+      "downloadLocation": "https://components.espressif.com/components/espressif/mqtt/versions/1.1.0",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 AND BSD-3-Clause",
+      "licenseDeclared": "Apache-2.0 AND BSD-3-Clause",
+      "copyrightText": "Copyright Espressif Systems; Copyright (c) 2014 Stephen Robinson",
+      "sourceInfo": "app: .pio/build/atom-s3-lite/esp-idf/espressif__mqtt/libespressif__mqtt.a; archive SHA256 d5dddf2236e330d0cdda37d1eb89730cdd8005cc5e7c4ccb2268c7f281c5e6c1; retained members: mqtt_client.c.o, mqtt_msg.c.o, platform_esp32_idf.c.o\napp: .pio/build/atom-s3-lite/esp-idf/espressif__mqtt/lib/mqtt_utils/libmqtt_utils_lib.a; archive SHA256 3e1548b40a8198b3d6e460076de110e9325ff24329d8a2177f9c91163515f82a; retained members: mqtt_utils.c.o\napp: .pio/build/atom-s3-lite/esp-idf/espressif__mqtt/lib/mqtt_outbox/libmqtt_outbox_lib.a; archive SHA256 36319930c5f702b1507d3dd43fe816d850c99479b6da469dfbeab799d0ba25d0; retained members: mqtt_outbox.c.o",
+      "licenseComments": "Full notices and applicable permission texts: THIRD_PARTY_NOTICES.md. See LICENSE_AUDIT.md for obligations and scope."
+    },
+    {
+      "SPDXID": "SPDXRef-http-parser",
+      "name": "HTTP Parser",
+      "versionInfo": "2.7.0",
+      "downloadLocation": "https://github.com/espressif/esp-idf/tree/v6.0.1/components/http_parser",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "copyrightText": "Copyright Igor Sysoev; Joyent, Inc. and other Node contributors",
+      "sourceInfo": "app: .pio/build/atom-s3-lite/esp-idf/http_parser/libhttp_parser.a; archive SHA256 4a219d7d8e52241d2fff723b4eba6845ab48e842eb6de4a6b0d15e6799905aff; retained members: http_parser.c.o",
+      "licenseComments": "Full notices and applicable permission texts: THIRD_PARTY_NOTICES.md. See LICENSE_AUDIT.md for obligations and scope."
+    },
+    {
+      "SPDXID": "SPDXRef-mbedtls",
+      "name": "Mbed TLS",
+      "versionInfo": "4.0.0",
+      "downloadLocation": "https://github.com/espressif/mbedtls",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0",
+      "licenseDeclared": "Apache-2.0 OR GPL-2.0-or-later",
+      "copyrightText": "Copyright The Mbed TLS Contributors; ARM Limited; Espressif Systems",
+      "sourceInfo": "app: .pio/build/atom-s3-lite/esp-idf/mbedtls/mbedtls/library/libmbedtls.a; archive SHA256 b5a21bbc605b7def88c853a7cbec32fdd11dae4ccbcc7fb8633ba243ef4d94a6; retained members: esp_platform_time.c.o, esp_psa_crypto_init.c.o, net_sockets.c.o, ssl_ciphersuites.c.o, ssl_client.c.o, ssl_msg.c.o, ssl_tls.c.o, ssl_tls12_client.c.o, ssl_tls12_server.c.o\napp: .pio/build/atom-s3-lite/esp-idf/mbedtls/mbedtls/library/libmbedx509.a; archive SHA256 7f9bfafe30d701c3193ff5549f3bdbbf46d1b5ff51acf7e006e2d4f10cc63dfc; retained members: x509.c.o, x509_crt.c.o, x509_oid.c.o",
+      "licenseComments": "Full notices and applicable permission texts: THIRD_PARTY_NOTICES.md. See LICENSE_AUDIT.md for obligations and scope."
+    },
+    {
+      "SPDXID": "SPDXRef-tf-psa",
+      "name": "TF-PSA-Crypto",
+      "versionInfo": "1.0.0",
+      "downloadLocation": "https://github.com/Mbed-TLS/TF-PSA-Crypto",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0",
+      "licenseDeclared": "Apache-2.0 OR GPL-2.0-or-later",
+      "copyrightText": "Copyright The Mbed TLS Contributors; Espressif Systems",
+      "sourceInfo": "app: .pio/build/atom-s3-lite/esp-idf/mbedtls/mbedtls/tf-psa-crypto/core/libtfpsacrypto.a; archive SHA256 c0baa390cb9608ec05fe85dba3737c4f10e9074007ace39b4894d6a7da493cd8; retained members: bignum_alt.c.o, esp_aes.c.o, esp_aes_common.c.o, esp_aes_dma_core.c.o, esp_aes_gcm.c.o, esp_aes_gdma_impl.c.o, esp_bignum.c.o, esp_crypto_shared_gdma.c.o, esp_hardware.c.o, esp_mem.c.o, esp_psa_its.c.o, esp_sha.c.o, esp_sha_gdma_impl.c.o, psa_crypto.c.o, psa_crypto_client.c.o, psa_crypto_driver_esp_aes.c.o, psa_crypto_driver_esp_aes_gcm.c.o, psa_crypto_driver_esp_cmac.c.o, psa_crypto_driver_esp_hmac_opaque.c.o, psa_crypto_driver_esp_hmac_transparent.c.o, psa_crypto_driver_esp_md5.c.o, psa_crypto_driver_esp_rsa_ds.c.o, psa_crypto_driver_esp_rsa_ds_utilities.c.o, psa_crypto_driver_esp_sha.c.o, psa_crypto_driver_esp_sha1.c.o, psa_crypto_driver_esp_sha256.c.o, psa_crypto_driver_esp_sha512.c.o, psa_crypto_driver_wrappers_no_static.c.o, psa_crypto_slot_management.c.o, psa_crypto_storage.c.o, sha.c.o\napp: .pio/build/atom-s3-lite/esp-idf/mbedtls/mbedtls/tf-psa-crypto/drivers/builtin/libmbed-builtin.a; archive SHA256 fdab3aaf59a9206d0123d53900b3d07f66549969609d37f6d4e7745fcb808edc; retained members: aes.c.o, asn1parse.c.o, asn1write.c.o, base64.c.o, bignum.c.o, bignum_core.c.o, ccm.c.o, cipher.c.o, cipher_wrap.c.o, cmac.c.o, constant_time.c.o, ecdh.c.o, ecdsa.c.o, ecp.c.o, ecp_curves.c.o, gcm.c.o, hmac_drbg.c.o, md.c.o, oid.c.o, pem.c.o, pk.c.o, pk_ecc.c.o, pk_rsa.c.o, pk_wrap.c.o, pkcs5.c.o, pkparse.c.o, platform.c.o, platform_util.c.o, psa_crypto_aead.c.o, psa_crypto_cipher.c.o, psa_crypto_ecp.c.o, psa_crypto_ffdh.c.o, psa_crypto_mac.c.o, psa_crypto_rsa.c.o, psa_util.c.o, rsa.c.o, rsa_alt_helpers.c.o, sha256.c.o, threading.c.o",
+      "licenseComments": "Full notices and applicable permission texts: THIRD_PARTY_NOTICES.md. See LICENSE_AUDIT.md for obligations and scope."
+    },
+    {
+      "SPDXID": "SPDXRef-ubsan",
+      "name": "UBSan support",
+      "versionInfo": "ESP-IDF 6.0.1",
+      "downloadLocation": "https://github.com/espressif/esp-idf/blob/v6.0.1/components/esp_system/ubsan.c",
+      "filesAnalyzed": false,
+      "licenseConcluded": "BSD-2-Clause",
+      "licenseDeclared": "BSD-2-Clause",
+      "copyrightText": "Copyright (c) 2016 Linaro Limited; modified for HelenOS by Jiří Zárevúcky; Copyright (c) 2020 Espressif Systems",
+      "sourceInfo": "libesp_system.a: ubsan.c.o",
+      "licenseComments": "Full notices and applicable permission texts: THIRD_PARTY_NOTICES.md. See LICENSE_AUDIT.md for obligations and scope."
+    },
+    {
+      "SPDXID": "SPDXRef-endian",
+      "name": "FreeBSD-derived endian macros",
+      "versionInfo": "ESP-IDF 6.0.1",
+      "downloadLocation": "https://github.com/espressif/esp-idf/blob/v6.0.1/components/esp_libc/platform_include/endian.h",
+      "filesAnalyzed": false,
+      "licenseConcluded": "BSD-2-Clause AND Apache-2.0",
+      "licenseDeclared": "BSD-2-Clause AND Apache-2.0",
+      "copyrightText": "Copyright (c) 2002 Thomas Moestl; Copyright 2020 Francesco Giancane; Copyright 2018-2024 Espressif Systems",
+      "sourceInfo": "components/esp_libc/platform_include/endian.h, included by retained translation units",
+      "licenseComments": "Full notices and applicable permission texts: THIRD_PARTY_NOTICES.md. See LICENSE_AUDIT.md for obligations and scope."
+    },
+    {
+      "SPDXID": "SPDXRef-picolibc",
+      "name": "Picolibc including Newlib-derived portions and Ryu",
+      "versionInfo": "1.8.10",
+      "downloadLocation": "https://github.com/picolibc/picolibc",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 AND BSD-2-Clause AND BSD-3-Clause AND LicenseRef-Picolibc-CodeSourcery AND LicenseRef-Picolibc-Cygnus AND LicenseRef-Picolibc-RedHat AND LicenseRef-Picolibc-SunPro AND LicenseRef-Picolibc-DJDelorie AND LicenseRef-Picolibc-OAR",
+      "licenseDeclared": "Apache-2.0 AND BSD-2-Clause AND BSD-3-Clause AND LicenseRef-Picolibc-CodeSourcery AND LicenseRef-Picolibc-Cygnus AND LicenseRef-Picolibc-RedHat AND LicenseRef-Picolibc-SunPro AND LicenseRef-Picolibc-DJDelorie AND LicenseRef-Picolibc-OAR",
+      "copyrightText": "Copyright 1989 The Regents of the University of California.\nCopyright 2004 CodeSourcery, LLC\nCopyright 1990 Regents of the University of California.\nCopyright 1995, 1996, 2002 Red Hat Incorporated.\nCopyright 2018 Arm Ltd.\nCopyright 1994 Cygnus Support.\nCopyright 2002 Jeff Johnston  <jjohnstn@redhat.com>\nCopyright 2017 Sichen Zhao <1473996754@qq.com>\nCopyright 2020 Keith Packard\nCopyright 2019 Ulf Adams\nCopyright 2019 Keith Packard\nCopyright 2018 Ulf Adams\nCopyright 2023 Keith Packard\nCopyright 2002,2005 Joerg Wunsch\nCopyright 2025 Keith Packard\nCopyright 2002, Joerg Wunsch\nCopyright 2002-2005  Michael Stumpf  <mistumpf@de.pepperl-fuchs.com>\n2006,2008  Dmitry Xmelkov \nCopyright 2002,2004,2005 Joerg Wunsch\n2008  Dmitry Xmelkov\nCopyright 2002, Alexander Popov (sasho@vip.bg)\n2002,2004,2005 Joerg Wunsch\n2005, Helmut Wallner\n2007, Dmitry Xmelkov\nCopyright 2005, Joerg Wunsch\nCopyright 2003, Joerg Wunsch\nCopyright 2002, 2007 Red Hat, Incorporated.\nCopyright 1993 Sun Microsystems, Inc.\nHeader copyright notices are retained in THIRD_PARTY_NOTICES.md.",
+      "sourceInfo": "app: $TOOLCHAIN_PATH/picolibc/xtensa-esp-elf/lib/esp32s3/no-rtti/libc.a; archive SHA256 6ce9c3243eaf1b391e1b082d9593d8995d7ffc5c7d9fbb483402f39d5228a0f7; retained members: libc_ctype_ctype_.c.o, libc_ctype_tolower.c.o, libc_misc_init.c.o, libc_stdlib_atoi.c.o, libc_stdlib_environ.c.o, libc_string_memmem.c.o, libc_string_strcasecmp.c.o, libc_string_strdup.c.o, libc_string_strerror.c.o, libc_string_strncasecmp.c.o, libc_string_strndup.c.o, libc_string_strnstr.c.o, libc_time_time.c.o, libc_tinystdio_asprintf.c.o, libc_tinystdio_atod_ryu.c.o, libc_tinystdio_atof_ryu.c.o, libc_tinystdio_bufio.c.o, libc_tinystdio_dtoa_ryu.c.o, libc_tinystdio_dtox_engine.c.o, libc_tinystdio_fflush.c.o, libc_tinystdio_fgetc.c.o, libc_tinystdio_filestrget.c.o, libc_tinystdio_filestrput.c.o, libc_tinystdio_filestrputalloc.c.o, libc_tinystdio_flockfile_init.c.o, libc_tinystdio_fprintf.c.o, libc_tinystdio_printf.c.o, libc_tinystdio_puts.c.o, libc_tinystdio_ryu_divpow2.c.o, libc_tinystdio_ryu_log10.c.o, libc_tinystdio_ryu_log2pow5.c.o, libc_tinystdio_ryu_pow5bits.c.o, libc_tinystdio_ryu_table.c.o, libc_tinystdio_ryu_umul128.c.o, libc_tinystdio_snprintf.c.o, libc_tinystdio_sprintf.c.o, libc_tinystdio_sscanf.c.o, libc_tinystdio_strtod.c.o, libc_tinystdio_strtol.c.o, libc_tinystdio_strtoul.c.o, libc_tinystdio_ungetc.c.o, libc_tinystdio_vfprintf.c.o, libc_tinystdio_vfscanf.c.o, libc_tinystdio_vprintf.c.o, libc_tinystdio_vsnprintf.c.o, libm_common_s_fpclassify.c.o, libm_common_s_isnan.c.o",
+      "licenseComments": "Full notices and applicable permission texts: THIRD_PARTY_NOTICES.md. See LICENSE_AUDIT.md for obligations and scope. Ryu selects Apache-2.0 from Apache-2.0 OR BSL-1.0. The installed compiler COPYING.picolibc, rather than the older IDF copy, was matched to retained archive members. Build-only GPL/AGPL scripts and tests are excluded."
+    },
+    {
+      "SPDXID": "SPDXRef-gcc-runtime",
+      "name": "GNU libstdc++ / libsupc++ and GCC runtime headers",
+      "versionInfo": "15.2.0",
+      "downloadLocation": "https://gcc.gnu.org/onlinedocs/gcc-15.2.0/libstdc++/manual/license.html",
+      "filesAnalyzed": false,
+      "licenseConcluded": "GPL-3.0-or-later WITH GCC-exception-3.1",
+      "licenseDeclared": "GPL-3.0-or-later WITH GCC-exception-3.1",
+      "copyrightText": "Copyright Free Software Foundation, Inc. (including 1994-2025 in the new header)",
+      "sourceInfo": "app: $TOOLCHAIN_PATH/picolibc/xtensa-esp-elf/lib/esp32s3/no-rtti/libstdc++.a; archive SHA256 c4ea4a6aff9cfe585c12c7169efb10db7c9093f7206f951492a066c6dee9df16; retained members: bad_alloc.o, class_type_info.o, del_op.o, del_ops.o, del_opv.o, eh_catch.o, eh_exception.o, eh_globals.o, eh_term_handler.o, eh_terminate.o, new_handler.o, new_op.o, new_opv.o, new_opvnt.o, si_class_type_info.o, tinfo.o",
+      "licenseComments": "Full notices and applicable permission texts: THIRD_PARTY_NOTICES.md. See LICENSE_AUDIT.md for obligations and scope. Eligible GCC compilation; no non-GPL-compatible compiler plugin/LTO transformation was observed. libgcc.a members are discarded in this build (ROM symbols resolve them); libstdc++.a members remain."
+    }
+  ],
+  "files": [
+    {
+      "SPDXID": "SPDXRef-File-app",
+      "fileName": "./firmware.bin",
+      "fileTypes": [
+        "BINARY"
+      ],
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "6f63d8fd6c243c07851b40af795bae373d71365dcf0b39db55cc802ed56bcad0"
+        }
+      ],
+      "licenseConcluded": "NOASSERTION",
+      "licenseInfoInFiles": [
+        "NOASSERTION"
+      ],
+      "copyrightText": "NOASSERTION",
+      "comment": "Mapped to the audited clean build; only identified image metadata and integrity bytes differ. See LICENSE_AUDIT.md."
+    },
+    {
+      "SPDXID": "SPDXRef-File-bootloader",
+      "fileName": "./bootloader.bin",
+      "fileTypes": [
+        "BINARY"
+      ],
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "af4794b3db40cfbf219b8e0a8aaba258842ddfbc8a2a81cc785f48cb5a3f46f1"
+        }
+      ],
+      "licenseConcluded": "NOASSERTION",
+      "licenseInfoInFiles": [
+        "NOASSERTION"
+      ],
+      "copyrightText": "NOASSERTION",
+      "comment": "Mapped to the audited clean build; only identified image metadata and integrity bytes differ. See LICENSE_AUDIT.md."
+    },
+    {
+      "SPDXID": "SPDXRef-File-partitions",
+      "fileName": "./partitions.bin",
+      "fileTypes": [
+        "BINARY"
+      ],
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "417facb149358cb4532fd2368e67453fc961890f1a56d6145092619a55fc365d"
+        }
+      ],
+      "licenseConcluded": "NOASSERTION",
+      "licenseInfoInFiles": [
+        "NOASSERTION"
+      ],
+      "copyrightText": "NOASSERTION",
+      "comment": "Partition configuration data, not linked executable code."
+    }
+  ],
+  "relationships": [
+    {
+      "spdxElementId": "SPDXRef-DOCUMENT",
+      "relationshipType": "DESCRIBES",
+      "relatedSpdxElement": "SPDXRef-OMK-Node"
+    },
+    {
+      "spdxElementId": "SPDXRef-OMK-Node",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-File-app"
+    },
+    {
+      "spdxElementId": "SPDXRef-File-app",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-bluedroid"
+    },
+    {
+      "spdxElementId": "SPDXRef-File-app",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-cjson"
+    },
+    {
+      "spdxElementId": "SPDXRef-File-app",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-endian"
+    },
+    {
+      "spdxElementId": "SPDXRef-File-app",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-esp-idf"
+    },
+    {
+      "spdxElementId": "SPDXRef-File-app",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-freertos"
+    },
+    {
+      "spdxElementId": "SPDXRef-File-app",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-gcc-runtime"
+    },
+    {
+      "spdxElementId": "SPDXRef-File-app",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-http-parser"
+    },
+    {
+      "spdxElementId": "SPDXRef-File-app",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-lwip"
+    },
+    {
+      "spdxElementId": "SPDXRef-File-app",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-mbedtls"
+    },
+    {
+      "spdxElementId": "SPDXRef-File-app",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-mqtt"
+    },
+    {
+      "spdxElementId": "SPDXRef-File-app",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-picolibc"
+    },
+    {
+      "spdxElementId": "SPDXRef-File-app",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-tf-psa"
+    },
+    {
+      "spdxElementId": "SPDXRef-File-app",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-tinycrypt"
+    },
+    {
+      "spdxElementId": "SPDXRef-File-app",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-tlsf"
+    },
+    {
+      "spdxElementId": "SPDXRef-File-app",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-ubsan"
+    },
+    {
+      "spdxElementId": "SPDXRef-File-app",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-wpa"
+    },
+    {
+      "spdxElementId": "SPDXRef-File-app",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-xtensa"
+    },
+    {
+      "spdxElementId": "SPDXRef-OMK-Node",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-File-bootloader"
+    },
+    {
+      "spdxElementId": "SPDXRef-File-bootloader",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-esp-idf"
+    },
+    {
+      "spdxElementId": "SPDXRef-OMK-Node",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-File-partitions"
+    }
+  ],
+  "hasExtractedLicensingInfos": [
+    {
+      "licenseId": "LicenseRef-Picolibc-CodeSourcery",
+      "name": "Picolibc CodeSourcery permissive notice",
+      "extractedText": "Permission to use, copy, modify, and distribute this file\nfor any purpose is hereby granted without fee, provided that\nthe above copyright notice and this notice appears in all\ncopies.\n\nThis file is distributed WITHOUT ANY WARRANTY; without even the implied\nwarranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE."
+    },
+    {
+      "licenseId": "LicenseRef-Picolibc-Cygnus",
+      "name": "Picolibc Cygnus permissive notice",
+      "extractedText": "Redistribution and use in source and binary forms are permitted\nprovided that the above copyright notice and this paragraph are\nduplicated in all such forms and that any documentation,\nand/or other materials related to such\ndistribution and use acknowledge that the software was developed\nat Cygnus Support, Inc.  Cygnus Support, Inc. may not be used to\nendorse or promote products derived from this software without\nspecific prior written permission.\nTHIS SOFTWARE IS PROVIDED ``AS IS'' AND WITHOUT ANY EXPRESS OR\nIMPLIED WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED\nWARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE."
+    },
+    {
+      "licenseId": "LicenseRef-Picolibc-RedHat",
+      "name": "Picolibc RedHat permissive notice",
+      "extractedText": "Permission to use, copy, modify, and distribute this software\nis freely granted, provided that this notice is preserved."
+    },
+    {
+      "licenseId": "LicenseRef-Picolibc-SunPro",
+      "name": "Picolibc SunPro permissive notice",
+      "extractedText": "Developed at SunPro, a Sun Microsystems, Inc. business.\nPermission to use, copy, modify, and distribute this\nsoftware is freely granted, provided that this notice\nis preserved."
+    },
+    {
+      "licenseId": "LicenseRef-Picolibc-DJDelorie",
+      "name": "Picolibc DJDelorie permissive notice",
+      "extractedText": "Copyright (C) 1991 DJ Delorie\nAll rights reserved.\n\nRedistribution, modification, and use in source and binary forms is permitted\nprovided that the above copyright notice and following paragraph are\nduplicated in all such forms.\n\nThis file is distributed WITHOUT ANY WARRANTY; without even the implied\nwarranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE."
+    },
+    {
+      "licenseId": "LicenseRef-Picolibc-OAR",
+      "name": "Picolibc OAR permissive notice",
+      "extractedText": "Written by Joel Sherrill <joel@OARcorp.com>.\n\n COPYRIGHT (c) 1989-2014.\n\n On-Line Applications Research Corporation (OAR).\n\n Permission to use, copy, modify, and distribute this software for any\n purpose without fee is hereby granted, provided that this entire notice\n is included in all copies of any software which is or includes a copy\n or modification of this software.\n\n THIS SOFTWARE IS BEING PROVIDED \"AS IS\", WITHOUT ANY EXPRESS OR IMPLIED\n WARRANTY.  IN PARTICULAR,  THE AUTHOR MAKES NO REPRESENTATION\n OR WARRANTY OF ANY KIND CONCERNING THE MERCHANTABILITY OF THIS\n SOFTWARE OR ITS FITNESS FOR ANY PARTICULAR PURPOSE.\n\n $Id$"
+    }
+  ]
+}

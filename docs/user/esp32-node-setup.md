@@ -1,5 +1,7 @@
 # AtomS3 LiteへのOMK Node導入
 
+Nodeの配布済みfirmwareに含まれる第三者ソフトウェアの許諾は[Third-party notices](../../firmware/esp32/omk-node/prebuilt/atom-s3-lite/THIRD_PARTY_NOTICES.md)を参照してください。バイナリを再配布する場合は同文書を同梱してください。
+
 AtomS3 LiteをGatewayへUSB接続し、Dashboardからファームウェアの書き込みとWi-Fi設定を行います。SEN66を使う場合は、続けてセンサを登録します。
 
 新品・未セットアップのAtomS3 Liteは、以下の手順で準備してください。使用済みNodeを別のGatewayへ移す場合や、microSD交換後に使い直す場合は、[既存Nodeの再設定](#既存nodeを再セットアップする)へ進みます。

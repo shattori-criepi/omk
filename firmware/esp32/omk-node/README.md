@@ -330,4 +330,6 @@ managed componentはmanifestとlockから再現します。`platformio.ini`が�
 
 ## Gateway用prebuilt package
 
+配布バイナリの第三者許諾は[Third-party notices](prebuilt/atom-s3-lite/THIRD_PARTY_NOTICES.md)を参照し、バイナリの再配布時は同文書を同梱してください。[監査記録と更新手順](LICENSE_AUDIT.md)も参照してください。
+
 一般利用者は[GatewayのDashboardからセットアップ](../../../docs/user/esp32-node-setup.md)します。開発者はsource commit後のclean HEADから`./scripts/build-omk-node-package.sh`を実行し、3 binaryとmanifestを別commitとして更新します。Gateway上ではbuildしません。詳細は[package更新とUSB setup設計](../../../docs/decisions/usb-node-setup.md)を参照してください。PC用flash scriptは開発・復旧用として維持します。
