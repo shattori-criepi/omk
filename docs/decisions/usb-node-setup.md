@@ -104,4 +104,4 @@ API testsはsandbox内でTestClientが停止したため、ローカル通信可
 
 unsupported chip／ambiguous MAC、hash不一致のwrite 0回、absolute path／missing binary／duplicate segment拒否、by-idの内部保持、固定subprocess argv、dialout追加順のテストも補完した。testのfactory secret比較は失敗出力にbytesを含めない形にした。
 
-検証: system-manager 138 passed、Dashboard 125 passed、関連scripts／firmware host tests 189 passed。Gateway／BLE setup script tests、AtomS3 Lite PlatformIO build、bash -n、JS構文確認、git diff --checkも成功。prebuilt packageは変更せず、source_commitは33a0ecaa1e6e913cd124d2723026249470f3b9b6のまま。実機flash・commit・pushは行っていない。
+検証: system-manager 138 passed、Dashboard 125 passed、関連scripts／firmware host tests 189 passed。Gateway／BLE setup script tests、AtomS3 Lite PlatformIO build、bash -n、JS構文確認、git diff --checkも成功。prebuilt packageは変更せず、source_commitは2e961df52583260fbd1a69493bbdf2412169cdc1のまま。実機flash・commit・pushは行っていない。
