@@ -10,28 +10,26 @@
 
 ## 配布物との対応
 
-clean buildの入力は `9a167edbd13f24b46f342b9ffa865da30ab60cd1`。配布manifestの `source_commit` は `c629cd631cc0c4ac79679373f6b556a576fab885`。両commit間で、firmware source、依存lock、PlatformIO設定、sdkconfig、partition CSVに差はない（firmware配下の差はREADMEとprebuiltのみ）。
+現在の配布物は、clean HEAD `c375ca9aff5768ee97f4b9babdbb01c0ccc2bfbe` から生成されたpackageを対象とする。`scripts/build-omk-node-package.sh` はbuild前にPlatformIO cleanを実行する。manifestの `source_commit` はこのHEADと一致し、配布appのversion文字列は `c375ca9`、`-dirty` は含まれない。
 
 | 配布物 | bytes | 配布済みSHA-256 |
 | --- | ---: | --- |
-| bootloader.bin | 21088 | `af4794b3db40cfbf219b8e0a8aaba258842ddfbc8a2a81cc785f48cb5a3f46f1` |
-| firmware.bin | 1546336 | `6f63d8fd6c243c07851b40af795bae373d71365dcf0b39db55cc802ed56bcad0` |
+| bootloader.bin | 21088 | `52866528078138249ca6bd9d040638123665a4f933a1c3b1015991c5b223f695` |
+| firmware.bin | 1546336 | `c6c31ae7873e2fb935212a414577a4258c08a49f4a872561d0123c861d4c7b9a` |
 | partitions.bin | 3072 | `417facb149358cb4532fd2368e67453fc961890f1a56d6145092619a55fc365d` |
 
-今回のclean buildはbootloaderが `425132bcbe389253d3a053adacb10dc1c233b216753b22488434dad5bad4f265`、appが `79cb89a3eca6a5efe1e85bb3ac356f9511c4d81f0ebab6e2a6ef630ef517691d`。サイズは同一で、partition tableは全byte一致した。
+現在の `.pio/build/atom-s3-lite/` の3binと `prebuilt/atom-s3-lite/` の3binは、メタデータ・checksumを含め全byte一致する。各SHA-256はmanifestおよびレビュー済みSBOMのfile checksumとも一致し、サイズはmanifestと一致する。今回のmapとSBOMはこの配布物に直接対応する。独立した再buildによる再現性試験を意味するものではない。
 
-appの差分は、app descriptorのversion `[48,80)`、time/date `[112,144)`、ELF SHA-256 `[176,208)`、末尾のimage checksumとSHA-256 `[1546303,1546336)` 内のみ。bootloaderの差分はbuild time `[72,104)` と末尾checksum/SHA-256 `[21055,21088)` 内のみ。範囲はファイル先頭からの0-based byte offsetで、終端を含まない。それ以外の全byteは一致した。従って今回のmapは配布物のコード・定数の監査根拠として使用できる。完全なbit-for-bit再現buildを達成したという意味ではない。
-
-配布appのversion文字列は `40addeb-dirty`（2026-09-17 build）で、manifestのcommit名と一致しない。上記のコード比較で今回のライセンス監査との対応を確認したが、過去のビルド来歴そのものはこの文字列から証明できない。バイナリとmanifestを今回書き換えて来歴を上書きすることはしていない。次の正式更新では既存のclean HEAD package生成手順で両者を更新する。
+今回の更新では既存のclean build成果を使用し、build/clean/package生成は実行していない。prebuilt binary、manifest、`THIRD_PARTY_NOTICES.md` は変更していない。前回監査からfirmware source・依存lock・PlatformIO設定・sdkconfig・partition CSVに変更はなく、リンク対象アーカイブと残存member集合、第三者ライセンス情報にも差はない。
 
 ## 実施方法とツールの限界
 
-1. `pio run -e atom-s3-lite -t clean` の後に通常buildを実施。最終appとbootloaderの両方が成功した。
-2. `esp-idf-sbom==1.4.0` を一時venvに導入し、appとbootloaderの `project_description.json` からそれぞれ `--rem-unused --rem-config --file-tags` でSPDXを生成した。
+1. 初回監査ではclean buildを実施。今回の更新では、上記HEADから作成済みの `.pio/build/atom-s3-lite/` と配布物の全byte一致を確認して、そのmap/ELF/component情報を使用した。
+2. `esp-idf-sbom==1.4.0` を使用し、現在のappとbootloaderの `project_description.json` からそれぞれ `--rem-unused --rem-config --file-tags` でSPDXを再生成した。前回保存した公式出力と比較し、第三者packageの版・license・copyright情報に差がないことを確認した。
 3. `omk_node.map` と `bootloader/bootloader.map` の `Linker script and memory map` 部分を確認。discarded sections、単なる `LOAD`、cross-referenceを組込みの証拠にせず、非zero address/sizeの入力sectionを残すアーカイブを抽出した。appは70アーカイブ、bootloaderは10アーカイブ。全アーカイブ名、SHA-256、残存object名をレビュー済みSBOMの `sourceInfo` に保存した。
-4. コンポーネントのsourceリスト、残存object、実際のライセンス原文を照合。CMakeのcompile commandsに対してGCC `-M` を実行し、617コマンド・1926 source/header依存を追加確認した。SPDXタグだけでなく、その後に残る原著者の許諾（TinyCrypt等）も確認した。
+4. 初回監査でコンポーネントのsourceリスト、残存object、ライセンス原文を照合し、GCC `-M` で617コマンド・1926 source/header依存を確認した。SPDXタグの後に残る原著者の許諾（TinyCrypt等）も確認済み。今回はsource/依存設定、残存member集合、公式SBOMの第三者情報に変更がないことを確認し、このライセンス判定を維持した。
 5. PlatformIOのpackage情報、`dependencies.lock`、IDFのsubmodule/`sbom.yml`、toolchainのランタイム原文を照合した。
-6. 元の公式SBOM出力をそのまま配布せず、下記の誤検出・不足を補正したSBOMを作成した。原出力はローカルの `.pio/license-audit/app-esp-idf-sbom.spdx.json` と `bootloader-esp-idf-sbom.spdx.json` に保存（Git対象外）。
+6. 元の公式SBOM出力をそのまま配布せず、下記の誤検出・不足を補正したSBOMを作成した。今回の原出力はローカルの `.pio/license-audit/app-c375ca9-esp-idf-sbom.spdx.json` と `bootloader-c375ca9-esp-idf-sbom.spdx.json` に保存（Git対象外）。
 
 公式ツールだけでは今回の結論を得られなかった。
 
@@ -83,9 +81,9 @@ GCCの根拠: [libstdc++ license](https://gcc.gnu.org/onlinedocs/libstdc++/manua
 
 ## 修正内容と再配布手順
 
-修正前には、バイナリに必要な第三者のApache全文、MIT/BSD通知、個別C runtime通知・謝辞がなく、ルートのOMK独自LICENSEのみでは条件を満たせなかった。今回、配布ディレクトリに通知本文を1文書に集約し、レビュー済みSBOMとこの監査記録を追加した。利用者向け・開発者向けREADMEに簡潔な導線を追加した。OMKのLICENSE、firmware source、sdkconfig、既存3binとmanifestは変更していない。
+初回監査前には、バイナリに必要な第三者のApache全文、MIT/BSD通知、個別C runtime通知・謝辞がなく、ルートのOMK独自LICENSEのみでは条件を満たせなかった。初回監査で配布通知を1文書に集約し、レビュー済みSBOM、監査記録、READMEの導線を追加した。今回はclean package更新に合わせ、SBOMの来歴とhash、およびこの監査記録のみを更新した。ライセンス一覧・リンク構成・再配布義務に変更はなく、第三者通知は維持した。
 
-GitHub checkout/ソースarchiveには通知が含まれる。バイナリを別途zip、Release添付、ミラー、製品同梱資料として配る場合も **`THIRD_PARTY_NOTICES.md` を必ず同梱する**。SBOMの同梱は監査の追跡に有用だが、SBOMだけでは許諾本文の代わりにならない。現在のpackage scriptは既存prebuiltディレクトリ内のbinary/manifestのみを置換し、同ディレクトリの通知を消さない。
+GitHub checkout/ソースarchiveには通知が含まれる。バイナリを別途zip、Release添付、ミラー、製品同梱資料として配る場合も **`THIRD_PARTY_NOTICES.md` を必ず同梱する**。SBOMの同梱は監査の追跡に有用だが、SBOMだけでは許諾本文の代わりにならない。現在のpackage scriptはclean→build後に既存prebuiltディレクトリ内のbinary/manifestのみを置換し、同ディレクトリの通知を消さない。SBOMは自動更新しないため、package更新時に現在の成果から再生成・照合する。
 
 依存、sdkconfig、toolchain、対象boardまたはsourceを変更したら、この監査結果を自動的に流用せず再確認する。新しいbinaryのSBOMハッシュも更新する。手順は次のとおり（repo rootから、既存のPlatformIO環境を使用）。
 
@@ -102,16 +100,16 @@ python3 -m venv /tmp/omk-sbom-venv
 
 ## 検証結果
 
-- 文書追加後に再度clean build成功。appは1,545,905 bytes使用、配布imageは1,546,336 bytes。実機への書込みは行っていない。
-- 修正後のapp/bootloaderの公式SBOMを再生成し、第三者package名とlicense集計が初回と同一であることを確認。両mapの70/10アーカイブと残存member集合も同一。
-- 2回目のapp SHA-256は `e4a3568a8ae378c8768ce12d625f27aa64c881678f2c63430f965147aa01812c`、bootloaderは `a7004b634766976d5df0cb49b15eb9c109fc85c905b95e924577a0717fddb620`。配布物との差分は初回と同じメタデータ範囲内のみ。配布用SBOMのアーカイブhashは初回のclean HEAD buildを記録し、binary hashは配布物自体を記録している。
-- firmware testsとpackage生成・flash・USB provisioning・reinitializeの既存テスト: **258 passed**。実装コードの変更はない。
-- `git diff --check`、追加文書の末尾空白、変更Markdownのローカルリンク、SBOMのbinary hash・関係先ID・LicenseRef定義を確認。
-- Apache、TinyCrypt、GPLv3、GCC例外の全文が原文と一致することを空白正規化後に検証。root LICENSEと既存binary/manifestは無変更。
+- 現在のbuild成果と配布物の3binが全byte一致。SHA-256はbinary / manifest / SBOMの3者で一致。manifestのsource commitは上記HEAD、app descriptorのversionは `c375ca9` で、`-dirty` はない。
+- app/bootloaderの公式SBOMを再生成。第三者package名・版・license・copyright情報は前回と同一。両mapの70/10アーカイブと残存member集合も同一。
+- レビュー済みSBOMの全80アーカイブhashを現在のファイルから照合。更新が必要だったのは、ビルド情報を含む `libesp_app_format.a` と `libesp_bootloader_format.a` の2件。その他78件は前回と一致した。第三者license表現・著作権・依存関係・LicenseRef本文は変更していない。
+- SBOMのdocument namespace・作成日時・build来歴、配布appのhash識別子、app/bootloaderのfile checksumと一致判定コメントを更新。partition tableのhashは不変。
+- JSON parse、公式esp-idf-sbom parserによる読込、SPDX license式・関係先ID・LicenseRef定義、Markdownのローカルリンク、`git diff --check` を確認。
+- 今回は文書とSBOMのみの更新で、clean/buildや実機への書込みは行っていない。初回監査の関連テスト258件成功は履歴として保持し、今回の再実行結果とはしない。package生成のclean→buildを含む既存テスト7件を再実行して成功した。
+- 作業開始時とのSHA-256照合でroot LICENSE、第三者通知、既存binary/manifestが不変であることを確認。
 
 ## 残る制約
 
 - opaqueなEspressif binary libについて内部実装sourceは取得できない。判断は配布元の当該libに付属するApache LICENSEに依拠する。未確認の内部著作権問題が絶対にないと証明するものではない。
-- 過去の配布appの `-dirty` 表記は上述のとおり残る。コード一致の検証は済んでいるが、将来の正式再生成時に来歴を揃えること。
 - 新しい依存や別board、将来のRelease添付物には再監査と通知の同梱が必要。この判定は上記3ファイルのハッシュに限定する。
 - セキュリティ脆弱性監査・実機動作試験は今回のライセンス監査には含めていない。
