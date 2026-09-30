@@ -7,6 +7,7 @@ repository_status="$(git -C "$root" status --porcelain --untracked-files=all)"
 [[ -z "$repository_status" ]] || { echo 'A clean repository is required.' >&2; exit 1; }
 source_commit="$(git -C "$root" rev-parse HEAD)"
 project="$root/firmware/esp32/omk-node"
+"${PLATFORMIO_CMD:-pio}" run -d "$project" -e atom-s3-lite -t clean
 "${PLATFORMIO_CMD:-pio}" run -d "$project" -e atom-s3-lite
 # A concurrent source edit must not be attributed to the original HEAD.
 current_commit="$(git -C "$root" rev-parse HEAD)"
