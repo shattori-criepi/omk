@@ -6,10 +6,18 @@ MQTTは、各データ取得処理をRaspberry Piへ集約するLAN内の内部�
 
 ## トピックとdevice_id
 
-`device_id`は各ノードを識別する設定値である。測定トピックは`omk/<device_id>/<data_type>`を基本とする。OMK Nodeの登録状態は、eFuse由来の`node_id`を使う専用のregistration topicで通知する。
+`device_id`は測定元を識別する論理設定値である。SEN66ではNodeの`logical_id`、BLEではregistryの`sensor_id`、Bルート・Ichijoでは各サービスの設定値を使う。物理Nodeの`node_id`やBLEの`device_key`とは区別する。測定トピックは`omk/<device_id>/<data_type>`を基本とする。OMK Nodeの登録状態は、eFuse由来の`node_id`を使う専用のregistration topicで通知する。
 
 | 用途 | トピック | QoS | retain |
 | --- | --- | --- | --- |
+| Bルート瞬時電力 | `omk/<device_id>/power` | 0 | false |
+| Bルート積算電力量 | `omk/<device_id>/cumulative-energy` | 0 | false |
+| Bルート30分電力量 | `omk/<device_id>/interval-energy` | 0 | false |
+| Ichijo電力フロー | `omk/<device_id>/power-flow` | 0 | false |
+| Bルート・Ichijo可用性 | `omk/<device_id>/status` | 0 | true |
+| Node登録設定 | `omk/node/<node_id>/registration/config` | 1 | 登録/変更はfalse、解除はtrue |
+| Node登録ACK | `omk/node/<node_id>/registration/ack` | 1 | true |
+| Node raw BLE relay | `omk-relay/<relay_node_id>/ble/raw` | 0 | false |
 | SEN66測定値 | `omk/<device_id>/sen66` | 0 | false |
 | 論理device可用性 | `omk/<logical_id>/status` | 0 | true |
 | OMK Node登録状態 | `omk/node/<node_id>/registration/status` | 1 | true |
@@ -19,11 +27,31 @@ MQTTは、各データ取得処理をRaspberry Piへ集約するLAN内の内部�
 | BLE開閉状態変化 | `omk/<sensor_id>/contact` | 0 | false |
 | BLEプラグ電力 | `omk/<sensor_id>/power` | 0 | false |
 
+表のQoSはpublisher側の設定である。Bルート・Ichijoがそれぞれの測定値と可用性を、NodeがSEN66・可用性・registration status/ack・Mesh診断・raw relayをpublishする。BLE Sensor Managerはraw relayをdecodeして通常のBLE測定値をpublishし、Nodeへのregistration configも送信する。Nodeは自分のconfigをQoS 1で購読する。BLE Sensor Managerはregistration status/ackをQoS 1、SEN66とraw relayをQoS 0で購読し、Node registryと受信鮮度を更新する。
+
+collectorとHarvestは`omk/#`をQoS 0で購読する。collectorは管理メッセージもJSONLへ保存するが、transformerは管理topicをParquetから除外し、Harvestも測定対象以外を集約しない。USB provisioningの完了確認も対象Nodeのregistration statusを使用する。
+
 SEN66測定トピックの例は`omk/sen66-001/sen66`である。
 
 登録済みOMK NodeはMQTT接続時に`omk/<logical_id>/status`へretain付きで`online`を送信する。予期しないMQTT切断時は同一topicのretain付きLast Will`offline`がbrokerから送信される。これはlogical deviceのMQTT到達性であり、SEN66など個別測定値の鮮度は最新telemetryのGateway受信時刻で判定する。したがって復旧後の接続時`online`が古いretained `offline`を必ず上書きする。
 
 ## Payload
+
+### Bルート・Ichijo
+
+Bルートpayloadはすべて`device_id`を持ち、次のfieldを送る。
+
+| data type | 時刻field | 測定field・品質 |
+| --- | --- | --- |
+| `power` | `measured_at` | `net_power_w`（買電が正、売電が負） |
+| `cumulative-energy` | `metered_at`、`received_at` | `cumulative_energy_import_kwh`、`cumulative_energy_export_kwh` |
+| `interval-energy` | `start_at`、`end_at` | `import_energy_kwh`、`export_energy_kwh`、`quality_status` |
+
+時刻はoffset付きISO 8601。積算payloadの`received_at`はBルート取得側の時刻で、collectorの外側の`received_at`とは別である。30分値は正常時`quality_status=normal`、逆方向非対応時は`reverse_not_supported`で売電量が`null`となる。前回値なし・非30分間隔・負の積算差分では30分値自体を生成・publishしない。瞬時・積算payloadには`quality`や`source`を付けない。
+
+Ichijoの`power-flow`は取得サイクル終了時の`measured_at`、PV・系統・蓄電池・PCS・負荷の値、`quality`（`normal`/`degraded`）、`errors`を持つ。取得失敗は`null`で保持する。全fieldとJSON例は[Ichijo README](../../services/ichijo-energy-node/README.md#mqtt)を参照する。Bルート・Ichijoの可用性payloadは`device_id`と`status`（`online`/`offline`）を持ち、Ichijoだけが`timestamp`も付ける。statusは接続時・正常終了時・Last Will用で、計測時刻や品質の代わりにはならない。
+
+### SEN66・Node登録
 
 測定値はSEN66の取得成功時に送信する。未取得値は非標準の`NaN`ではなくJSONの`null`にする。ESP32は時刻同期をしていないため`measured_at`を含めず、sensor-collectorが付与するGateway受信時刻`received_at`を保存・集計に使用する。
 
@@ -42,6 +70,8 @@ OMK NodeはMQTT接続後と登録変更時に、QoS 1・retain付きでregistrat
 新品Gatewayは、このstatusだけからNode registryのLogical IDを復元できる。旧Gatewayのregistryやretained ACKは不要。GatewayはIDの形式（1〜48文字のASCII英数字・`-`・`_`）と、他Nodeの確定済み・要求中IDとの重複を検証する。既存のprotocol version、capabilities、connected sensors、registration state、status受信時刻も保存する。
 
 旧firmwareの`logical_id`を含まないregistered statusも受理し、Gatewayに保存済みのIDは消さない。明示的な`provisioned` statusは登録情報を解除する。firmwareはこの状態で`logical_id`を出力しない。Gatewayで解除済みの登録は、古いretained statusでは復活させない。
+
+登録・変更要求のconfigは`{"protocol_version":1,"logical_id":"sen66-001"}`、解除要求は`{"protocol_version":1,"logical_id":null}`である。登録ACKは`protocol_version`、`node_id`、`logical_id`、`registration_state: "registered"`を持つ。解除成功時はretained config/ackを空payloadで消去し、`provisioned` statusを送る。SEN66の診断情報がある場合、registration statusには`sen66_rc`（recovery総数）と`sen66_to`（liveness timeout数）も加わる。
 
 `registration/ack`は引き続き設定要求への応答であり、単なるMQTT再接続では送らない。GatewayからのID変更要求が進行中の場合は、従来どおり対応するACKで現在値を確定する。retained registration status自体はNodeのonline判定には使わない。
 
@@ -64,7 +94,7 @@ omk/node/<node_id>/status
 | `is_root` | 観測時点のroot状態 |
 | `parent_bssid` | 観測済みparent BSSID。transition中は旧値が残り得る |
 | `rssi_dbm` / `rssi_valid` | STA接続先RSSIと取得可否。取得失敗時は`rssi_valid=false` |
-| `ip` | 現在または直近のSTA/internal-network IPv4。transition中は旧値が残り得る |
+| `ip` | 現在のSTA/internal-network IPv4。parent切断時は`0.0.0.0`へclearし、IP再取得時に更新する |
 | `parent_change_count` | 前回と異なるparent BSSIDへの接続回数 |
 | `parent_disconnect_count` | raw `MESH_EVENT_PARENT_DISCONNECTED` 回数 |
 | `is_rootless` | `MESH_EVENT_NETWORK_STATE`が示す、現在のMesh networkにrootがいない状態 |
@@ -93,11 +123,11 @@ omk/node/<node_id>/status
 
 Mesh通信が成立しているのにMQTTだけが復旧しない状態では、Nodeはsoftware restartで復旧を試みる。Mesh起動済み、parent接続済み、rootlessでない、有効IPあり、MQTT client開始済み、MQTT未接続の条件がすべて連続180秒続いたときだけrestartする。parent切断、rootless、IP未取得、MQTT接続復旧、その他の通常通信条件の喪失で、restart判定用の連続時間をリセットする。したがってMesh再構成中や通常の通信断はrestart対象にならない。restart直前には診断情報をログへ出し、`last_omk_restart_reason`と`mesh_mqtt_liveness_restart_count`で結果を確認できる。
 
-`is_rootless`、layer、parent BSSID、IPも再構成の途中値である。特に同一SSIDで異なるBSSIDを持つGateway／市販中継機の環境では、異なるroot/treeが形成されるリスクを実機評価中である。非同期起動やNode移設後に最適rootへ自動復帰する保証はないため、root自動再選出はこの診断データを使って今後判断し、現時点では実装しない。市販中継機との併用自体は否定せず、今後の実住宅試験で評価する。
+`is_rootless`、layer、parent BSSID、IPも再構成の途中値である。特に同一SSIDで異なるBSSIDを持つGateway／市販中継機の環境では、異なるroot/treeが形成されるリスクを実機評価中である。非同期起動やNode移設後に最適rootへ自動復帰する保証はないため、現在はNode参加後の安定待ちや、弱いroot uplinkでの切断増加を条件にroot再選出を要求する。成功後のcooldownと120秒のliveness restart抑止を含む[現行policy](../decisions/esp-wifi-mesh-node-networking.md#現行のroot再選出とlivenessの関係)を参照する。市販中継機との併用自体は否定せず、今後の実住宅試験で評価する。
 
 ## 汎用JSONL収集
 
-`sensor-collector`は`omk/#`をQoS 0で購読し、測定値とOMK Nodeのregistration statusを収集する。collectorはセンサ機種、`device_id`、測定項目の意味を解釈せず、受信したpayloadをトップレベルへ展開しない。
+`sensor-collector`は`omk/#`をQoS 0で購読し、測定値とOMK Nodeのregistration statusを収集する。JSONLのpayloadを機種別の列へ展開しない。ただし保存前に、通常BLE topicの`device_id`と`source`に基づくdirect優先フィルタを適用する。direct受信から30秒未満のrelay観測はJSONL・latestともに更新しない。sourceがない旧payloadは従来どおり保存する。
 
 Raspberry Pi側でAsia/Tokyoの受信時刻をミリ秒付きISO 8601形式で付与し、`data/sensors/YYYY/MM/DD.jsonl`へ1メッセージ1行で追記する。通常のJSON payloadの共通構造は次のとおりである。
 
@@ -105,7 +135,7 @@ Raspberry Pi側でAsia/Tokyoの受信時刻をミリ秒付きISO 8601形式で�
 {"received_at":"2026-07-30T10:54:12.123+09:00","topic":"omk/sen66-001/sen66","qos":0,"retain":false,"payload":{"device_id":"sen66-001"}}
 ```
 
-JSONとして解析できないUTF-8 payloadは`payload_raw`と`payload_parse_error`を記録する。UTF-8でないpayloadは`payload_base64`と`payload_encoding: "base64"`で保持し、メッセージを破棄しない。CSVは一次保存形式ではなく、必要に応じてこのJSONLから後段で生成する。
+JSONとして解析できないUTF-8 payloadは`payload_raw`と`payload_parse_error`を記録する。UTF-8でないpayloadは`payload_base64`と`payload_encoding: "base64"`で保持し、メッセージを破棄しない。汎用経路のCSVはParquetから後段で生成する。Bルートサービスは別途、専用CSVをMQTT配送前にも保存する。
 
 ## latest状態キャッシュ
 
@@ -119,15 +149,17 @@ SwitchBot等のBLE受信は Dashboard ではなく Raspberry Pi ホスト上の`
 
 Gateway direct BLEとESP32 Node relayを併用するSwitchBot BLE sensorでは、Nodeは論理`sensor_id`や`device_key`を生成せず、manufacturer data、service data、BLE address、RSSIを`omk-relay/<relay_node_id>/ble/raw`へpublishする。この内部topicは`sensor-collector`と`harvest-uploader`の`omk/#`購読対象外である。BLE Sensor Managerがdirect BLEと同じdecoderとregistryでsensorを特定した後だけ、通常の`omk/<sensor_id>/{environment,motion,contact,power}`へメッセージをpublishする。direct/relayの経路選択仕様とpayload例は[BLE direct / ESP32 Node relayの経路選択](../decisions/ble-direct-relay-route-selection.md)を参照する。
 
-BLEアドバタイズは常時受信し、runtimeのlatest値、RSSI、受信時刻はBLE受信ごとに更新する。environmentは初回の正常値を即時publishし、以後は`device_key`ごとに最短10秒間隔でpublishする。Motion Sensorは状態変化時に即時publishし、同一状態も最短10秒間隔で `{"device_id":"motion-001","measured_at":"...","motion_state":1}`の形でpublishする。`motion_state`は0=不在、1=検知である。
+BLE測定値には`source: "direct"`または`"relay"`を付け、relayの場合だけ`relay_node_id`を加える。`measured_at`はGatewayでのBLE callback/raw relay受信時刻で、センサ本体の計測時計ではない。`quality: "normal"`はenvironmentとpowerに付け、motion/contactには付けない。下記のJSONは主要測定fieldの抜粋であり、batteryやlight等もdecoderが取得できた場合は含む。
 
-Contact Sensorも状態変化時に即時publishし、同一状態も最短10秒間隔で`{"device_id":"contact-001","measured_at":"...","contact_state":1}` を publishする。`contact_state`は0=閉、1=開で、公式のtimeout-not-closeも開（1）として正規化する。各rate limitはmonotonic clockを使い、`enabled=false`ではBLE observationと runtime更新を継続する一方、MQTT publishは停止する。したがってJSONLへのSwitchBot 一次保存は厳密な固定周期ではなく、通常は最短約10秒間隔となる。
+BLEアドバタイズは常時受信し、登録済み一覧のruntime latest値、RSSI、受信時刻はdirect受信で更新する。この一覧の受信状態とrelay由来のMQTT測定値は別である。environmentは初回の正常値を即時publishし、以後は`device_key`ごとに最短10秒間隔でpublishする。Motion Sensorは状態変化時に即時publishし、同一状態も最短10秒間隔で `{"device_id":"motion-001","measured_at":"...","motion_state":1}`の形でpublishする。`motion_state`は0=不在、1=検知である。
+
+Contact Sensorも状態変化時に即時publishし、同一状態も最短10秒間隔で`{"device_id":"contact-001","measured_at":"...","contact_state":1}` を publishする。`contact_state`は0=閉、1=開で、公式のtimeout-not-closeも開（1）として正規化する。direct/relay経路の切替時は同値でも最初の観測を即時publishする。各rate limitはmonotonic clockを使い、`enabled=false`ではBLE observationと runtime更新を継続する一方、MQTT publishは停止する。したがってJSONLへのSwitchBot 一次保存は厳密な固定周期ではなく、通常は最短約10秒間隔となる。
 
 Plug Miniは`{"device_id":"plug-001","measured_at":"...","power_w":173.2,"switch_state":1}`を`omk/<sensor_id>/power`へpublishする。`switch_state`は 0=OFF、1=ONで、初回は即時、同一状態は最短10秒間隔、状態変化は即時publishする。Pi実機では`omk/plug-001/power`がsensor-collectorの日次JSONLへ保存され、`power_w`と`switch_state`がpayloadのまま記録されることを確認した。BLEの受信時刻に依存するため厳密な10秒固定ではないが、通常は最短約10秒間隔で保存される。
 
 ## Bルート接続
 
-Bルート通信はUSBシリアル、OS権限、認証、PANA通信に依存するため、当面はホスト上のsystemdサービスで実行し、コンテナ化しない。Bルート値は`omk/<device_id>/power`などへpublishされ、collectorのJSONL保存とlatest状態キャッシュへ反映される。既存の専用保存の扱いは、MQTT経由の保存を並行検証した後に判断する。
+Bルート通信はUSBシリアル、OS権限、認証、PANA通信に依存するため、当面はホスト上のsystemdサービスで実行し、コンテナ化しない。Bルート値は`omk/<device_id>/power`などへpublishされ、collectorのJSONL保存とlatest状態キャッシュへ反映される。現在は専用CSVへ保存した後、MQTTへbest-effortで送信する。MQTT切断中の値はMQTT再送用に保持しないため、CSVとcollectorのJSONLの件数が常に一致するとは限らない。
 
 ## セキュリティと運用
 

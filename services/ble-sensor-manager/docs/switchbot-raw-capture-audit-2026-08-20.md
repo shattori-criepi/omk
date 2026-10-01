@@ -23,7 +23,7 @@ decoder条件を追加・変更する際は、各byteの根拠を次のように
 
 ## CO2問題からの前提
 
-旧CO2 decoderは`index 7 == 0xe4`と`index 11 == 0`を要求していた。2個体での追加captureではこれらに加えindex 6と12も可変と判明した。現行CO2 decoderは次だけを用いる。
+旧CO2 decoderは`index 7 == 0xe4`と`index 11 == 0`を要求していた。2個体での追加captureではこれらに加えindex 6と12も可変と判明した。当時のCO2 decoderは次だけを用いていた。
 
 - manufacturer dataが16 byte
 - `data[15] == 0`
@@ -31,6 +31,8 @@ decoder条件を追加・変更する際は、各byteの根拠を次のように
 - `data[13:15]`がbig-endianで400〜10,000 ppm
 
 index 6、7、11、12はclassifier条件にしない。CO2は2個体・6 captureで確認済みだが、`data[15] == 0`も観測上の終端であって、全個体への仕様保証ではない。
+
+現在はbyte 15の可変性も確認されており、`data[15] == 0`を要求しない。16-byte長だけで機種を自動確定することもない。現行仕様は[CO₂の復号・登録条件](switchbot-model-evidence.md#co₂-manufacturer-only形式の初回登録)を参照する。
 
 ## 実機監査
 

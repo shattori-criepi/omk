@@ -6,6 +6,8 @@ Node初回登録の正式方式はUSB Serial/JTAG Provisioningとする。初回
 
 SSID、PSK、Node ID、物理ボタンの入力は不要である。USB抜き差しをreset手段として前提にせず、共通firmwareへcredentialだけを後から追加設定する。
 
+現在の一般利用者向け初回導入は、[Gateway USB Node setup](usb-node-setup.md)で追加したDashboardからのprebuilt書込みとUSB provisioningを使用する。この文書のCLIは、通常firmwareが動作しているNodeへのWi-Fi設定・開発検証用として維持する。
+
 ## 不採用方式
 
 - BLE GATT provisioning: Raspberry PiからAtomS3 Liteへの接続が不安定で、`le-connection-abort-by-local`、HCI `0x3e`が発生した。PPCP/MTU/PHY等の低レイヤ調査は停止し、保守コストを許容しない。
@@ -35,10 +37,11 @@ USB方式はLinux BLE stackやGateway Wi-Fi構成に依存せず、通常firmwar
 リポジトリルートから実行する。Python環境にはpytestを含む関連サービスの開発依存が必要。
 
 ```sh
+OMK_TEST_CJSON_DIR="$PWD/firmware/esp32/omk-node/managed_components/espressif__cjson/cJSON" \
 python -m pytest scripts/tests/test_provision_omk_node_via_usb.py scripts/tests/test_usb_node_provisioning_service.py firmware/esp32/omk-node/tests/test_usb_provisioning_protocol.py
 ```
 
-firmwareテストは実際のCコマンドhandlerとcJSONをホストcompilerでコンパイルし、NVS相当の保存／消去呼出しをfakeへ置換して回数を検証する。`cc`とPlatformIO配下のESP-IDF cJSON sourceが必要。別配置では`OMK_TEST_CJSON_DIR`に`cJSON.c`と`cJSON.h`のあるディレクトリを指定する。依存がない場合はskipになるため、公開前確認ではこのテストが実行されたことを確認する。
+firmwareテストは実際のCコマンドhandlerとcJSONをホストcompilerでコンパイルし、NVS相当の保存／消去呼出しをfakeへ置換して回数を検証する。`cc`とcJSON sourceが必要。現行ESP-IDF 6環境では`OMK_TEST_CJSON_DIR`に`firmware/esp32/omk-node/managed_components/espressif__cjson/cJSON/`の絶対パスを指定する。別配置でも同変数に`cJSON.c`と`cJSON.h`のあるディレクトリを指定する。依存がない場合はskipになるため、公開前確認ではこのテストが実行されたことを確認する。
 
 ### 実機再確認手順（未実施）
 

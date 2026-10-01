@@ -104,7 +104,7 @@ mqtt:
 
 `cumulative_fetch_delay_seconds`は30分境界後の待機秒数です。既存の`cumulative_check_interval_seconds`は設定読込みの互換性のためだけに受け付け、`run`のEA/EB取得周期には使用しません。
 
-`run`では、アクティブスキャンで候補が見つからない、またはPANA接続に失敗した場合でも終了しません。`retry.reconnect_wait_seconds`待機後に、Bルート認証からスキャン、PANA接続までを再試行します。`Ctrl+C`または`SIGTERM`で待機中の再試行を安全に中断できます。診断用の`test-connection`は単発実行のため、失敗時に再試行を継続せず終了します。
+`run`では、アクティブスキャンで候補が見つからない、またはPANA接続に失敗した場合でも終了しません。最初の2回の失敗後は`retry.reconnect_wait_seconds`、以後は同設定値と300秒の大きい方を待ち、Bルート認証からスキャン、PANA接続までを再試行します。長時間未接続の待機中はDashboardの手動再試行要求も受け付けます。`Ctrl+C`または`SIGTERM`で待機中の再試行を安全に中断できます。診断用の`test-connection`は単発実行のため、失敗時に再試行を継続せず終了します。
 
 ```yaml
 # config/credentials.yaml

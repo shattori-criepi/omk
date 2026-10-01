@@ -56,6 +56,10 @@ Validated PV / battery / PCS ECHONET Lite profile -- UDP/3610, GET only --> Rasp
 cd services/ichijo-energy-node
 python3 -m venv .venv
 .venv/bin/pip install -r requirements-dev.txt
+# 自分で作成・確認した.envを環境変数へ読み込む（アプリは自動読込みしない）
+set -a
+. ./.env
+set +a
 PYTHONPATH=src .venv/bin/python -m ichijo_energy_node
 
 # 実機導入時: MQTTへ送らず1サイクルを標準出力

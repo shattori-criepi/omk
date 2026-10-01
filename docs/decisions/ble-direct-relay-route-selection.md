@@ -61,7 +61,7 @@ omk-relay/<relay_node_id>/ble/raw
 
 `omk-relay/...`は`sensor-collector`と`harvest-uploader`が購読する`omk/#`の外に置く。したがって、Gatewayでsensorを特定する前のrelay入力はJSONL保存・Harvest集約へ入らない。
 
-GatewayのBLE Sensor Managerは既存registryで`device_key`に対応するsensorを特定する。たとえば、登録済みの`switchbot:020000000001`を`th-001`へ対応付け、enabledなenvironment sensorだけを次の通常のsensor topicへ再publishする。`measured_at`にはNodeの時計ではなくGateway受信時刻を付与する。
+GatewayのBLE Sensor Managerは既存registryで`device_key`に対応するsensorを特定する。登録済みかつenabledなenvironment、motion、contact、power sensorを、それぞれの通常topicへ再publishする。次は`switchbot:020000000001`を`th-001`へ対応付けるenvironmentの例である。`measured_at`にはNodeの時計ではなくGateway受信時刻を付与する。
 
 ```text
 omk/th-001/environment

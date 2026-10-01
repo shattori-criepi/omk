@@ -8,7 +8,7 @@
 - Node: AtomS3 LiteのOMK Node。SEN66等のI2CセンサとBLE relayを扱う
 - Bルート: 対応USBシリアルアダプタをGatewayのhost serviceで利用
 - BLE: Gateway direct BLEを主系、Node relayを補助経路として利用
-- 住宅用PV・蓄電池・PCS: 現行の単一検証profile向けECHONET Lite連携はGatewayとは別Raspberry Piで動作
+- 住宅用PV・蓄電池・PCS: 現行の単一検証profile向けECHONET Lite連携はGatewayホストに任意導入するサービス
 
 ## ディレクトリ
 

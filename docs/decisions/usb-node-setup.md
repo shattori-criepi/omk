@@ -9,13 +9,13 @@
 3. `pio run -d firmware/esp32/omk-node -e atom-s3-lite`を実行する。
 4. sourceをcommitする。
 5. リポジトリ内のclean HEADから`./scripts/build-omk-node-package.sh`を実行する。
-6. `firmware/esp32/omk-node/prebuilt/atom-s3-lite/`の3 binaryとmanifestを確認する。
+6. `firmware/esp32/omk-node/prebuilt/atom-s3-lite/`の3 binaryとmanifestを確認し、source commit・version・SHA-256を照合する。[ライセンス監査の更新手順](../../firmware/esp32/omk-node/LICENSE_AUDIT.md)に従い、同じbuildのapp/bootloader情報からレビュー済み`sbom.spdx.json`を再生成し、配布binary・manifest・SBOMのhashを照合する。`LICENSE_AUDIT.md`の来歴も更新し、依存やリンク対象に差があれば第三者通知と再配布義務を再確認する。
 7. packageを別commitにする。
 8. pushする。
 9. Gatewayでpullする。初回導入時は`scripts/setup-system-manager.sh`を再実行してvenv依存とdialout membershipを更新する。
 10. Dashboardから対象Nodeをセットアップする。
 
-生成scriptはGit状態取得の失敗を停止条件とし、untrackedを含むdirty treeを拒否し、build前後のHEADとclean状態を確認する。`source_commit`はbuild元の40桁SHAでありpackage commitではない。runtimeでGateway HEADとの一致は要求しない。`.pio/`やNode固有credentialは追跡しない。今回同梱したpackageのsourceはmanifestを参照する。
+生成scriptはGit状態取得の失敗を停止条件とし、untrackedを含むdirty treeを拒否し、build前後のHEADとclean状態を確認する。既存`.pio/`成果を再利用しないようPlatformIO cleanの後にbuildする。生成対象は3 binaryとmanifestのみで、SBOM・監査記録・第三者通知は自動更新しない。`source_commit`はbuild元の40桁SHAでありpackage commitではない。runtimeでGateway HEADとの一致は要求しない。`.pio/`やNode固有credentialは追跡しない。今回同梱したpackageのsourceはmanifestを参照する。
 
 ## 固定package仕様と境界
 
@@ -43,8 +43,9 @@ setup開始時に公開ttyACM名をallowlist内の優先パス（存在すれば
 - `POST /api/nodes/usb-setup`: device、node_id、strict booleanのconfirm_atom_s3_liteだけを受け付け202を返す。追加fieldは拒否。
 - `GET /api/nodes/usb-setup/status`: stage、node_id、安全なerror codeのみ。
 - `POST /api/nodes/usb-provision`: 既存Wi-Fiのみの互換APIとして維持。標準UIはsetupを使用。
+- `POST /api/nodes/usb-reinitialize`: 使用済みNodeの明示的な再セットアップ。旧PoP・Wi-Fi・Logical IDを置換/解除し、通常setupと同じlock・statusを使用する。[再試行とcredentialの扱い](../../services/system-manager/README.md#usb-node-setup)を参照する。
 
-setupはoperation lockとserial access lockを既存provisioningと共有し同時に1件。candidate pollingはportを開かない。system-managerは既存非rootユーザーで動作し、setupでdialout groupを追加する。flash用sudo/helperや任意コマンドAPIは追加しない。ブラウザからはDashboard backendを通しBearer tokenを公開しない。
+setupはoperation lockとserial access lockを既存provisioningと共有し同時に1件。setup中のcandidate pollingはcacheのみを返しportを開かない。idle時はserial lockの下で探索する。system-managerは既存非rootユーザーで動作し、setupでdialout groupを追加する。flash用sudo/helperや任意コマンドAPIは追加しない。ブラウザからはDashboard backendを通しBearer tokenを公開しない。
 
 Wi-Fi送信後は対象node_idの新しいMQTT registration status（provisioned/registered）を待つ。setupではmosquitto_sub -Rで過去のretained statusだけによる誤成功を防ぐ。受信は現在のGatewayへの接続確認になるが、Mesh経路の全hop検査は行わない。タイムアウトは失敗とし、Wi-Fi設定済みだけでsetup完了に置き換えない。
 
@@ -53,6 +54,8 @@ PC用flash-omk-node.shは既存H3 guardを維持し開発・復旧用に残す�
 ## 実機確認
 
 新品・既存（Gateway credentialあり／なし）での完走、再列挙、USB差替え停止、工場secretの維持、電断後の復旧、AP変更後の再setup、SEN66登録、SEN66なしのBLE/Mesh、fresh Gatewayのdialout権限を確認する。自動testsはfake serial/esptoolを用い実USBを書き込まない。
+
+以下は2026-09-11時点の実装・レビュー記録であり、テスト件数とcommit SHAは現在の配布物を示さない。現行packageの来歴は`manifest.json`とライセンス監査記録を参照する。
 
 ## 実装時の検証記録（2026-09-11）
 

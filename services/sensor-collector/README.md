@@ -1,6 +1,6 @@
 # sensor-collector
 
-Mosquittoの`omk/#`を購読し、payloadの機種別仕様を解釈せず日次JSONLへ追記するサービスです。`status`トピックも収集します。
+Mosquittoの`omk/#`を購読し、payloadの機種別仕様を解釈せず日次JSONLへ追記するサービスです。`status`トピックも収集します。ただし通常のBLE測定topicでは保存前に`device_id`と`source`を確認し、direct受信から30秒未満のrelay観測を除外します。対象は`environment`、`motion`、`contact`、`power`で、値が同じかどうかによる重複除去ではありません。
 
 各取得処理と保存処理を分離するための一次保存サービスです。MQTTトピックは`omk/<device_id>/<data_type>`を基本とし、新しいセンサや測定項目の追加にcollectorの変更は必要ありません。CSV変換、分析、可視化、外部送信は別コンポーネントで行います。Harvest uploaderはMQTTを独立して購読し、JSONL保存の完了を待ちません。
 

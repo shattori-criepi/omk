@@ -247,17 +247,19 @@ Presence Sensor Proと確認した1個体で行われた。Pi内蔵Bluetoothで�
 
 ### CO₂ manufacturer-only形式の初回登録
 
+以下のcapture例は先頭6-byteの個体識別子を同じ例示値へ置換し、後続の測定byteは保持している。
+
 - `0x35` service typeはCO₂センサーの明示的な機種識別根拠であり、従来どおり未登録個体を
   自動識別する。serviceが空の16-byte manufacturer layoutは、decoderが復号できてもmodelを
   自動選択しない。
-- 利用者は2台目の未登録個体で`b0e9fe5815cc1ae405992d003b02fe00`を観測し、既存decoderの
+- 利用者は2台目の未登録個体で`0200000000061ae405992d003b02fe00`を観測し、既存decoderの
   766 ppm / 25.5 ℃ / 45 %が本体表示と一致すると報告した。これはCO₂値のlayout解釈を補強する
   B相当の実測であり、16-byte長、末尾`00`、正常値、可変byteを組み合わせても機種固有の
   discriminatorにはならない。
-- 同じ個体の追加観測で、`b0e9fe5815ccffe4019a31002502ec00`は748 ppm、
-  `b0e9fe5815cc01e4019a3100250e8040`は3712 ppmだった。byte 15は`00`から`40`に
+- 同じ個体の追加観測で、`020000000006ffe4019a31002502ec00`は748 ppm、
+  `02000000000601e4019a3100250e8040`は3712 ppmだった。byte 15は`00`から`40`に
   変動するため、classifier・validity条件には使用しない。意味は現時点で特定しない。
-  CO₂値は従来どおり`data[13:15]`のbig-endian値を使用する。
+  CO₂値は`data[13:15]`の符号なしbig-endian値を使用し、上位byteをmaskしない。400〜10,000 ppmの検証は復号後に行う。byte 15を値へ連結したり、`00`固定で高濃度packetを拒否したりしない。
 - service dataが空で、既存CO₂ decoderの16-byte長、Meter互換温湿度
   expression、温度・湿度・CO₂の値範囲をすべて検証できる未登録candidateだけに
   `co2_sensor`の明示登録選択肢を付ける。candidate本体は`unknown_switchbot`のままとし、
@@ -286,8 +288,6 @@ Presence Sensor Proと確認した1個体で行われた。Pi内蔵Bluetoothで�
 エージェントの自動テストでは、登録前拒否・明示登録・registry再読込・値取得まで確認した。
 公開前の追加実機報告では、新品microSDから構築した標準Pi4 Gatewayで、旧registryなしのPresence Sensor Pro初回登録が確認された。登録時packetの形式や自動判定／明示選択の別までは、この報告から断定しない。過去にPi内蔵BluetoothでScan Response/service dataを取得できなかった観測は、環境差として保持する。
 
-### 別件の作業メモ（今回未修正）
+### Node候補表示の追記
 
-利用者の実機試験で、登録済みOMK Node 3台がDashboard「未登録デバイス」とcandidate APIに
-現れるとの報告あり。Node候補除外の問題として別途調査する。今回のPresence/M1/M2変更に
-Nodeの候補生成・登録状態処理の修正は含めていない。
+Presence/M1/M2試験時には登録済みOMK NodeがBLE候補へ混在する報告があった。現在の`candidate_list()`は登録状態にかかわらず`omk_node`を除外し、Nodeは専用の`/api/nodes`で管理する。`test_registry_and_decoder.py`で未登録・provisioned・registeredの各状態を検証している。

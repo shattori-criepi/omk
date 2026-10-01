@@ -248,7 +248,7 @@ AtomS3 Liteをproduction対象として、共通NodeはESP-WIFI-MESH、SEN66、B
 
 保存済みGateway SSID/PSKからMesh IDとMesh AP passwordをruntime導出する。Gateway credentialはOMK専用NVS storeに保持し、ESP-WIFI-MESHがchild parent選択で変更するruntime STA configurationとは共有しない。root/parent/child、Node別SSID、固定IP、manual parentの設定はない。rootはGateway APへ接続し、internal networkのDHCP/DNS/NAPTを提供する。childは自動選択されたparent経由でIPを得て、既存の`IP_EVENT_STA_GOT_IP`起点で通常TCP MQTTを`mqtt://192.168.50.1:1883`へ接続する。GatewayにMesh daemonや特別なrouting設定は必要ない。市販Wi-Fi中継機は必須ではないが、実際の到達性はNode配置と電波条件に依存する。AC電源で常時動作させる。
 
-parentまたはrootの喪失時にはMeshが自動再構成する。起動時は`esp_wifi_start()`、`esp_mesh_init()`、`esp_mesh_start()`の成功後にだけinternal-netif receive taskを開始する。Mesh初期化前に`esp_mesh_recv()`を呼ばない。
+topologyはrootを頂点とするtreeで、childはparent経由でrootへ到達する。parentまたはrootの喪失時にはMeshが自動再構成する。参加Nodeの増加やroot uplinkの不安定化に対しては、条件付きで標準APIによるroot再選出を要求する。[現行の再選出policyとlivenessとの関係](../../../docs/decisions/esp-wifi-mesh-node-networking.md#現行のroot再選出とlivenessの関係)を参照する。起動時は`esp_wifi_start()`、`esp_mesh_init()`、`esp_mesh_start()`の成功後にだけinternal-netif receive taskを開始する。Mesh初期化前に`esp_mesh_recv()`を呼ばない。
 
 ### AtomS3 Lite運用RSSI profileと実機検証（2026-09）
 
@@ -332,4 +332,4 @@ managed componentはmanifestとlockから再現します。`platformio.ini`が�
 
 配布バイナリの第三者許諾は[Third-party notices](prebuilt/atom-s3-lite/THIRD_PARTY_NOTICES.md)を参照し、バイナリの再配布時は同文書を同梱してください。[監査記録と更新手順](LICENSE_AUDIT.md)も参照してください。
 
-一般利用者は[GatewayのDashboardからセットアップ](../../../docs/user/esp32-node-setup.md)します。開発者はsource commit後のclean HEADから`./scripts/build-omk-node-package.sh`を実行し、3 binaryとmanifestを別commitとして更新します。Gateway上ではbuildしません。詳細は[package更新とUSB setup設計](../../../docs/decisions/usb-node-setup.md)を参照してください。PC用flash scriptは開発・復旧用として維持します。
+一般利用者は[GatewayのDashboardからセットアップ](../../../docs/user/esp32-node-setup.md)します。開発者はsource commit後のclean HEADから`./scripts/build-omk-node-package.sh`を実行し、scriptはPlatformIO clean→buildを実行し、3 binaryとmanifestを更新します。SBOMと監査記録は自動更新しないため、同じbuild成果から再生成・照合してpackageと一緒に別commitへ含めます。第三者通知は依存・リンク構成の変化に応じて確認します。Gateway上ではbuildしません。詳細は[package更新とUSB setup設計](../../../docs/decisions/usb-node-setup.md)を参照してください。PC用flash scriptは開発・復旧用として維持します。

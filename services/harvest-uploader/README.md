@@ -1,6 +1,6 @@
 # harvest-uploader
 
-`harvest-uploader`はMQTTを独立クライアントとして`omk/#`購読し、受信時刻（Asia/Tokyo）の00秒から59秒までを住宅全体の1分レコードへ集約してSORACOM Harvest DataへPOSTします。JSONLは引き続き`sensor-collector`による10秒生データの一次保存であり、本サービスはJSONLやParquetを読まず変更もしません。
+`harvest-uploader`はMQTTを独立クライアントとして`omk/#`購読し、受信時刻（Asia/Tokyo）の00秒から59秒までを住宅全体の1分レコードへ集約してSORACOM Harvest DataへPOSTします。受信した測定・管理メッセージのJSONL一次保存は`sensor-collector`が担い、本サービスはJSONLやParquetを読まず変更もしません。
 
 ## MQTT入力
 
@@ -15,7 +15,7 @@
 | `omk/<sensor_id>/contact` | `contact_state` |
 | `omk/<sensor_id>/power` | `power_w`、`switch_state`（Plug Mini等の電力センサ） |
 
-`power`の正値は買電、負値は売電です。電圧・電流・力率、蓄電池の運転状態はHarvestへ送信しません。不正JSON、JSON objectではないpayload、非有限数は安全に無視します。
+Bルート`power`の`net_power_w`は正値が買電、負値が売電です。Plugの`power_w`とは区別します。電圧・電流・力率、蓄電池の運転状態はHarvestへ送信しません。不正JSON、JSON objectではないpayload、非有限数は安全に無視します。
 
 ### Thread model
 
@@ -37,11 +37,11 @@ SwitchBot Plug MiniのPi実機では、`plug-001_power_w`と`plug-001_switch_sta
 
 ## 再送と設定
 
-HTTP成功は2xxです。失敗したレコードは`HARVEST_QUEUE_PATH`のSQLite outboxに保持され、古い順に最大1件ずつ、最大60秒の指数バックオフで再送します。作成から`HARVEST_RETRY_MAX_AGE_SECONDS`（既定3600秒）を超えたものは警告ログとともに破棄します。SQLiteにより再起動後も再送待ちデータを保持します。
+HTTP成功は2xxです。確定した1分レコードは送信前にoutboxへ保存し、成功後に削除します。失敗したレコードは`HARVEST_QUEUE_PATH`のSQLite outboxに保持され、再送時刻に到達したものを古い順に1回の処理で最大1件ずつ、最大60秒の指数バックオフで再送します。作成から`HARVEST_RETRY_MAX_AGE_SECONDS`（既定3600秒）を超えたものは警告ログとともに破棄します。SQLiteにより再起動後も再送待ちデータを保持します。
 
 環境変数は`MQTT_HOST`（既定`mosquitto`）、`MQTT_PORT`（`1883`）、`MQTT_CLIENT_ID`（`omk-harvest-uploader`）、`MQTT_TOPIC`（`omk/#`）、`HARVEST_ENDPOINT`（`http://harvest.soracom.io`）、`HARVEST_TIMEOUT_SECONDS`（`10`）、`HARVEST_RETRY_MAX_AGE_SECONDS`（`3600`）、`HARVEST_QUEUE_PATH`、`TZ`です。認証情報・APIキーをpayloadやソースへ入れません。
 
-Compose外で起動する場合や既定値を確認する場合は、secretを含まない[`.env.example`](.env.example)を参照してください。必要に応じてこれをローカルの`.env`へコピーし、接続先などを設定します。
+Compose外で起動する場合や既定値を確認する場合は、secretを含まない[`.env.example`](.env.example)を参照してください。必要に応じてこれをローカルの`.env`へコピーし、接続先などを設定します。アプリ自体は`.env`を自動読込みしないため、Compose外では起動するプロセスへ環境変数として渡してください。
 
 Harvest Data側では、731日保持とカスタムタイムスタンプを利用できる設定を別途有効化してください。
 

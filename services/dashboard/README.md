@@ -90,7 +90,7 @@ Raspberry Pi自身では上記の`localhost`を使用します。OMK APに接続
 
 generic catalogまたは表示設定が利用できない場合は、互換の固定表示へフォールバックします。この表示は`broute_power.json`、`sen66.json`、`ichijo_power_flow.json`を使いますが、通常の現行表示を置き換えるものではありません。
 
-データセットまたは値がない場合も画面は表示され、数値は`--`、電力状態は「データなし」、鮮度は`unavailable`になります。日計電力量は該当データがない場合`0.0 kWh`です。
+データセットまたは値がない場合も画面は表示され、数値は`--`、電力状態は「データなし」、鮮度は`unavailable`になります。日計電力量も該当データがない場合は`--`で、実測ゼロと区別します。日計は`broute_interval_energy`の`end_at`がJST当日となる買電量・売電量の合計です。transformerが生成済みのParquetだけを読むため、latestの瞬時値とは更新時期が異なります。
 
 ## 表示設定
 

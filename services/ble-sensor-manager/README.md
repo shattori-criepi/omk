@@ -1,14 +1,14 @@
 # OMK BLEセンサマネージャー
 
-このRaspberry Piホストサービスは、BlueZのBLEアドバタイズを受動的に受信し、物理的な`device_key`をOMKの論理的な`sensor_id`へ対応付け、`omk/living-env-01/environment`のようなベンダー非依存のMQTT topicをpublishします。
+このRaspberry Piホストサービスは、BlueZ/BleakでペアリングせずBLEアドバタイズを受信し、物理的な`device_key`をOMKの論理的な`sensor_id`へ対応付け、`omk/living-env-01/environment`のようなベンダー非依存のMQTT topicをpublishします。
 
-このサービスはDashboardコンテナの外で動作し、Dockerはホストゲートウェイ経由でポート8787へ接続します。BlueZのDBusソケットや特権コンテナは不要なため、Bluetoothへのアクセスはホストサービスに分離されたままです。DashboardをローカルUI以外へ公開する場合は、Piのファイアウォールでポート8787をDockerブリッジに限定してください。
+このサービスはDashboardコンテナの外で動作し、Dockerはホストゲートウェイ経由でポート8787へ接続します。BlueZのDBusソケットや特権コンテナは不要なため、Bluetoothへのアクセスはホストサービスに分離されたままです。setupが導入する`omk-ble-api.service`とnftables規則により、ポート8787への入力はloopbackとDocker bridgeに限定します。このAPI自体には認証がないため、この制限を維持し、ブラウザからはDashboard backendを経由します。
 
 Pi上で`scripts/setup-ble-sensor-manager.sh`を実行すると、virtualenvの作成とsystemd unitの導入・再起動を行えます。unitは`OMK_BLE_REGISTRY`と`OMK_NODE_REGISTRY`をそれぞれ`data/ble/sensors.json`と`data/ble/nodes.json`へ設定し、`data/ble`だけを書込み可能にしたまま`ProtectSystem=strict`を維持します。登録情報はこれらの可読なJSONへ保存します。
 
 ## ESP32 Node初回Wi-Fi設定
 
-Nodeの初回Wi-Fi設定はBLE Sensor Managerでは行わない。NodeをGatewayへUSB接続し、`python3 scripts/provision_omk_node_via_usb.py`を実行する。USB transportはNode IDを取得し、credential保存・software reboot・MQTT registration statusまでを確認する。通常のBLE scan、SwitchBot relay、MQTT Node registrationはこの操作から独立して継続する。
+Nodeの初回Wi-Fi設定はBLE Sensor Managerでは行わない。一般利用者はNodeをGatewayへUSB接続し、[Dashboardのセットアップ](../../docs/user/esp32-node-setup.md)でsystem-managerにprebuilt書込みとWi-Fi設定を要求する。通常firmware導入済みNodeへの開発用Wi-Fi設定には`python3 scripts/provision_omk_node_via_usb.py`も利用できる。USB transportはNode IDを取得し、credential保存・software reboot・MQTT registration statusまでを確認する。通常のBLE scan、SwitchBot relay、MQTT Node registrationはこの操作から独立して継続する。
 
 Nodeの`node_id`はeFuse由来の物理IDであり、`logical_id`はNode自身が測定値を`omk/<logical_id>/...`へ送る場合だけの論理IDである。`logical_id`は全Nodeで一意でなければならず、Gatewayは重複した登録要求・ACK・registration statusを拒否する。BLE relay専用Nodeはrelay topicに`node_id`を使うため、`logical_id`を登録する必要はない。
 

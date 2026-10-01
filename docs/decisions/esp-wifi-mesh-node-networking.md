@@ -8,7 +8,7 @@
 
 共通Node firmwareの通信層としてESP-WIFI-MESH internal IP networking/NAPTを採用する。1台のNodeはSEN66計測、BLE scan/SwitchBot relay、Mesh中継、通常TCP MQTT publishを同時に担う。root/parent/childは固定せず、保存済みGateway SSID/PSKを共通入力としてMeshが自動選択・自動再構成する。
 
-rootはGateway APへ通常STA接続し、internal subnet `10.0.0.1/16`のDHCP/DNS/NAPTを提供する。childはMesh parent経由でDHCP接続し、rootのNAPTを通じて`mqtt://192.168.50.1:1883`へ通常TCP接続する。Gatewayには特別なMesh daemon、routing daemon、独自relay protocolを追加しない。市販Wi-Fi中継機は必須にしない。NodeはAC電源前提である。
+Meshはrootを頂点とするtree topologyであり、各childはparentを経由する。rootはGateway APへ通常STA接続し、internal subnet `10.0.0.1/16`のDHCP/DNS/NAPTを提供する。childはMesh parent経由でDHCP接続し、rootのNAPTを通じて`mqtt://192.168.50.1:1883`へ通常TCP接続する。Gatewayには特別なMesh daemon、routing daemon、独自relay protocolを追加しない。市販Wi-Fi中継機は必須にしない。NodeはAC電源前提である。
 
 ## credential導出
 
@@ -33,13 +33,21 @@ python3 scripts/provision_omk_node_via_usb.py --device /dev/ttyACM0 --profile om
 
 ## 診断と運用上の解釈
 
-diagnostic topicと全fieldは[データ経路とMQTT仕様](../developer/data-and-mqtt.md#mesh診断status)で定義する。`parent_disconnect_count`はraw Mesh event回数であり、利用者が知覚する通信断回数ではない。起動やtopology再構成時に複数回増加してよい。`mesh_layer=-1`、旧parent BSSID、旧IPなどのtransient観測値も正常に起こり得るため、Dashboardはstabilization windowを用いる。
+diagnostic topicと全fieldは[データ経路とMQTT仕様](../developer/data-and-mqtt.md#mesh診断status)で定義する。`parent_disconnect_count`はraw Mesh event回数であり、利用者が知覚する通信断回数ではない。起動やtopology再構成時に複数回増加してよい。`mesh_layer=-1`や旧parent BSSIDなどのtransient観測値も起こり得る。parent切断時のcurrent IPは`0.0.0.0`へclearする。現行BLE managerのNode online判定はDiscovery BLE、raw relay、SEN66の受信鮮度を使い、このMesh診断topicによるstabilization判定は実装していない。
 
 Mesh通信が成立しているのにMQTTだけが長時間復旧しない状態では、software restartで復旧を試みる。Mesh起動済み、parent接続済み、rootlessでない、有効IPあり、MQTT client開始済み、MQTT未接続の条件がすべて180秒連続した場合だけ発動する。単にMQTTが180秒未接続であることを条件にしないため、Mesh再構成中や通常の通信断はrestart対象にならない。parent切断、rootless、IP未取得、MQTT接続復旧、その他の通常通信条件の喪失で判定時間をリセットする。restart直前にはMesh/MQTT診断情報をログへ出し、`mesh_mqtt_liveness_timeout`をNVSへ記録してからrestartする。`last_omk_restart_reason`と`mesh_mqtt_liveness_restart_count`で、直近の理由と累積回数を診断できる。
 
-実住宅試験では、同一SSID・異BSSIDのGateway／市販Wi-Fi中継機が同時に見える環境で、別root/treeが形成されるリスクを確認した。また、非同期起動やNode移設後に最適rootへ自動復帰するとは限らない。市販中継機との併用は否定せず今後の試験で評価するが、root自動再選出（`esp_mesh_waive_root()`の自動化）は、`is_rootless`、切断reason、root role変化を収集してから別decisionで判断する。
+実住宅試験では、同一SSID・異BSSIDのGateway／市販Wi-Fi中継機が同時に見える環境で、別root/treeが形成されるリスクを確認した。また、非同期起動やNode移設後に最適rootへ自動復帰するとは限らない。採用当初は診断収集を先行したが、現在は下記の条件付きroot再選出を実装している。市販中継機との併用や配置ごとの最適性は引き続き実機評価対象である。
 
-WPA2暗号化Mesh APのassociation expiryはESP-IDFの推奨に従い30秒とする。root election、router BSSID、channel/router switchの設定はこの段階では変更しない。
+WPA2暗号化Mesh APのassociation expiryはESP-IDFの推奨に従い30秒とする。router BSSIDの固定やmanual parent選択は行わない。同一Meshの複数root競合は`esp_mesh_allow_root_conflicts(false)`で無効化している。
+
+## 現行のroot再選出とlivenessの関係
+
+`mesh_root_recovery.c`は、rootでの`MESH_EVENT_ROUTING_TABLE_ADD`後に60秒の安定待ちを置く。待機中の追加参加は待ち時間を延長する。また、30秒ごとの診断でrootの有効RSSIが−80 dBm以下で、前回観測からの増分が「parent切断3回以上」または「MQTT切断2回以上」の場合も再選出を要求する。RSSIだけでは要求しない。
+
+実行時にもroot・parent接続済み・rootlessでないことを要求し、通常の制御経路から`esp_mesh_waive_root(NULL, MESH_VOTE_REASON_ROOT_INITIATED)`を呼ぶ。成功後は15分のcooldownを置き、その間の追加要求を抑止する。再選出成功後120秒はMQTT livenessによるsoftware restartを抑止し、再構成を優先する。その後も通常通信条件が揃ったままMQTT未接続が180秒継続した場合だけ既存のrestart判定へ進む。
+
+これはchildのRSSI roamingや特定Nodeへのroot固定ではなく、最適なrootへの交代を保証しない。再選出の要求・実行・延期理由はログで確認する。下記の過去のフェイルオーバー試験と、この追加policyの実機検証は区別する。policyの条件・cooldown・時刻wrapはホストテストで確認する。
 
 ## 実機確認済み範囲
 
