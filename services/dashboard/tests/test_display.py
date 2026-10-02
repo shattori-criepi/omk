@@ -894,7 +894,7 @@ def test_hero_display_html_and_javascript_expose_polling_targets(tmp_path: Path,
     assert 'class="display-secondary-label"' in response.text
     assert 'class="display-secondary-value"' in response.text
     assert 'class="display-secondary-unit"' in response.text
-    assert 'fetch("/api/display", { cache: "no-store" })' in javascript
+    assert 'fetch("/api/display", options)' in javascript
     assert "DISPLAY_POLL_INTERVAL_MS = 10_000" in javascript
     assert "headerWeekday.textContent" in javascript
     assert 'WEEKDAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]' in javascript

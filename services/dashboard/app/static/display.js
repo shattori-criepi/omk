@@ -9,6 +9,7 @@ const clockTime = document.querySelector("#clock-time");
 const clockUpdatedAt = document.querySelector("#clock-updated-at");
 const clockFreshness = document.querySelector("#clock-freshness");
 const DISPLAY_POLL_INTERVAL_MS = 10_000;
+const DISPLAY_FETCH_TIMEOUT_MS = 7_000;
 const WEEKDAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const WEEKDAY_ARIA_NAMES = ["日曜日", "月曜日", "火曜日", "水曜日", "木曜日", "金曜日", "土曜日"];
 let displayFetchInProgress = false;
@@ -255,15 +256,22 @@ function updateDisplay(data) {
 async function refreshDisplay() {
   if (displayFetchInProgress) return;
   displayFetchInProgress = true;
+  let timeoutId;
   try {
+    // Use the widely supported controller + timer, not AbortSignal.timeout().
+    const controller = new AbortController();
+    timeoutId = setTimeout(() => controller.abort(), DISPLAY_FETCH_TIMEOUT_MS);
+    const options = { cache: "no-store", signal: controller.signal };
     const response = demoEnabled
-      ? await fetch(`/api/display?demo_mode=${demoMode}`, { cache: "no-store" })
-      : await fetch("/api/display", { cache: "no-store" });
+      ? await fetch(`/api/display?demo_mode=${demoMode}`, options)
+      : await fetch("/api/display", options);
     if (!response.ok) throw new Error(`display API returned ${response.status}`);
+    // Keep the timeout active while reading the response body as well.
     updateDisplay(await response.json());
   } catch (error) {
     console.warn("Dashboard refresh failed; keeping current values.", error);
   } finally {
+    clearTimeout(timeoutId);
     displayFetchInProgress = false;
   }
 }
