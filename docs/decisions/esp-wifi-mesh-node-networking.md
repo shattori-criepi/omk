@@ -37,17 +37,26 @@ diagnostic topicと全fieldは[データ経路とMQTT仕様](../developer/data-a
 
 Mesh通信が成立しているのにMQTTだけが長時間復旧しない状態では、software restartで復旧を試みる。Mesh起動済み、parent接続済み、rootlessでない、有効IPあり、MQTT client開始済み、MQTT未接続の条件がすべて180秒連続した場合だけ発動する。単にMQTTが180秒未接続であることを条件にしないため、Mesh再構成中や通常の通信断はrestart対象にならない。parent切断、rootless、IP未取得、MQTT接続復旧、その他の通常通信条件の喪失で判定時間をリセットする。restart直前にはMesh/MQTT診断情報をログへ出し、`mesh_mqtt_liveness_timeout`をNVSへ記録してからrestartする。`last_omk_restart_reason`と`mesh_mqtt_liveness_restart_count`で、直近の理由と累積回数を診断できる。
 
-実住宅試験では、同一SSID・異BSSIDのGateway／市販Wi-Fi中継機が同時に見える環境で、別root/treeが形成されるリスクを確認した。また、非同期起動やNode移設後に最適rootへ自動復帰するとは限らない。採用当初は診断収集を先行したが、現在は下記の条件付きroot再選出を実装している。市販中継機との併用や配置ごとの最適性は引き続き実機評価対象である。
+実住宅試験では、同一SSID・異BSSIDのGateway／市販Wi-Fi中継機が同時に見える環境で、別root/treeが形成されるリスクを確認した。また、非同期起動やNode移設後に最適rootへ自動復帰するとは限らない。採用当初は診断収集を先行したが、現在は下記の2段階root recoveryを実装している。市販中継機との併用や配置ごとの最適性は引き続き実機評価対象である。
 
 WPA2暗号化Mesh APのassociation expiryはESP-IDFの推奨に従い30秒とする。router BSSIDの固定やmanual parent選択は行わない。同一Meshの複数root競合は`esp_mesh_allow_root_conflicts(false)`で無効化している。
 
-## 現行のroot再選出とlivenessの関係
+## 2段階root recoveryとlivenessの関係
 
-`mesh_root_recovery.c`は、rootでの`MESH_EVENT_ROUTING_TABLE_ADD`後に60秒の安定待ちを置く。待機中の追加参加は待ち時間を延長する。また、30秒ごとの診断でrootの有効RSSIが−80 dBm以下で、前回観測からの増分が「parent切断3回以上」または「MQTT切断2回以上」の場合も再選出を要求する。RSSIだけでは要求しない。
+`mesh_root_recovery.c`は、30秒ごとのstatus処理でGatewayリンクを観測し、次の2段階を同じ制御経路から選択する。実行時にもroot・parent接続済み・rootlessでないことを確認する。
 
-実行時にもroot・parent接続済み・rootlessでないことを要求し、通常の制御経路から`esp_mesh_waive_root(NULL, MESH_VOTE_REASON_ROOT_INITIATED)`を呼ぶ。成功後は15分のcooldownを置き、その間の追加要求を抑止する。再選出成功後120秒はMQTT livenessによるsoftware restartを抑止し、再構成を優先する。その後も通常通信条件が揃ったままMQTT未接続が180秒継続した場合だけ既存のrestart判定へ進む。
+- **Level 1: root再選挙。** rootでの`MESH_EVENT_ROUTING_TABLE_ADD`後に60秒の安定待ちを置く。待機中の追加参加は待ち時間を延長する。また、rootの有効RSSIが−80 dBm以下で、前回観測からの増分が「parent切断3回以上」または「MQTT切断2回以上」の場合も要求する。`esp_mesh_waive_root(NULL, MESH_VOTE_REASON_ROOT_INITIATED)`で、より良いroot候補への交代を試みる。候補がなければ現在のrootが残るため、この段階では弱RSSIだけを理由に投票しない。API成功後はLevel 1に15分のcooldownを置く。
+- **Level 2: root放棄とparent再探索。** rootかつRSSI validかつGateway RSSIが−85 dBm以下の観測が180秒継続した場合、`esp_mesh_set_self_organized(true, true)`を呼ぶ。ESP-IDF 6.0.1ではrootがrouterおよびchildとの接続を解除し、root roleを放棄して通常Nodeとしてpreferred parentを探索する。parentの選択はESP-WIFI-MESHへ任せ、OMKによるparent固定や独自の周辺RSSI scanは行わない。短時間の切断回数やLevel 1の実行有無は、この段階の必須条件にしない。
 
-これはchildのRSSI roamingや特定Nodeへのroot固定ではなく、最適なrootへの交代を保証しない。再選出の要求・実行・延期理由はログで確認する。下記の過去のフェイルオーバー試験と、この追加policyの実機検証は区別する。policyの条件・cooldown・時刻wrapはホストテストで確認する。
+Level 2の継続時間とcooldownはLevel 1と分離する。Level 1を実行しても継続時間はリセットせず、たとえば最初の弱RSSI観測を`t=0`として、`t=30秒`のLevel 1後もroot／−89 dBmのままなら`t=180秒`でLevel 2へ進める。RSSIが−85 dBmより改善、non-root化、RSSI invalidのいずれかをstatus処理で観測すると継続時間をリセットする。最初の該当観測から180秒を数えるため、物理的な劣化開始からの遅れには最大1 status周期が加わる。
+
+同じ周期で両段階が成立した場合はLevel 2を優先し、API失敗時にも同じ周期でLevel 1を続けて呼ばない。Level 2成功後は専用の15分cooldownへ入り、継続時間と未実行のLevel 1要求をリセットし、Level 1にも15分のcooldownを適用して再構成を保護する。cooldown中もリンク観測を続け、終了時に再び180秒の継続条件を満たしていれば再実行できる。Level 2 API失敗では成功時刻・cooldown・graceを更新せず、条件が続けば次の30秒周期で再試行する。時刻比較は`uint32_t`のwrapを考慮する。
+
+どちらのAPI成功後も120秒は既存のMQTT livenessによるsoftware restartを抑止する。通常通信条件が失われれば既存のliveness計測をリセットし、grace終了後は通常通信条件下でMQTT未接続が180秒継続した場合の最終的なsoftware restartを維持する。APIの`ESP_OK`は回復要求の成功として扱い、実際のroot交代・parent接続・MQTT復旧の完了を意味しない。
+
+Level 1は`root reelection requested/executed: ... (level=1)`、Level 2は`root recovery requested: sustained_weak_root (level=2)`と`root parent reselection executed: sustained_weak_root (level=2)`で区別する。失敗時は理由と`esp_err_to_name()`によるESP-IDF errorを記録する。今回は既存status MQTT payloadを維持し、追加の回復診断はログへ記録する。
+
+[ESP-IDF 6.0.1のself-organized networking仕様](https://docs.espressif.com/projects/esp-idf/en/v6.0.1/esp32s3/api-reference/network/esp-wifi-mesh.html#enabling-self-organized-networking)と同版の`esp_mesh.h`の型・利用条件に基づく。特定treeへの統合や最適rootへの交代を保証するものではない。root conflicts無効化、parent RSSI閾値（high=−78、medium=−82、low=−85 dBm）、最大layerなどの既存設定は維持する。下記の過去のフェイルオーバー試験と、この追加policyの実機検証は区別する。継続時間のリセット、段階間の優先順位、API失敗、cooldown、liveness grace、時刻wrapはhost testで確認する。実機では弱rootとそのchildの再接続、既存treeへの統合可否、MQTT／SEN66／BLE relay復旧、15分以内の再探索抑止を確認する。
 
 ## 実機確認済み範囲
 

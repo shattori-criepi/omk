@@ -90,23 +90,39 @@ static uint32_t uptime_milliseconds(void) {
     return (uint32_t)(esp_timer_get_time() / 1000);
 }
 
-/* esp_mesh_waive_root() is documented by the bundled ESP-IDF as root-only. Keep
- * this call in the periodic control path, rather than in a disconnect event:
+/* Keep both recovery levels in the periodic control path, rather than in a disconnect event:
  * a request observed while disconnected remains pending until the root has a
  * parent again. */
-static void try_root_reelection(void) {
+static void try_root_recovery(void) {
     uint32_t now_ms = uptime_milliseconds();
-    if (!mesh_root_recovery_should_execute(&root_recovery, now_ms, esp_mesh_is_root(),
-                                           parent_connected, is_rootless)) return;
+    omk_mesh_root_recovery_action_t action = mesh_root_recovery_should_execute(
+        &root_recovery, now_ms, esp_mesh_is_root(), parent_connected, is_rootless);
+    if (action == OMK_MESH_ROOT_RECOVERY_NONE) return;
+    if (action == OMK_MESH_ROOT_RECOVERY_PARENT_RESELECTION) {
+        ESP_LOGI(TAG, "root recovery requested: sustained_weak_root (level=2)");
+        /* ESP-IDF 6.0.1: select_parent=true makes a root disconnect from its
+         * router and children and search for a preferred parent as a non-root.
+         * Parent choice remains entirely with self-organized ESP-WIFI-MESH. */
+        esp_err_t err = esp_mesh_set_self_organized(true, true);
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "root parent reselection failed: sustained_weak_root (%s)", esp_err_to_name(err));
+        } else {
+            mesh_root_recovery_mark_executed(&root_recovery, now_ms, action);
+            ESP_LOGI(TAG, "root parent reselection executed: sustained_weak_root (level=2)");
+        }
+        /* On failure retry next status cycle, without a vote in this cycle or
+         * a successful-recovery cooldown/grace period. */
+        return;
+    }
     const char *reason = mesh_root_recovery_reason_name(root_recovery.reason);
-    ESP_LOGI(TAG, "root reelection requested: %s", reason);
+    ESP_LOGI(TAG, "root reelection requested: %s (level=1)", reason);
     esp_err_t err = esp_mesh_waive_root(NULL, MESH_VOTE_REASON_ROOT_INITIATED);
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "root reelection deferred: %s (%s)", reason, esp_err_to_name(err));
         return;
     }
-    mesh_root_recovery_mark_executed(&root_recovery, now_ms);
-    ESP_LOGI(TAG, "root reelection executed: %s", reason);
+    mesh_root_recovery_mark_executed(&root_recovery, now_ms, action);
+    ESP_LOGI(TAG, "root reelection executed: %s (level=1)", reason);
 }
 
 void mesh_network_log_diagnostics(const char *event, uint32_t reason) {
@@ -153,7 +169,7 @@ static void check_mqtt_liveness(void) {
     if (mqtt_liveness_since_us == 0) mqtt_liveness_since_us = now_us;
     state.mqtt_disconnected_duration_s =
         (uint32_t)((now_us - mqtt_liveness_since_us) / 1000000);
-    /* A root handover has a brief, expected MQTT interruption.  Prefer that
+    /* Root reelection/reselection has an expected MQTT interruption. Prefer that
      * recovery path before falling back to the existing 180-second reboot. */
     if (mesh_root_recovery_in_grace(&root_recovery, uptime_milliseconds()) ||
         !mesh_mqtt_liveness_should_recover(&state)) return;
@@ -189,7 +205,7 @@ static void publish_status(void *argument) {
     mesh_root_recovery_observe_link(&root_recovery, uptime_milliseconds(), esp_mesh_is_root(),
                                     rssi_valid, rssi, parent_disconnect_count,
                                     mqtt_registration_get_disconnect_count());
-    try_root_reelection();
+    try_root_recovery();
     char ip_text[16];
     snprintf(ip_text, sizeof(ip_text), IPSTR, IP2STR(&current_ip));
     uint64_t node_id;

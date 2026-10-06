@@ -26,6 +26,15 @@ void mesh_root_recovery_observe_link(omk_mesh_root_recovery_t *state, uint32_t n
                                      uint32_t parent_disconnect_count,
                                      uint32_t mqtt_disconnect_count) {
     if (state == NULL) return;
+    /* Observe Level 2 from the first sample, even during Level 1 cooldown.
+     * A vote alone does not break a continuously weak root link. */
+    if (!is_root || !rssi_valid || rssi_dbm > OMK_MESH_ROOT_SEVERE_WEAK_RSSI_DBM) {
+        state->severe_weak_active = false;
+        state->severe_weak_since_ms = 0;
+    } else if (!state->severe_weak_active) {
+        state->severe_weak_active = true;
+        state->severe_weak_since_ms = now_ms;
+    }
     if (!state->counters_initialized) {
         state->last_parent_disconnect_count = parent_disconnect_count;
         state->last_mqtt_disconnect_count = mqtt_disconnect_count;
@@ -38,9 +47,8 @@ void mesh_root_recovery_observe_link(omk_mesh_root_recovery_t *state, uint32_t n
     state->last_mqtt_disconnect_count = mqtt_disconnect_count;
     if (!is_root || !rssi_valid || rssi_dbm > OMK_MESH_ROOT_WEAK_RSSI_DBM ||
         (state->has_executed && !time_reached(now_ms, state->cooldown_until_ms))) return;
-    /* RSSI alone is not sufficient: these conservative 30-second deltas require
-     * observed disruption as well.  Parent churn is more direct; MQTT churn
-     * catches an unstable root uplink that stays associated. */
+    /* Level 1 requires disruption as well as weak RSSI. Parent churn is more
+     * direct; MQTT churn catches an unstable root uplink that stays associated. */
     if (parent_delta < OMK_MESH_ROOT_PARENT_DISCONNECT_DELTA &&
         mqtt_delta < OMK_MESH_ROOT_MQTT_DISCONNECT_DELTA) return;
     state->pending = true;
@@ -48,19 +56,41 @@ void mesh_root_recovery_observe_link(omk_mesh_root_recovery_t *state, uint32_t n
     state->due_ms = now_ms;
 }
 
-bool mesh_root_recovery_should_execute(const omk_mesh_root_recovery_t *state, uint32_t now_ms,
-                                       bool is_root, bool parent_connected, bool rootless) {
-    return state != NULL && state->pending && is_root && parent_connected && !rootless &&
-           (!state->has_executed || time_reached(now_ms, state->cooldown_until_ms)) &&
-           time_reached(now_ms, state->due_ms);
+omk_mesh_root_recovery_action_t mesh_root_recovery_should_execute(
+    const omk_mesh_root_recovery_t *state, uint32_t now_ms,
+    bool is_root, bool parent_connected, bool rootless) {
+    if (state == NULL || !is_root || !parent_connected || rootless)
+        return OMK_MESH_ROOT_RECOVERY_NONE;
+    if (state->severe_weak_active &&
+        (uint32_t)(now_ms - state->severe_weak_since_ms) >= OMK_MESH_ROOT_SEVERE_WEAK_DURATION_MS &&
+        (!state->has_parent_reselected ||
+         (uint32_t)(now_ms - state->last_parent_reselection_ms) >=
+             OMK_MESH_ROOT_PARENT_RESELECTION_COOLDOWN_MS)) {
+        return OMK_MESH_ROOT_RECOVERY_PARENT_RESELECTION;
+    }
+    if (state->pending &&
+        (!state->has_executed || time_reached(now_ms, state->cooldown_until_ms)) &&
+        time_reached(now_ms, state->due_ms)) {
+        return OMK_MESH_ROOT_RECOVERY_REELECTION;
+    }
+    return OMK_MESH_ROOT_RECOVERY_NONE;
 }
 
-void mesh_root_recovery_mark_executed(omk_mesh_root_recovery_t *state, uint32_t now_ms) {
-    if (state == NULL) return;
+void mesh_root_recovery_mark_executed(omk_mesh_root_recovery_t *state, uint32_t now_ms,
+                                     omk_mesh_root_recovery_action_t action) {
+    if (state == NULL || action == OMK_MESH_ROOT_RECOVERY_NONE) return;
+    /* Both successful actions defer further votes and grant liveness grace.
+     * Only Level 2 starts its own cooldown and resets the weak observation. */
     state->pending = false;
     state->has_executed = true;
     state->last_execution_ms = now_ms;
     state->cooldown_until_ms = now_ms + OMK_MESH_ROOT_REELECTION_COOLDOWN_MS;
+    if (action == OMK_MESH_ROOT_RECOVERY_PARENT_RESELECTION) {
+        state->has_parent_reselected = true;
+        state->last_parent_reselection_ms = now_ms;
+        state->severe_weak_active = false;
+        state->severe_weak_since_ms = 0;
+    }
 }
 
 bool mesh_root_recovery_in_grace(const omk_mesh_root_recovery_t *state, uint32_t now_ms) {

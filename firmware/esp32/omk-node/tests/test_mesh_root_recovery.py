@@ -32,7 +32,7 @@ def test_mesh_root_recovery_policy(tmp_path):
             observe(&s, 60000, 1, 1, -85, 3, 0);
             assert(s.pending && s.reason == OMK_MESH_ROOT_REELECTION_ROOT_LINK_UNHEALTHY);
             assert(mesh_root_recovery_should_execute(&s, 60000, 1, 1, 0));
-            mesh_root_recovery_mark_executed(&s, 60000);
+            mesh_root_recovery_mark_executed(&s, 60000, OMK_MESH_ROOT_RECOVERY_REELECTION);
             assert(mesh_root_recovery_in_grace(&s, 60001));
 
             /* Cooldown suppresses repeated link faults and topology churn. */
@@ -40,6 +40,8 @@ def test_mesh_root_recovery_policy(tmp_path):
             assert(!s.pending);
             mesh_root_recovery_note_topology_change(&s, 90000, 1);
             assert(!s.pending);
+            /* Link improves, so only Level 1 is relevant to the topology vote. */
+            observe(&s, 120000, 1, 1, -79, 6, 0);
             /* Once cooldown ends a topology batch waits for one quiet period. */
             mesh_root_recovery_note_topology_change(&s, 960000, 1);
             mesh_root_recovery_note_topology_change(&s, 970000, 1);
