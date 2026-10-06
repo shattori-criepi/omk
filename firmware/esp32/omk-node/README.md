@@ -43,7 +43,7 @@ USB専用protocolはv2。`set_wifi`と`clear_wifi`には12桁小文字hexの`exp
 
 ### v1からの更新
 
-GatewayのCLI/system-managerとNode通常firmwareを両方更新する。system-manager更新後はサービスを再起動する。既存Nodeの通常firmware更新は[`scripts/flash-omk-node.sh`](../../../docs/user/esp32-node-setup.md#firmwareを更新する)を使い、保存済みcredential、Wi-Fi、Logical IDを維持する。新品Nodeの初回導入は[Dashboardからのセットアップ](../../../docs/user/esp32-node-setup.md#2-dashboardからセットアップする)を標準とする。使用済みNodeを新Gatewayへ設定し直す場合は[Dashboard「OMK Nodeを再セットアップ」](../../../docs/user/esp32-node-setup.md#既存nodeを再セットアップする)を使う。この再セットアップはcredentialを置換し、Wi-Fiを再設定、Logical IDを解除するため、通常更新とは区別する。探索用identifyだけはv1を受け付け、旧firmwareも台数に数える。旧firmwareを選択した場合は操作用v2確認で停止し、credentialを送信しない。旧CLIから新firmwareへのv1状態変更要求も拒否する。node_id、logical_id、保存済みWi-Fi設定の形式、BLE Discovery/MQTT protocol v1は変更しない。新しいidentity guardの実機試験は未実施で、従来の実機確認記録はv2の安全性確認を意味しない。[検証手順](../../../docs/decisions/usb-serial-provisioning.md)を参照する。
+GatewayのCLI/system-managerとNode通常firmwareを両方更新する。system-manager更新後はサービスを再起動する。既存Nodeの通常firmware更新は[「5-2. OMK Nodeの更新・再設定」](../../../docs/user/node-maintenance.md#ファームウェアを更新する)の通常更新手順を使い、保存済みcredential、Wi-Fi、Logical IDを維持する。新品Nodeの初回導入は[Dashboardからのセットアップ](../../../docs/user/esp32-node-setup.md#2-dashboardからセットアップする)を標準とする。使用済みNodeを新Gatewayへ設定し直す場合は[「5-2. OMK Nodeの更新・再設定」](../../../docs/user/node-maintenance.md#既存nodeを再セットアップする)の再セットアップ手順を使う。この再セットアップはcredentialを置換し、Wi-Fiを再設定、Logical IDを解除するため、通常更新とは区別する。探索用identifyだけはv1を受け付け、旧firmwareも台数に数える。旧firmwareを選択した場合は操作用v2確認で停止し、credentialを送信しない。旧CLIから新firmwareへのv1状態変更要求も拒否する。node_id、logical_id、保存済みWi-Fi設定の形式、BLE Discovery/MQTT protocol v1は変更しない。新しいidentity guardの実機試験は未実施で、従来の実機確認記録はv2の安全性確認を意味しない。[検証手順](../../../docs/decisions/usb-serial-provisioning.md)を参照する。
 
 ## Node ID
 

@@ -13,36 +13,45 @@
 - BLEセンサやAtomS3 Liteを使うOMK Nodeを利用して、Gatewayから離れた場所にもセンサを設置できます。
 - SORACOM Harvestを利用する場合は、計測データをクラウドへ送信して保管できます。
 
-## OMKを作る
+初めて製作する方は、[「1-1. OMK導入ガイド」](docs/user/getting-started.md)から始めてください。2章でGatewayを組み立てて設定し、3章でSEN66 Nodeを1台製作して計測を始め、4章でDashboardの使い方を確認します。5章と6章は、導入後の保守や拡張が必要になったときに参照してください。
 
-初めて製作する方は、**[OMK製作ガイド](docs/user/getting-started.md)**から始めてください。部品の準備、Gatewayの組み立て、標準機能のセットアップ、本体完成の確認まで順に進められます。その後、SEN66 Nodeを1台製作して計測を始めます。
+## 1. OMKの概要
 
-- [OMKの参考パーツ構成](docs/user/parts-list.md)
-- [Gatewayの組み立て](docs/user/gateway-assembly.md)
-- [Gatewayセットアップ](docs/user/gateway-setup.md)
+- [1-1. OMK導入ガイド](docs/user/getting-started.md)
+- [1-2. 用語集](docs/user/glossary.md)
+- [1-3. 対応センサ・機器と取得データ](docs/user/supported-devices.md)
 
-## センサ・計測機器を追加する
+## 2. OMK Gatewayを製作・セットアップする
 
-本体完成後は、[センサ・計測機器を追加する](docs/user/sensor-setup.md)からSEN66 Nodeの製作へ進みます。SwitchBot等のBLEセンサ、Bルート、追加Nodeもこのページから追加できます。
+- [2-1. OMKのパーツ構成](docs/user/parts-list.md)
+- [2-2. Gatewayの組み立て](docs/user/gateway-assembly.md)
+- [2-3. Gatewayセットアップ](docs/user/gateway-setup.md)
 
-- [SEN66 Nodeの組み立て](docs/user/sen66-node-assembly.md)
-- [AtomS3 LiteをOMK Nodeとしてセットアップする](docs/user/esp32-node-setup.md)
-- [OMK Nodeの役割と設置](docs/user/node-and-sensors.md)
+## 3. センサ・計測機器を追加する
 
-## OMKを運用する
+- [3-1. センサ・計測機器を追加する](docs/user/sensor-setup.md)
+- [3-2. SEN66 Nodeの組み立て](docs/user/sen66-node-assembly.md)
+- [3-3. SEN66 Nodeをセットアップする](docs/user/esp32-node-setup.md)
 
-- [Dashboardの使い方](docs/user/dashboard.md)
-- [Gatewayの更新・保守](docs/user/gateway-maintenance.md)
-- [トラブルシューティング](docs/user/troubleshooting.md)
-- [用語集](docs/user/glossary.md)
+## 4. Dashboardを使う
 
-## 標準構成以外・高度な構成
+- [4-1. Dashboardの使い方](docs/user/dashboard.md)
 
-別の表示端末、ディスプレイなし、Onyxなし、有線LAN、家庭内Wi-Fiの制約、高度なNode構成は、[標準構成以外・高度な構成](docs/user/advanced-configuration.md)にまとめています。
+## 5. 運用・保守
+
+- [5-1. Gatewayソフトウェアの更新・保守](docs/user/gateway-maintenance.md)
+- [5-2. OMK Nodeの更新・再設定](docs/user/node-maintenance.md)
+- [5-3. トラブルシューティング](docs/user/troubleshooting.md)
+
+## 6. オプション・拡張
+
+- [6-1. OMK Nodeで計測範囲を拡張する](docs/user/node-and-sensors.md)
+- [6-2. 中継専用OMK Nodeを追加する](docs/user/relay-node-setup.md)
+- [6-3. 標準構成以外・高度な構成](docs/user/advanced-configuration.md)
 
 ## 対応機器と取得データ
 
-主な対応機器と取得データは次のとおりです。計測項目、接続方式、対応範囲の詳細は[対応センサ・機器と取得データ](docs/user/supported-devices.md)を参照してください。
+主な対応機器と取得データは次のとおりです。計測項目、接続方式、対応範囲の詳細は[「1-3. 対応センサ・機器と取得データ」](docs/user/supported-devices.md)を参照してください。
 
 | 機器・センサ | 主な取得データ |
 | --- | --- |
@@ -58,16 +67,16 @@ OMKで動作確認している推奨構成は次のとおりです。
 - Gateway：**Raspberry Pi 4、Raspberry Pi Touch Display 2（7インチ）、SORACOM Onyx**。OSは64ビットのRaspberry Pi OSを使用します。
 - OMK Node：AtomS3 Lite。
 
-初期セットアップには、既存Wi-Fiなどのインターネット接続を使います。OMK AP（Wi-Fiアクセスポイント）を有効にすると、Raspberry Piの内蔵Wi-FiはOMK AP専用となり、外部Wi-Fiには接続できません。推奨構成ではSORACOM Onyxを外部通信と遠隔管理に使います。
+初期セットアップには、既存Wi-Fiなどのインターネット接続を使います。APはAccess Point（アクセスポイント）の略です。OMK APを有効にすると、Raspberry Piの内蔵Wi-FiはOMK AP専用となり、外部Wi-Fiには接続できません。推奨構成ではSORACOM Onyxを外部通信と遠隔管理に使います。
 
-標準構成以外の対応範囲と制約は、[標準構成以外・高度な構成](docs/user/advanced-configuration.md)を参照してください。
+標準構成以外の対応範囲と制約は、[「6-3. 標準構成以外・高度な構成」](docs/user/advanced-configuration.md)を参照してください。
 
 ## OMKを開発する
 
 - [アーキテクチャ](docs/developer/architecture.md)
-- [開発環境・テスト](docs/developer/development.md)
-- [ネットワーク設計](docs/developer/networking.md)
-- [データ経路とMQTT](docs/developer/data-and-mqtt.md)
+- [開発ガイド](docs/developer/development.md)
+- [Gatewayネットワーク設計](docs/developer/networking.md)
+- [データ経路とMQTT仕様](docs/developer/data-and-mqtt.md)
 - [リポジトリ構成](docs/developer/repository-structure.md)
 - [設計判断の記録](docs/decisions/)
 
@@ -95,7 +104,7 @@ GitHubでの情報共有・提案は、次の方針で受け付けます。
 
 - GitHub Discussions：アイデア、活用例、利用方法の情報共有に使います。無償の個別サポート窓口ではありません。
 - Issue：再現可能な不具合や、対応が決まった課題の管理に使います。単なる機能追加要望はDiscussionへ投稿してください。
-- コード変更・機能追加の提案：まずDiscussionで目的、背景、想定用途、OMK全体への有用性を共有してください。OMK本体への取り込みを検討する場合は、必要に応じてIssue化やPR提出を案内します。PRの常時募集は行わず、事前相談のないPRへのレビュー、マージ、対応は約束しません。
+- コード変更・機能追加の提案：まずDiscussionで目的、背景、想定用途、OMK全体への有用性を共有してください。OMKリポジトリへの取り込みを検討する場合は、必要に応じてIssue化やPR提出を案内します。PRの常時募集は行わず、事前相談のないPRへのレビュー、マージ、対応は約束しません。
 
 電力中央研究所が主体となる研究・実証・被験者実験で設置する場合は、研究計画に基づき、研究実施側が設置、運用、保守、トラブル対応等を行います。上記の自己責任・サポート方針によって、実験協力者へ保守責任を転嫁することはありません。
 

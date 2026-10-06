@@ -1,12 +1,12 @@
-# Gatewayの更新・保守
+# 5-1. Gatewayソフトウェアの更新・保守
 
-構築済みGatewayの更新、機能追加、再設定、状態確認を説明します。初めて構築する場合は[Gatewayセットアップ](gateway-setup.md)、問題が起きた場合は[トラブルシューティング](troubleshooting.md)を参照してください。
+構築済みGatewayの更新、機能追加、再設定、状態確認を説明します。初めて構築する場合は[「2-3. Gatewayセットアップ」](gateway-setup.md)、問題が起きた場合は[「5-3. トラブルシューティング」](troubleshooting.md)を参照してください。
 
-## OMKを更新する
+## GatewayのOMKソフトウェアを更新する
 
 更新にはGateway自身のインターネット接続が必要です。標準構成ではSORACOM Onyxを使います。Onyxを使わない場合は、有線LANなどの接続を用意してください。OMK APは機器とGatewayをつなぐローカルネットワークで、AP側端末の外部通信は転送しません。
 
-更新中はDashboardや計測が一時的に停止します。セットアップには既存データや認証情報を保持する処理がありますが、サービスの再起動、設定ファイル・権限の更新、旧設定の移行も行います。実行前に重要な計測データを[USBへ書き出し](dashboard.md#データを書き出す)、独自設定がある場合は控えを残してください。
+更新中はDashboardや計測が一時的に停止します。セットアップには既存データや認証情報を保持する処理がありますが、サービスの再起動、設定ファイル・権限の更新、旧設定の移行も行います。実行前に[「4-1. Dashboardの使い方」](dashboard.md#データを書き出す)に従って重要な計測データをUSBへ書き出し、独自設定がある場合は控えを残してください。
 
 ### 1. Gatewayへ接続する
 
@@ -21,7 +21,9 @@ git status --short
 
 何も表示されなければ、次へ進みます。ファイル名が表示された場合は、手元の変更や追加ファイルがあるため、ここで更新を止めてください。この手順では、変更のない状態からの更新を扱います。
 
-### 2. 最新版を取得する
+### 2. GitHubからOMKソースコードの最新版を取得する
+
+`git pull`は、GitHub上の更新を取得して、Gateway内のOMKソースコードを更新するコマンドです。稼働中のサービスへの反映は、次のセットアップ再実行で行います。
 
 ```bash
 git pull --ff-only
@@ -37,7 +39,7 @@ git pull --ff-only
 ./scripts/setup-omk-gateway.sh --with-soracom
 ```
 
-APの確認メッセージには[Gatewayセットアップ](gateway-setup.md#6-omk-apへの切り替え)に沿って答えます。最終AP切り替え処理はSSH切断後も進みますが、前段のパッケージ導入等に同じ保証はありません。切断された場合は[接続し直して](#構築後のgatewayへ接続する)、次を実行します。
+APの確認メッセージには[「2-3. Gatewayセットアップ」](gateway-setup.md#6-omk-apへの切り替え)に沿って答えます。最終AP切り替え処理はSSH切断後も進みますが、前段のパッケージ導入等に同じ保証はありません。切断された場合は[接続し直して](#構築後のgatewayへ接続する)、次を実行します。
 
 ```bash
 cd ~/projects/omk
@@ -52,13 +54,13 @@ cd ~/projects/omk
 
 Bルート計測は再実行中に停止する場合があります。FT230Xの実物確認が出たらRS-WSUHA-Pの接続を確認して答えます。
 
-Onyxなしや表示端末を変更した構成では、[標準構成以外・高度な構成](advanced-configuration.md)に従って最初のコマンドを調整します。失敗時は[再開手順](troubleshooting.md#パッケージやomkのダウンロードが失敗する)へ進みます。
+Onyxなしや表示端末を変更した構成では、[「6-3. 標準構成以外・高度な構成」](advanced-configuration.md)に従って最初のコマンドを調整します。失敗時は[「5-3. トラブルシューティング」](troubleshooting.md#パッケージやomkのダウンロードが失敗する)へ進みます。
 
 ### 4. 更新後の動作を確認する
 
 セットアップが完了したら、[状態を確認する](#状態を確認する)の表に沿って、Dashboardと使用中の機器の表示を見ます。
 
-Gatewayを更新しても、設置済みOMK Nodeのファームウェアは自動更新されません。Nodeの更新は[AtomS3 LiteをOMK Nodeとしてセットアップする](esp32-node-setup.md#ファームウェアを更新する)を参照してください。
+Gatewayを更新しても、設置済みOMK Nodeのファームウェアは自動更新されません。Nodeの更新は[「5-2. OMK Nodeの更新・再設定」](node-maintenance.md#ファームウェアを更新する)を参照してください。
 
 ## セットアップを再実行する
 
@@ -66,7 +68,7 @@ Gateway全体の設定をやり直す場合は、Gatewayのターミナルで`cd
 
 ## 個別サービスを再設定する
 
-標準Gatewayでは以下のサービスは導入済みです。センサの追加は[センサ・計測機器を追加する](sensor-setup.md)を参照してください。以下は旧構成への導入や個別の再設定用で、Gateway自身のインターネット接続が必要です。
+標準Gatewayでは以下のサービスは導入済みです。センサの追加は[「3-1. センサ・計測機器を追加する」](sensor-setup.md)を参照してください。以下は旧構成への導入や個別の再設定用で、Gateway自身のインターネット接続が必要です。
 
 ### BLEセンサ・OMK Nodeを使う
 
@@ -77,7 +79,7 @@ cd ~/projects/omk
 ./scripts/setup-ble-sensor-manager.sh
 ```
 
-完了したら、[DashboardでBLEセンサを登録する](dashboard.md#bleセンサを探索して登録する)か、[AtomS3 LiteをOMK Nodeとしてセットアップする](esp32-node-setup.md)手順へ進みます。センサの接続・設置は[OMK Nodeの役割と設置](node-and-sensors.md)、SEN66の組み立ては[SEN66 Nodeの組み立て](sen66-node-assembly.md)を参照してください。
+完了したら、[「4-1. Dashboardの使い方」](dashboard.md#bleセンサを探索して登録する)か、[「3-3. SEN66 Nodeをセットアップする」](esp32-node-setup.md)の登録手順を参照してください。センサの接続・設置は[「6-1. OMK Nodeで計測範囲を拡張する」](node-and-sensors.md)、SEN66の組み立ては[「3-2. SEN66 Nodeの組み立て」](sen66-node-assembly.md)を参照してください。
 
 ### Bルートを使う
 
@@ -88,7 +90,7 @@ cd ~/projects/omk
 ./scripts/setup-broute-meter.sh
 ```
 
-`Use this FT230X serial adapter as RS-WSUHA-P? ... [y/N]`と表示されたら、接続した実物がRS-WSUHA-Pであることを確かめて`y`を入力します。完了したら、[Dashboardの「Bルート設定」](dashboard.md#bルートを設定する)でBルートIDとパスワードを入力します。
+`Use this FT230X serial adapter as RS-WSUHA-P? ... [y/N]`と表示されたら、接続した実物がRS-WSUHA-Pであることを確かめて`y`を入力します。完了したら、[「4-1. Dashboardの使い方」](dashboard.md#bルートを設定する)でBルートIDとパスワードを入力します。
 
 ### SORACOM Onyxを追加・再設定する
 
@@ -105,11 +107,11 @@ cd ~/projects/omk
 
 既存のOnyxを再設定する場合も同じコマンドを使います。すでに接続中の場合は、その接続を保持します。APNを変更する目的の再設定では、その指定だけで既存接続が切り替わるとは限らないため、接続結果を確認してください。
 
-完了したら、SORACOMユーザーコンソールで対象SIMのセッション状態が「オンライン」になっていることを見ます。接続できない場合は[Onyxで外部通信できない場合の対処](troubleshooting.md#onyxで外部通信できない)を参照してください。
+完了したら、SORACOMユーザーコンソールで対象SIMのセッション状態が「オンライン」になっていることを見ます。接続できない場合は[「5-3. トラブルシューティング」](troubleshooting.md#onyxで外部通信できない)を参照してください。
 
 ## 状態を確認する
 
-PCで確認する場合はOMK APへ接続し、ブラウザで`http://192.168.50.1:8000/`を開きます。GatewayのディスプレイでもDashboardを操作できます。
+GatewayのTouch Display 2でDashboardを操作します。別の表示端末を使う場合は[「6-3. 標準構成以外・高度な構成」](advanced-configuration.md#pcやタブレット等からdashboardを使う場合)を参照してください。
 
 | 対象 | 確認する場所と表示 |
 | --- | --- |
@@ -119,23 +121,21 @@ PCで確認する場合はOMK APへ接続し、ブラウザで`http://192.168.50
 | OMK Node | 「機器管理」で、無線接続しているNodeの「接続」が「オンライン」になる。SEN66を使う場合は、表示画面に計測値が表示される。 |
 | Bルート | 「Bルート設定」の「接続状態」が「接続済み」になる |
 
-機器の行は、使用しているものだけ確認します。表示が戻らない場合は、[トラブルシューティング](troubleshooting.md)の該当する症状へ進んでください。サービスやログによる詳細な診断は、[開発ガイドのGatewayでの確認](../developer/development.md#gatewayでの確認)を参照してください。
+機器の行は、使用しているものだけ確認します。表示が戻らない場合は、[「5-3. トラブルシューティング」](troubleshooting.md)の該当する症状へ進んでください。サービスやログによる詳細な診断は、[「開発ガイド」](../developer/development.md#gatewayでの確認)を参照してください。
 
 ## 再起動・シャットダウンする
 
 Dashboardの管理メニューから「システム操作」を開き、「再起動」または「シャットダウン」を選んで、確認画面の「実行」を押します。この間は計測も停止します。
 
-電源を外す場合は、シャットダウンが完了してから外してください。シャットダウン後は、電源を入れ直すまで利用できません。画面操作は[Dashboardの使い方](dashboard.md#gatewayを再起動シャットダウンする)も参照してください。
+電源を外す場合は、シャットダウンが完了してから外してください。シャットダウン後は、電源を入れ直すまで利用できません。画面操作は[「4-1. Dashboardの使い方」](dashboard.md#gatewayを再起動シャットダウンする)も参照してください。
 
 ## 構築後のGatewayへ接続する
 
-本体では、USBキーボードを接続して`Ctrl+Alt+T`でターミナルを開きます。PCから操作するときは次の方法があります。
+Gatewayでは、USBキーボードを接続して`Ctrl+Alt+T`でターミナルを開きます。PCから操作するときは次の方法があります。
 
 - **近くのPC**：Touch Display 2の「OMKアクセスポイント参照」で接続情報を表示し、PCをOMK APへ接続します。PowerShellで`ssh omkdev@192.168.50.1`を実行します。Gatewayの外部通信はOnyxを使います。
 - **SORACOM Napterで遠隔接続**：PCをインターネットへ接続し、SORACOMユーザーコンソールで対象SIMが「オンライン」であることを確認します。Napterのオンデマンドリモートアクセスを開始し、[SORACOM公式のSSH接続手順](https://users.soracom.io/ja-jp/docs/napter/login-with-ssh/)の「PCのターミナルを使ってSSH接続する」に従います。接続先・ポートはNapterの表示値、ユーザー名は`omkdev`、パスワードはImagerで設定したものです。
 
-## このページの完了と次の手順
+## 保守完了の確認
 
 更新・再設定が終わり、Dashboardと利用中の機器の値が更新されることを確認できたら保守完了です。
-
-**次へ：[Dashboardの使い方](dashboard.md)で通常の運用へ戻ります。**

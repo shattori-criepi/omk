@@ -1,10 +1,14 @@
-# 標準構成以外・高度な構成
+# 6-3. 標準構成以外・高度な構成
 
-[OMK製作ガイド](getting-started.md)の標準構成を理解した後で、表示端末や外部通信を変更する際の参照ページです。以下の標準構成以外の組み合わせは、OMKでは実機で動作確認していません。
+[「1-1. OMK導入ガイド」](getting-started.md)の標準構成を理解した後で、表示端末や外部通信を変更する際の参照ページです。以下の標準構成以外の組み合わせは、OMKでは実機で動作確認していません。
 
-## 別の表示端末・ディスプレイなし
+## PCやタブレット等からDashboardを使う場合
 
-OMK APに接続したPCやタブレットから、`http://192.168.50.1:8000/`を開けます。[Dashboardの接続手順](dashboard.md#pcやタブレット等からdashboardを使う場合)を参照してください。
+[「4-1. Dashboardの使い方」](dashboard.md#omk-apの接続情報を見る)に従い、Touch Display 2の「OMKアクセスポイント参照」でSSIDとパスワードを表示し、PCやタブレット等をそのWi-Fiへ接続します。ブラウザで`http://192.168.50.1:8000/`を開いてください。OMK APはGateway・Node・管理端末を結ぶローカルネットワークです。接続したPC等の外部通信はGateway経由では転送せず、外部通信が必要なGateway自身はOnyxを使います。
+
+SSID・パスワードの入力の代わりに、端末が対応していれば接続用QRコードも使えます。
+
+## 別のディスプレイ・ディスプレイなし
 
 ディスプレイなしで構築する場合は、`setup-omk-gateway.sh`に`--no-kiosk`を追加します。別のディスプレイを使う場合も、標準kioskはTouch Display 2（DSI-1）の回転・タッチ設定を含むため、そのままの適合を前提にせず、表示環境を個別に調整してください。
 
@@ -26,7 +30,7 @@ DashboardやMQTTは、標準ではGateway本体とOMK AP向けに公開されま
 ./scripts/setup-soracom-onyx.sh --apn du.soracom.io
 ```
 
-接続中のOnyxを保持する処理があるため、既存接続のAPN変更まで自動反映されるとは限りません。[Onyxの保守手順](gateway-maintenance.md#soracom-onyxを追加再設定する)と設定結果を確認してください。
+接続中のOnyxを保持する処理があるため、既存接続のAPN変更まで自動反映されるとは限りません。[「5-1. Gatewayソフトウェアの更新・保守」](gateway-maintenance.md#soracom-onyxを追加再設定する)と設定結果を確認してください。
 
 ## 家庭内Wi-Fiを使う構成について
 
@@ -37,15 +41,13 @@ DashboardやMQTTは、標準ではGateway本体とOMK AP向けに公開されま
 - OMK APから外部インターフェースへの転送は遮断し、AP側のIPv6と上流DNS問い合わせも無効にしています。
 - Raspberry Piの内蔵Wi-Fiは標準構成ではAP専用です。同じ内蔵Wi-Fiを既存Wi-Fiへの外部接続にも使う手順は提供していません。
 
-変更を検討する場合は、[ネットワーク設計](../developer/networking.md)と[NodeファームウェアREADME](../../firmware/esp32/omk-node/README.md)で、Gatewayへの到達性、provisioning、管理画面の公開範囲を確認してください。
+変更を検討する場合は、[「Gatewayネットワーク設計」](../developer/networking.md)と[「OMK ESP32 Node」](../../firmware/esp32/omk-node/README.md)で、Gatewayへの到達性、provisioning、管理画面の公開範囲を確認してください。
 
 ## 高度なNode構成とクラウド連携
 
-- [OMK Nodeの役割と設置](node-and-sensors.md)：BLE中継とNode間Mesh中継の使い分け・詳細図。
-- [NodeファームウェアREADME](../../firmware/esp32/omk-node/README.md)：手動設定、Mesh、診断の技術情報。
-- [データ経路とMQTT](../developer/data-and-mqtt.md)：Gateway内部の受信・保存・送信。
-- [Harvest uploader README](../../services/harvest-uploader/README.md)：SORACOM Harvestへの送信。標準Composeではuploaderも起動するため、Harvest側の利用設定と送信動作はこの文書で確認します。
+- [「6-1. OMK Nodeで計測範囲を拡張する」](node-and-sensors.md)：BLE中継とNode間Mesh中継の使い分け・詳細図。
+- [「OMK ESP32 Node」](../../firmware/esp32/omk-node/README.md)：手動設定、Mesh、診断の技術情報。
+- [「データ経路とMQTT仕様」](../developer/data-and-mqtt.md)：Gateway内部の受信・保存・送信。
+- [「harvest-uploader」](../../services/harvest-uploader/README.md)：SORACOM Harvestへの送信。標準Composeではuploaderも起動するため、Harvest側の利用設定と送信動作はこの文書で確認します。
 
 このページでは、標準構成から変更する箇所と実装上の制約を確認しました。
-
-**次へ：[Gatewayの更新・保守](gateway-maintenance.md)で設定反映と動作確認を行います。**
