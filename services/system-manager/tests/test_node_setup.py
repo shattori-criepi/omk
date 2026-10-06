@@ -128,7 +128,7 @@ def test_setup_uses_long_fresh_registration_wait(package, tmp_path, hardware, mo
         NODE,
         {'timeout': setup.MQTT_REGISTRATION_TIMEOUT_SECONDS, 'fresh': True},
     )]
-    assert setup.MQTT_REGISTRATION_TIMEOUT_SECONDS == 180
+    assert setup.MQTT_REGISTRATION_TIMEOUT_SECONDS == 120
 
 
 def test_existing_credential_is_unchanged(package, tmp_path, hardware):
@@ -294,9 +294,9 @@ def test_registration_wait_ignores_retained_and_handles_timeout(monkeypatch):
         def communicate(self, **kwargs): return ('', '')
     monkeypatch.setattr(setup.subprocess, 'Popen', lambda command, **kw: commands.append(command) or Process())
     with pytest.raises(ProvisioningError, match='mqtt_registration_timeout'):
-        setup.usb.wait_for_registration_status(NODE, timeout=180, fresh=True)
+        setup.usb.wait_for_registration_status(NODE, timeout=120, fresh=True)
     assert '-R' in commands[0] and commands[0][-1] == f'omk/node/{NODE}/registration/status'
-    assert commands[0][commands[0].index('-W') + 1] == '180'
+    assert commands[0][commands[0].index('-W') + 1] == '120'
 
 
 def test_registration_wait_accepts_fresh_matching_status(monkeypatch):
@@ -308,8 +308,8 @@ def test_registration_wait_accepts_fresh_matching_status(monkeypatch):
 
     command = []
     monkeypatch.setattr(setup.subprocess, 'Popen', lambda args, **kwargs: command.extend(args) or Process())
-    setup.usb.wait_for_registration_status(NODE, timeout=180, fresh=True)
-    assert '-R' in command and command[command.index('-W') + 1] == '180'
+    setup.usb.wait_for_registration_status(NODE, timeout=120, fresh=True)
+    assert '-R' in command and command[command.index('-W') + 1] == '120'
 
 
 def test_write_boundary_inspection_keeps_bootloader_alive(monkeypatch):

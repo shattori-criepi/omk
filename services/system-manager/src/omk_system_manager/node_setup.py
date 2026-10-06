@@ -24,7 +24,7 @@ STORE = ROOT / 'data/provisioning/nodes'
 SEGMENTS = (('bootloader.bin', '0x00000000', 0x8000),
             ('partitions.bin', '0x00008000', 0x1000),
             ('firmware.bin', '0x00010000', 0x200000))
-MQTT_REGISTRATION_TIMEOUT_SECONDS = 180
+MQTT_REGISTRATION_TIMEOUT_SECONDS = 120
 
 
 def regular_bytes(path: Path, maximum: int) -> bytes:
