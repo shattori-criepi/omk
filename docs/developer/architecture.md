@@ -28,6 +28,16 @@ DashboardのUSB書き出しはDashboard backendから認証済みsystem-manager�
 
 system-managerはDashboardの`host.docker.internal`経由の要求をBearer tokenで認証します。ブラウザへhost権限やこのtoken、保存済みBルート認証情報は渡しません。APのSSID/PSKは管理画面の明示的な「表示」操作でブラウザへ返すため、Dashboardの公開先をloopbackとOMK APに限定します。USB Node書込みはsystem-managerの非rootユーザーがdialout権限と固定版esptoolで行い、USBデータ書き出しのmount helperとは分離します。
 
+## 限定的な動作確認済み住宅設備連携
+
+**動作確認は、開発者宅の一条工務店住宅1戸・単一の設備構成に限られます。** 他の住宅・機種・構成での動作は未確認で、太陽光発電・蓄電池・PCSやECHONET Lite対応機器全般に対応する機能ではありません。
+
+| 設備 | 接続方法 | 取得できる値・状態 | 対応上の注意 |
+| --- | --- | --- | --- |
+| 太陽光発電・蓄電池・PCS設備（上記の確認済み構成） | OMK APとは別に、対象設備と同じローカルネットワークへGatewayを接続 | 太陽光発電電力（W）、蓄電池残量（%）、蓄電池の充電電力・放電電力（W）、蓄電池の運転状態、買電電力・売電電力（W）、PCS交流出力電力（W）、住宅内消費電力（W） | 読み取り専用の任意連携で、OMKの標準構成には含まれません。住宅販売会社・機器メーカーの公式APIではありません。 |
+
+実装と設定は[「ichijo-energy-node」](../../services/ichijo-energy-node/README.md)を参照してください。
+
 ## Node、ESP-WIFI-MESH、BLE
 
 共通ESP32 NodeはUSB Serial/JTAG Provisioning、ESP-WIFI-MESH、Wi-Fi/IP/MQTT、SEN66などのI2Cセンサ、BLE relayを同時に扱います。SEN66が未接続でもBLE relayとして利用でき、SEN66とBLE relayを接続したNodeも同じfirmwareで動作します。production対象はAtomS3 Liteです。初回登録に物理ボタン操作は必要ありません。

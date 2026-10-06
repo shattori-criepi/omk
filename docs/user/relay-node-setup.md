@@ -1,6 +1,6 @@
-# 6-2. 中継専用OMK Nodeを追加する
+# 中継専用OMK Nodeを追加する
 
-SEN66の計測を確認した後、Gatewayから離れた場所へ計測範囲を広げたい場合に使う手順です。[「6-1. OMK Nodeで計測範囲を拡張する」](node-and-sensors.md)で、BLE受信とNode間のMesh中継の違い、設置場所を確認してください。
+SEN66の計測を確認した後、Gatewayから離れた場所へ計測範囲を広げたい場合に使う手順です。[「OMK Nodeで計測範囲を拡張する」](node-and-sensors.md)で、BLE受信とNode間のMesh中継の違い、設置場所を確認してください。
 
 中継専用Nodeは、SEN66を接続せずに使うAtomS3 Liteです。SEN66 Nodeと同じファームウェアでBLE中継とMesh中継を行えます。中継専用のファームウェアやLogical IDの登録は不要です。
 
@@ -16,8 +16,8 @@ SEN66の計測を確認した後、Gatewayから離れた場所へ計測範囲�
 ## この手順の前に
 
 - Gatewayのセットアップと初回のSEN66計測確認を済ませ、OMK APとDashboardを使える状態にします。
-- 新品・未セットアップのAtomS3 Liteを用意します。使用済みNodeの接続先を変える場合は[「5-2. OMK Nodeの更新・再設定」](node-maintenance.md#既存nodeを再セットアップする)を参照してください。
-- BLEセンサの初回登録はGatewayの近くで行います。Node経由でのみ受信している未登録センサは探索候補に表示されません。登録操作は[「4-1. Dashboardの使い方」](dashboard.md#bleセンサを探索して登録する)を参照してください。
+- 新品・未セットアップのAtomS3 Liteを用意します。使用済みNodeの接続先を変える場合は[「OMK Nodeを更新・再設定する」](node-maintenance.md#既存nodeを再セットアップする)を参照してください。
+- BLEセンサの初回登録はGatewayの近くで行います。Node経由でのみ受信している未登録センサは探索候補に表示されません。登録操作は[「BLEセンサを追加する」](ble-sensor-setup.md#bleセンサを探索して登録する)を参照してください。
 
 ## 1. GatewayへUSB接続する
 
@@ -31,7 +31,7 @@ SEN66を接続していないAtomS3 Liteを、データ通信対応のUSBケー�
 4. 「OMK Nodeをセットアップ」を押します。ファームウェアとOMK APのWi-Fi設定が書き込まれます。
 5. USB接続と給電を維持し、「セットアップ完了」と表示されるまで待ちます。
 
-既存Nodeの再セットアップが表示された場合は、[「5-2. OMK Nodeの更新・再設定」](node-maintenance.md)を参照してください。失敗した場合は[「5-3. トラブルシューティング」](troubleshooting.md#nodeセットアップを診断する)で表示内容を確認します。
+既存Nodeの再セットアップが表示された場合は、[「OMK Nodeを更新・再設定する」](node-maintenance.md)を参照してください。失敗した場合は[「トラブルシューティング」](troubleshooting.md#nodeセットアップを診断する)で表示内容を確認します。
 
 ## 3. 設置して通信を確認する
 

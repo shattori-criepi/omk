@@ -1,13 +1,13 @@
-# 3-3. SEN66 Nodeをセットアップする
+# 3-2. SEN66 Nodeをセットアップする
 
-AtomS3 Liteは市販のハードウェアです。OMK用ファームウェアと設定を書き込むと、センサのデータをGatewayへ送る「OMK Node」になります。このページでは、[「3-2. SEN66 Nodeの組み立て」](sen66-node-assembly.md)で組み立てたSEN66 NodeをGatewayへUSB接続し、Dashboardから設定・登録して計測を始めます。
+AtomS3 Liteは市販のハードウェアです。OMK用ファームウェアと設定を書き込むと、センサのデータをGatewayへ送る「OMK Node」になります。このページでは、前のページで組み立てたSEN66 NodeをGatewayへUSB接続し、Dashboardから設定・登録して計測を始めます。
 
-新品・未セットアップのAtomS3 Liteは、以下の順に進めてください。使用済みNodeの接続先を変える場合は[「5-2. OMK Nodeの更新・再設定」](node-maintenance.md#既存nodeを再セットアップする)を参照してください。
+新品・未セットアップのAtomS3 Liteを使い、以下の順に進めます。
 
 ## この手順の前に
 
-- [「2-3. Gatewayセットアップ」](gateway-setup.md)を完了し、OMK APとBLE機能が動作し、Dashboardを使える状態にしておきます。
-- SEN66、接続基板、AtomS3 Liteを[「3-2. SEN66 Nodeの組み立て」](sen66-node-assembly.md)のとおり配線しておきます。**ケースの蓋はまだ固定しません。**
+- Gatewayのセットアップを完了し、DashboardとOMK APを使える状態にします。
+- SEN66、接続基板、AtomS3 Liteの配線を済ませておきます。**ケースの蓋はまだ固定しません。**
 - データ通信に対応したUSBケーブルと、設置場所でNodeへ給電するUSB電源を用意します。
 
 ## 1. GatewayへUSB接続する
@@ -17,14 +17,14 @@ SEN66を配線したAtomS3 LiteのUSBケーブルを、**GatewayのUSB端子**�
 ## 2. Dashboardからセットアップする
 
 1. Touch Display 2のDashboardで、右上の歯車から「管理メニュー → 機器管理」へ進みます。
-2. 「接続: USB接続」と表示されたOMK Nodeのカードを見ます。新品・未セットアップでは「USB接続されたNode候補」と「OMK Nodeをセットアップ」が表示されます。既存のOMK Nodeで「OMK Nodeを再セットアップ」が表示されたら、[「5-2. OMK Nodeの更新・再設定」](node-maintenance.md#既存nodeを再セットアップする)へ進んでください。
+2. 「接続: USB接続」と表示されたOMK Nodeのカードを見ます。新品・未セットアップでは「USB接続されたNode候補」と「OMK Nodeをセットアップ」が表示されます。既存のOMK Nodeで「OMK Nodeを再セットアップ」が表示されたら、[「トラブルシューティング」](troubleshooting.md#nodeセットアップを診断する)の使用済みNodeの項目を確認してください。
 3. GatewayのUSBに接続した実物が**未セットアップのAtomS3 Lite**であることを確かめ、「未セットアップのAtomS3 Liteであることを確認しました」の行をタップしてチェックを入れます。初回設定を途中から再開する場合、この確認欄は表示されないことがあります。
 4. 「OMK Nodeをセットアップ」を押します。Gatewayに用意されたファームウェアの書き込みと、OMK APへ接続するためのWi-Fi設定が自動で行われます。
 5. **USB接続と給電を維持したまま、「セットアップ完了」と表示されるまで待ちます。**
 
 「セットアップ完了」を確認したら、USBを接続したまま次のSEN66登録へ進みます。
 
-「セットアップ失敗」と表示された場合やNodeが見つからない場合は、[「5-3. トラブルシューティング」](troubleshooting.md#nodeセットアップを診断する)を参照してください。
+「セットアップ失敗」と表示された場合やNodeが見つからない場合は、[「トラブルシューティング」](troubleshooting.md#nodeセットアップを診断する)を参照してください。
 
 ## 3. SEN66を確認して登録する
 
@@ -48,6 +48,8 @@ USB接続中のWi-Fi状態は「Wi-Fi設定済み」と表示されます。「�
 4. Dashboardの「管理メニュー → 機器管理」で、対象Nodeの「接続」が「オンライン」になることを確認します。
 5. 同じカードにLogical IDと「登録済み」、「接続センサ: SEN66（検出済み）」が表示され、Dashboardの表示画面の計測値と「最終更新」が更新されることを確認します。
 
-これでSEN66 Nodeの製作・登録・設置と、Dashboardでの計測確認が完了しました。次へ：[「4-1. Dashboardの使い方」](dashboard.md)で表示設定やデータの書き出しを確認してください。
+これでSEN66 Nodeの製作・登録・設置と、Dashboardでの計測確認が完了しました。
 
-値が出ない、Nodeがオンラインにならない場合は[「5-3. トラブルシューティング」](troubleshooting.md#センサや機器の値が更新されない)へ進みます。
+値が出ない、Nodeがオンラインにならない場合は[「トラブルシューティング」](troubleshooting.md#センサや機器の値が更新されない)へ進みます。
+
+次へ：[「4-1. Dashboardの使い方」](dashboard.md)

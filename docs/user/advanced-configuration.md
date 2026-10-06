@@ -1,4 +1,4 @@
-# 6-3. 標準構成以外・高度な構成
+# 標準構成以外・高度な構成
 
 [「1-1. OMK導入ガイド」](getting-started.md)の標準構成を理解した後で、表示端末や外部通信を変更する際の参照ページです。以下の標準構成以外の組み合わせは、OMKでは実機で動作確認していません。
 
@@ -30,7 +30,7 @@ DashboardやMQTTは、標準ではGateway本体とOMK AP向けに公開されま
 ./scripts/setup-soracom-onyx.sh --apn du.soracom.io
 ```
 
-接続中のOnyxを保持する処理があるため、既存接続のAPN変更まで自動反映されるとは限りません。[「5-1. Gatewayソフトウェアの更新・保守」](gateway-maintenance.md#soracom-onyxを追加再設定する)と設定結果を確認してください。
+接続中のOnyxを保持する処理があるため、既存接続のAPN変更まで自動反映されるとは限りません。[「Gatewayソフトウェアを更新・保守する」](gateway-maintenance.md#soracom-onyxを追加再設定する)と設定結果を確認してください。
 
 ## 家庭内Wi-Fiを使う構成について
 
@@ -45,9 +45,11 @@ DashboardやMQTTは、標準ではGateway本体とOMK AP向けに公開されま
 
 ## 高度なNode構成とクラウド連携
 
-- [「6-1. OMK Nodeで計測範囲を拡張する」](node-and-sensors.md)：BLE中継とNode間Mesh中継の使い分け・詳細図。
+- [「OMK Nodeで計測範囲を拡張する」](node-and-sensors.md)：BLE中継とNode間Mesh中継の使い分け・詳細図。
 - [「OMK ESP32 Node」](../../firmware/esp32/omk-node/README.md)：手動設定、Mesh、診断の技術情報。
 - [「データ経路とMQTT仕様」](../developer/data-and-mqtt.md)：Gateway内部の受信・保存・送信。
 - [「harvest-uploader」](../../services/harvest-uploader/README.md)：SORACOM Harvestへの送信。標準Composeではuploaderも起動するため、Harvest側の利用設定と送信動作はこの文書で確認します。
 
-このページでは、標準構成から変更する箇所と実装上の制約を確認しました。
+## 機器を追加した構成の費用例
+
+Gateway、ディスプレイ、OnyxとSIM、Bルート、SEN66 Nodeを含む複数のOMK NodeやBLEセンサを含む購入例では、**約10万円**です（2026年8月時点）。通信費・送料・3Dプリント費用は含みません。選ぶ構成によって総額は変わるため、購入時の価格は各販売元で確認してください。

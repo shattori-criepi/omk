@@ -10,53 +10,58 @@
 - Raspberry Piに計測データを保存し、長期間の履歴として蓄積できます。
 - Gateway内のローカルDashboardで、現在の計測値と機器の状態を確認できます。
 - 保存済みデータをCSV/ZIPとしてUSBメモリへ書き出せます。
-- BLEセンサやAtomS3 Liteを使うOMK Nodeを利用して、Gatewayから離れた場所にもセンサを設置できます。
 - SORACOM Harvestを利用する場合は、計測データをクラウドへ送信して保管できます。
 
-初めて製作する方は、[「1-1. OMK導入ガイド」](docs/user/getting-started.md)から始めてください。2章でGatewayを組み立てて設定し、3章でSEN66 Nodeを1台製作して計測を始め、4章でDashboardの使い方を確認します。5章と6章は、導入後の保守や拡張が必要になったときに参照してください。
+## OMKの製作方法
 
-## 1. OMKの概要
+初めて製作する方は、以下を上から順に読み、各ページ末尾の「次へ」で進めてください。GatewayとSEN66 Nodeを製作し、4-1のDashboardで計測確認まで完了します。
+
+### 1. OMKの概要
 
 - [1-1. OMK導入ガイド](docs/user/getting-started.md)
-- [1-2. 用語集](docs/user/glossary.md)
-- [1-3. 対応センサ・機器と取得データ](docs/user/supported-devices.md)
+- [1-2. 対応センサ・機器と取得データ](docs/user/supported-devices.md)
 
-## 2. OMK Gatewayを製作・セットアップする
+### 2. OMK Gatewayを製作・セットアップする
 
 - [2-1. OMKのパーツ構成](docs/user/parts-list.md)
 - [2-2. Gatewayの組み立て](docs/user/gateway-assembly.md)
 - [2-3. Gatewayセットアップ](docs/user/gateway-setup.md)
 
-## 3. センサ・計測機器を追加する
+### 3. SEN66 Nodeを製作・セットアップする
 
-- [3-1. センサ・計測機器を追加する](docs/user/sensor-setup.md)
-- [3-2. SEN66 Nodeの組み立て](docs/user/sen66-node-assembly.md)
-- [3-3. SEN66 Nodeをセットアップする](docs/user/esp32-node-setup.md)
+- [3-1. SEN66 Nodeの組み立て](docs/user/sen66-node-assembly.md)
+- [3-2. SEN66 Nodeをセットアップする](docs/user/esp32-node-setup.md)
 
-## 4. Dashboardを使う
+### 4. Dashboardを使う
 
 - [4-1. Dashboardの使い方](docs/user/dashboard.md)
 
-## 5. 運用・保守
+ここまでで、推奨構成のOMKの製作・セットアップとSEN66による計測確認は完了です。
 
-- [5-1. Gatewayソフトウェアの更新・保守](docs/user/gateway-maintenance.md)
-- [5-2. OMK Nodeの更新・再設定](docs/user/node-maintenance.md)
-- [5-3. トラブルシューティング](docs/user/troubleshooting.md)
+## 必要に応じて行う作業
 
-## 6. オプション・拡張
+製作完了後に、目的に合うページを選んでください。
 
-- [6-1. OMK Nodeで計測範囲を拡張する](docs/user/node-and-sensors.md)
-- [6-2. 中継専用OMK Nodeを追加する](docs/user/relay-node-setup.md)
-- [6-3. 標準構成以外・高度な構成](docs/user/advanced-configuration.md)
+- [BLEセンサを追加する](docs/user/ble-sensor-setup.md)
+- [Bルートでスマートメーターを追加する](docs/user/broute-setup.md)
+- [OMK Nodeで計測範囲を拡張する](docs/user/node-and-sensors.md)
+- [中継専用OMK Nodeを追加する](docs/user/relay-node-setup.md)
+- [Gatewayソフトウェアを更新・保守する](docs/user/gateway-maintenance.md)
+- [OMK Nodeを更新・再設定する](docs/user/node-maintenance.md)
+- [標準構成以外・高度な構成](docs/user/advanced-configuration.md)
+
+## 参考情報
+
+- [用語集](docs/user/glossary.md)
+- [トラブルシューティング](docs/user/troubleshooting.md)
 
 ## 対応機器と取得データ
 
-主な対応機器と取得データは次のとおりです。計測項目、接続方式、対応範囲の詳細は[「1-3. 対応センサ・機器と取得データ」](docs/user/supported-devices.md)を参照してください。
+主な対応機器と取得データは次のとおりです。計測項目、接続方式、対応範囲の詳細は[「1-2. 対応センサ・機器と取得データ」](docs/user/supported-devices.md)を参照してください。
 
 | 機器・センサ | 主な取得データ |
 | --- | --- |
 | 低圧スマートメーター（Bルート） | 系統の瞬時電力、買電・売電の積算電力量、30分ごとの買電量・売電量 |
-| 太陽光発電・蓄電池・PCS設備（開発者宅の住宅でのみ動作確認済み） | 太陽光発電、蓄電池、買電・売電、PCS、住宅内消費の電力・状態 |
 | Sensirion SEN66 | 温度、相対湿度、CO₂濃度、粒子状物質、VOC Index、NOx Index |
 | SwitchBot BLEセンサ | 温湿度、CO₂濃度、人感、開閉、プラグの消費電力・スイッチ状態、防水温湿度 |
 
@@ -65,11 +70,11 @@
 OMKで動作確認している推奨構成は次のとおりです。
 
 - Gateway：**Raspberry Pi 4、Raspberry Pi Touch Display 2（7インチ）、SORACOM Onyx**。OSは64ビットのRaspberry Pi OSを使用します。
-- OMK Node：AtomS3 Lite。
+- SEN66 Node：Sensirion SEN66とAtomS3 Lite。
 
 初期セットアップには、既存Wi-Fiなどのインターネット接続を使います。APはAccess Point（アクセスポイント）の略です。OMK APを有効にすると、Raspberry Piの内蔵Wi-FiはOMK AP専用となり、外部Wi-Fiには接続できません。推奨構成ではSORACOM Onyxを外部通信と遠隔管理に使います。
 
-標準構成以外の対応範囲と制約は、[「6-3. 標準構成以外・高度な構成」](docs/user/advanced-configuration.md)を参照してください。
+標準構成以外の対応範囲と制約は、[「標準構成以外・高度な構成」](docs/user/advanced-configuration.md)を参照してください。
 
 ## OMKを開発する
 

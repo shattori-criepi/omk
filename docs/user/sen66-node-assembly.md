@@ -1,12 +1,14 @@
-# 3-2. SEN66 Nodeの組み立て
+# 3-1. SEN66 Nodeの組み立て
 
 SEN66とAtomS3 Liteを接続し、3Dプリントした試作ケースへ収める手順です。このページでは配線までを行い、蓋を開けたまま次の初期設定・計測確認へ進みます。
 
 <img src="../images/sen66-node/sen66-node_assembly-01.jpg" alt="蓋を外したSEN66 Node。左にSEN66、右手前に接続基板、右奥にAtomS3 Liteを配置した組み立て例" width="720">
 
+SEN66 NodeはOMKの推奨センサ構成です。OMKの利用に必須ではありませんが、初回は動作確認も兼ねて1台製作します。
+
 ## この手順の前に
 
-[「2-3. Gatewayセットアップ」](gateway-setup.md)を完了し、Dashboardを使える状態にしておきます。以下の部品と3Dプリントしたケースをそろえ、**AtomS3 LiteのUSBをGatewayや電源へつながない状態**で組み立てを始めます。SEN66の配線が終わってから、次のページでGatewayへUSB接続します。
+Gatewayのセットアップを終え、Dashboardを使える状態から始めます。以下の部品と3Dプリントしたケースをそろえ、**AtomS3 LiteのUSBをGatewayや電源へつながない状態**で組み立てを始めます。SEN66の配線が終わってから、次のページでGatewayへUSB接続します。
 
 ## 必要な部品
 
@@ -57,4 +59,6 @@ SEN66とAtomS3 Liteを接続し、3Dプリントした試作ケースへ収め�
 - `sen66-node-lid.stl`：蓋
 - `sen66-node-cable-jig.stl`：ケーブル固定具（任意）
 
-ここまででSEN66とAtomS3 Liteの配線・ケースへの収納が完了しました。次へ：[「3-3. SEN66 Nodeをセットアップする」](esp32-node-setup.md)でGatewayへUSB接続し、設定・登録・計測確認・蓋の固定を行います。
+ここまででSEN66とAtomS3 Liteの配線・ケースへの収納が完了しました。
+
+次へ：[「3-2. SEN66 Nodeをセットアップする」](esp32-node-setup.md)

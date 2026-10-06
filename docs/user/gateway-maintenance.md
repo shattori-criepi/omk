@@ -1,6 +1,6 @@
-# 5-1. Gatewayソフトウェアの更新・保守
+# Gatewayソフトウェアを更新・保守する
 
-構築済みGatewayの更新、機能追加、再設定、状態確認を説明します。初めて構築する場合は[「2-3. Gatewayセットアップ」](gateway-setup.md)、問題が起きた場合は[「5-3. トラブルシューティング」](troubleshooting.md)を参照してください。
+構築済みGatewayの更新、機能追加、再設定、状態確認を説明します。初めて構築する場合は[「2-3. Gatewayセットアップ」](gateway-setup.md)、問題が起きた場合は[「トラブルシューティング」](troubleshooting.md)を参照してください。
 
 ## GatewayのOMKソフトウェアを更新する
 
@@ -54,13 +54,13 @@ cd ~/projects/omk
 
 Bルート計測は再実行中に停止する場合があります。FT230Xの実物確認が出たらRS-WSUHA-Pの接続を確認して答えます。
 
-Onyxなしや表示端末を変更した構成では、[「6-3. 標準構成以外・高度な構成」](advanced-configuration.md)に従って最初のコマンドを調整します。失敗時は[「5-3. トラブルシューティング」](troubleshooting.md#パッケージやomkのダウンロードが失敗する)へ進みます。
+Onyxなしや表示端末を変更した構成では、[「標準構成以外・高度な構成」](advanced-configuration.md)に従って最初のコマンドを調整します。失敗時は[「トラブルシューティング」](troubleshooting.md#パッケージやomkのダウンロードが失敗する)へ進みます。
 
 ### 4. 更新後の動作を確認する
 
 セットアップが完了したら、[状態を確認する](#状態を確認する)の表に沿って、Dashboardと使用中の機器の表示を見ます。
 
-Gatewayを更新しても、設置済みOMK Nodeのファームウェアは自動更新されません。Nodeの更新は[「5-2. OMK Nodeの更新・再設定」](node-maintenance.md#ファームウェアを更新する)を参照してください。
+Gatewayを更新しても、設置済みOMK Nodeのファームウェアは自動更新されません。Nodeの更新は[「OMK Nodeを更新・再設定する」](node-maintenance.md#ファームウェアを更新する)を参照してください。
 
 ## セットアップを再実行する
 
@@ -68,7 +68,7 @@ Gateway全体の設定をやり直す場合は、Gatewayのターミナルで`cd
 
 ## 個別サービスを再設定する
 
-標準Gatewayでは以下のサービスは導入済みです。センサの追加は[「3-1. センサ・計測機器を追加する」](sensor-setup.md)を参照してください。以下は旧構成への導入や個別の再設定用で、Gateway自身のインターネット接続が必要です。
+標準Gatewayでは以下のサービスは導入済みです。計測機器の追加は[「BLEセンサを追加する」](ble-sensor-setup.md)または[「Bルートでスマートメーターを追加する」](broute-setup.md)を参照してください。以下は旧構成への導入や個別の再設定用で、Gateway自身のインターネット接続が必要です。
 
 ### BLEセンサ・OMK Nodeを使う
 
@@ -79,7 +79,7 @@ cd ~/projects/omk
 ./scripts/setup-ble-sensor-manager.sh
 ```
 
-完了したら、[「4-1. Dashboardの使い方」](dashboard.md#bleセンサを探索して登録する)か、[「3-3. SEN66 Nodeをセットアップする」](esp32-node-setup.md)の登録手順を参照してください。センサの接続・設置は[「6-1. OMK Nodeで計測範囲を拡張する」](node-and-sensors.md)、SEN66の組み立ては[「3-2. SEN66 Nodeの組み立て」](sen66-node-assembly.md)を参照してください。
+完了したら、[「BLEセンサを追加する」](ble-sensor-setup.md#bleセンサを探索して登録する)か、[「3-2. SEN66 Nodeをセットアップする」](esp32-node-setup.md)の登録手順を参照してください。センサの接続・設置は[「OMK Nodeで計測範囲を拡張する」](node-and-sensors.md)、SEN66の組み立ては[「3-1. SEN66 Nodeの組み立て」](sen66-node-assembly.md)を参照してください。
 
 ### Bルートを使う
 
@@ -90,7 +90,7 @@ cd ~/projects/omk
 ./scripts/setup-broute-meter.sh
 ```
 
-`Use this FT230X serial adapter as RS-WSUHA-P? ... [y/N]`と表示されたら、接続した実物がRS-WSUHA-Pであることを確かめて`y`を入力します。完了したら、[「4-1. Dashboardの使い方」](dashboard.md#bルートを設定する)でBルートIDとパスワードを入力します。
+`Use this FT230X serial adapter as RS-WSUHA-P? ... [y/N]`と表示されたら、接続した実物がRS-WSUHA-Pであることを確かめて`y`を入力します。完了したら、[「Bルートでスマートメーターを追加する」](broute-setup.md#2-bルートidパスワードを登録する)でBルートIDとパスワードを入力します。
 
 ### SORACOM Onyxを追加・再設定する
 
@@ -107,11 +107,11 @@ cd ~/projects/omk
 
 既存のOnyxを再設定する場合も同じコマンドを使います。すでに接続中の場合は、その接続を保持します。APNを変更する目的の再設定では、その指定だけで既存接続が切り替わるとは限らないため、接続結果を確認してください。
 
-完了したら、SORACOMユーザーコンソールで対象SIMのセッション状態が「オンライン」になっていることを見ます。接続できない場合は[「5-3. トラブルシューティング」](troubleshooting.md#onyxで外部通信できない)を参照してください。
+完了したら、SORACOMユーザーコンソールで対象SIMのセッション状態が「オンライン」になっていることを見ます。接続できない場合は[「トラブルシューティング」](troubleshooting.md#onyxで外部通信できない)を参照してください。
 
 ## 状態を確認する
 
-GatewayのTouch Display 2でDashboardを操作します。別の表示端末を使う場合は[「6-3. 標準構成以外・高度な構成」](advanced-configuration.md#pcやタブレット等からdashboardを使う場合)を参照してください。
+GatewayのTouch Display 2でDashboardを操作します。別の表示端末を使う場合は[「標準構成以外・高度な構成」](advanced-configuration.md#pcやタブレット等からdashboardを使う場合)を参照してください。
 
 | 対象 | 確認する場所と表示 |
 | --- | --- |
@@ -121,7 +121,7 @@ GatewayのTouch Display 2でDashboardを操作します。別の表示端末を�
 | OMK Node | 「機器管理」で、無線接続しているNodeの「接続」が「オンライン」になる。SEN66を使う場合は、表示画面に計測値が表示される。 |
 | Bルート | 「Bルート設定」の「接続状態」が「接続済み」になる |
 
-機器の行は、使用しているものだけ確認します。表示が戻らない場合は、[「5-3. トラブルシューティング」](troubleshooting.md)の該当する症状へ進んでください。サービスやログによる詳細な診断は、[「開発ガイド」](../developer/development.md#gatewayでの確認)を参照してください。
+機器の行は、使用しているものだけ確認します。表示が戻らない場合は、[「トラブルシューティング」](troubleshooting.md)の該当する症状へ進んでください。サービスやログによる詳細な診断は、[「開発ガイド」](../developer/development.md#gatewayでの確認)を参照してください。
 
 ## 再起動・シャットダウンする
 

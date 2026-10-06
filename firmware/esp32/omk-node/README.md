@@ -2,7 +2,7 @@
 
 OMK NodeはAtomS3 Liteをproduction対象とする共通firmware基盤です。ボード固有のLCD、LED、ボタンはこの基盤に含めません。BLE中継（`ble_scan`）とSEN66計測は同じ基盤で共存できます。SEN66接続やBLE relay利用の有無にかかわらず、このfirmwareを標準とします。
 
-この文書はfirmwareの開発・デバッグ・特殊復旧向けです。一般利用者の初回Nodeセットアップは[GatewayのDashboardから行う手順](../../../docs/user/esp32-node-setup.md)を使用します。既存Nodeの正式なfirmware更新は、同ページの更新手順に従い`scripts/flash-omk-node.sh`を使用します。ここでは、実装済みかつ実機で確認済みのDiscovery、USB Serial/JTAG Provisioning、ESP-WIFI-MESH、SEN66、BLE relay、MQTTを記録します。3台のAtomS3 Liteでraw BLE relay、SEN66、Mesh/MQTTの同時動作を確認済みです。
+この文書はfirmwareの開発・デバッグ・特殊復旧向けです。一般利用者の初回Nodeセットアップは[「3-2. SEN66 Nodeをセットアップする」](../../../docs/user/esp32-node-setup.md)を使用します。既存Nodeの正式なfirmware更新は、[「OMK Nodeを更新・再設定する」](../../../docs/user/node-maintenance.md#ファームウェアを更新する)に従い`scripts/flash-omk-node.sh`を使用します。ここでは、実装済みかつ実機で確認済みのDiscovery、USB Serial/JTAG Provisioning、ESP-WIFI-MESH、SEN66、BLE relay、MQTTを記録します。3台のAtomS3 Liteでraw BLE relay、SEN66、Mesh/MQTTの同時動作を確認済みです。
 
 ## 有線センサの識別（M4）
 
@@ -43,7 +43,7 @@ USB専用protocolはv2。`set_wifi`と`clear_wifi`には12桁小文字hexの`exp
 
 ### v1からの更新
 
-GatewayのCLI/system-managerとNode通常firmwareを両方更新する。system-manager更新後はサービスを再起動する。既存Nodeの通常firmware更新は[「5-2. OMK Nodeの更新・再設定」](../../../docs/user/node-maintenance.md#ファームウェアを更新する)の通常更新手順を使い、保存済みcredential、Wi-Fi、Logical IDを維持する。新品Nodeの初回導入は[Dashboardからのセットアップ](../../../docs/user/esp32-node-setup.md#2-dashboardからセットアップする)を標準とする。使用済みNodeを新Gatewayへ設定し直す場合は[「5-2. OMK Nodeの更新・再設定」](../../../docs/user/node-maintenance.md#既存nodeを再セットアップする)の再セットアップ手順を使う。この再セットアップはcredentialを置換し、Wi-Fiを再設定、Logical IDを解除するため、通常更新とは区別する。探索用identifyだけはv1を受け付け、旧firmwareも台数に数える。旧firmwareを選択した場合は操作用v2確認で停止し、credentialを送信しない。旧CLIから新firmwareへのv1状態変更要求も拒否する。node_id、logical_id、保存済みWi-Fi設定の形式、BLE Discovery/MQTT protocol v1は変更しない。新しいidentity guardの実機試験は未実施で、従来の実機確認記録はv2の安全性確認を意味しない。[検証手順](../../../docs/decisions/usb-serial-provisioning.md)を参照する。
+GatewayのCLI/system-managerとNode通常firmwareを両方更新する。system-manager更新後はサービスを再起動する。既存Nodeの通常firmware更新は[「OMK Nodeを更新・再設定する」](../../../docs/user/node-maintenance.md#ファームウェアを更新する)の通常更新手順を使い、保存済みcredential、Wi-Fi、Logical IDを維持する。新品Nodeの初回導入は[「3-2. SEN66 Nodeをセットアップする」](../../../docs/user/esp32-node-setup.md#2-dashboardからセットアップする)を標準とする。使用済みNodeを新Gatewayへ設定し直す場合は[「OMK Nodeを更新・再設定する」](../../../docs/user/node-maintenance.md#既存nodeを再セットアップする)の再セットアップ手順を使う。この再セットアップはcredentialを置換し、Wi-Fiを再設定、Logical IDを解除するため、通常更新とは区別する。探索用identifyだけはv1を受け付け、旧firmwareも台数に数える。旧firmwareを選択した場合は操作用v2確認で停止し、credentialを送信しない。旧CLIから新firmwareへのv1状態変更要求も拒否する。node_id、logical_id、保存済みWi-Fi設定の形式、BLE Discovery/MQTT protocol v1は変更しない。新しいidentity guardの実機試験は未実施で、従来の実機確認記録はv2の安全性確認を意味しない。[検証手順](../../../docs/decisions/usb-serial-provisioning.md)を参照する。
 
 ## Node ID
 
@@ -332,4 +332,4 @@ managed componentはmanifestとlockから再現します。`platformio.ini`が�
 
 配布バイナリの第三者許諾は[Third-party notices](prebuilt/atom-s3-lite/THIRD_PARTY_NOTICES.md)を参照し、バイナリの再配布時は同文書を同梱してください。[監査記録と更新手順](LICENSE_AUDIT.md)も参照してください。
 
-一般利用者は[GatewayのDashboardからセットアップ](../../../docs/user/esp32-node-setup.md)します。開発者はsource commit後のclean HEADから`./scripts/build-omk-node-package.sh`を実行し、scriptはPlatformIO clean→buildを実行し、3 binaryとmanifestを更新します。SBOMと監査記録は自動更新しないため、同じbuild成果から再生成・照合してpackageと一緒に別commitへ含めます。第三者通知は依存・リンク構成の変化に応じて確認します。Gateway上ではbuildしません。詳細は[package更新とUSB setup設計](../../../docs/decisions/usb-node-setup.md)を参照してください。PC用flash scriptは開発・復旧用として維持します。
+一般利用者は[「3-2. SEN66 Nodeをセットアップする」](../../../docs/user/esp32-node-setup.md)に従って設定します。開発者はsource commit後のclean HEADから`./scripts/build-omk-node-package.sh`を実行し、scriptはPlatformIO clean→buildを実行し、3 binaryとmanifestを更新します。SBOMと監査記録は自動更新しないため、同じbuild成果から再生成・照合してpackageと一緒に別commitへ含めます。第三者通知は依存・リンク構成の変化に応じて確認します。Gateway上ではbuildしません。詳細は[package更新とUSB setup設計](../../../docs/decisions/usb-node-setup.md)を参照してください。PC用flash scriptは開発・復旧用として維持します。

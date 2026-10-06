@@ -1,6 +1,6 @@
 # 2-2. Gatewayの組み立て
 
-[「2-1. OMKのパーツ構成」](parts-list.md)で用意したRaspberry Pi 4、Touch Display 2（7インチ）、SmartiPi Touch Pro 3 サイズSを組み立てます。メーカーの手順に沿いながら、OMK用の接続を整える補助ガイドです。
+用意したRaspberry Pi 4、Touch Display 2（7インチ）、SmartiPi Touch Pro 3 サイズSを組み立てます。メーカーの手順に沿いながら、OMK用の接続を整える補助ガイドです。
 
 <img src="../images/omk-gateway/omk_overview.jpg" alt="Touch Display 2とケース、Onyxを組み合わせたOMK Gatewayの完成例。画面はセンサ追加後の表示" width="600">
 
@@ -37,7 +37,7 @@ OnyxはUSBへ接続する前に、[SORACOM公式のSIM挿入手順](https://user
 
 ## 4. Bルート用アダプタを接続する（利用する場合）
 
-Bルートを使う予定でRS-WSUHA-Pを用意している場合は、GatewayのUSB端子へ接続し、そのまま次のセットアップへ進みます。BルートID・パスワードの入力は、Gatewayのセットアップ後に行います。
+Bルートを使う予定でRS-WSUHA-Pを用意している場合は、GatewayのUSB端子へ接続し、そのまま次のセットアップへ進みます。
 
 Bルートを使わない場合、またはアダプタをまだ用意していない場合は、未接続で進められます。
 
@@ -48,8 +48,7 @@ Bルートを使わない場合、またはアダプタをまだ用意してい�
 - USBキーボードをPiへ接続してある（AP切り替え後に使用）。
 - microSDを挿せる状態で、Piの電源はまだ入れていない。
 - Bルートを使い、RS-WSUHA-Pを用意している場合はUSBへ接続してある。使わない場合や未入手の場合は未接続でよい。
-- AtomS3 LiteとSEN66はまだ接続していない。これらはGatewayのセットアップ後に組み立て・設定する。
 
 これでGatewayの物理的な組み立てが完了しました。
 
-次へ：[「2-3. Gatewayセットアップ」](gateway-setup.md)でOSを書き込み、電源を入れて設定します。
+次へ：[「2-3. Gatewayセットアップ」](gateway-setup.md)

@@ -1,4 +1,4 @@
-# 6-1. OMK Nodeで計測範囲を拡張する
+# OMK Nodeで計測範囲を拡張する
 
 SEN66 Nodeの初回計測まで完了した後、Gatewayから離れた場所へ計測範囲を広げる必要がある場合に読むページです。OMK Nodeは、AtomS3 LiteにOMK用ファームウェアと設定を導入した端末で、センサの接続に加えて通信の中継にも使えます。
 
@@ -8,7 +8,7 @@ SEN66 Nodeを配置して中継を兼ねる方法と、SEN66を接続しない�
 
 空気質センサのSEN66をOMK Nodeへ接続した構成を「SEN66 Node」と呼びます。温度・湿度・CO₂濃度などを計測し、Gatewayへデータを届けられる範囲なら、Gatewayから離れた部屋にも設置できます。
 
-配線やケースの組み立ては[「3-2. SEN66 Nodeの組み立て」](sen66-node-assembly.md)を参照してください。
+配線やケースの組み立ては[「3-1. SEN66 Nodeの組み立て」](sen66-node-assembly.md)を参照してください。
 
 ## BLEセンサを中継するNode
 
@@ -16,7 +16,7 @@ BLE中継は、Gatewayから離れたSwitchBot等のBLEセンサの電波を、�
 
 SEN66 NodeがBLE中継を兼ねることも、SEN66を接続しない中継専用Nodeを使うこともできます。Gatewayが直接受信できるBLEセンサだけを使う場合は、Nodeは不要です。
 
-初回登録は、対象のBLEセンサをGatewayの近くへ置いて[「4-1. Dashboardの使い方」](dashboard.md#bleセンサを探索して登録する)に従って登録します。Node経由でのみ受信している未登録センサは探索候補に表示されません。登録後に設置場所へ戻します。
+初回登録は、対象のBLEセンサをGatewayの近くへ置いて[「BLEセンサを追加する」](ble-sensor-setup.md#bleセンサを探索して登録する)に従って登録します。Node経由でのみ受信している未登録センサは探索候補に表示されません。登録後に設置場所へ戻します。
 
 ## Node同士で通信を中継する
 
@@ -40,4 +40,4 @@ OMKのNode間通信には、Espressifが提供する[ESP-WIFI-MESH](https://docs
 
 ## 追加するNodeを準備する
 
-SEN66を使わない場所へ中継用の端末を置く場合は、[「6-2. 中継専用OMK Nodeを追加する」](relay-node-setup.md)に部品と設定・設置確認をまとめています。SEN66も計測する場合は、[「3-2. SEN66 Nodeの組み立て」](sen66-node-assembly.md)と[「3-3. SEN66 Nodeをセットアップする」](esp32-node-setup.md)を参照してください。使用済みNodeの設定変更は[「5-2. OMK Nodeの更新・再設定」](node-maintenance.md)で扱います。
+SEN66を使わない場所へ中継用の端末を置く場合は、[「中継専用OMK Nodeを追加する」](relay-node-setup.md)に部品と設定・設置確認をまとめています。SEN66も計測する場合は、[「3-1. SEN66 Nodeの組み立て」](sen66-node-assembly.md)と[「3-2. SEN66 Nodeをセットアップする」](esp32-node-setup.md)を参照してください。使用済みNodeの設定変更は[「OMK Nodeを更新・再設定する」](node-maintenance.md)で扱います。
