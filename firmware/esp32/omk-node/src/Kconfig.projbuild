@@ -31,7 +31,10 @@ config MESH_PARENT_RSSI_LOW
     range -120 10
     default -85
     help
-        Minimum RSSI for a Mesh parent candidate and weak-current-parent
-        threshold. Set this value to -82 dBm for the initial relay PoC.
+        ESP-IDF standard low boundary (-85 dBm), used to compare parent
+        RSSI ranges and report a persistently weak current parent. Keep the
+        standard high/medium/low values (-78/-82/-85) on AtomS3 Lite; a
+        -84 to -85 dBm link can still carry measurements. This is not an
+        application-enforced candidate cutoff.
 
 endmenu

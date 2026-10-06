@@ -79,4 +79,4 @@ def test_mesh_network_uses_root_only_standard_vote_api():
     assert "MESH_EVENT_ROUTING_TABLE_ADD" in source
     assert "esp_mesh_waive_root(NULL, MESH_VOTE_REASON_ROOT_INITIATED)" in source
     assert "mesh_root_recovery_should_execute" in source
-    assert "mesh_root_recovery_in_grace" in source
+    assert "mesh_root_recovery_in_grace" in (SOURCE / "mesh_recovery.c").read_text()

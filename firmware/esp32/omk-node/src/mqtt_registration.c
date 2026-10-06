@@ -387,7 +387,7 @@ void mqtt_registration_set_sen66_diagnostics(uint32_t recovery_count,
     }
 }
 
-esp_err_t mqtt_registration_publish_mesh_status(const char *payload) {
+static esp_err_t publish_mesh_diagnostic(const char *payload, const char *suffix) {
     if (payload == NULL || payload[0] == '\0') {
         return ESP_ERR_INVALID_ARG;
     }
@@ -400,13 +400,21 @@ esp_err_t mqtt_registration_publish_mesh_status(const char *payload) {
         return err;
     }
     char topic[OMK_MQTT_TOPIC_SIZE];
-    int written = snprintf(topic, sizeof(topic), "omk/node/%012" PRIx64 "/status", node_id);
+    int written = snprintf(topic, sizeof(topic), "omk/node/%012" PRIx64 "/%s", node_id, suffix);
     if (written < 0 || written >= (int)sizeof(topic) ||
         strlen(payload) >= OMK_MQTT_MESH_STATUS_PAYLOAD_SIZE) {
         return ESP_ERR_INVALID_SIZE;
     }
     int message_id = esp_mqtt_client_enqueue(client, topic, payload, 0, 0, 0, true);
     return message_id < 0 ? ESP_FAIL : ESP_OK;
+}
+
+esp_err_t mqtt_registration_publish_mesh_status(const char *payload) {
+    return publish_mesh_diagnostic(payload, "status");
+}
+
+esp_err_t mqtt_registration_publish_mesh_recovery_status(const char *payload) {
+    return publish_mesh_diagnostic(payload, "mesh_recovery/status");
 }
 
 static void start_or_reconnect_mqtt(void) {

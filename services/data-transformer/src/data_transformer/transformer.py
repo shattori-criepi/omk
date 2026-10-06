@@ -434,7 +434,7 @@ def _is_status_topic(record: dict[str, Any]) -> bool:
     return (
         (len(parts) == 3 and bool(parts[1]) and parts[2] == "status")
         or (len(parts) == 4 and parts[1] == "node" and bool(parts[2]) and parts[3] == "status")
-        or (len(parts) == 5 and parts[1] == "node" and bool(parts[2]) and parts[3] == "registration" and parts[4] == "status")
+        or (len(parts) == 5 and parts[1] == "node" and bool(parts[2]) and parts[3] in {"registration", "mesh_recovery"} and parts[4] == "status")
         or (len(parts) == 5 and parts[1] == "node" and bool(parts[2]) and parts[3] == "registration" and parts[4] in {"ack", "config"})
     )
 

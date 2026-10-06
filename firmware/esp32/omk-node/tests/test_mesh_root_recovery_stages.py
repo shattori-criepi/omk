@@ -13,8 +13,6 @@ def recovery_binary(tmp_path_factory):
     source = (SOURCE / "mesh_network.c").read_text()
     dispatch = source[source.index("static void try_root_recovery(void)"):
                       source.index("void mesh_network_log_diagnostics")]
-    liveness = source[source.index("static void check_mqtt_liveness(void)"):
-                      source.index("/* The first observed role")]
     harness = r'''
         #include <assert.h>
         #include <stdbool.h>
@@ -22,7 +20,7 @@ def recovery_binary(tmp_path_factory):
         #include <stdio.h>
         #include <string.h>
         #include "mesh_root_recovery.h"
-        #include "mesh_liveness.h"
+        #include "mesh_recovery.h"
 
         typedef int esp_err_t;
         #define ESP_OK 0
@@ -36,14 +34,11 @@ def recovery_binary(tmp_path_factory):
         static bool root = true, parent_connected = true, is_rootless;
         static bool started = true, mqtt_connected;
         static struct { uint32_t addr; } current_ip = {1};
-        static int64_t mqtt_liveness_since_us;
-        static unsigned votes, reselections, restarts, recorded_restarts, diagnostics;
+        static omk_mesh_recovery_t recovery;
+        static unsigned votes, reselections, restarts;
         static esp_err_t api_result = ESP_OK;
         static uint32_t uptime_milliseconds(void) { return now_ms; }
-        static int64_t esp_timer_get_time(void) { return (int64_t)now_ms * 1000; }
         static bool esp_mesh_is_root(void) { return root; }
-        static bool mqtt_registration_is_started(void) { return true; }
-        static bool mqtt_registration_is_connected(void) { return mqtt_connected; }
         static const char *esp_err_to_name(esp_err_t err) {
             assert(err == ESP_FAIL);
             return "ESP_FAIL";
@@ -58,20 +53,19 @@ def recovery_binary(tmp_path_factory):
             ++reselections;
             return api_result;
         }
-        static void mesh_network_log_diagnostics(const char *event, uint32_t reason) {
-            assert(strcmp(event, "mesh_mqtt_liveness_timeout: software restart") == 0);
-            assert(reason == 0);
-            ++diagnostics;
+    ''' + dispatch + r'''
+        static void check_mqtt_liveness(void) {
+            omk_mesh_recovery_input_t in = {
+                .started=started, .parent_connected=parent_connected, .is_root=root,
+                .rootless=is_rootless, .has_ip=current_ip.addr != 0,
+                .mqtt_started=true, .mqtt_connected=mqtt_connected,
+            };
+            omk_mesh_recovery_action_t action = mesh_recovery_choose(&recovery, now_ms, &in, &root_recovery);
+            if (action == OMK_RECOVERY_RESTART) {
+                ++restarts;
+                mesh_recovery_complete(&recovery, now_ms, action, true);
+            }
         }
-        static void boot_diagnostics_record_restart_reason(const char *reason) {
-            assert(strcmp(reason, "mesh_mqtt_liveness_timeout") == 0);
-            ++recorded_restarts;
-        }
-        static void esp_restart(void) {
-            assert(diagnostics == restarts + 1 && recorded_restarts == restarts + 1);
-            ++restarts;
-        }
-    ''' + dispatch + liveness + r'''
         static void tick(uint32_t now, bool is_root, bool valid, int rssi,
                          uint32_t parent_count, uint32_t mqtt_count) {
             now_ms = now;
@@ -200,7 +194,7 @@ def recovery_binary(tmp_path_factory):
              * after reconnection, even if recovery grace has already elapsed. */
             parent_connected = false;
             check_mqtt_liveness();
-            assert(mqtt_liveness_since_us == 0);
+            assert(!recovery.mqtt_wait_active);
             parent_connected = true;
             now_ms = 330000;
             check_mqtt_liveness();
@@ -209,7 +203,7 @@ def recovery_binary(tmp_path_factory):
             assert(restarts == 1);
             now_ms = 510000;
             check_mqtt_liveness();
-            assert(restarts == 2);
+            assert(restarts == 1 && recovery.restart_spent);
         }
         static void execution_guards(void) {
             weak(0);
@@ -234,6 +228,8 @@ def recovery_binary(tmp_path_factory):
         int main(int argc, char **argv) {
             assert(argc == 2);
             mesh_root_recovery_init(&root_recovery);
+            mesh_recovery_init(&recovery, false, 0);
+            recovery.jitter_ms = 0;
             const char *scenario = argv[1];
             if (!strcmp(scenario, "sustained")) sustained();
             else if (strstr(scenario, "_reset")) reset_observation(scenario);
@@ -261,7 +257,7 @@ def recovery_binary(tmp_path_factory):
     executable = directory / "recovery"
     subprocess.run([
         "cc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-I", str(SOURCE),
-        str(program), str(SOURCE / "mesh_root_recovery.c"), str(SOURCE / "mesh_liveness.c"),
+        str(program), str(SOURCE / "mesh_root_recovery.c"), str(SOURCE / "mesh_liveness.c"), str(SOURCE / "mesh_recovery.c"),
         "-o", str(executable),
     ], check=True)
     return executable
@@ -283,5 +279,5 @@ def test_recovery_stages(recovery_binary, scenario):
 def test_status_observes_link_then_recovers_before_liveness():
     source = (SOURCE / "mesh_network.c").read_text()
     status = source[source.index("static void publish_status"):source.index("static void ip_event_handler")]
-    assert (status.index("mesh_root_recovery_observe_link(") < status.index("try_root_recovery();")
-            < status.index("check_mqtt_liveness();"))
+    assert (status.index("mesh_root_recovery_observe_link(") < status.index("try_recovery();")
+            < status.index("publish_recovery_status(node_id);"))

@@ -22,8 +22,8 @@ CONFIG_LWIP_TCP_OVERSIZE_MSS=y
 # ESP-WIFI-MESH runtime limits; router/AP credentials are supplied at runtime.
 CONFIG_MESH_MAX_LAYER=6
 CONFIG_MESH_ROUTE_TABLE_SIZE=50
-# ESP-WIFI-MESH parent RSSI thresholds. Keep ESP-IDF's effective defaults
-# unless a hardware trial intentionally overrides this profile.
+# ESP-IDF standard RSSI range boundaries, shared by AtomS3 Lite.
+# Preserve usable -84/-85 dBm links; parent switching keeps IDF runtime values.
 CONFIG_MESH_PARENT_RSSI_HIGH=-78
 CONFIG_MESH_PARENT_RSSI_MEDIUM=-82
 CONFIG_MESH_PARENT_RSSI_LOW=-85

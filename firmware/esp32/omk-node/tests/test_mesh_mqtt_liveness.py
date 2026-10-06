@@ -48,16 +48,17 @@ def test_mesh_mqtt_liveness_policy_boundaries(tmp_path):
     subprocess.run([str(executable)], check=True)
 
 
-def test_watchdog_uses_timer_context_and_persists_reason_before_restart():
+def test_watchdog_is_serialized_with_events_and_uses_durable_budget():
     source = (SOURCE / "mesh_network.c").read_text()
-    assert "#define OMK_MESH_MQTT_LIVENESS_TIMEOUT_S 180U" in (SOURCE / "mesh_liveness.h").read_text()
-    assert "mesh_mqtt_liveness_should_recover(&state)" in source
-    assert 'boot_diagnostics_record_restart_reason("mesh_mqtt_liveness_timeout")' in source
-    assert "esp_restart();" in source
-    assert "mqtt_liveness_since_us = 0;" in source
-    assert "eligible_while_disconnected" in source
-    timer = source[source.index("static void publish_status") : source.index("static void ip_event_handler")]
-    assert timer.index("check_mqtt_liveness();") > timer.index("mqtt_registration_publish_mesh_status(payload)")
+    assert ".callback = status_timer_callback" in source
+    assert "esp_event_post(OMK_MESH_CONTROL_EVENT" in source
+    assert "status_event_handler" in source
+    dispatch = source[source.index("static void run_recovery_action"):source.index("static void try_recovery")]
+    assert dispatch.index("mesh_recovery_store_save") < dispatch.index("esp_restart();")
+    assert "Recovery restart blocked: budget persistence failed" in dispatch
+    policy = (SOURCE / "mesh_recovery.c").read_text()
+    assert "mesh_mqtt_liveness_should_recover(&mqtt)" in policy
+    assert "!s->restart_spent" in policy
 
 
 def test_status_payload_has_capacity_for_liveness_and_mesh_data_plane_diagnostics():

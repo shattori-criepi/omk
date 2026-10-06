@@ -14,6 +14,7 @@ esp_err_t mqtt_registration_start(void);
 
 /* Queues one non-retained mesh diagnostic status payload. */
 esp_err_t mqtt_registration_publish_mesh_status(const char *payload);
+esp_err_t mqtt_registration_publish_mesh_recovery_status(const char *payload);
 
 /* Counts MQTT_EVENT_DISCONNECTED events for mesh diagnostics. */
 uint32_t mqtt_registration_get_disconnect_count(void);

@@ -136,20 +136,22 @@ def test_status_topics_are_ignored_without_error_jsonl(tmp_path):
     broute_status = _record("omk/broute-001/status", {"device_id": "broute-001", "status": "online"})
     sen66_status = _record("omk/sen66-001/status", {"device_id": "sen66-001", "status": "online"})
     node_status = _record("omk/node/9af9509eb8b6/status", {"status": "online"})
+    recovery_status = _record("omk/node/9af9509eb8b6/mesh_recovery/status", {"recovery_stage": "healthy"})
     registration_status = _record("omk/node/9af9509eb8b6/registration/status", {"status": "registered"})
     registration_ack = _record("omk/node/9af9509eb8b6/registration/ack", {"accepted": True})
     registration_config = _record("omk/node/9af9509eb8b6/registration/config", {"configured": True})
     input_file.write_text("\n".join(json.dumps(record) for record in [
-        power, broute_status, sen66_status, node_status, registration_status,
+        power, broute_status, sen66_status, node_status, recovery_status, registration_status,
         registration_ack, registration_config,
     ]) + "\n", encoding="utf-8")
     result = transform(input_file, tmp_path / "processed")
     assert result.converted == 1
-    assert result.ignored == 6
+    assert result.ignored == 7
     assert result.ignored_topics == {
         "omk/broute-001/status": 1,
         "omk/sen66-001/status": 1,
         "omk/node/9af9509eb8b6/status": 1,
+        "omk/node/9af9509eb8b6/mesh_recovery/status": 1,
         "omk/node/9af9509eb8b6/registration/status": 1,
         "omk/node/9af9509eb8b6/registration/ack": 1,
         "omk/node/9af9509eb8b6/registration/config": 1,

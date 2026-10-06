@@ -121,7 +121,22 @@ omk/node/<node_id>/status
 
 `parent_disconnect_count`と`mqtt_disconnect_count`は障害回数ではない。起動とtopology再構成の1回の事象で複数回増え得る。Dashboardや監視は単発のcounterで異常判定せず、MQTT接続状態、継続時間、計測欠測などを組み合わせて扱う。
 
-Mesh通信が成立しているのにMQTTだけが復旧しない状態では、Nodeはsoftware restartで復旧を試みる。Mesh起動済み、parent接続済み、rootlessでない、有効IPあり、MQTT client開始済み、MQTT未接続の条件がすべて連続180秒続いたときだけrestartする。parent切断、rootless、IP未取得、MQTT接続復旧、その他の通常通信条件の喪失で、restart判定用の連続時間をリセットする。したがってMesh再構成中や通常の通信断はrestart対象にならない。restart直前には診断情報をログへ出し、`last_omk_restart_reason`と`mesh_mqtt_liveness_restart_count`で結果を確認できる。
+Mesh/MQTT recoveryのpolicyは[networking decision](../decisions/esp-wifi-mesh-node-networking.md#全nodeのparent-loss-recoveryとbounded-restart)で定義する。MQTT-onlyはMesh起動・parent接続・非rootless・有効IP・MQTT開始済み・MQTT未接続が180秒＋Node ID jitter（0〜120秒）続いた場合の最終fallbackとする。parent-lossと共有するNVS budgetはepisode中1回だけ消費可能で、15分の正常継続後だけ回復する。従来の`last_omk_restart_reason`とMQTT restart countも継続する。
+
+追加の復旧診断は`omk/node/<node_id>/mesh_recovery/status`へ30秒周期、QoS 0、非retainで送る。既存Node statusは1152-byte bufferを維持し、追加topicは768-byte bufferに収める。両方に`node_id`と`uptime_s`を含む。
+
+| field | 意味 |
+| --- | --- |
+| `recovery_stage` | `idle` / `healthy` / `self_healing` / `explicit` / `wait_ip` / `mqtt_wait` / `budget_hold` / `restart_pending` |
+| `last_recovery_reason` | `none` / `parent_loss` / `router_loss` / `rootless` / `no_parent_found` / `stop_reconnection` / `mqtt_only` / `sustained_weak_root` / `topology_change` / `root_link_unhealthy`。復帰後も直近理由を保持 |
+| `no_parent_found_count`, `last_scan_times` | boot内のevent回数と最後のscan_times（payloadなしは−1） |
+| `stop_reconnection_count` | boot内のreconnection停止event回数。これだけで再起動しない |
+| `parent_reselection_count` | boot内のOMK parent再選択要求の受付成功回数（child lossとweak-root Level 2）。復旧完了回数ではない |
+| `parent_loss_duration_s` | parent未接続またはrootlessの連続秒数。解除後は0 |
+| `restart_budget_spent` | trueなら自動restart禁止。NVS障害時もtrue |
+| `recovery_restart_count`, `last_restart_reason` | NVSの累積restart予約回数と最後の予約理由。bootを跨ぐ。commit後の電源断などでは実reset回数と異なり得る |
+
+孤立中のMQTT送信はできない。復帰後のboot内counter・最後の理由と、bootを跨ぐrestart診断を合わせて読む。data-transformerではこのtopicもstatusとして計測変換から除外する。
 
 `is_rootless`、layer、parent BSSID、IPも再構成の途中値である。特に同一SSIDで異なるBSSIDを持つGateway／市販中継機の環境では、異なるroot/treeが形成されるリスクを実機評価中である。非同期起動やNode移設後に最適rootへ自動復帰する保証はないため、現在はNode参加後の安定待ちや、弱いroot uplinkでの切断増加を条件にroot再選出を要求する。成功後のcooldownと120秒のliveness restart抑止を含む[現行policy](../decisions/esp-wifi-mesh-node-networking.md#現行のroot再選出とlivenessの関係)を参照する。市販中継機との併用自体は否定せず、今後の実住宅試験で評価する。
 
