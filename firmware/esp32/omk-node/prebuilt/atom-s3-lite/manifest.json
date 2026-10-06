@@ -2,13 +2,13 @@
   "schema_version": 1,
   "target": "atom-s3-lite",
   "chip": "esp32s3",
-  "source_commit": "c0346e9d67239df476ae47e9b3a91957214d8a68",
+  "source_commit": "0a386a9d11a88231c6c07631b5a01e8f50958da4",
   "segments": [
     {
       "filename": "bootloader.bin",
       "offset": "0x00000000",
       "size": 21088,
-      "sha256": "9f4db8f8c20212bcc3e234ff8f2aacf1f17e404f9c0e5a17a943d866e4a79bc6"
+      "sha256": "8fc701ed4b0d2e3ef6373c98d950440aa0eee4d8017ae634935b3e68e9389ce5"
     },
     {
       "filename": "partitions.bin",
@@ -19,8 +19,8 @@
     {
       "filename": "firmware.bin",
       "offset": "0x00010000",
-      "size": 1546944,
-      "sha256": "b932d9a3d2f5d614c0d9f9372852fc96da1c4865513debeec82e08b755b39056"
+      "size": 1550864,
+      "sha256": "dd8b967c94e69e3fa0c0f413c02bd2541009de5e407886ea04c3437315928162"
     }
   ]
 }
