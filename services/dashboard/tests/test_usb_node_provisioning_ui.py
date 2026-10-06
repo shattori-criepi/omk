@@ -84,17 +84,20 @@ def test_cards_and_explicit_new_node_confirmation():
     script = (ROOT/'app/static/admin.js').read_text()
     rendering = script[script.index('function nodeCard'):script.index('function saveNodeInputState')]
     submit = script[script.index('async function submitUsbProvision'):script.index('// Restore progress')]
+    confirmation_change = script[script.index('nodes.onchange ='):script.index('nodes.onclick =')]
     javascript = r'''
 const assert = require('node:assert/strict');
 const text = value => String(value ?? '').replaceAll('<', '&lt;');
 let usbCandidatesInitialized = true, usbProvisioningInProgress = false, pendingNodeRegistration, usbSetupPoll;
 const usbCandidatesByNodeId = new Map();
 const statusLine = {};
+const nodes = {};
 let requests = [];
-const api = async (path, options) => requests.push({path, body: JSON.parse(options.body)});
-const pollUsbSetup = async () => {};
-const renderNodes = () => {};
-''' + rendering + submit + r'''
+const api = async (path, options) => { assert.equal(options.method, 'POST'); requests.push({path, body: JSON.parse(options.body)}); };
+let renders = 0, polls = 0;
+const pollUsbSetup = async () => { polls += 1; };
+const renderNodes = () => { renders += 1; };
+''' + rendering + submit + confirmation_change + r'''
 const candidate = {device: '/dev/ttyACM0', node_id: '000000000001', kind: 'omk_node', credential_state: 'present', wifi_configured: true};
 usbCandidatesByNodeId.set(candidate.node_id, candidate);
 let card = nodeCard({node_id: candidate.node_id, registration_state: 'registered', logical_id: 'sen66-001', capabilities: ['ble_scan', 'sen66']});
@@ -102,24 +105,56 @@ assert(!card.includes('OMK Nodeをセットアップ'));
 assert(card.includes('OMK Nodeを再セットアップ'));
 assert(!card.includes('Gatewayに配置済みのfirmwareを書き込み、Wi-Fiを設定します。'));
 assert(card.includes('Logical IDを変更') && card.includes('Logical ID登録を解除'));
+assert(!card.includes('atom-confirmation-title') && !card.includes('atom-confirmation-error'));
 assert(!card.includes('毎回、Gatewayに配置済み'));
 assert(card.includes('対応機能: BLE relay対応 · SEN66対応'));
 assert(card.includes('sen66-001'));
 candidate.kind = 'unconfirmed_esp32s3';
 card = nodeCard(candidate);
 assert(card.includes('ESP32-S3を検出') && card.includes('class="confirm-atom"'));
+assert(card.includes('<h3 class="atom-confirmation-title">確認が必要です</h3>'));
+assert(card.includes('aria-required="true" aria-describedby="atom-confirmation-error-000000000001"'));
+assert(card.includes('</label><p id="atom-confirmation-error-000000000001" class="atom-confirmation-error" role="alert" hidden>この項目を確認してチェックしてください。</p>'));
+assert(!card.includes('disabled'));
 assert(card.includes('OMK Nodeをセットアップ'));
 assert(!card.includes('再セットアップ'));
 assert(card.includes('対応機能: セットアップ後に確認'));
 assert(card.includes('接続センサ: セットアップ後に確認'));
 assert(!card.includes('node-logical-id'));
-const button = {disabled: false, dataset: {device: candidate.device, nodeId: candidate.node_id, unconfirmed: 'true'}, closest: () => ({querySelector: () => ({checked: false})})};
+const error = {hidden: true}, classes = new Set(), attributes = {};
+let focused = false, scrolled = false;
+const field = {
+  nextElementSibling: error,
+  classList: {toggle(name, enabled) { if (enabled) classes.add(name); else classes.delete(name); }},
+  scrollIntoView(options) { assert.equal(options.block, 'center'); scrolled = true; },
+};
+const confirmation = {
+  checked: false,
+  closest(selector) { return selector === '.confirm-atom' ? this : field; },
+  setAttribute(name, value) { attributes[name] = value; },
+  removeAttribute(name) { delete attributes[name]; },
+  focus(options) { assert.equal(options.preventScroll, true); focused = true; },
+};
+const button = {disabled: false, dataset: {device: candidate.device, nodeId: candidate.node_id, unconfirmed: 'true'}, closest: () => ({querySelector: () => confirmation})};
 (async () => {
  await submitUsbProvision(button);
  assert.equal(requests.length, 0);
- button.closest = () => ({querySelector: () => ({checked: true})});
+ assert.equal(renders, 0); assert.equal(polls, 0);
+ assert(!usbProvisioningInProgress && !button.disabled);
+ assert.equal(error.hidden, false);
+ assert(classes.has('atom-confirmation--error'));
+ assert.equal(attributes['aria-invalid'], 'true');
+ assert(focused && scrolled);
+ nodes.onchange({target: confirmation});
+ assert.equal(error.hidden, false);
+ confirmation.checked = true;
+ nodes.onchange({target: confirmation});
+ assert.equal(error.hidden, true);
+ assert(!classes.has('atom-confirmation--error'));
+ assert.equal(attributes['aria-invalid'], undefined);
  await submitUsbProvision(button);
  assert.deepEqual(requests[0], {path: '/setup/usb-setup', body: {device: candidate.device, node_id: candidate.node_id, confirm_atom_s3_lite: true}});
+ assert.equal(renders, 1); assert.equal(polls, 1);
  await submitUsbProvision(button);
  assert.equal(requests.length, 1);
  usbProvisioningInProgress = false;
@@ -128,7 +163,7 @@ const button = {disabled: false, dataset: {device: candidate.device, nodeId: can
  assert(!usbSetupControls(candidate).includes('OMK Nodeをセットアップ'));
 })().catch(error => {console.error(error); process.exitCode = 1;});
 '''
-    subprocess.run(['node', '-e', javascript], check=True, capture_output=True, text=True)
+    subprocess.run(['node', '-e', javascript], check=True, capture_output=True, text=True, timeout=10)
 
 
 def test_atom_confirmation_is_preserved_and_locked_while_setup_runs():
@@ -139,7 +174,7 @@ const assert = require('node:assert/strict');
 const text = value => String(value ?? '—');
 let usbProvisioningInProgress = false;
 const logicalInputs = [];
-const oldConfirmation = {checked: true, dataset: {nodeId: '000000000001'}};
+const oldConfirmation = {checked: true, dataset: {nodeId: '000000000001'}, getAttribute: () => null};
 const newConfirmation = {checked: false, disabled: true, dataset: {nodeId: '000000000001'}};
 const nodes = {
   querySelectorAll(selector) { return selector === '.confirm-atom' ? [oldConfirmation] : logicalInputs; },
@@ -159,6 +194,55 @@ assert(controlsDuringSetup.includes('セットアップ中…'));
 assert(controlsDuringSetup.includes('data-unconfirmed="true" disabled'));
 usbProvisioningInProgress = false;
 assert(!usbSetupControls(candidate).includes('class="confirm-atom" data-node-id="000000000001" disabled'));
+'''
+    subprocess.run(['node', '-e', harness], check=True, capture_output=True, text=True, timeout=10)
+
+
+def test_atom_confirmation_error_survives_refresh_until_checked():
+    script = (ROOT/'app/static/admin.js').read_text()
+    confirmation_state = script[script.index('function setAtomConfirmationError'):script.index('function validLogicalId')]
+    confirmation_change = script[script.index('nodes.onchange ='):script.index('nodes.onclick =')]
+    harness = r'''
+const assert = require('node:assert/strict');
+function checkbox() {
+  const attributes = {}, classes = new Set();
+  const field = {
+    classes, nextElementSibling: {hidden: true},
+    classList: {toggle(name, enabled) { if (enabled) classes.add(name); else classes.delete(name); }},
+  };
+  return {
+    checked: false, dataset: {nodeId: '000000000001'}, field,
+    closest(selector) { return selector === '.confirm-atom' ? this : field; },
+    getAttribute(name) { return attributes[name] ?? null; },
+    setAttribute(name, value) { attributes[name] = value; },
+    removeAttribute(name) { delete attributes[name]; },
+  };
+}
+let confirmation = checkbox();
+const nodes = {
+  querySelectorAll: () => [confirmation],
+  querySelector: () => confirmation,
+};
+''' + confirmation_state + confirmation_change + r'''
+setAtomConfirmationError(confirmation, true);
+const saved = saveNodeInputState();
+confirmation = checkbox();
+restoreNodeInputState(saved);
+assert.equal(confirmation.checked, false);
+assert.equal(confirmation.field.nextElementSibling.hidden, false);
+assert(confirmation.field.classes.has('atom-confirmation--error'));
+assert.equal(confirmation.getAttribute('aria-invalid'), 'true');
+nodes.onchange({target: {closest: () => null}});
+assert.equal(confirmation.field.nextElementSibling.hidden, false);
+confirmation.checked = true;
+nodes.onchange({target: confirmation});
+const checkedState = saveNodeInputState();
+confirmation = checkbox();
+restoreNodeInputState(checkedState);
+assert.equal(confirmation.checked, true);
+assert.equal(confirmation.field.nextElementSibling.hidden, true);
+assert(!confirmation.field.classes.has('atom-confirmation--error'));
+assert.equal(confirmation.getAttribute('aria-invalid'), null);
 '''
     subprocess.run(['node', '-e', harness], check=True, capture_output=True, text=True, timeout=10)
 

@@ -118,10 +118,17 @@ function usbSetupControls(candidate) {
     // Resume an interrupted initial setup without replacing its saved credential.
     const resumeSetup = candidate.kind === "omk_node" && candidate.credential_state === "present" && candidate.wifi_configured === false;
     if (!unconfirmed && !resumeSetup) return reset;
-    return `${unconfirmed ? `<p>USB接続されたNode候補：ESP32-S3を検出 · OMK firmware未確認</p><p class="atom-confirmation-hint">GatewayのUSBに接続した機器が、まだOMK Nodeとして設定していないAtomS3 Liteであることを確認してください。確認後、下のチェック欄をタップしてください。</p><label class="atom-confirmation"><input type="checkbox" class="confirm-atom" data-node-id="${text(candidate.node_id)}" ${usbProvisioningInProgress ? "disabled" : ""}><span>未セットアップのAtomS3 Liteであることを確認しました</span></label>` : '<p>Wi-Fi設定が未完了です。保存済みの管理情報を維持してセットアップを続けます。</p>'}<p>Gatewayに配置済みのfirmwareを書き込み、Wi-Fiを設定します。</p><button class="provision-usb-node" data-device="${deviceAttribute}" data-node-id="${text(candidate.node_id)}" data-unconfirmed="${unconfirmed}" ${usbProvisioningInProgress ? "disabled" : ""}>${usbProvisioningInProgress ? "セットアップ中…" : "OMK Nodeをセットアップ"}</button>`;
+    return `${unconfirmed ? `<p>USB接続されたNode候補：ESP32-S3を検出 · OMK firmware未確認</p><h3 class="atom-confirmation-title">確認が必要です</h3><p class="atom-confirmation-hint">GatewayのUSBに接続した機器が、まだOMK Nodeとして設定していないAtomS3 Liteであることを確認してください。確認後、下のチェック欄をタップしてください。</p><label class="atom-confirmation"><input type="checkbox" class="confirm-atom" data-node-id="${text(candidate.node_id)}" ${usbProvisioningInProgress ? "disabled" : ""} aria-required="true" aria-describedby="atom-confirmation-error-${text(candidate.node_id)}"><span>未セットアップのAtomS3 Liteであることを確認しました</span></label><p id="atom-confirmation-error-${text(candidate.node_id)}" class="atom-confirmation-error" role="alert" hidden>この項目を確認してチェックしてください。</p>` : '<p>Wi-Fi設定が未完了です。保存済みの管理情報を維持してセットアップを続けます。</p>'}<p>Gatewayに配置済みのfirmwareを書き込み、Wi-Fiを設定します。</p><button class="provision-usb-node" data-device="${deviceAttribute}" data-node-id="${text(candidate.node_id)}" data-unconfirmed="${unconfirmed}" ${usbProvisioningInProgress ? "disabled" : ""}>${usbProvisioningInProgress ? "セットアップ中…" : "OMK Nodeをセットアップ"}</button>`;
 }
-function saveNodeInputState() { const saved = {}; nodes.querySelectorAll(".confirm-atom").forEach(input => { saved[input.dataset.nodeId] = {confirmAtom: input.checked}; }); return saved; }
-function restoreNodeInputState(saved) { Object.entries(saved).forEach(([nodeId, state]) => { const confirmation = nodes.querySelector(`.confirm-atom[data-node-id="${nodeId}"]`); if (confirmation && state.confirmAtom === true) confirmation.checked = true; }); }
+function setAtomConfirmationError(confirmation, invalid) {
+    const field = confirmation.closest(".atom-confirmation");
+    field.classList.toggle("atom-confirmation--error", invalid);
+    field.nextElementSibling.hidden = !invalid;
+    if (invalid) confirmation.setAttribute("aria-invalid", "true");
+    else confirmation.removeAttribute("aria-invalid");
+}
+function saveNodeInputState() { const saved = {}; nodes.querySelectorAll(".confirm-atom").forEach(input => { saved[input.dataset.nodeId] = {confirmAtom: input.checked, confirmationError: input.getAttribute("aria-invalid") === "true"}; }); return saved; }
+function restoreNodeInputState(saved) { Object.entries(saved).forEach(([nodeId, state]) => { const confirmation = nodes.querySelector(`.confirm-atom[data-node-id="${nodeId}"]`); if (confirmation && state.confirmAtom === true) confirmation.checked = true; if (confirmation && state.confirmationError && !confirmation.checked) setAtomConfirmationError(confirmation, true); }); }
 function validLogicalId(value) { return /^[A-Za-z0-9_-]{1,48}$/.test(value); }
 function renderNodes() {
     const savedInputs = saveNodeInputState();
@@ -222,10 +229,14 @@ async function pollUsbSetup(submissionFailed = false, showTerminal = false) {
 }
 async function submitUsbProvision(button) {
     if (button.disabled || usbProvisioningInProgress) return;
-    const confirmed = button.closest("article").querySelector(".confirm-atom")?.checked === true;
+    const confirmation = button.closest("article").querySelector(".confirm-atom");
+    const confirmed = confirmation?.checked === true;
     const reinitialize = button.dataset.reinitialize === "true";
     if (reinitialize && !window.confirm(`OMK Nodeを再セットアップしますか？\nNode ID: ${button.dataset.nodeId}\n\n接続した機器がAtomS3 Liteであることを確認してください。\n既存provisioning credentialを新しいcredentialへ置換します。\nWi-Fi設定を消去し、新Gateway用に再設定します。\nLogical IDを消去するため、Node・接続センサの設定を再度行う必要があります。\n\n途中失敗した場合は同じ「再セットアップ」操作で再試行できます。`)) return;
     if (!reinitialize && button.dataset.unconfirmed === "true" && !confirmed) {
+        setAtomConfirmationError(confirmation, true);
+        confirmation.closest(".atom-confirmation").scrollIntoView({block: "center"});
+        confirmation.focus({preventScroll: true});
         statusLine.textContent = "接続した機器が未セットアップのAtomS3 Liteであることを確認し、チェック欄をタップしてください。";
         return;
     }
@@ -245,6 +256,10 @@ async function submitUsbProvision(button) {
 }
 // Restore progress after navigation/reload, without exposing the host token.
 pollUsbSetup();
+nodes.onchange = (event) => {
+    const confirmation = event.target.closest(".confirm-atom");
+    if (confirmation?.checked) setAtomConfirmationError(confirmation, false);
+};
 nodes.onclick = async (event) => { const provision = event.target.closest(".provision-usb-node"); if (provision) { await submitUsbProvision(provision); return; } const edit = event.target.closest(".edit-node-logical-id"); if (edit) { openLogicalKeyboard(edit); return; } const remove = event.target.closest(".remove-node-registration"); if (!remove || !window.confirm(`Logical ID「${remove.dataset.logicalId}」の登録を解除しますか？\n\nWi-Fi設定と過去の計測データは削除されません。\nこのNodeのLogical IDだけが未登録状態になります。`)) return; try { await api(`/nodes/${encodeURIComponent(remove.dataset.nodeId)}/registration`, {method: "DELETE"}); await loadNodes(); statusLine.className = "setup-status"; statusLine.textContent = "Logical IDの登録を解除しました。"; } catch (error) { statusLine.className = "setup-status error"; statusLine.textContent = error.message; } };
 registered.onclick = (event) => { const button = event.target.closest(".edit-sensor"); if (!button) return; const sensor = JSON.parse(decodeURIComponent(button.dataset.sensor)); editingDeviceKey = sensor.device_key; editError.hidden = true; document.querySelector("#edit-physical-info").textContent = `${sensor.device_key} · ${vendorName(sensor.vendor)} ${modelName(sensor.model)} · ${sensor.sensor_type}`; document.querySelector("#edit-sensor-id").value = sensor.sensor_id; document.querySelector("#edit-display-name").value = sensor.display_name; document.querySelector("#edit-location").value = sensor.location; document.querySelector("#edit-enabled").checked = sensor.enabled; editDialog.showModal(); };
 document.querySelector("#cancel-register").onclick = () => dialog.close(); document.querySelector("#cancel-edit").onclick = () => editDialog.close();

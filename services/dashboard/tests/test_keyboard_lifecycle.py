@@ -39,7 +39,7 @@ keyboard.open(input, {label: 'Logical ID', length: 48, appendAtEnd: true, onCanc
 def test_logical_keyboard_asset_versions():
     template = (ROOT / "app/templates/admin_sensors.html").read_text()
     for asset in ("display.css", "software_keyboard.js", "admin.js"):
-        version = "20260916-logical-id-flow-1" if asset == "display.css" else "20260918-sensor-keyboard-1"
+        version = "20260918-sensor-keyboard-1" if asset == "software_keyboard.js" else "20261006-atom-confirmation-2"
         assert re.search(re.escape(asset) + r"'\) }}\?v=" + version + r'"', template)
 
 
