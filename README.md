@@ -10,19 +10,35 @@
 - Raspberry Piに計測データを保存し、長期間の履歴として蓄積できます。
 - Gateway内のローカルDashboardで、現在の計測値と機器の状態を確認できます。
 - 保存済みデータをCSV/ZIPとしてUSBメモリへ書き出せます。
-- BLEセンサやAtomS3 LiteのOMK Nodeを利用して、Gatewayから離れた場所にもセンサを設置できます。
+- BLEセンサやAtomS3 Liteを使うOMK Nodeを利用して、Gatewayから離れた場所にもセンサを設置できます。
 - SORACOM Harvestを利用する場合は、計測データをクラウドへ送信して保管できます。
 
-## OMKを使う
+## OMKを作る
 
-初めて導入する場合は、[利用開始ガイド](docs/user/getting-started.md)で機材と導入の流れを確認し、[Gatewayセットアップ](docs/user/gateway-setup.md)へ進んでください。センサやOMK NodeはGatewayの構築後に追加します。用語は[用語集](docs/user/glossary.md)で確認できます。
+初めて製作する方は、**[OMK製作ガイド](docs/user/getting-started.md)**から始めてください。部品の準備、Gatewayの組み立て、標準機能のセットアップ、本体完成の確認まで順に進められます。その後、SEN66 Nodeを1台製作して計測を始めます。
 
 - [OMKの参考パーツ構成](docs/user/parts-list.md)
+- [Gatewayの組み立て](docs/user/gateway-assembly.md)
+- [Gatewayセットアップ](docs/user/gateway-setup.md)
+
+## センサ・計測機器を追加する
+
+本体完成後は、[センサ・計測機器を追加する](docs/user/sensor-setup.md)からSEN66 Nodeの製作へ進みます。SwitchBot等のBLEセンサ、Bルート、追加Nodeもこのページから追加できます。
+
+- [SEN66 Nodeの組み立て](docs/user/sen66-node-assembly.md)
+- [AtomS3 LiteをOMK Nodeとしてセットアップする](docs/user/esp32-node-setup.md)
 - [OMK Nodeの役割と設置](docs/user/node-and-sensors.md)
-- [AtomS3 LiteへのOMK Node導入](docs/user/esp32-node-setup.md)
+
+## OMKを運用する
+
 - [Dashboardの使い方](docs/user/dashboard.md)
 - [Gatewayの更新・保守](docs/user/gateway-maintenance.md)
 - [トラブルシューティング](docs/user/troubleshooting.md)
+- [用語集](docs/user/glossary.md)
+
+## 標準構成以外・高度な構成
+
+別の表示端末、ディスプレイなし、Onyxなし、有線LAN、家庭内Wi-Fiの制約、高度なNode構成は、[標準構成以外・高度な構成](docs/user/advanced-configuration.md)にまとめています。
 
 ## 対応機器と取得データ
 
@@ -44,7 +60,7 @@ OMKで動作確認している推奨構成は次のとおりです。
 
 初期セットアップには、既存Wi-Fiなどのインターネット接続を使います。OMK AP（Wi-Fiアクセスポイント）を有効にすると、Raspberry Piの内蔵Wi-FiはOMK AP専用となり、外部Wi-Fiには接続できません。推奨構成ではSORACOM Onyxを外部通信と遠隔管理に使います。
 
-別のディスプレイ、ディスプレイなし、有線LANなどで外部通信を行う構成も利用できますが、OMKでは動作確認していません。詳細は[利用開始ガイド](docs/user/getting-started.md)を参照してください。
+標準構成以外の対応範囲と制約は、[標準構成以外・高度な構成](docs/user/advanced-configuration.md)を参照してください。
 
 ## OMKを開発する
 

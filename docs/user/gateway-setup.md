@@ -1,19 +1,15 @@
 # Gatewayセットアップ
 
-このページは、新品のmicroSDカードからOMK Gatewayを構築する手順です。OMKで動作確認している推奨構成は、**Raspberry Pi 4、Raspberry Pi Touch Display 2（7インチ）、SORACOM Onyx**です。Windows PCからSSHで操作し、Dashboardの表示、OMK AP、Onyxによる外部通信を設定します。
+[Gatewayの組み立て](gateway-assembly.md)を終えた本体に、OSとOMKの標準機能を設定します。Windows PCから始め、OMK AP切り替え後はGateway本体を操作します。**最後の完了確認まで進めてから、センサを追加してください。**
 
-## 用意するもの
+## この手順の前に
 
-- Raspberry Pi 4と安定した電源
-- Raspberry Pi Touch Display 2（7インチ）
-- 64GB以上を目安にしたmicroSDカードとカードリーダー
-- SORACOM Onyx
-- 利用開始済みのSORACOM Air SIM（nano SIM）。通常用途にはplan-Dを推奨します。
-- Windows PC（Raspberry Pi ImagerによるOS書き込みとSSH接続に使用）
-- インターネットに接続できる既存Wi-Fi
-- USBキーボード（Gatewayを直接操作する場合）
+- Touch Display 2、ケース、Raspberry Pi 4の組み立てを済ませ、USBキーボードを接続します。
+- 利用開始済みのSORACOM Air SIM（nano SIM、plan-D）をOnyxへ挿し、OnyxをGatewayへUSB接続しておきます。ほかのUSBモデムは接続しません。
+- 64GB以上を目安にしたmicroSD、カードリーダー、Windows PC、インターネットに接続できる既存Wi-Fiを用意します。テザリングを使う場合は、作業中に自動停止しない設定にしてください。
+- RS-WSUHA-P、AtomS3 Lite、SEN66はまだ接続しません。Gatewayの電源はOS書き込み後に入れます。
 
-部品例は[OMKの参考パーツ構成](parts-list.md)を参照してください。センサやOMK NodeはGatewayの構築後に追加します。
+部品は[OMKの参考パーツ構成](parts-list.md)、全体の順序は[OMK製作ガイド](getting-started.md)で確認できます。コマンドは1つずつ実行し、エラーが出たら次へ進まず[中断時の再開手順](troubleshooting.md#パッケージやomkのダウンロードが失敗する)を参照してください。
 
 ## 1. Raspberry Pi ImagerでOSを書き込む
 
@@ -37,7 +33,7 @@ Windows PCにmicroSDカードを接続し、Raspberry Pi Imagerで次を選び�
 
 Imagerの画面操作は[Raspberry Pi公式ガイド](https://www.raspberrypi.com/documentation/computers/getting-started.html#install-using-imager)も参照してください。
 
-書き込みと検証が完了したら、microSDカードをRaspberry Piへ挿入します。OnyxはUSB接続する前に、本体の表示に合わせてSIMの金属端子の向きを確かめ、SIMを挿入します。電源を入れる前にTouch Display 2とOnyxを接続し、電源を入れて起動を待ちます。
+書き込みと検証が完了したら、PCからmicroSDを安全に取り外してGatewayのカードスロット（組み立てたケースのmicroSD延長部品）へ挿します。Touch Display 2、SIM入りOnyx、USBキーボードの接続を確かめ、Piの電源を入れて起動を待ちます。
 
 ## 2. GatewayへSSH接続する
 
@@ -74,6 +70,9 @@ cd omk
 
 ## 4. Gatewayのセットアップを開始する
 
+以下はGateway上のコマンドです。初回だけ`--with-base`を付け、OS更新とDockerを導入します。`--with-soracom`により、基本設定の後にOnyxの設定も実行されます。Onyxはこのコマンドの前から接続しておいてください。
+
+
 ```bash
 ./scripts/setup-omk-gateway.sh --with-base --with-soracom
 ```
@@ -84,7 +83,7 @@ cd omk
 
 ## 5. 基本設定後にセットアップを再開する
 
-OSなどの基本設定後に再起動または再ログインが必要な場合、セットアップはいったん停止して操作を案内します。画面に表示された方の操作を行い、接続し直してセットアップを再開します。案内なしで処理が続く場合は、そのまま手順6へ進んでください。
+OSなどの基本設定が`Setup result: SUCCESS`で完了し、再起動または再ログインが必要な場合、セットアップはいったん停止して操作を案内します。画面に表示された方の操作を行い、接続し直してセットアップを再開します。案内なしで処理が続く場合は、そのまま手順6の確認メッセージへ進みます。`Setup result: FAILURE`なら基本設定未完了なので、再起動表示だけで完了と判断せず[再開手順](troubleshooting.md#パッケージやomkのダウンロードが失敗する)を参照してください。
 
 ### 再起動のメッセージが表示された場合
 
@@ -119,39 +118,29 @@ cd ~/projects/omk
 
 ## 6. OMK APへの切り替え
 
-OMK APは、PCやOMK NodeをGatewayへ接続するためのWi-Fiアクセスポイントです。有効にすると、Raspberry Piの内蔵Wi-FiはOMK AP専用になり、これまでのWi-Fi経由のSSH接続やインターネット通信には使えなくなります。これ以降の外部通信にはOnyxを使います。
+手順4・5のスクリプトは、Onyx設定、Dashboardとデータ保存などのサービス準備・起動を行い、最後にOMK APへ切り替えます。**ここでスクリプトを追加実行する必要はありません。**
 
-セットアップ中に表示される確認には、次の順に答えてください。入力後はEnterを押します。
+OMK APはGateway・Node・管理端末をつなぐローカルネットワークです。PCやNodeのインターネット通信はGateway経由では転送しません。外部通信はGateway自身がOnyxを使うため、AP側端末の通信でSORACOM回線を意図せず消費しません。
+
+有効化するとPiの内蔵Wi-FiはOMK専用となり、既存Wi-Fiから切断されます。**切り替え前に、PCのSORACOMユーザーコンソールで対象SIMのセッション状態が「オンライン」になっていることを確認してください。** つながらなければ[Onyxの対処](troubleshooting.md#onyxで外部通信できない)を確認してから進みます。 Onyx設定で`Optional external DNS/HTTPS reachability check failed`等の`WARNING`が出た場合も、後続のダウンロードに必要な外部通信を復旧してからAPを有効化します。SIMの「オンライン」だけでは外部通信まで確認できません。
+
+実行中の確認には、表示された順に答えます。設定済みの項目では一部の確認が省略される場合があります。
 
 | 確認メッセージ | 入力・操作 |
 | --- | --- |
 | `Apply these NetworkManager profile changes? [y/N]` | `y`を入力する |
 | `Show the OMK AP password now? [y/N]` | 既定の`N`のままEnterを押す |
-| `Activate omk-ap now? This can disconnect SSH [y/N]` | `y`を入力する |
+| `Activate omk-ap now? This can disconnect SSH [y/N]` | Onyxの接続を確認後、`y`を入力する |
 
-Touch Display 2でDashboardを使う標準構成では、OMK APのSSID・パスワードを控える必要はありません。OMK NodeのWi-Fi設定もNodeセットアップ時に自動で行われます。PCやタブレット等でDashboardを見る場合だけ、後から[「OMKアクセスポイント参照」](dashboard.md#omk-apの接続情報を見る)で確認します。
+SSID・パスワードは後でTouch Display 2の[「OMKアクセスポイント参照」](dashboard.md#omk-apの接続情報を見る)から見られます。NodeのWi-Fi設定はNodeセットアップ時に自動で行われます。APの接続情報は第三者へ不用意に共有しないでください。
 
-OMK APに接続できる端末からはDashboardを閲覧できるため、**SSIDとパスワードは第三者へ不用意に共有しないでください。**
-
-APを有効にすると、既存Wi-Fi経由のSSHは切断されますが正常です。Gatewayのセットアップは切断後も完了まで進みます。
+最終AP切り替えは独立した処理として実行されるため、この時点のSSH切断後も進みます。`queued`という表示は切り替えの受付であり、完了の判定は手順9で行います。これより前のダウンロード中などの通信断は、[中断時の再開手順](troubleshooting.md#パッケージやomkのダウンロードが失敗する)で対処してください。
 
 ### AP切替後の操作方法
 
-以降は、NapterでWindows PCからSSH接続するか、USBキーボードを使ってGatewayを直接操作します。どちらの場合も、手順7・8のコマンドをGateway上で実行します。
+ここからは**GatewayのTouch Display 2とUSBキーボード**を使います。`Ctrl+Alt+T`でターミナルを開き、次の手順7・8のコマンドを本体上で実行します。パスワードを求められたらImagerで決めた`omkdev`のパスワードを入力します。ダウンロードにはOnyxを使います。
 
-#### Napterを使う場合
-
-SORACOM Napterは、SORACOM回線を通してGatewayへ遠隔接続するサービスです。
-
-1. Windows PCは、インターネットに接続できる既存Wi-Fiへ接続したままにします。
-2. SORACOMユーザーコンソールで、Onyxに入れたSIMのセッション状態が「オンライン」になったら、Napterのオンデマンドリモートアクセスを開始します。
-3. [SORACOM公式のSSH接続手順](https://users.soracom.io/ja-jp/docs/napter/login-with-ssh/)の「PCのターミナルを使ってSSH接続する」に従い、Windows PowerShellから接続します。接続先・ポートはNapterに表示された値、ユーザー名は`omkdev`、パスワードはImagerで設定したものを使います。
-
-接続できたら、手順7のコマンドを実行します。つながらない場合は[Napterのトラブルシューティング](troubleshooting.md#napterでssh接続できない)を参照してください。
-
-#### Gatewayを直接操作する場合
-
-GatewayにUSBキーボードを接続し、Touch Display 2の画面で`Ctrl+Alt+T`を押してターミナルを開きます。以降は、手順7のGateway上のコマンドをそのまま実行してください。
+PCのWi-Fi一覧でGatewayの`OMK-XXXXXX`形式のSSIDが見えることを確かめ、次へ進んでください。見つからない場合は[OMK APが見えない場合](troubleshooting.md#omk-apがwi-fi一覧に見えない)を参照します。
 
 ## 7. BLE Sensor Managerを設定する
 
@@ -162,51 +151,47 @@ cd ~/projects/omk
 ./scripts/setup-ble-sensor-manager.sh
 ```
 
-セットアップが完了したら次へ進みます。BLEセンサとOMK Nodeをどちらも使わない場合だけ、この手順を省略できます。
+標準Gatewayの機能として、この手順を完了してください。個別センサの登録はまだ行いません。`--with-ble`は使用せず、Gateway側のMQTTサービスが起動した後に、この個別スクリプトで導入します。
 
-## 8. Bルートを使用する場合は設定する
+```bash
+systemctl is-active omk-ble-sensor-manager.service
+```
 
-低圧スマートメーターのBルートを使う場合は、利用申請後に電力会社から提供された、Bルートに接続するためのIDとパスワードを用意します。この時点でGatewayへ追加接続する機器はRS-WSUHA-Pだけです。OMK NodeはGateway構築後に接続します。Bルートを使わない場合は手順9へ進んでください。
+`active`なら次へ進みます。それ以外ならセットアップのエラーを確認し、[再開手順](troubleshooting.md#パッケージやomkのダウンロードが失敗する)を参照してください。
 
-Gateway上で次を実行します。
+## 8. Bルートサービスを準備する
+
+### この手順の前に
+
+**RS-WSUHA-PとAtomS3 LiteなどのUSBシリアル機器は、まだ接続しません。Onyxは接続したままにします。** この工程ではGateway側のサービスだけを導入します。BルートID・パスワードも不要です。
+
+Gateway本体のターミナルで実行します。
 
 ```bash
 cd ~/projects/omk
 ./scripts/setup-broute-meter.sh
 ```
 
-`Use this FT230X serial adapter as RS-WSUHA-P? ... [y/N]`と表示されたら、`y`を入力します。
+アダプタ未接続では、シリアルポート未設定のままサービスを導入・有効化して終了します。機器や認証情報が用意されていない旨の警告と、サービス未起動はこの段階では正常です。`ERROR`で終了した場合は次へ進まず、表示内容を確認してください。
 
-IDとパスワードは、Gatewayの構築後に[DashboardのBルート設定](dashboard.md#bルートを設定する)で登録します。
+```bash
+systemctl is-enabled omk-broute-meter.service
+```
+
+`enabled`なら準備完了です。アダプタ接続・初期設定・認証情報の入力は、本体完成後の[Bルートでスマートメーターを追加する](sensor-setup.md#bルートでスマートメーターを追加する)で行います。
 
 ## 9. セットアップ完了を確認する
 
-次の2点を確認できれば、Gatewayの構築は完了です。
+ターミナルを閉じ、Touch Display 2で次を確認します。
 
-- Touch Display 2に日時や計測値を表示するDashboardの画面が出ており、右上に管理メニューを開く歯車アイコンがある
-- PCやスマートフォンのWi-Fi一覧に、Gatewayの`OMK-XXXXXX`形式のSSIDが表示される
+- Dashboardの表示画面が開き、右上の歯車から管理メニューを操作できる。
+- 「機器管理」が開き、BLE Sensor Managerへの接続エラーが出ない（機器は未登録で構いません）。
+- 「Bルート設定」が開く。アダプタ未接続のため「接続状態: サービス停止」、ID・パスワードは「未設定」で正常です。まだ認証情報は入力しません。
+- 「OMKアクセスポイント参照」のSSIDが、PCやスマートフォンのWi-Fi一覧に見える。
+- 手順7のBLEサービスは`active`、手順8のBルートサービスは`enabled`になっている。
 
-この時点ではまだセンサを追加していないため、計測データが表示されていなくても正常です。
+センサを追加していないので、計測値が空でも正常です。画面が出ない場合は[Touch Display 2の表示の対処](troubleshooting.md#touch-display-2にdashboardが表示されない)を参照してください。
 
-続いて、使いたいセンサや機器を追加します。
+**これでOMK本体が完成しました。** Dashboard・保存機能・OMK APとGateway側のBLE・Bルート機能が準備できました。
 
-1. [対応センサ・機器と取得データ](supported-devices.md)で、計測したい項目に対応する機器を選びます。
-2. 必要な機器を用意します。OMK Nodeを使う場合は、[OMK Nodeの役割と設置](node-and-sensors.md)で使い方と設置場所を確認します。
-3. Nodeが必要なら、[AtomS3 LiteへのOMK Node導入](esp32-node-setup.md)で準備・登録します。
-4. [Dashboardの使い方](dashboard.md)へ進み、BLEセンサの登録や表示設定を行います。
-
-構築後の更新・機能追加は[Gatewayの更新・保守](gateway-maintenance.md)、問題が起きた場合は[トラブルシューティング](troubleshooting.md)を参照してください。
-
-## 標準構成以外で使う場合
-
-別のディスプレイ、ディスプレイなし、Onyxなしの構成も利用できますが、OMKでは動作確認していません。
-
-- Onyxを使わない場合は、手順4・5のコマンドから`--with-soracom`を外します。AP切り替え後のセットアップにもインターネット接続が必要なため、有線LANなどの通信経路を用意してください。
-- ディスプレイを使わない場合は、手順4・5のコマンドに`--no-kiosk`を追加します。DashboardはOMK APに接続したPCなどで利用します。
-- plan-DUのSIMを使う場合は、手順4・5のセットアップコマンドの先頭に`SORACOM_APN=du.soracom.io`を付けて実行します。
-
-PCやタブレット等からDashboardを見る場合は、[Dashboardの任意の接続方法](dashboard.md#pcやタブレット等からdashboardを使う場合)を参照してください。
-
-### SSHで設定を続ける場合
-
-Onyxを使わない場合は、PCをOMK APへ接続し、`ssh omkdev@192.168.50.1`でGatewayへ接続できます。後続のセットアップには、Gatewayに有線LANなど別のインターネット接続経路が必要です。
+**次へ：[センサ・計測機器を追加する](sensor-setup.md)から、SEN66 Nodeを1台製作して計測を始めます。**

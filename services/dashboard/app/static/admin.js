@@ -118,7 +118,7 @@ function usbSetupControls(candidate) {
     // Resume an interrupted initial setup without replacing its saved credential.
     const resumeSetup = candidate.kind === "omk_node" && candidate.credential_state === "present" && candidate.wifi_configured === false;
     if (!unconfirmed && !resumeSetup) return reset;
-    return `${unconfirmed ? `<p>USB接続されたNode候補：ESP32-S3を検出 · OMK firmware未確認</p><label><input type="checkbox" class="confirm-atom" data-node-id="${text(candidate.node_id)}" ${usbProvisioningInProgress ? "disabled" : ""}>接続した機器が未セットアップのAtomS3 Liteであることを確認しました</label>` : '<p>Wi-Fi設定が未完了です。保存済みの管理情報を維持してセットアップを続けます。</p>'}<p>Gatewayに配置済みのfirmwareを書き込み、Wi-Fiを設定します。</p><button class="provision-usb-node" data-device="${deviceAttribute}" data-node-id="${text(candidate.node_id)}" data-unconfirmed="${unconfirmed}" ${usbProvisioningInProgress ? "disabled" : ""}>${usbProvisioningInProgress ? "セットアップ中…" : "OMK Nodeをセットアップ"}</button>`;
+    return `${unconfirmed ? `<p>USB接続されたNode候補：ESP32-S3を検出 · OMK firmware未確認</p><p class="atom-confirmation-hint">GatewayのUSBに接続した機器が、まだOMK Nodeとして設定していないAtomS3 Liteであることを確認してください。確認後、下のチェック欄をタップしてください。</p><label class="atom-confirmation"><input type="checkbox" class="confirm-atom" data-node-id="${text(candidate.node_id)}" ${usbProvisioningInProgress ? "disabled" : ""}><span>未セットアップのAtomS3 Liteであることを確認しました</span></label>` : '<p>Wi-Fi設定が未完了です。保存済みの管理情報を維持してセットアップを続けます。</p>'}<p>Gatewayに配置済みのfirmwareを書き込み、Wi-Fiを設定します。</p><button class="provision-usb-node" data-device="${deviceAttribute}" data-node-id="${text(candidate.node_id)}" data-unconfirmed="${unconfirmed}" ${usbProvisioningInProgress ? "disabled" : ""}>${usbProvisioningInProgress ? "セットアップ中…" : "OMK Nodeをセットアップ"}</button>`;
 }
 function saveNodeInputState() { const saved = {}; nodes.querySelectorAll(".confirm-atom").forEach(input => { saved[input.dataset.nodeId] = {confirmAtom: input.checked}; }); return saved; }
 function restoreNodeInputState(saved) { Object.entries(saved).forEach(([nodeId, state]) => { const confirmation = nodes.querySelector(`.confirm-atom[data-node-id="${nodeId}"]`); if (confirmation && state.confirmAtom === true) confirmation.checked = true; }); }
@@ -178,7 +178,7 @@ const usbSetupErrors = {
     unsupported_chip: "対応するESP32-S3を確認できませんでした。",
     ambiguous_mac: "機器を一意に識別できません。対象機器の接続を確認してください。",
     node_identity_changed: "対象機器の同一性を確認できないため停止しました。",
-    atom_s3_lite_confirmation_required: "未セットアップのAtomS3 Lite実物確認が必要です。",
+    atom_s3_lite_confirmation_required: "接続した機器が未セットアップのAtomS3 Liteであることを確認し、チェック欄をタップしてください。",
     recovery_required: "初回セットアップはできません。既存Nodeとして再セットアップを選択してください。",
     factory_write_failed: "初回/再セットアップの管理情報書込みに失敗しました。保存済み情報を残し、再セットアップから再試行できます。",
     firmware_write_failed: "firmware書込みに失敗しました。管理情報を削除せず接続を確認してください。",
@@ -226,7 +226,7 @@ async function submitUsbProvision(button) {
     const reinitialize = button.dataset.reinitialize === "true";
     if (reinitialize && !window.confirm(`OMK Nodeを再セットアップしますか？\nNode ID: ${button.dataset.nodeId}\n\n接続した機器がAtomS3 Liteであることを確認してください。\n既存provisioning credentialを新しいcredentialへ置換します。\nWi-Fi設定を消去し、新Gateway用に再設定します。\nLogical IDを消去するため、Node・接続センサの設定を再度行う必要があります。\n\n途中失敗した場合は同じ「再セットアップ」操作で再試行できます。`)) return;
     if (!reinitialize && button.dataset.unconfirmed === "true" && !confirmed) {
-        statusLine.textContent = "未セットアップのAtomS3 Lite実物確認が必要です。";
+        statusLine.textContent = "接続した機器が未セットアップのAtomS3 Liteであることを確認し、チェック欄をタップしてください。";
         return;
     }
     usbProvisioningInProgress = true;

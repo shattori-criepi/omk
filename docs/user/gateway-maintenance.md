@@ -4,13 +4,13 @@
 
 ## OMKを更新する
 
-更新にはGateway自身のインターネット接続が必要です。標準構成ではSORACOM Onyxを使います。Onyxを使わない場合は、有線LANなどの接続を用意してください。OMK APはインターネット接続用ではありません。
+更新にはGateway自身のインターネット接続が必要です。標準構成ではSORACOM Onyxを使います。Onyxを使わない場合は、有線LANなどの接続を用意してください。OMK APは機器とGatewayをつなぐローカルネットワークで、AP側端末の外部通信は転送しません。
 
-更新中はDashboardや計測が一時的に停止します。通常の更新やセットアップの再実行では、既存の設定と計測データは保持されます。
+更新中はDashboardや計測が一時的に停止します。セットアップには既存データや認証情報を保持する処理がありますが、サービスの再起動、設定ファイル・権限の更新、旧設定の移行も行います。実行前に重要な計測データを[USBへ書き出し](dashboard.md#データを書き出す)、独自設定がある場合は控えを残してください。
 
 ### 1. Gatewayへ接続する
 
-Gatewayへの接続・操作方法は、[GatewayセットアップのAP切替後の操作方法](gateway-setup.md#ap切替後の操作方法)を参照してください。
+Gatewayへの接続・操作方法は、本ページの[構築後のGatewayへ接続する](#構築後のgatewayへ接続する)を参照してください。
 
 以下のコマンドはGateway上で実行してください。
 
@@ -31,39 +31,42 @@ git pull --ff-only
 
 ### 3. セットアップを再実行する
 
-標準構成のSORACOM OnyxとBLE Sensor Managerを使っている場合は、次のコマンドで更新を反映します。**通常の更新では`--with-base`を付けません。**
-
-実行前に、使用中の構成に合わせてオプションを調整してください。
-
-| 使用している構成 | 下のコマンドからの変更 |
-| --- | --- |
-| Bルートを使う | `--with-broute`を追加する。RS-WSUHA-PをGatewayへ接続しておく。 |
-| Onyxでplan-DUのSIMを使う | コマンドの先頭に`SORACOM_APN=du.soracom.io`を付ける |
-| Onyxを使わない | `--with-soracom`を外す |
-| BLEセンサとOMK Nodeをどちらも使わない | `--with-ble`を外す |
-| GatewayのディスプレイにDashboardを自動表示しない | `--no-kiosk`を追加する |
+標準構成では次を順に実行します。**通常の更新では`--with-base`を付けず、BLEは個別スクリプトで更新します。** 各コマンドが完了したことを確認してから次を実行してください。
 
 ```bash
-./scripts/setup-omk-gateway.sh --with-soracom --with-ble
+./scripts/setup-omk-gateway.sh --with-soracom
 ```
 
-使用中の機能のオプションを外すと、その機能は更新されません。
+APの確認メッセージには[Gatewayセットアップ](gateway-setup.md#6-omk-apへの切り替え)に沿って答えます。最終AP切り替え処理はSSH切断後も進みますが、前段のパッケージ導入等に同じ保証はありません。切断された場合は[接続し直して](#構築後のgatewayへ接続する)、次を実行します。
 
-OMK APの確認メッセージが表示されたら、[OMK APへの切り替え](gateway-setup.md#6-omk-apへの切り替え)と同じように操作します。最後のAP有効化でSSHが切断される場合がありますが、セットアップは切断後も完了まで進みます。
+```bash
+cd ~/projects/omk
+./scripts/setup-ble-sensor-manager.sh
+```
+
+続いて、Bルートサービスを更新します。利用中のRS-WSUHA-Pは接続したまま、AtomS3 LiteなどほかのUSBシリアル機器は作業中だけ外します。Onyxは外部通信のため接続したままにします。Bルート未使用ならアダプタ未接続のままで実行できます。
+
+```bash
+./scripts/setup-broute-meter.sh
+```
+
+Bルート計測は再実行中に停止する場合があります。FT230Xの実物確認が出たらRS-WSUHA-Pの接続を確認して答えます。
+
+Onyxなしや表示端末を変更した構成では、[標準構成以外・高度な構成](advanced-configuration.md)に従って最初のコマンドを調整します。失敗時は[再開手順](troubleshooting.md#パッケージやomkのダウンロードが失敗する)へ進みます。
 
 ### 4. 更新後の動作を確認する
 
 セットアップが完了したら、[状態を確認する](#状態を確認する)の表に沿って、Dashboardと使用中の機器の表示を見ます。
 
-Gatewayを更新しても、設置済みOMK Nodeのファームウェアは自動更新されません。Nodeの更新は[AtomS3 LiteへのOMK Node導入](esp32-node-setup.md#firmwareを更新する)を参照してください。
+Gatewayを更新しても、設置済みOMK Nodeのファームウェアは自動更新されません。Nodeの更新は[AtomS3 LiteをOMK Nodeとしてセットアップする](esp32-node-setup.md#ファームウェアを更新する)を参照してください。
 
 ## セットアップを再実行する
 
 Gateway全体の設定をやり直す場合は、Gatewayのターミナルで`cd ~/projects/omk`を実行し、上の[手順3](#3-セットアップを再実行する)へ進みます。特定の機能だけを再設定する場合は、次の節にある専用コマンドを使います。
 
-## 構築後に機能を追加する
+## 個別サービスを再設定する
 
-以下のコマンドもGateway上で実行します。追加に必要なファイルを取得するため、インターネットへ接続しておいてください。
+標準Gatewayでは以下のサービスは導入済みです。センサの追加は[センサ・計測機器を追加する](sensor-setup.md)を参照してください。以下は旧構成への導入や個別の再設定用で、Gateway自身のインターネット接続が必要です。
 
 ### BLEセンサ・OMK Nodeを使う
 
@@ -74,18 +77,18 @@ cd ~/projects/omk
 ./scripts/setup-ble-sensor-manager.sh
 ```
 
-完了したら、[DashboardでBLEセンサを登録する](dashboard.md#bleセンサを探索して登録する)か、[AtomS3 LiteをOMK Nodeとして準備する](esp32-node-setup.md)手順へ進みます。センサの接続・設置は[OMK Nodeの役割と設置](node-and-sensors.md)、SEN66の組み立ては[SEN66 Nodeの組み立て](sen66-node-assembly.md)を参照してください。
+完了したら、[DashboardでBLEセンサを登録する](dashboard.md#bleセンサを探索して登録する)か、[AtomS3 LiteをOMK Nodeとしてセットアップする](esp32-node-setup.md)手順へ進みます。センサの接続・設置は[OMK Nodeの役割と設置](node-and-sensors.md)、SEN66の組み立ては[SEN66 Nodeの組み立て](sen66-node-assembly.md)を参照してください。
 
 ### Bルートを使う
 
-RS-WSUHA-PをGatewayへ接続します。ほかのUSBシリアル機器は、セットアップ中だけ取り外してください。
+RS-WSUHA-PをGatewayへ接続します。AtomS3 LiteなどほかのUSBシリアル機器は、セットアップ中だけ取り外してください。Onyxは外部通信のため接続したままにします。
 
 ```bash
 cd ~/projects/omk
 ./scripts/setup-broute-meter.sh
 ```
 
-`Use this FT230X serial adapter as RS-WSUHA-P? ... [y/N]`と表示されたら、`y`を入力します。完了したら、[Dashboardの「Bルート設定」](dashboard.md#bルートを設定する)でBルートIDとパスワードを入力します。
+`Use this FT230X serial adapter as RS-WSUHA-P? ... [y/N]`と表示されたら、接続した実物がRS-WSUHA-Pであることを確かめて`y`を入力します。完了したら、[Dashboardの「Bルート設定」](dashboard.md#bルートを設定する)でBルートIDとパスワードを入力します。
 
 ### SORACOM Onyxを追加・再設定する
 
@@ -100,7 +103,7 @@ cd ~/projects/omk
 ./scripts/setup-soracom-onyx.sh
 ```
 
-既存のOnyxを再設定する場合も同じコマンドを使います。すでに接続中の場合は、その接続を保持します。
+既存のOnyxを再設定する場合も同じコマンドを使います。すでに接続中の場合は、その接続を保持します。APNを変更する目的の再設定では、その指定だけで既存接続が切り替わるとは限らないため、接続結果を確認してください。
 
 完了したら、SORACOMユーザーコンソールで対象SIMのセッション状態が「オンライン」になっていることを見ます。接続できない場合は[Onyxで外部通信できない場合の対処](troubleshooting.md#onyxで外部通信できない)を参照してください。
 
@@ -123,3 +126,16 @@ PCで確認する場合はOMK APへ接続し、ブラウザで`http://192.168.50
 Dashboardの管理メニューから「システム操作」を開き、「再起動」または「シャットダウン」を選んで、確認画面の「実行」を押します。この間は計測も停止します。
 
 電源を外す場合は、シャットダウンが完了してから外してください。シャットダウン後は、電源を入れ直すまで利用できません。画面操作は[Dashboardの使い方](dashboard.md#gatewayを再起動シャットダウンする)も参照してください。
+
+## 構築後のGatewayへ接続する
+
+本体では、USBキーボードを接続して`Ctrl+Alt+T`でターミナルを開きます。PCから操作するときは次の方法があります。
+
+- **近くのPC**：Touch Display 2の「OMKアクセスポイント参照」で接続情報を表示し、PCをOMK APへ接続します。PowerShellで`ssh omkdev@192.168.50.1`を実行します。Gatewayの外部通信はOnyxを使います。
+- **SORACOM Napterで遠隔接続**：PCをインターネットへ接続し、SORACOMユーザーコンソールで対象SIMが「オンライン」であることを確認します。Napterのオンデマンドリモートアクセスを開始し、[SORACOM公式のSSH接続手順](https://users.soracom.io/ja-jp/docs/napter/login-with-ssh/)の「PCのターミナルを使ってSSH接続する」に従います。接続先・ポートはNapterの表示値、ユーザー名は`omkdev`、パスワードはImagerで設定したものです。
+
+## このページの完了と次の手順
+
+更新・再設定が終わり、Dashboardと利用中の機器の値が更新されることを確認できたら保守完了です。
+
+**次へ：[Dashboardの使い方](dashboard.md)で通常の運用へ戻ります。**
