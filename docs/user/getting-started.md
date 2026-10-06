@@ -2,7 +2,7 @@
 
 おうちモニタキット（OMK）は、住宅の電力・環境・行動を計測するシステムです。データを収集・保存するOMK Gateway、計測するセンサ・機器、現在の値と機器の状態を表示するDashboardで構成します。
 
-推奨するGateway構成は、Raspberry Pi 4、Touch Display 2（7インチ）、SORACOM Onyxです。Gatewayのセットアップ後に、空気質センサのSEN66とAtomS3 Liteを組み合わせた「SEN66 Node」を1台製作し、計測を始めます。AtomS3 Liteは市販のハードウェアで、OMK用ファームウェアと設定を書き込むと「OMK Node」になります。
+推奨するGateway構成は、Raspberry Pi 4、Touch Display 2（7インチ）、SORACOM Onyxです。Gatewayのセットアップ後に、空気質センサのSEN66とAtomS3 Liteを組み合わせた「SEN66 Node」を1台製作し、計測を始めます。
 
 分からない用語がある場合は[「用語集」](glossary.md)を参照してください。
 
@@ -25,7 +25,7 @@ flowchart LR
     ble["BLEセンサ<br/>SwitchBotなど"] -->|BLE| gw
     meter["スマートメーター"] -->|Wi-SUN| adapter["RS-WSUHA-P"]
     adapter -->|USB| gw
-    gw -->|DSI| display["Touch Display 2"]
+    gw -->|配線| display["Touch Display 2"]
     gw -->|USB| onyx["SORACOM Onyx"]
     onyx -->|LTE| external["外部通信<br/>遠隔管理・クラウド送信"]
     classDef gateway fill:#163a63,color:#fff,stroke:#071f3a,stroke-width:4px,font-size:20px;

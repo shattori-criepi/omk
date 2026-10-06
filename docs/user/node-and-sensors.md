@@ -1,43 +1,47 @@
 # OMK Nodeで計測範囲を拡張する
 
-SEN66 Nodeの初回計測まで完了した後、Gatewayから離れた場所へ計測範囲を広げる必要がある場合に読むページです。OMK Nodeは、AtomS3 LiteにOMK用ファームウェアと設定を導入した端末で、センサの接続に加えて通信の中継にも使えます。
+Gatewayから離れた部屋や別の階でも計測したいときに、OMK Nodeを追加する必要があるかを判断するページです。OMK Nodeは、AtomS3 LiteにOMK用ファームウェアと設定を導入した端末です。SEN66を接続して計測するほか、センサや別のNodeから届いたデータをGatewayへ送る役割も担えます。
 
-SEN66 Nodeを配置して中継を兼ねる方法と、SEN66を接続しない「中継専用Node」を追加する方法があります。BLEセンサの電波を受ける役割と、Gatewayまでデータを運ぶ経路を分けて考え、必要な位置にNodeを置きます。
+## Gatewayへ直接届く場合は、そのまま使う
 
-## SEN66を接続するNode
+BLEセンサの電波がGatewayへ届き、計測値が更新されていれば、そのセンサのためにNodeを追加する必要はありません。SEN66 NodeもGatewayと通信できていれば、1台で計測を続けられます。
 
-空気質センサのSEN66をOMK Nodeへ接続した構成を「SEN66 Node」と呼びます。温度・湿度・CO₂濃度などを計測し、Gatewayへデータを届けられる範囲なら、Gatewayから離れた部屋にも設置できます。
+```mermaid
+flowchart LR
+    ble["BLEセンサ"] -->|BLE| gw["Gateway"]
+    sen["SEN66 Node"] -->|Wi-Fi| gw
+```
 
-配線やケースの組み立ては[「3-1. SEN66 Nodeの組み立て」](sen66-node-assembly.md)を参照してください。
+## BLEセンサの電波が届かない場合
 
-## BLEセンサを中継するNode
+Gatewayへ直接届かないBLEセンサの近くにNodeを置き、そのNodeがセンサの電波を受信してGatewayへデータを送れます。これが「BLE中継」です。Nodeは、対象のBLEセンサの電波が届き、Gatewayとも通信できる位置に置きます。
 
-BLE中継は、Gatewayから離れたSwitchBot等のBLEセンサの電波を、近くのOMK Nodeが代わりに受信し、そのデータをGatewayへ送る機能です。BLEは、SwitchBotなどの無線センサとの通信に使う方式です。
+```mermaid
+flowchart LR
+    ble["離れた場所のBLEセンサ"] -->|BLE| node["近くのOMK Node"]
+    node -->|Wi-Fi| gw["Gateway"]
+```
 
-SEN66 NodeがBLE中継を兼ねることも、SEN66を接続しない中継専用Nodeを使うこともできます。Gatewayが直接受信できるBLEセンサだけを使う場合は、Nodeは不要です。
+BLEセンサの初回登録はGatewayの近くで行います。Node経由でのみ受信している未登録センサは探索候補に表示されないためです。登録後に設置場所へ戻して中継を利用します。
 
-初回登録は、対象のBLEセンサをGatewayの近くへ置いて[「BLEセンサを追加する」](ble-sensor-setup.md#bleセンサを探索して登録する)に従って登録します。Node経由でのみ受信している未登録センサは探索候補に表示されません。登録後に設置場所へ戻します。
+## 離れたNodeの通信が届かない場合
 
-## Node同士で通信を中継する
+SEN66 NodeなどがGatewayと直接通信できないときは、その間に別のNodeを置き、Node同士でデータを運べます。これが「Mesh中継」です。間に置くNodeには、離れたNodeとGatewayの両方へ通信できる位置を選びます。
 
-Node同士でESP-WIFI-MESHによる通信を中継し、Gatewayから離れた場所まで通信範囲を広げます。Gatewayと離れたNodeの間に、互いに通信できる範囲で別のNodeを置きます。これは、BLEセンサの電波を受けるBLE中継とは別の役割で、SEN66の計測データやNodeが受信したBLEデータをGatewayまで運ぶ経路になります。
+```mermaid
+flowchart LR
+    far["離れたSEN66 Node"] -->|Mesh| middle["間に置くOMK Node"]
+    middle -->|Wi-Fi| gw["Gateway"]
+```
 
-OMKのNode間通信には、Espressifが提供する[ESP-WIFI-MESH](https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-guides/esp-wifi-mesh.html)を利用しています。ESP-WIFI-MESHはNodeが階層的につながるツリー状の構成で通信を中継する仕組みで、すべてのNode同士が常時直接通信する完全メッシュではありません。OMKでは、この仕組みを基盤として、通信が不安定になった場合の自動復旧などの機能を追加しています。
+BLE中継は「BLEセンサの電波をNodeが受ける機能」、Mesh中継は「Nodeからのデータを別のNode経由でGatewayへ運ぶ機能」で、別の機能です。同じNodeで両方を使えます。例えば、Nodeが受信したBLEデータを、さらに別のNode経由でGatewayへ届けることもできます。
 
-<img src="../images/esp32-node/esp32-node-network-overview.png" alt="BLEセンサをGatewayまたはOMK Nodeで受信し、Node同士はESP-WIFI-MESHでツリー状につながり、GatewayへはWi-Fiで接続する構成図" width="900">
+図は通信経路の例です。実際のNode間通信にはESP-WIFI-MESHを使い、配置や電波の状態に応じて経路が選ばれます。すべてのNode同士が直接つながる必要はありません。
 
-緑の線はBLEセンサからの受信、青い線はNode間のESP-WIFI-MESHによる通信と、GatewayへのWi-Fi接続を表します。Gatewayへ向かう中継経路が構成されます。
+## SEN66 Nodeと中継専用Nodeを選ぶ
 
-この図はNodeとMeshの詳細図です。Bルート、表示、保存、外部通信を含む関係は[「1-1. OMK導入ガイド」](getting-started.md#omkのハードウェア構成とデータの流れ)を参照してください。
+SEN66 Node自身も、SEN66を計測しながらBLE中継やMesh中継を行い、通信経路の一部になれます。既に設置したSEN66 Nodeで届くなら、専用のNodeを増やす必要はありません。
 
-## 設置場所を決める
+その場所でSEN66を計測する必要がなく、通信範囲を広げたい場合は、センサを接続しない「中継専用Node」を置きます。どちらのNodeも設置場所でUSB電源から常時給電するため、電源を確保できる場所を選びます。壁や階、金属によって電波の届き方が変わるので、設置後に通信を確認して位置を調整します。
 
-- Nodeは、GatewayまたはGatewayへ中継できる別のNodeと通信できる位置に置きます。
-- BLE中継に使うNodeは、対象センサの電波も届く位置に置きます。
-- 壁や階を隔てる場所、金属で囲まれた場所では、通信が不安定になることがあります。設置後はDashboardの「機器管理」でNodeの「接続」が「オンライン」になり、中継するBLEセンサの「最終受信」が更新される位置を選びます。届かなければ、Gatewayや別のNode、センサに近づけます。
-- Nodeは設置場所でUSB電源へ接続し、常時給電します。中継専用Nodeも電源を入れておきます。
-- SEN66 Nodeは、SEN66の吸気・排気口を塞がないように置きます。
-
-## 追加するNodeを準備する
-
-SEN66を使わない場所へ中継用の端末を置く場合は、[「中継専用OMK Nodeを追加する」](relay-node-setup.md)に部品と設定・設置確認をまとめています。SEN66も計測する場合は、[「3-1. SEN66 Nodeの組み立て」](sen66-node-assembly.md)と[「3-2. SEN66 Nodeをセットアップする」](esp32-node-setup.md)を参照してください。使用済みNodeの設定変更は[「OMK Nodeを更新・再設定する」](node-maintenance.md)で扱います。
+中継専用Nodeが必要と判断したら、[「中継専用OMK Nodeをセットアップする」](relay-node-setup.md)で準備・設定・設置を行います。SEN66の計測も追加する場合は、[「3-1. SEN66 Nodeの組み立て」](sen66-node-assembly.md)を参照してください。

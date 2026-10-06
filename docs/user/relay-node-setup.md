@@ -1,42 +1,46 @@
-# 中継専用OMK Nodeを追加する
+# 中継専用OMK Nodeをセットアップする
 
-SEN66の計測を確認した後、Gatewayから離れた場所へ計測範囲を広げたい場合に使う手順です。[「OMK Nodeで計測範囲を拡張する」](node-and-sensors.md)で、BLE受信とNode間のMesh中継の違い、設置場所を確認してください。
-
-中継専用Nodeは、SEN66を接続せずに使うAtomS3 Liteです。SEN66 Nodeと同じファームウェアでBLE中継とMesh中継を行えます。中継専用のファームウェアやLogical IDの登録は不要です。
-
-## 必要な部品
-
-| 区分 | 部品 | 参考製品・実使用例 | 用途・選定条件 |
-| --- | --- | --- | --- |
-| 必須 | 小型端末 | [M5Stack AtomS3 Lite](https://www.switch-science.com/products/8778) | BLEセンサや他のNodeの通信を中継 |
-| 必須 | USB電源 | USB-A出力のACアダプター（5V、1A以上を目安） | 設置場所での常時給電 |
-| どちらか必須 | 給電用の接続 | [Type-Cオス USB-Aオス変換アダプタ](https://www.amazon.co.jp/dp/B0CKVP8DZ8)、またはUSB-A → USB-Cケーブル | USB電源とAtomS3 Liteを接続 |
-| 初期設定時に必須 | USBケーブル | データ通信・給電対応のUSB-A → USB-Cケーブル | Gatewayとの接続用。上の給電用ケーブルがデータ通信対応なら兼用できます。 |
+[「OMK Nodeで計測範囲を拡張する」](node-and-sensors.md)で中継専用Nodeが必要と判断した方の作業手順です。AtomS3 Liteを準備し、Gatewayで設定してから設置・通信確認を行います。
 
 ## この手順の前に
 
-- Gatewayのセットアップと初回のSEN66計測確認を済ませ、OMK APとDashboardを使える状態にします。
-- 新品・未セットアップのAtomS3 Liteを用意します。使用済みNodeの接続先を変える場合は[「OMK Nodeを更新・再設定する」](node-maintenance.md#既存nodeを再セットアップする)を参照してください。
-- BLEセンサの初回登録はGatewayの近くで行います。Node経由でのみ受信している未登録センサは探索候補に表示されません。登録操作は[「BLEセンサを追加する」](ble-sensor-setup.md#bleセンサを探索して登録する)を参照してください。
+- Gatewayのセットアップを済ませ、OMK APとTouch Display 2のDashboardを使える状態にします。
+- 通信確認に使うBLEセンサは、[「BLEセンサを追加する」](ble-sensor-setup.md)に従って登録を済ませます。SEN66 Nodeを使って確認する場合は、そのNodeの設定・登録を済ませます。
 
-## 1. GatewayへUSB接続する
+## 1. AtomS3 Liteを準備する
 
-SEN66を接続していないAtomS3 Liteを、データ通信対応のUSBケーブルでGatewayへ接続します。ほかのAtomS3 Liteや同種の開発ボードは、セットアップ中だけGatewayから取り外します。OnyxとRS-WSUHA-Pは接続したままで構いません。
+| 部品 | 参考製品・実使用例 | 準備するもの |
+| --- | --- | --- |
+| 小型端末 | [M5Stack AtomS3 Lite](https://www.switch-science.com/products/8778) | 新品・未セットアップのもの。センサは接続しません。 |
+| USB電源 | USB-A出力のACアダプター（5V、1A以上を目安） | 設置場所での常時給電用 |
+| USBケーブル | データ通信・給電対応のUSB-A → USB-Cケーブル | Gatewayでの設定と設置後の給電に使用 |
+| 給電用アダプタ（任意） | [Type-Cオス USB-Aオス変換アダプタ](https://www.amazon.co.jp/dp/B0CKVP8DZ8) | 設置後にUSBケーブルの代わりに使用する場合 |
 
-## 2. Dashboardからセットアップする
+使用済みNodeの接続先を変える場合は、[「OMK Nodeを更新・再設定する」](node-maintenance.md#既存nodeを再セットアップする)の手順を使ってください。
+
+## 2. GatewayへUSB接続する
+
+AtomS3 Liteをデータ通信対応のUSBケーブルでGatewayへ接続します。ほかのAtomS3 Liteや同種の開発ボードは、セットアップ中だけGatewayから取り外します。OnyxとRS-WSUHA-Pは接続したままで構いません。
+
+## 3. Dashboardからセットアップする
 
 1. Touch Display 2のDashboardで「管理メニュー → 機器管理」を開きます。
 2. 「接続: USB接続」のカードに「USB接続されたNode候補」と「OMK Nodeをセットアップ」が表示されることを確認します。
 3. 接続した実物を確かめ、「未セットアップのAtomS3 Liteであることを確認しました」にチェックを入れます。初回設定の再開時には、この確認欄が表示されないことがあります。
-4. 「OMK Nodeをセットアップ」を押します。ファームウェアとOMK APのWi-Fi設定が書き込まれます。
-5. USB接続と給電を維持し、「セットアップ完了」と表示されるまで待ちます。
+4. 「OMK Nodeをセットアップ」を押します。
+5. USB接続と給電を維持し、「セットアップ完了」と表示されるまで待ちます。Logical IDの登録は行いません。
 
 既存Nodeの再セットアップが表示された場合は、[「OMK Nodeを更新・再設定する」](node-maintenance.md)を参照してください。失敗した場合は[「トラブルシューティング」](troubleshooting.md#nodeセットアップを診断する)で表示内容を確認します。
 
-## 3. 設置して通信を確認する
+## 4. 設置する
 
-1. GatewayからAtomS3 Liteを取り外し、設置場所のUSB電源へ接続します。常時給電してください。
-2. Dashboardの「機器管理」で、対象Nodeの「接続」が「オンライン」になることを確認します。「Wi-Fi設定済み」「接続センサ: 未検出」の表示で使えます。
-3. BLE中継に使う場合は、登録済みセンサの「最終受信」が更新されることを確認します。Mesh中継に使う場合は、その先のNodeが「オンライン」になり、計測値が更新されることを確認します。
+1. 設定したAtomS3 LiteをGatewayから取り外します。
+2. 選んだ設置場所へ置き、USB電源に接続します。常時給電してください。
 
-通信が続かない場合は、GatewayやほかのNode、対象のBLEセンサに近づけて配置を調整します。設置後も対象の計測値や受信時刻が更新されれば、追加したNodeでの通信を確認できています。
+## 5. 通信を確認する
+
+1. Dashboardの「機器管理」で、設置したNodeの「接続」が「オンライン」になることを確認します。「Wi-Fi設定済み」「接続センサ: 未検出」の表示で使えます。
+2. 対象のBLEセンサを使う場合は、そのセンサの「最終受信」が更新されることを確認します。離れたSEN66 Nodeを使う場合は、そのNodeが「オンライン」になり、計測値が更新されることを確認します。
+3. 更新が続かない場合は、設置したNodeをGatewayや対象機器に近づけ、位置を調整して再確認します。
+
+設置後も対象の計測値や受信時刻が更新されれば、作業完了です。

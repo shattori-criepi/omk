@@ -45,7 +45,7 @@
 - [BLEセンサを追加する](docs/user/ble-sensor-setup.md)
 - [Bルートでスマートメーターを追加する](docs/user/broute-setup.md)
 - [OMK Nodeで計測範囲を拡張する](docs/user/node-and-sensors.md)
-- [中継専用OMK Nodeを追加する](docs/user/relay-node-setup.md)
+- [中継専用OMK Nodeをセットアップする](docs/user/relay-node-setup.md)
 - [Gatewayソフトウェアを更新・保守する](docs/user/gateway-maintenance.md)
 - [OMK Nodeを更新・再設定する](docs/user/node-maintenance.md)
 - [標準構成以外・高度な構成](docs/user/advanced-configuration.md)
