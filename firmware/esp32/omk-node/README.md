@@ -304,6 +304,44 @@ Raspberry PiはOMK専用APを提供し、NodeはそのWi-Fiへ接続します。
 
 電波が弱いフロアでは、`ble_scan` capabilityを持つAtomS3 LiteをBLE scanner / relayとして配置できます。BLE中継専用NodeにLogical IDの登録は不要です。Nodeは接続不要のSwitchBot BLEアドバタイズをactive scanで受信し、Wi-Fi/MQTTでGatewayへraw relayします。Gatewayが物理identityをregistryで解決する方式で実装済みです。詳細は上記relay節を参照してください。
 
+## MQTT送信pollとoutbox診断
+
+SEN66のenqueue成功後の欠測対策として、AtomS3 LiteのMQTT poll read timeoutを1,000msから100msへ変更した。利用者による実機比較試験後、正式採用する。MQTT QoS、BLE scanning・中継判定、Mesh接続・復旧、SEN66読み取り周期は変更しない。
+
+`dependencies.lock`と実ビルドはESP-IDF 6.0.1／ESP-MQTT 1.1.0。採用ソースは`managed_components/espressif__mqtt/mqtt_client.c`。接続中のtaskはQUEUED項目を1ループで1件送信した後に受信pollへ入る。enqueueはpollを起こさず、受信データがなければ旧設定では約1件/秒の排出になり得る。さらに30秒を超えた未送信outbox項目は送信前に期限切れ削除される。100msはpoll待ち時間の指定であり、送信間隔を保証する値ではない。依存ライブラリは無編集。
+
+| 設定 | 採用値 |
+| --- | --- |
+| `CONFIG_MQTT_USE_CUSTOM_CONFIG` | y |
+| `CONFIG_MQTT_POLL_READ_TIMEOUT_MS` | 100 |
+| `CONFIG_MQTT_REPORT_DELETED_MESSAGES` | y |
+| outbox保持期限 | 30000ms（維持） |
+| MQTT buffer / task stack / priority | 1024B / 6144B / 5（維持） |
+| event queue / API mutex | 1 / 有効（維持） |
+
+設定は`sdkconfig.atom-s3-lite`。custom config有効化で明示される他の値は従来の実効defaultを維持する。生成された`config/sdkconfig.json`と`compile_commands.json`を回帰テストで確認する。
+
+既存の`omk/node/<node_id>/status`に次の`mqtt`オブジェクトを追加する。定期メッセージ数は増やさない。最大値・累計は起動時にリセットし、MQTT再接続では保持する。
+
+| フィールド | 意味と限界 |
+| --- | --- |
+| `mqtt.outbox_bytes` | status生成時のoutbox格納データbyte数。このstatus自身のenqueue前の値。件数や全heap占有量ではない |
+| `mqtt.outbox_sampled_max_bytes` | enqueue後とstatus生成時に公開APIで観測した最大値。非同期送信との競合があり、厳密な瞬間peakではない |
+| `mqtt.expired_messages` | `MQTT_EVENT_DELETED`受信数。QoS 0を含む全topic合計。送信成功後の通常削除を含まない |
+| `mqtt.error_events` | `MQTT_EVENT_ERROR`受信数。接続・受信等も含み、送信専用エラー数ではない |
+
+ESP-MQTT 1.1.0は削除関数の戻り値を`>= 0`で判定するため、QoS 0のmsg_id=0も通知される。ただし削除topic・payload・測定連番はイベントから取得できない。ライブラリのイベント配送自体に失敗した場合の削除数も保証しない。statusのバッファ確保・構築に失敗した場合は既存statusを送信する。
+
+Gatewayでの確認例:
+
+```bash
+mosquitto_sub -h 127.0.0.1 -F '%I %t %p' -t 'omk/node/09dda0d5a8f2/status'
+```
+
+実機比較では全PUBLISHの間隔とtopic別件数、SEN66受信率、BLEアドレス別受信状況、outbox滞留・期限切れ、MQTT切断、空きheap、Mesh状態を同じ配置・負荷・観測時間で比較する。TCP packet数ではなく、streamを再構成したMQTTメッセージ数を使う。
+
+正式採用時のソース分離では、実機試験用の保存SHA256記録と既存ローカル成果物が一致することを確認した（app SHA256: `4911f18b553cff10c111eb687786772b129f1857488d0830b2b7b4b2a66c99c0`）。その試験バイナリは未commitのMesh試験変更と別件のSEN66連番診断も含む作業ツリーから生成されており、MQTTだけを採用したcommitと同一構成ではない。MQTTの設定・計数・enqueue観測処理は保持し、status構築から別件診断への依存だけを分離した。公開prebuiltとmanifestは更新していない。ソース版をbuildしても配置済みprebuiltは自動では更新されない。
+
 ## Build
 
 ```bash

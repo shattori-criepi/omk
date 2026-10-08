@@ -65,7 +65,7 @@ def test_status_payload_has_capacity_for_liveness_and_mesh_data_plane_diagnostic
     source = (SOURCE / "mesh_network.c").read_text()
     mqtt = (SOURCE / "mqtt_registration.c").read_text()
     assert "#define OMK_MESH_STATUS_PAYLOAD_SIZE 1152" in source
-    assert "#define OMK_MQTT_MESH_STATUS_PAYLOAD_SIZE 1152" in mqtt
+    assert "#define OMK_MQTT_MESH_STATUS_PAYLOAD_SIZE 1408" in mqtt
     for field in (
         "mqtt_connected", "mqtt_disconnected_duration_s", "mqtt_last_connected_uptime_s",
         "mesh_rx_success_count", "mesh_tx_success_count", "mesh_tx_failure_count",

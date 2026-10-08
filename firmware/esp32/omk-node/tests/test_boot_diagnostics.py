@@ -71,7 +71,7 @@ def test_node_status_has_boot_and_heap_diagnostics_with_capacity():
 def test_registration_and_mesh_status_have_separate_payload_capacity():
     source = (SOURCE / "mqtt_registration.c").read_text()
     assert "#define OMK_REGISTRATION_PAYLOAD_SIZE 256" in source
-    assert "#define OMK_MQTT_MESH_STATUS_PAYLOAD_SIZE 1152" in source
+    assert "#define OMK_MQTT_MESH_STATUS_PAYLOAD_SIZE 1408" in source
 
 
 def test_switchbot_scan_is_active_and_joins_advertisement_and_scan_response_fragments():

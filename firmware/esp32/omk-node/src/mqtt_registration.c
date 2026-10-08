@@ -4,6 +4,7 @@
 #include <math.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <stdarg.h>
 #include <string.h>
 
@@ -13,6 +14,7 @@
 #include "esp_netif_ip_addr.h"
 #include "esp_wifi.h"
 #include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
 #include "mqtt_client.h"
 #include "nvs.h"
 #include "node_registration.h"
@@ -27,7 +29,7 @@
 /* Two 31-byte advertisement fragments rendered as hex plus fixed JSON fields. */
 #define OMK_MQTT_BLE_RELAY_PAYLOAD_SIZE 512
 #define OMK_MQTT_SEN66_PAYLOAD_SIZE 768
-#define OMK_MQTT_MESH_STATUS_PAYLOAD_SIZE 1152
+#define OMK_MQTT_MESH_STATUS_PAYLOAD_SIZE 1408
 /* Includes a maximum-length logical ID and both uint32 SEN66 diagnostics. */
 #define OMK_REGISTRATION_PAYLOAD_SIZE 256
 #define OMK_MQTT_CLIENT_ID_SIZE 32
@@ -52,6 +54,52 @@ static bool sen66_connected;
 static bool sen66_diagnostics_available;
 static uint32_t sen66_recovery_count;
 static uint32_t sen66_measurement_timeout_count;
+
+/* MQTT delivery diagnostics: all counts are per boot, across reconnects.
+ * Sample the public byte-count API after enqueue and before status generation.
+ * This is an observed maximum, not an atomic peak inside ESP-MQTT. */
+static portMUX_TYPE mqtt_diagnostic_lock = portMUX_INITIALIZER_UNLOCKED;
+static uint32_t mqtt_outbox_sampled_max_bytes;
+static uint32_t mqtt_expired_messages;
+static uint32_t mqtt_error_events;
+
+static uint32_t sample_mqtt_outbox(void) {
+    /* Never call MQTT while holding our critical section (MQTT has its own lock). */
+    int bytes = client ? esp_mqtt_client_get_outbox_size(client) : 0;
+    uint32_t current = bytes > 0 ? (uint32_t)bytes : 0;
+    portENTER_CRITICAL(&mqtt_diagnostic_lock);
+    if (current > mqtt_outbox_sampled_max_bytes) mqtt_outbox_sampled_max_bytes = current;
+    portEXIT_CRITICAL(&mqtt_diagnostic_lock);
+    return current;
+}
+
+static void record_mqtt_diagnostic_event(esp_mqtt_event_id_t event_id) {
+    portENTER_CRITICAL(&mqtt_diagnostic_lock);
+    /* DELETED includes QoS 0 (msg_id=0); only msg_id is valid, not topic/qos. */
+    if (event_id == MQTT_EVENT_DELETED) ++mqtt_expired_messages;
+    if (event_id == MQTT_EVENT_ERROR) ++mqtt_error_events;
+    portEXIT_CRITICAL(&mqtt_diagnostic_lock);
+}
+
+static bool format_mqtt_diagnostics(char *buffer, size_t size) {
+    uint32_t current = sample_mqtt_outbox();
+    portENTER_CRITICAL(&mqtt_diagnostic_lock);
+    uint32_t maximum = mqtt_outbox_sampled_max_bytes;
+    uint32_t expired = mqtt_expired_messages;
+    uint32_t errors = mqtt_error_events;
+    portEXIT_CRITICAL(&mqtt_diagnostic_lock);
+    int n = snprintf(buffer, size,
+        "{\"outbox_bytes\":%" PRIu32 ",\"outbox_sampled_max_bytes\":%" PRIu32
+        ",\"expired_messages\":%" PRIu32 ",\"error_events\":%" PRIu32 "}",
+        current, maximum, expired, errors);
+    return n >= 0 && (size_t)n < size;
+}
+
+static int enqueue_observed(const char *topic, const char *payload) {
+    int message_id = esp_mqtt_client_enqueue(client, topic, payload, 0, 0, 0, true);
+    (void)sample_mqtt_outbox();
+    return message_id;
+}
 
 static bool logical_id_is_valid(const char *logical_id);
 
@@ -299,6 +347,7 @@ static void mqtt_event_handler(void *arg, esp_event_base_t event_base,
     (void)arg;
     (void)event_base;
 
+    record_mqtt_diagnostic_event((esp_mqtt_event_id_t)event_id);
     switch ((esp_mqtt_event_id_t)event_id) {
     case MQTT_EVENT_CONNECTED:
         client_connected = true;
@@ -405,12 +454,32 @@ static esp_err_t publish_mesh_diagnostic(const char *payload, const char *suffix
         strlen(payload) >= OMK_MQTT_MESH_STATUS_PAYLOAD_SIZE) {
         return ESP_ERR_INVALID_SIZE;
     }
-    int message_id = esp_mqtt_client_enqueue(client, topic, payload, 0, 0, 0, true);
+    int message_id = enqueue_observed(topic, payload);
     return message_id < 0 ? ESP_FAIL : ESP_OK;
 }
 
 esp_err_t mqtt_registration_publish_mesh_status(const char *payload) {
-    return publish_mesh_diagnostic(payload, "status");
+    /* Keep existing status fields and cadence. Allocation/format failure must
+     * not suppress the original mesh status. No sensor-task work under a lock. */
+    size_t length = payload ? strlen(payload) : 0;
+    if (length == 0 || payload[length - 1] != '}' ||
+        length >= OMK_MQTT_MESH_STATUS_PAYLOAD_SIZE)
+        return publish_mesh_diagnostic(payload, "status");
+    /* The timer task has a small stack. Build in one bounded heap allocation. */
+    size_t size = OMK_MQTT_MESH_STATUS_PAYLOAD_SIZE;
+    char *combined = malloc(size);
+    if (!combined) return publish_mesh_diagnostic(payload, "status");
+    int n = snprintf(combined, size, "%.*s,\"mqtt\":", (int)(length - 1), payload);
+    bool complete = n >= 0 && (size_t)n < size - 1 &&
+        format_mqtt_diagnostics(combined + n, size - (size_t)n - 1);
+    if (complete) {
+        size_t end = strlen(combined);
+        combined[end] = '}';
+        combined[end + 1] = '\0';
+    }
+    esp_err_t err = publish_mesh_diagnostic(complete ? combined : payload, "status");
+    free(combined);
+    return err;
 }
 
 esp_err_t mqtt_registration_publish_mesh_recovery_status(const char *payload) {
@@ -558,7 +627,7 @@ esp_err_t mqtt_registration_publish_environment(const char *sensor_id,
 
     /* This may be called from the Bluedroid callback task. Enqueueing hands
      * the message to ESP-MQTT's own task without blocking BLE scanning. */
-    int message_id = esp_mqtt_client_enqueue(client, topic, payload, 0, 0, 0, true);
+    int message_id = enqueue_observed(topic, payload);
     return message_id < 0 ? ESP_FAIL : ESP_OK;
 }
 
@@ -620,7 +689,7 @@ esp_err_t mqtt_registration_publish_ble_relay(const char *relay_node_id, const c
     written = snprintf(payload + offset, sizeof(payload) - offset, "]}");
     if (written < 0 || (size_t)written >= sizeof(payload) - offset) return ESP_ERR_INVALID_SIZE;
 
-    int message_id = esp_mqtt_client_enqueue(client, topic, payload, 0, 0, 0, true);
+    int message_id = enqueue_observed(topic, payload);
     return message_id < 0 ? ESP_FAIL : ESP_OK;
 }
 
@@ -691,6 +760,6 @@ esp_err_t mqtt_registration_publish_sen66(const char *sensor_id,
         return ESP_ERR_INVALID_SIZE;
     }
 
-    int message_id = esp_mqtt_client_enqueue(client, topic, payload, 0, 0, 0, true);
+    int message_id = enqueue_observed(topic, payload);
     return message_id < 0 ? ESP_FAIL : ESP_OK;
 }
