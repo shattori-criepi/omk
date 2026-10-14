@@ -16,8 +16,8 @@ def test_sen66_liveness_timeout_reuses_existing_recovery_path():
 def test_sen66_liveness_resets_only_after_a_successful_measurement_read():
     source = (SOURCE / "sensor_manager.c").read_text()
 
-    ready = source[source.index("} else if (data_ready) {") : source.index("if (monotonic_milliseconds() - slot->last_successful_measurement_ms")]
-    assert "last_successful_measurement_ms = monotonic_milliseconds();" in ready
+    ready = source[source.index("} else if (data_ready) {") : source.index("if (!measurement_succeeded &&")]
+    assert "last_successful_measurement_ms = read_completed_ms;" in ready
     assert "slot->driver->publish" in ready
     assert ready.index("last_successful_measurement_ms") < ready.index("slot->driver->publish")
 

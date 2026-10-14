@@ -22,6 +22,7 @@ def status_binary(tmp_path_factory):
     status = source[source.index("static void publish_registration_status"):validation_start]
     constants = "\n".join(re.search(r"^#define " + name + r" .+$", text, re.M).group(0) for name, text in (
         ("OMK_REGISTRATION_PAYLOAD_SIZE", source),
+        ("OMK_MQTT_OUTBOX_BYTES", (SOURCE / "communication_limits.h").read_text()),
         ("OMK_NODE_LOGICAL_ID_MAX_LENGTH", (SOURCE / "node_registration.h").read_text()),
     ))
     harness = r'''
@@ -46,6 +47,11 @@ static char client_id[] = "omk-node-020000000001";
 static char registration_topic[] = "omk/node/020000000001/registration/status";
 static char registration_payload[OMK_REGISTRATION_PAYLOAD_SIZE];
 static bool sen66_connected, sen66_diagnostics_available;
+static int sensor_status_lock;
+static uint32_t sensor_status_version, sensor_status_sent_version;
+static void sen66_delivery_status_sending(bool sending) { (void)sending; }
+#define portENTER_CRITICAL(p) assert(++*(p)==1)
+#define portEXIT_CRITICAL(p) assert(--*(p)==0)
 static uint32_t sen66_recovery_count = UINT32_MAX, sen66_measurement_timeout_count = UINT32_MAX;
 static bool saved_registered, read_failure;
 static const char *saved_id;
@@ -61,7 +67,8 @@ static esp_err_t node_registration_get_logical_id(char *value, size_t size) {
     strcpy(value, saved_id);
     return ESP_OK;
 }
-static int esp_mqtt_client_publish(int handle, const char *topic, const char *payload, int length, int qos, int retain) {
+static int esp_mqtt_client_publish_bounded(int handle, const char *topic, const char *payload, int length, int qos, int retain, unsigned limit) {
+    assert(limit == OMK_MQTT_OUTBOX_BYTES);
     (void)handle;
     assert(strcmp(topic, registration_topic) == 0);
     assert(length == 0 && qos == 1 && retain == 1);
@@ -122,8 +129,8 @@ def test_registered_status_does_not_publish_invalid_or_unreadable_nvs_identity(s
 
 def test_connect_synchronizes_status_without_synthesizing_an_ack():
     source = (SOURCE / "mqtt_registration.c").read_text()
-    connected = source[source.index("case MQTT_EVENT_CONNECTED:"):source.index("case MQTT_EVENT_DATA:")]
+    connected = source[source.index("static void synchronize_registration_connection"):source.index("static void mqtt_event_handler")]
     assert "publish_registration_status();" in connected
     assert "publish_registration_ack" not in connected
     configured = source[source.index("esp_err_t save_err = node_registration_save"):source.index("static void mqtt_event_handler")]
-    assert configured.index("publish_registration_ack(logical_id->valuestring);") < configured.index("publish_registration_status();")
+    assert configured.index("publish_registration_ack(logical_id);") < configured.index("publish_registration_status();")

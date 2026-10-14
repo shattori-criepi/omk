@@ -20,3 +20,6 @@ esp_err_t mesh_netifs_start(bool is_root);
 esp_err_t mesh_netifs_stop(void);
 esp_err_t mesh_netif_start_root_ap(bool is_root, uint32_t dns_addr);
 void mesh_netif_get_diagnostics(mesh_netif_diagnostics_t *diagnostics);
+
+/* Normal telemetry admission only; never gate DHCP/TCP/Mesh control frames. */
+bool mesh_netif_allow_data(void);

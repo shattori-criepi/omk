@@ -1,4 +1,4 @@
-"""Run both recovery stages and the real API dispatch/liveness path with host stubs."""
+"""Run retained root voting and the real API dispatch/liveness path with host stubs."""
 import subprocess
 from pathlib import Path
 
@@ -21,6 +21,8 @@ def recovery_binary(tmp_path_factory):
         #include <string.h>
         #include "mesh_root_recovery.h"
         #include "mesh_recovery.h"
+        #define portENTER_CRITICAL(lock) ((void)0)
+        #define portEXIT_CRITICAL(lock) ((void)0)
 
         typedef int esp_err_t;
         #define ESP_OK 0
@@ -35,7 +37,7 @@ def recovery_binary(tmp_path_factory):
         static bool started = true, mqtt_connected;
         static struct { uint32_t addr; } current_ip = {1};
         static omk_mesh_recovery_t recovery;
-        static unsigned votes, reselections, restarts;
+        static unsigned votes, restarts;
         static esp_err_t api_result = ESP_OK;
         static uint32_t uptime_milliseconds(void) { return now_ms; }
         static bool esp_mesh_is_root(void) { return root; }
@@ -46,11 +48,6 @@ def recovery_binary(tmp_path_factory):
         static esp_err_t esp_mesh_waive_root(const void *vote, int reason) {
             assert(root && vote == NULL && reason == MESH_VOTE_REASON_ROOT_INITIATED);
             ++votes;
-            return api_result;
-        }
-        static esp_err_t esp_mesh_set_self_organized(bool enable, bool select_parent) {
-            assert(root && enable && select_parent);
-            ++reselections;
             return api_result;
         }
     ''' + dispatch + r'''
@@ -70,126 +67,66 @@ def recovery_binary(tmp_path_factory):
                          uint32_t parent_count, uint32_t mqtt_count) {
             now_ms = now;
             root = is_root;
-            unsigned before = votes + reselections;
+            unsigned before = votes;
             mesh_root_recovery_observe_link(&root_recovery, now, root, valid, rssi,
                                             parent_count, mqtt_count);
             try_root_recovery();
-            /* Includes API failures: never fall through to the other stage. */
-            assert(votes + reselections <= before + 1);
+            assert(votes <= before + 1);
         }
         static void weak(uint32_t now) { tick(now, true, true, -85, 0, 0); }
         static void sustained(void) {
-            for (uint32_t t = 0; t < 180000; t += 30000) {
-                weak(t);
-                assert(votes == 0 && reselections == 0);
-            }
-            weak(179999);
-            assert(reselections == 0);
-            weak(180000);
-            assert(votes == 0 && reselections == 1);
-            assert(root_recovery.has_parent_reselected);
-            assert(root_recovery.last_parent_reselection_ms == 180000);
-            assert(!root_recovery.severe_weak_active);
-        }
-        static void reset_observation(const char *scenario) {
-            weak(0);
-            weak(150000);
-            bool is_root = strcmp(scenario, "child_reset") != 0;
-            bool valid = strcmp(scenario, "invalid_reset") != 0;
-            int rssi = strcmp(scenario, "rssi_reset") == 0 ? -84 : -90;
-            tick(179999, is_root, valid, rssi, 0, 0);
-            assert(!root_recovery.severe_weak_active);
-            weak(180000);
-            weak(359999);
-            assert(reselections == 0);
-            weak(360000);
-            assert(reselections == 1);
+            for (uint32_t t = 0; t <= 7200000; t += 30000) weak(t);
+            assert(votes == 0);
         }
         static void invalid(void) {
             for (uint32_t t = 0; t <= 360000; t += 30000)
-                tick(t, true, false, -90, 0, 0);
-            assert(votes == 0 && reselections == 0);
+                tick(t, true, false, -90, t / 10000, t / 15000);
+            assert(votes == 0);
         }
         static void after_vote(bool becomes_child) {
             tick(0, true, true, -89, 0, 0);
             tick(30000, true, true, -89, 3, 0);
-            assert(votes == 1 && reselections == 0);
-            assert(root_recovery.severe_weak_since_ms == 0);
-            for (uint32_t t = 60000; t <= 180000; t += 30000)
+            assert(votes == 1);
+            for (uint32_t t = 60000; t <= 1800000; t += 30000)
                 tick(t, !becomes_child, true, -89, 3, 0);
-            assert(votes == 1 && reselections == (becomes_child ? 0U : 1U));
+            assert(votes == 1); /* No RSSI-only second stage, even after cooldown. */
         }
-        static void cooldown(void) {
-            sustained();
-            /* Even if Mesh makes this node root again, don't immediately retry. */
-            for (uint32_t t = 210000; t < 1080000; t += 30000) weak(t);
-            weak(1079999);
-            assert(reselections == 1);
-            weak(1080000);
-            assert(reselections == 2);
-        }
-        static void cooldown_then_new_episode(void) {
-            sustained();
-            tick(210000, false, true, -90, 0, 0);
-            weak(1080000);
-            weak(1259999);
-            assert(reselections == 1);
-            weak(1260000);
-            assert(reselections == 2);
+        static void cooldown(uint32_t start) {
+            tick(start, true, true, -85, 0, 0);
+            tick(start + 30000U, true, true, -85, 3, 0);
+            assert(votes == 1);
+            tick(start + 929999U, true, true, -85, 6, 0);
+            assert(votes == 1);
+            tick(start + 930000U, true, true, -85, 9, 0);
+            assert(votes == 2);
         }
         static void api_failure(void) {
             weak(0);
             api_result = ESP_FAIL;
-            tick(180000, true, true, -85, 3, 0);
-            assert(votes == 0 && reselections == 1);
-            assert(!root_recovery.has_parent_reselected && !root_recovery.has_executed);
-            assert(!mesh_root_recovery_in_grace(&root_recovery, 180001));
-            assert(root_recovery.severe_weak_active);
-            assert(root_recovery.severe_weak_since_ms == 0);
+            tick(30000, true, true, -85, 3, 0);
+            assert(votes == 1 && root_recovery.pending);
+            assert(!mesh_root_recovery_in_grace(&root_recovery, 30001));
+            assert(!root_recovery.cooldown_active);
+            tick(60000, true, true, -85, 3, 0);
+            assert(votes == 2 && root_recovery.pending);
             api_result = ESP_OK;
-            tick(210000, true, true, -85, 3, 0);
-            assert(votes == 0 && reselections == 2);
-            assert(root_recovery.last_parent_reselection_ms == 210000);
+            tick(90000, true, true, -85, 3, 0);
+            assert(votes == 3 && !root_recovery.pending);
+            assert(mesh_root_recovery_in_grace(&root_recovery, 90001));
         }
-        static void priority(bool topology) {
-            weak(0);
-            if (topology) mesh_root_recovery_note_topology_change(&root_recovery, 120000, true);
-            tick(180000, true, true, -85, topology ? 0 : 3, 0);
-            assert(votes == 0 && reselections == 1);
-            assert(!root_recovery.pending);
-            /* Rejoins after reselection don't immediately trigger Level 1. */
-            mesh_root_recovery_note_topology_change(&root_recovery, 210000, true);
-            tick(210000, true, true, -90, 6, 2);
-            assert(votes == 0 && reselections == 1);
-        }
-        static void wrap(uint32_t start) {
-            weak(start);
-            weak(start + 179999U);
-            assert(reselections == 0);
-            weak(start + 180000U);
-            assert(reselections == 1);
-            assert(mesh_root_recovery_in_grace(&root_recovery, start + 299999U));
-            assert(!mesh_root_recovery_in_grace(&root_recovery, start + 300000U));
-            weak(start + 210000U);
-            weak(start + 1079999U);
-            assert(reselections == 1);
-            weak(start + 1080000U);
-            assert(reselections == 2);
-        }
-        static void grace(bool level2) {
+        static void grace(void) {
             /* MQTT has already timed out when recovery starts. */
             now_ms = 1000;
             check_mqtt_liveness();
-            if (level2) weak(1000);
-            else tick(1000, true, true, -80, 0, 0);
-            tick(181000, true, true, level2 ? -85 : -80, 3, 0);
-            assert(level2 ? reselections == 1 : votes == 1);
+            tick(1000, true, true, -80, 0, 0);
+            tick(181000, true, true, -80, 3, 0);
+            assert(votes == 1);
             now_ms = 300999;
             check_mqtt_liveness();
             assert(restarts == 0);
             now_ms = 301000;
             check_mqtt_liveness();
-            assert(restarts == 1);
+            assert(restarts == 0);
             /* An actual disconnect resets liveness; allow a fresh 180 seconds
              * after reconnection, even if recovery grace has already elapsed. */
             parent_connected = false;
@@ -200,30 +137,30 @@ def recovery_binary(tmp_path_factory):
             check_mqtt_liveness();
             now_ms = 509999;
             check_mqtt_liveness();
-            assert(restarts == 1);
+            assert(restarts == 0);
             now_ms = 510000;
             check_mqtt_liveness();
-            assert(restarts == 1 && recovery.restart_spent);
+            assert(restarts == 0 && !recovery.restart_spent);
         }
         static void execution_guards(void) {
             weak(0);
             parent_connected = false;
-            weak(180000);
+            tick(180000, true, true, -85, 3, 0);
             parent_connected = true;
             is_rootless = true;
-            weak(210000);
+            tick(210000, true, true, -85, 3, 0);
             is_rootless = false;
             now_ms = 240000;
             root = false;  /* Role changed after sampling. */
             try_root_recovery();
-            assert(votes == 0 && reselections == 0);
-            weak(270000);
-            assert(reselections == 1);
+            assert(votes == 0);
+            tick(270000, true, true, -85, 3, 0);
+            assert(votes == 1);
         }
         static void mqtt_vote(void) {
             tick(0, true, true, -80, 0, 0);
             tick(30000, true, true, -80, 0, 2);
-            assert(votes == 1 && reselections == 0);
+            assert(votes == 1);
         }
         int main(int argc, char **argv) {
             assert(argc == 2);
@@ -232,19 +169,13 @@ def recovery_binary(tmp_path_factory):
             recovery.jitter_ms = 0;
             const char *scenario = argv[1];
             if (!strcmp(scenario, "sustained")) sustained();
-            else if (strstr(scenario, "_reset")) reset_observation(scenario);
             else if (!strcmp(scenario, "invalid")) invalid();
             else if (!strcmp(scenario, "after_vote")) after_vote(false);
             else if (!strcmp(scenario, "child_after_vote")) after_vote(true);
-            else if (!strcmp(scenario, "cooldown")) cooldown();
-            else if (!strcmp(scenario, "cooldown_new_episode")) cooldown_then_new_episode();
+            else if (!strcmp(scenario, "cooldown")) cooldown(0);
+            else if (!strcmp(scenario, "wrap_cooldown")) cooldown(UINT32_MAX - 250000U);
             else if (!strcmp(scenario, "api_failure")) api_failure();
-            else if (!strcmp(scenario, "priority_weak")) priority(false);
-            else if (!strcmp(scenario, "priority_topology")) priority(true);
-            else if (!strcmp(scenario, "wrap_duration")) wrap(UINT32_MAX - 100000U);
-            else if (!strcmp(scenario, "wrap_cooldown")) wrap(UINT32_MAX - 250000U);
-            else if (!strcmp(scenario, "level1_grace")) grace(false);
-            else if (!strcmp(scenario, "level2_grace")) grace(true);
+            else if (!strcmp(scenario, "grace")) grace();
             else if (!strcmp(scenario, "guards")) execution_guards();
             else if (!strcmp(scenario, "mqtt_vote")) mqtt_vote();
             else assert(false);
@@ -264,20 +195,21 @@ def recovery_binary(tmp_path_factory):
 
 
 @pytest.mark.parametrize("scenario", [
-    "sustained", "rssi_reset", "child_reset", "invalid_reset", "invalid",
-    "after_vote", "child_after_vote", "cooldown", "cooldown_new_episode",
-    "api_failure", "priority_weak", "priority_topology", "wrap_duration", "wrap_cooldown",
-    "level1_grace", "level2_grace", "guards", "mqtt_vote",
+    "sustained", "invalid", "after_vote", "child_after_vote", "cooldown",
+    "api_failure", "wrap_cooldown", "grace", "guards", "mqtt_vote",
 ])
-def test_recovery_stages(recovery_binary, scenario):
+def test_root_vote_dispatch(recovery_binary, scenario):
     result = subprocess.run([str(recovery_binary), scenario], check=True, capture_output=True, text=True)
     if scenario == "api_failure":
-        assert "root parent reselection failed: sustained_weak_root (ESP_FAIL)" in result.stdout
-        assert "root parent reselection executed: sustained_weak_root" in result.stdout
+        assert "root reelection deferred: root_link_unhealthy (ESP_FAIL)" in result.stdout
+        assert "root reelection executed: root_link_unhealthy (level=1)" in result.stdout
 
 
 def test_status_observes_link_then_recovers_before_liveness():
     source = (SOURCE / "mesh_network.c").read_text()
     status = source[source.index("static void publish_status"):source.index("static void ip_event_handler")]
-    assert (status.index("mesh_root_recovery_observe_link(") < status.index("try_recovery();")
-            < status.index("publish_recovery_status(node_id);"))
+    assert status.index("mesh_root_recovery_observe_link(") < status.index("publish_recovery_status(node_id);")
+    assert "try_recovery();" not in status
+    monitor = source[source.index("static void recovery_task"):source.index("static void publish_recovery_status")]
+    assert "try_recovery();" in monitor
+    assert "vTaskDelay(pdMS_TO_TICKS(1000))" in monitor

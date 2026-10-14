@@ -23,6 +23,7 @@ typedef struct sen66_measurement {
     float nox_index;
     float co2_ppm;
     uint32_t uptime_ms;
+    uint32_t sequence; /* Successful reads in this boot, including unsent samples. */
 } sen66_measurement_t;
 
 typedef struct {

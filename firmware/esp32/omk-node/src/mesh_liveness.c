@@ -5,6 +5,39 @@
 bool mesh_mqtt_liveness_should_recover(const omk_mesh_mqtt_liveness_state_t *state) {
     return state != NULL && state->mesh_started && state->parent_connected &&
            !state->rootless && state->has_ip && state->normal_operation &&
-           !state->mqtt_connected &&
+           (!state->mqtt_connected || !state->mqtt_progress) &&
            state->mqtt_disconnected_duration_s >= OMK_MESH_MQTT_LIVENESS_TIMEOUT_S;
+}
+
+bool mqtt_progress_probe_due(const omk_mqtt_progress_t *s, uint32_t now, bool connected) {
+    return connected && !s->submitting && s->pending_id == 0 &&
+           (!s->attempted || (uint32_t)(now - s->attempt_ms) >= OMK_MQTT_PROBE_INTERVAL_MS);
+}
+
+bool mqtt_progress_begin(omk_mqtt_progress_t *s, uint32_t now, bool connected) {
+    if (!mqtt_progress_probe_due(s, now, connected)) return false;
+    s->submitting = true;
+    return true;
+}
+
+void mqtt_progress_result(omk_mqtt_progress_t *s, uint32_t now, int message_id) {
+    s->attempted = true;
+    s->attempt_ms = now;
+    s->pending_id = message_id > 0 ? message_id : 0;
+    s->submitting = false;
+}
+
+void mqtt_progress_event(omk_mqtt_progress_t *s, uint32_t now, int message_id, bool acknowledged) {
+    if (s->submitting) return; /* Only unrelated IDs can precede installation. */
+    if (message_id <= 0 || message_id != s->pending_id) return;
+    s->pending_id = 0;
+    if (acknowledged) {
+        s->ack_seen = true;
+        s->ack_ms = now;
+        ++s->ack_count;
+    }
+}
+
+bool mqtt_progress_is_fresh(const omk_mqtt_progress_t *s, uint32_t now) {
+    return s->ack_seen && (uint32_t)(now - s->ack_ms) < OMK_MQTT_PROGRESS_FRESH_MS;
 }

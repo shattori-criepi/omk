@@ -73,8 +73,8 @@ def test_sen66_mqtt_failure_does_not_stop_periodic_measurement():
     publish = sensor_manager[sensor_manager.index("err = slot->driver->publish") :]
     assert "mqtt_warning_logged = true;" in publish
     assert "mqtt_warning_logged = false;" in publish
-    assert "slot->next_attempt_ms = monotonic_milliseconds() + SENSOR_MEASUREMENT_INTERVAL_MS;" in publish
-    assert "mqtt_registration_publish_sen66(logical_id, &ctx->sample)" in (SOURCE / "sensor_drivers.c").read_text()
+    assert "slot->next_attempt_ms = read_completed_ms + SENSOR_MEASUREMENT_INTERVAL_MS;" in publish
+    assert "sen66_delivery_submit(logical_id, &ctx->sample)" in (SOURCE / "sensor_drivers.c").read_text()
 
 
 def test_registration_status_payload_has_dedicated_capacity_for_sensor_presence():
@@ -83,7 +83,8 @@ def test_registration_status_payload_has_dedicated_capacity_for_sensor_presence(
     assert "static char registration_payload[OMK_REGISTRATION_PAYLOAD_SIZE];" in source
     status = source[source.index("static void publish_registration_status") : source.index("static bool logical_id_is_valid(const char *logical_id) {")]
     assert '"\\\"connected_sensors\\\":%s%s}"' in status
-    assert "esp_mqtt_client_publish(client, registration_topic," in status
+    assert "esp_mqtt_client_publish_bounded(client, registration_topic," in status
+    assert "OMK_MQTT_OUTBOX_BYTES" in status
     assert "registration_payload, 0, 1, 1" in status
 
     for state, sensors in (("registered", ["sen66"]), ("provisioned", [])):
@@ -117,7 +118,7 @@ def test_registration_status_includes_sen66_recovery_diagnostics_only_after_reco
     source = (SOURCE / "mqtt_registration.c").read_text()
     status = source[source.index("static void publish_registration_status") : source.index("static bool logical_id_is_valid(const char *logical_id) {")]
 
-    assert "if (sen66_diagnostics_available)" in status
+    assert "if (diagnostics_available)" in status
     assert "sen66_rc" in status
     assert "sen66_to" in status
     assert "mqtt_registration_set_sen66_diagnostics" in source

@@ -29,7 +29,7 @@ static void init(bool spent) {
     in = (omk_mesh_recovery_input_t){.started=true, .mqtt_started=true};
 }
 static void healthy(void) {
-    in.parent_connected = in.has_ip = in.mqtt_connected = true;
+    in.parent_connected = in.has_ip = in.mqtt_connected = in.mqtt_progress = true;
     in.rootless = false;
 }
 static void accepted(uint32_t t) {
@@ -76,19 +76,19 @@ static void restart(void) {
     assert(tick(780000) == OMK_RECOVERY_RESTART);
     mesh_recovery_complete(&s, 780000, OMK_RECOVERY_RESTART, true);
     assert(s.restart_spent);
-    for (uint32_t t = 810000; t < 7200000; t += 30000) {
+    for (uint32_t t = 810000; t < 3600000; t += 30000) {
         omk_mesh_recovery_action_t a = tick(t);
         assert(a != OMK_RECOVERY_RESTART && a != OMK_RECOVERY_REARM);
         if (a != OMK_RECOVERY_NONE) mesh_recovery_complete(&s, t, a, true);
     }
     /* Brief success followed by MQTT-only failure is the SAME budget. */
-    healthy(); tick(7200000);
+    healthy(); tick(3000000);
     in.mqtt_connected = false;
-    tick(7200001);
-    assert(tick(7500000) == OMK_RECOVERY_NONE);
+    tick(3000001);
+    assert(tick(3300000) == OMK_RECOVERY_NONE);
     init(true); /* Simulate boot loading spent NVS marker. */
     tick(0); accepted(120000);
-    for (uint32_t t = 150000; t < 7200000; t += 30000) {
+    for (uint32_t t = 150000; t < 3600000; t += 30000) {
         omk_mesh_recovery_action_t a = tick(t);
         assert(a != OMK_RECOVERY_RESTART);
         if (a != OMK_RECOVERY_NONE) mesh_recovery_complete(&s, t, a, true);
@@ -118,45 +118,75 @@ static void healthy_interrupt(const char *which) {
     assert(tick(1800000) == OMK_RECOVERY_REARM);
 }
 static void roles(void) {
-    tick(0);
+    tick(0); accepted(120000);
     in.is_root = true;
-    assert(tick(120000) == OMK_RECOVERY_ROUTER_RECONNECT);
+    assert(tick(150000) == OMK_RECOVERY_NONE);
+    assert(!s.explicit_accepted && s.loss_since_ms==150000);
+    assert(tick(270000) == OMK_RECOVERY_ROUTER_RECONNECT);
     in.is_root = false;
-    accepted(150000);
+    assert(tick(300000) == OMK_RECOVERY_NONE);
+    accepted(420000);
     in.is_root = true;
-    assert(tick(450000) == OMK_RECOVERY_ROUTER_RECONNECT);
+    assert(tick(450000) == OMK_RECOVERY_NONE);
+    assert(tick(570000) == OMK_RECOVERY_ROUTER_RECONNECT);
+    assert(tick(1050000) == OMK_RECOVERY_ROUTER_RECONNECT); // child API never authorizes Root reboot
+    mesh_recovery_complete(&s,1050000,OMK_RECOVERY_ROUTER_RECONNECT,true);
+    assert(tick(1230000)==OMK_RECOVERY_RESTART); // Root's own reconnect got settle time
     in.parent_connected = true; in.rootless = true;
-    assert(tick(480000) == OMK_RECOVERY_NONE); /* Do not discard a router. */
+    assert(tick(1230001) == OMK_RECOVERY_NONE); // Intact router protected
     in.is_root = false;
-    assert(tick(480000) == OMK_RECOVERY_CHILD_RESELECT);
+    assert(tick(1230002) == OMK_RECOVERY_NONE);
+    assert(tick(1350002) == OMK_RECOVERY_CHILD_RESELECT);
 }
 static void priority(void) {
     in.is_root = true;
-    mesh_root_recovery_note_topology_change(&root, 0, true);
     mesh_root_recovery_observe_link(&root, 0, true, true, -90, 0, 0);
-    tick(0);
-    assert(tick(180000) == OMK_RECOVERY_ROUTER_RECONNECT);
+    mesh_root_recovery_observe_link(&root, 30000, true, true, -90, 3, 0);
+    tick(30000);
+    assert(tick(210000) == OMK_RECOVERY_ROUTER_RECONNECT);
     healthy(); in.mqtt_connected = false;
-    tick(180001);
-    assert(tick(360001) == OMK_RECOVERY_WEAK_ROOT);
-    mesh_root_recovery_mark_executed(&root, 360001, OMK_MESH_ROOT_RECOVERY_PARENT_RESELECTION);
-    assert(tick(480000) == OMK_RECOVERY_NONE);
-    assert(tick(480001) == OMK_RECOVERY_RESTART);
-    init(false); healthy(); in.is_root=true; in.mqtt_connected=false;
-    tick(0);
-    mesh_root_recovery_note_topology_change(&root, 120000, true);
-    assert(tick(180000) == OMK_RECOVERY_ROOT_VOTE);
+    tick(210001);
+    assert(tick(390001) == OMK_RECOVERY_ROOT_VOTE);
+    mesh_root_recovery_mark_executed(&root, 390001);
+    assert(tick(510000) == OMK_RECOVERY_NONE);
+    assert(tick(510001) == OMK_RECOVERY_NONE);
+    in.is_root = false;
+    assert(tick(510002) == OMK_RECOVERY_RESTART);
 }
 static void grace(void) {
     healthy(); in.is_root=true; in.mqtt_connected=false;
     tick(0);
-    mesh_root_recovery_mark_executed(&root, 180000, OMK_MESH_ROOT_RECOVERY_REELECTION);
+    mesh_root_recovery_mark_executed(&root, 180000);
     assert(tick(299999) == OMK_RECOVERY_NONE);
-    assert(tick(300000) == OMK_RECOVERY_RESTART);
+    assert(tick(300000) == OMK_RECOVERY_NONE);
+    in.is_root = false;
+    assert(tick(300001) == OMK_RECOVERY_RESTART);
     init(false); tick(0);
-    mesh_root_recovery_mark_executed(&root, 180000, OMK_MESH_ROOT_RECOVERY_PARENT_RESELECTION);
+    mesh_root_recovery_mark_executed(&root, 180000);
     assert(tick(299999) == OMK_RECOVERY_NONE);
     assert(tick(300000) == OMK_RECOVERY_CHILD_RESELECT);
+}
+static void old_grace(uint32_t days) {
+    uint32_t start=1000U, later=start+days*86400000U;
+    healthy(); in.is_root=true;
+    mesh_root_recovery_mark_executed(&root,start);
+    tick(start);
+    tick(start+120000U);
+    tick(start+900000U);
+    in.mqtt_connected=false;
+    assert(tick(later)==OMK_RECOVERY_NONE);
+    assert(tick(later+180000U)==OMK_RECOVERY_NONE);
+    in.is_root=false;
+    assert(tick(later+180001U)==OMK_RECOVERY_RESTART);
+
+    init(false); healthy();
+    mesh_root_recovery_mark_executed(&root,start);
+    tick(start);
+    tick(start+120000U);
+    tick(start+900000U);
+    in.parent_connected=false;
+    assert(tick(later)==OMK_RECOVERY_NONE);
+    assert(tick(later+120000U)==OMK_RECOVERY_CHILD_RESELECT);
 }
 static void events(void) {
     tick(0);
@@ -237,6 +267,45 @@ static void mqtt(void) {
     in.started=false;
     assert(tick(900000)==OMK_RECOVERY_NONE && s.stage==OMK_RECOVERY_IDLE);
 }
+
+static void stalled_connected(void) {
+    healthy(); in.mqtt_progress=false;
+    assert(tick(0)==OMK_RECOVERY_NONE && s.stage==OMK_RECOVERY_MQTT_WAIT);
+    assert(tick(179999)==OMK_RECOVERY_NONE);
+    assert(tick(180000)==OMK_RECOVERY_RESTART);
+    in.is_root=true;
+    assert(tick(200000)==OMK_RECOVERY_NONE); /* Root MQTT failure cannot reboot tree. */
+    in.rootless=true;
+    tick(210000); s.explicit_accepted=true; s.explicit_since_ms=210000;
+    assert(tick(900000)==OMK_RECOVERY_NONE); /* Associated Root stays protected. */
+}
+static void retry_after_boot(void) {
+    init(true); healthy(); in.mqtt_progress=false;
+    tick(0);
+    assert(s.stage==OMK_RECOVERY_BUDGET_HOLD && !s.healthy_active);
+    assert(tick(OMK_MESH_RESTART_RETRY_MS-1)==OMK_RECOVERY_NONE);
+    assert(tick(OMK_MESH_RESTART_RETRY_MS)==OMK_RECOVERY_RESTART);
+    mesh_recovery_complete(&s,OMK_MESH_RESTART_RETRY_MS,OMK_RECOVERY_RESTART,true);
+    assert(s.restart_spent); /* Time alone never rearms the normal budget. */
+    assert(tick(2*OMK_MESH_RESTART_RETRY_MS-1)==OMK_RECOVERY_NONE);
+    assert(tick(2*OMK_MESH_RESTART_RETRY_MS)==OMK_RECOVERY_RESTART);
+    init(true); healthy(); in.mqtt_progress=false; tick(0);
+    assert(tick(180000)==OMK_RECOVERY_NONE); /* Fresh reboot restarts cooldown. */
+    s.persistence_blocked=true;
+    assert(tick(4*OMK_MESH_RESTART_RETRY_MS)==OMK_RECOVERY_NONE);
+    init(true); healthy(); tick(0); in.mqtt_progress=false; tick(899999);
+    in.mqtt_progress=true; tick(900000);
+    assert(tick(1799999)!=OMK_RECOVERY_REARM);
+    assert(tick(1800000)==OMK_RECOVERY_REARM);
+}
+static void retry_wrap(void) {
+    uint32_t base=UINT32_MAX-1000U;
+    init(true); healthy(); in.mqtt_progress=false; tick(base);
+    assert(tick(base+OMK_MESH_RESTART_RETRY_MS-1)==OMK_RECOVERY_NONE);
+    assert(tick(base+OMK_MESH_RESTART_RETRY_MS)==OMK_RECOVERY_RESTART);
+    mesh_recovery_complete(&s,base+OMK_MESH_RESTART_RETRY_MS,OMK_RECOVERY_RESTART,false);
+    assert(tick(base+2*OMK_MESH_RESTART_RETRY_MS)==OMK_RECOVERY_NONE);
+}
 int main(int argc,char **argv) {
     assert(argc==2); init(false);
     if (!strcmp(argv[1],"transient")) transient();
@@ -248,11 +317,16 @@ int main(int argc,char **argv) {
     else if (!strcmp(argv[1],"roles")) roles();
     else if (!strcmp(argv[1],"priority")) priority();
     else if (!strcmp(argv[1],"grace")) grace();
+    else if (!strcmp(argv[1],"old_grace_25")) old_grace(25);
+    else if (!strcmp(argv[1],"old_grace_30")) old_grace(30);
     else if (!strcmp(argv[1],"events")) events();
     else if (!strcmp(argv[1],"api_failure")) api_failure();
     else if (!strcmp(argv[1],"wrap")) wrap();
     else if (!strcmp(argv[1],"jitter")) jitter();
     else if (!strcmp(argv[1],"mqtt")) mqtt();
+    else if (!strcmp(argv[1],"stalled_connected")) stalled_connected();
+    else if (!strcmp(argv[1],"retry_after_boot")) retry_after_boot();
+    else if (!strcmp(argv[1],"retry_wrap")) retry_wrap();
     else assert(false);
 }
 ''')
@@ -267,7 +341,7 @@ int main(int argc,char **argv) {
 @pytest.mark.parametrize("scenario", [
     "transient", "reselection", "restart", "rearm", "mqtt_flap", "parent_flap",
     "ip_flap", "rootless_flap", "roles", "priority", "grace", "events",
-    "api_failure", "wrap", "jitter", "mqtt", "repeated_reselection",
+    "api_failure", "wrap", "jitter", "mqtt", "repeated_reselection", "old_grace_25", "old_grace_30", "stalled_connected", "retry_after_boot", "retry_wrap",
 ])
 def test_policy(policy_binary, scenario):
     subprocess.run([str(policy_binary), scenario], check=True)

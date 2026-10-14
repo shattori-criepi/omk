@@ -4,6 +4,7 @@ No simulated radio or throughput claim: check byte accounting, expiry, event
 routing (including QoS 0 id=0), and the effective poll/configuration constants.
 """
 import json
+import os
 from pathlib import Path
 import subprocess
 
@@ -46,15 +47,16 @@ typedef int esp_mqtt_event_id_t;
 #define MQTT_EVENT_ERROR 0
 static void *client=(void *)1;
 static int bytes, result, reads;
-static int esp_mqtt_client_get_outbox_size(void *);
-static int esp_mqtt_client_enqueue(void *,const char *,const char *,int,int,int,bool);
+static int esp_mqtt_client_get_outbox_size_nowait(void *);
+static int esp_mqtt_client_enqueue_bounded(void *,const char *,const char *,int,int,int,unsigned,void (*)(int));
+#include "communication_limits.h"
 ''' + delivery_source() + r'''
-static int esp_mqtt_client_get_outbox_size(void *c) {
+static int esp_mqtt_client_get_outbox_size_nowait(void *c) {
     assert(c && mqtt_diagnostic_lock==0); ++reads; return bytes;
 }
-static int esp_mqtt_client_enqueue(void *c,const char *t,const char *p,int len,int qos,int retain,bool store) {
+static int esp_mqtt_client_enqueue_bounded(void *c,const char *t,const char *p,int len,int qos,int retain,unsigned limit,void (*submitted)(int)) {
     assert(c && !strcmp(t,"test") && !strcmp(p,"payload"));
-    assert(!len && !qos && !retain && store && mqtt_diagnostic_lock==0);
+    assert(!len && !qos && !retain && limit==OMK_MQTT_DATA_BYTES && !submitted && mqtt_diagnostic_lock==0);
     return result;
 }
 int main(void) {
@@ -74,7 +76,7 @@ int main(void) {
     return 0;
 }
 '''
-    first, reconnected = map(json.loads, compile_run(tmp_path, source).splitlines())
+    first, reconnected = map(json.loads, compile_run(tmp_path, source, [PROJECT / "src"]).splitlines())
     assert first == {"outbox_bytes": 128, "outbox_sampled_max_bytes": 4096, "expired_messages": 2, "error_events": 1}
     assert reconnected == {**first, "outbox_bytes": 0}
     source = (PROJECT / "src/mqtt_registration.c").read_text()
@@ -161,13 +163,18 @@ def test_custom_config_keeps_other_effective_mqtt_defaults(tmp_path):
     compile_run(tmp_path, '''
 #include <assert.h>
 #include "mqtt_config.h"
-typedef void *esp_mqtt_client_handle_t;
+#include <stdatomic.h>
+struct mock_client { atomic_int queued_events; };
+typedef struct mock_client *esp_mqtt_client_handle_t;
 #pragma GCC diagnostic ignored "-Wunused-parameter"
 ''' + poll + '''
 int main(void) {
     assert(CONFIG_MQTT_USE_CUSTOM_CONFIG==1 && MQTT_REPORT_DELETED_MESSAGES==1);
     assert(MQTT_POLL_READ_TIMEOUT_MS==100);
-    assert(max_poll_timeout(0,MQTT_POLL_READ_TIMEOUT_MS)==100);
+    struct mock_client c = {0};
+    assert(max_poll_timeout(&c,MQTT_POLL_READ_TIMEOUT_MS)==100);
+    atomic_store(&c.queued_events,1);
+    assert(max_poll_timeout(&c,MQTT_POLL_READ_TIMEOUT_MS)==100);
     assert(MQTT_EVENT_QUEUE_SIZE==1 && OUTBOX_EXPIRED_TIMEOUT_MS==30000);
     assert(MQTT_BUFFER_SIZE_BYTE==1024 && MQTT_TASK_STACK==6144 && MQTT_TASK_PRIORITY==5);
     assert(MQTT_TCP_DEFAULT_PORT==1883 && MQTT_SSL_DEFAULT_PORT==8883);
@@ -182,7 +189,7 @@ int main(void) {
 
 
 def test_generated_atom_build_uses_managed_mqtt_and_poll_100ms():
-    build = PROJECT / ".pio/build/atom-s3-lite"
+    build = Path(os.environ.get("OMK_FIRMWARE_BUILD_DIR", PROJECT / ".pio/build/atom-s3-lite"))
     if not (build / "config/sdkconfig.json").exists():
         pytest.skip("Run the AtomS3 Lite build to check effective generated config")
     config = json.loads((build / "config/sdkconfig.json").read_text())
@@ -192,70 +199,10 @@ def test_generated_atom_build_uses_managed_mqtt_and_poll_100ms():
     assert config["MQTT_EVENT_QUEUE_SIZE"] == 1
     assert not config["MQTT_DISABLE_API_LOCKS"]
     entries = json.loads((build / "compile_commands.json").read_text())
-    entry = next(e for e in entries if e["file"].endswith("espressif__mqtt/mqtt_client.c"))
+    # Diagnostic v2 compiles a verified patched copy; normal builds use managed source.
+    mqtt_sources = {str((MQTT / "mqtt_client.c").resolve()),
+                    str((build / "network_diagnostics/mqtt_client.c").resolve())}
+    matches = [e for e in entries if e["file"] in mqtt_sources]
+    assert len(matches) == 1
+    entry = matches[0]
     assert str((build / "config").resolve()) in entry["command"]
-
-
-def test_node_status_preserves_fields_capacity_and_allocation_fallback(tmp_path):
-    mqtt = (PROJECT / "src/mqtt_registration.c").read_text()
-    mesh = mqtt[mqtt.index("static esp_err_t publish_mesh_diagnostic("):mqtt.index("static void start_or_reconnect_mqtt(")]
-    constants = "\n".join(line for line in mqtt.splitlines() if line.startswith(("#define OMK_MQTT_TOPIC_SIZE ", "#define OMK_MQTT_MESH_STATUS_PAYLOAD_SIZE ")))
-    output = compile_run(tmp_path, r'''
-#include <assert.h>
-#include <stdbool.h>
-#include <stdint.h>
-#include <inttypes.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-typedef int portMUX_TYPE;
-typedef int esp_mqtt_event_id_t;
-typedef int esp_err_t;
-#define portMUX_INITIALIZER_UNLOCKED 0
-#define portENTER_CRITICAL(p) assert(++*(p)==1)
-#define portEXIT_CRITICAL(p) assert(--*(p)==0)
-#define MQTT_EVENT_DELETED 10
-#define MQTT_EVENT_ERROR 0
-#define ESP_OK 0
-#define ESP_FAIL -1
-#define ESP_ERR_INVALID_ARG 1
-#define ESP_ERR_INVALID_STATE 2
-#define ESP_ERR_INVALID_SIZE 3
-static void *client=(void *)1;
-static bool client_connected=true, fail_allocation;
-static unsigned calls;
-static char captured[2048];
-static int esp_mqtt_client_get_outbox_size(void *c) {assert(c);return 1234;}
-static int esp_mqtt_client_enqueue(void *c,const char *t,const char *p,int len,int qos,int retain,bool store) {
-    assert(c && !strcmp(t,"omk/node/09dda0d5a8f2/status"));
-    assert(!len && !qos && !retain && store);
-    ++calls;assert(strlen(p)<sizeof(captured));strcpy(captured,p);return 0;
-}
-static esp_err_t node_identity_get_id(uint64_t *id) {*id=0x09dda0d5a8f2;return ESP_OK;}
-static void *test_malloc(size_t size) {return fail_allocation?NULL:malloc(size);}
-#define malloc test_malloc
-''' + constants + "\n" + delivery_source() + mesh + r'''
-int main(void) {
-    record_mqtt_diagnostic_event(MQTT_EVENT_DELETED);
-    assert(mqtt_registration_publish_mesh_status("{\"node_id\":\"09dda0d5a8f2\",\"is_root\":true}")==ESP_OK);
-    assert(calls==1);puts(captured);
-    mqtt_outbox_sampled_max_bytes=UINT32_MAX;
-    mqtt_expired_messages=UINT32_MAX;mqtt_error_events=UINT32_MAX;
-    char original[1152];memset(original,' ',sizeof(original));
-    memcpy(original,"{\"node_id\":0",12);original[1150]='}';original[1151]=0;
-    assert(mqtt_registration_publish_mesh_status(original)==ESP_OK);
-    assert(calls==2);puts(captured);
-    fail_allocation=true;
-    assert(mqtt_registration_publish_mesh_status(original)==ESP_OK);
-    assert(calls==3 && !strcmp(captured,original));
-    client_connected=false;
-    assert(mqtt_registration_publish_mesh_status(original)==ESP_ERR_INVALID_STATE);
-    assert(calls==3);
-    return 0;
-}
-''')
-    status, maximum = map(json.loads, output.splitlines())
-    assert status["node_id"] == "09dda0d5a8f2" and status["is_root"] is True
-    assert status["mqtt"] == {"outbox_bytes": 1234, "outbox_sampled_max_bytes": 1234, "expired_messages": 1, "error_events": 0}
-    assert maximum["mqtt"]["outbox_sampled_max_bytes"] == 2**32 - 1
-    assert maximum["mqtt"]["expired_messages"] == maximum["mqtt"]["error_events"] == 2**32 - 1

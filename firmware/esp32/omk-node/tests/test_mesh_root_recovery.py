@@ -21,62 +21,70 @@ def test_mesh_root_recovery_policy(tmp_path):
         int main(void) {
             omk_mesh_root_recovery_t s;
             mesh_root_recovery_init(&s);
-
-            /* Boot counters establish a baseline, including zero. */
             observe(&s, 0, 1, 1, -85, 0, 0);
             assert(!s.pending);
-            /* RSSI alone, even very weak, must never ask for a vote. */
-            observe(&s, 30000, 1, 1, -90, 0, 0);
+            /* RSSI alone, even very weak for hours, cannot request recovery. */
+            for (unsigned t = 30000; t <= 7200000; t += 30000) {
+                observe(&s, t, 1, 1, -90, 0, 0);
+                assert(!mesh_root_recovery_should_execute(&s, t, 1, 1, 0));
+            }
+
+            mesh_root_recovery_init(&s);
+            observe(&s, 0, 1, 1, -80, 0, 0);
+            /* Preserve weak RSSI and per-observation disconnect boundaries. */
+            observe(&s, 30000, 1, 1, -80, 2, 1);
             assert(!s.pending);
-            /* Actual repeated uplink disruption plus weak RSSI does. */
-            observe(&s, 60000, 1, 1, -85, 3, 0);
-            assert(s.pending && s.reason == OMK_MESH_ROOT_REELECTION_ROOT_LINK_UNHEALTHY);
+            observe(&s, 60000, 1, 1, -80, 5, 1);
             assert(mesh_root_recovery_should_execute(&s, 60000, 1, 1, 0));
-            mesh_root_recovery_mark_executed(&s, 60000, OMK_MESH_ROOT_RECOVERY_REELECTION);
-            assert(mesh_root_recovery_in_grace(&s, 60001));
+            mesh_root_recovery_mark_executed(&s, 60000);
+            assert(!s.pending && mesh_root_recovery_in_grace(&s, 60001));
 
-            /* Cooldown suppresses repeated link faults and topology churn. */
-            observe(&s, 90000, 1, 1, -85, 6, 0);
+            /* Cooldown updates baselines; its churn is not replayed later. */
+            observe(&s, 90000, 1, 1, -85, 8, 3);
             assert(!s.pending);
-            mesh_root_recovery_note_topology_change(&s, 90000, 1);
+            observe(&s, 960000, 1, 1, -85, 8, 3);
             assert(!s.pending);
-            /* Link improves, so only Level 1 is relevant to the topology vote. */
-            observe(&s, 120000, 1, 1, -79, 6, 0);
-            /* Once cooldown ends a topology batch waits for one quiet period. */
-            mesh_root_recovery_note_topology_change(&s, 960000, 1);
-            mesh_root_recovery_note_topology_change(&s, 970000, 1);
-            assert(s.pending && s.reason == OMK_MESH_ROOT_REELECTION_TOPOLOGY_CHANGE);
-            assert(!mesh_root_recovery_should_execute(&s, 1029999, 1, 1, 0));
-            assert(mesh_root_recovery_should_execute(&s, 1030000, 1, 1, 0));
+            observe(&s, 990000, 1, 1, -80, 8, 5);
+            assert(mesh_root_recovery_should_execute(&s, 990000, 1, 1, 0));
 
-            /* Children and disconnected roots can neither request nor execute. */
             mesh_root_recovery_init(&s);
-            mesh_root_recovery_note_topology_change(&s, 1, 0);
-            assert(!s.pending);
-            observe(&s, 1, 0, 1, -90, 0, 0);
-            observe(&s, 30001, 0, 1, -90, 4, 4);
-            assert(!s.pending);
-            mesh_root_recovery_note_topology_change(&s, 1, 1);
-            assert(!mesh_root_recovery_should_execute(&s, 60001, 1, 0, 0));
-            assert(!mesh_root_recovery_should_execute(&s, 60001, 1, 1, 1));
+            observe(&s, 0, 1, 1, -79, 0, 0);
+            observe(&s, 30000, 1, 1, -79, 3, 2);
+            assert(!s.pending); /* Strong link. */
+            observe(&s, 60000, 1, 0, -90, 6, 4);
+            assert(!s.pending); /* Invalid RSSI. */
+            observe(&s, 90000, 0, 1, -90, 9, 6);
+            assert(!s.pending); /* Child. */
+            observe(&s, 120000, 1, 1, -80, 9, 6);
+            assert(!s.pending); /* No new disruption after role change. */
+            observe(&s, 150000, 1, 1, -80, 12, 6);
+            assert(!mesh_root_recovery_should_execute(&s, 150000, 0, 1, 0));
+            assert(!mesh_root_recovery_should_execute(&s, 150000, 1, 0, 0));
+            assert(!mesh_root_recovery_should_execute(&s, 150000, 1, 1, 1));
+            assert(mesh_root_recovery_should_execute(&s, 150000, 1, 1, 0));
+            /* A request held while disconnected has no expiring deadline. */
+            assert(mesh_root_recovery_should_execute(&s, 30U * 86400000U, 1, 1, 0));
 
-            /* Unsigned timing still works across the 32-bit millisecond wrap. */
             mesh_root_recovery_init(&s);
-            mesh_root_recovery_note_topology_change(&s, 0xfffffff0U, 1);
-            assert(mesh_root_recovery_should_execute(&s, 59984U, 1, 1, 0));
+            observe(&s, 0, 1, 1, -80, UINT32_MAX - 1, 0);
+            observe(&s, 30000, 1, 1, -80, 1, 0);
+            assert(s.pending); /* Counter rollover still means three events. */
             return 0;
         }
     """))
     subprocess.run([
-        "cc", "-std=c11", "-Wall", "-Werror", "-I", str(SOURCE), str(program),
+        "cc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-I", str(SOURCE), str(program),
         str(SOURCE / "mesh_root_recovery.c"), "-o", str(executable),
     ], check=True)
     subprocess.run([str(executable)], check=True)
 
 
-def test_mesh_network_uses_root_only_standard_vote_api():
+def test_mesh_network_only_votes_for_unhealthy_root_links():
     source = (SOURCE / "mesh_network.c").read_text()
-    assert "MESH_EVENT_ROUTING_TABLE_ADD" in source
-    assert "esp_mesh_waive_root(NULL, MESH_VOTE_REASON_ROOT_INITIATED)" in source
-    assert "mesh_root_recovery_should_execute" in source
-    assert "mesh_root_recovery_in_grace" in (SOURCE / "mesh_recovery.c").read_text()
+    dispatch = source[source.index("static void try_root_recovery(void)"):
+                      source.index("void mesh_network_log_diagnostics")]
+    assert "MESH_EVENT_ROUTING_TABLE_ADD" not in source
+    assert "esp_mesh_set_self_organized" not in dispatch
+    assert "esp_mesh_waive_root(NULL, MESH_VOTE_REASON_ROOT_INITIATED)" in dispatch
+    assert "root_link_unhealthy" in dispatch
+    assert "mesh_root_recovery_should_execute" in dispatch

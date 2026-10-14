@@ -1,8 +1,12 @@
 #include "mesh_network.h"
+#include "network_diagnostics.h"
 
 #include <inttypes.h>
 #include <stdio.h>
+#include <stdatomic.h>
 #include <string.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 #include "esp_event.h"
 #include "esp_log.h"
@@ -37,13 +41,23 @@ static uint32_t last_parent_disconnect_reason;
 static uint32_t last_wifi_disconnect_reason;
 static uint32_t root_switch_count;
 static uint32_t rootless_since_s;
-static bool is_rootless;
+static atomic_bool is_rootless;
 static bool root_role_known;
 static bool previous_is_root;
-static bool started;
-static bool parent_connected;
+static atomic_bool started;
+static atomic_bool parent_connected;
 static esp_ip4_addr_t current_ip;
-/* Owned by the default event loop, including periodic recovery/status. */
+/* Short RAM critical sections only; no MQTT/Mesh/NVS/logging under this lock. */
+static portMUX_TYPE recovery_lock = portMUX_INITIALIZER_UNLOCKED;
+static omk_mesh_recovery_input_t recovery_snapshot;
+static bool recovery_action_pending;
+static bool recovery_action_attempted, rearm_attempted;
+static uint32_t recovery_action_ms, rearm_attempt_ms;
+static bool recovery_control_waiting;
+static uint32_t recovery_control_since_ms;
+/* Written only by the monitor when selecting a restart. Events never alter it. */
+static omk_mesh_recovery_t restart_selection;
+static bool restart_selected_root;
 ESP_EVENT_DEFINE_BASE(OMK_MESH_CONTROL_EVENT);
 static omk_mesh_recovery_t recovery;
 static omk_mesh_recovery_record_t recovery_record;
@@ -72,19 +86,40 @@ static esp_err_t configure_parent_rssi_thresholds(void) {
     return ESP_OK;
 }
 
-static void log_parent_switch_parameters(void) {
-    mesh_switch_parent_t p = {0};
-    esp_err_t err = esp_mesh_get_switch_parent_paras(&p);
+static esp_err_t configure_parent_switch_parameters(void) {
+    mesh_switch_parent_t configured = {0};
+    esp_err_t err = esp_mesh_get_switch_parent_paras(&configured);
     if (err != ESP_OK) {
-        ESP_LOGW(TAG, "Mesh parent switching read-back failed: %s", esp_err_to_name(err));
-        return;
+        ESP_LOGE(TAG, "Could not get Mesh parent switching parameters: %s", esp_err_to_name(err));
+        return err;
     }
-    /* IDF ships libmesh.a, not its implementation. Do not invent defaults or
-     * interpret switch_rssi as an improvement delta; retain runtime values. */
-    ESP_LOGI(TAG, "Mesh parent switching (IDF runtime): self_organized=%d duration_ms=%d"
+    /* Change only these two trial thresholds; retain every other IDF runtime
+     * field, including duration_ms and the select_rssi/switch_rssi pair. */
+    configured.cnx_rssi = -78;
+    configured.backoff_rssi = -78;
+    err = esp_mesh_set_switch_parent_paras(&configured);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Could not set Mesh parent switching parameters: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    mesh_switch_parent_t applied = {0};
+    err = esp_mesh_get_switch_parent_paras(&applied);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Mesh parent switching read-back failed: %s", esp_err_to_name(err));
+        return err;
+    }
+    ESP_LOGI(TAG, "Mesh parent switching (read-back): self_organized=%d duration_ms=%d"
              " cnx_rssi=%d select_rssi=%d switch_rssi=%d backoff_rssi=%d",
-             esp_mesh_get_self_organized(), p.duration_ms, p.cnx_rssi,
-             p.select_rssi, p.switch_rssi, p.backoff_rssi);
+             esp_mesh_get_self_organized(), applied.duration_ms, applied.cnx_rssi,
+             applied.select_rssi, applied.switch_rssi, applied.backoff_rssi);
+    if (applied.cnx_rssi != configured.cnx_rssi || applied.backoff_rssi != configured.backoff_rssi ||
+        applied.duration_ms != configured.duration_ms || applied.select_rssi != configured.select_rssi ||
+        applied.switch_rssi != configured.switch_rssi) {
+        ESP_LOGE(TAG, "Mesh parent switching read-back does not match requested parameters");
+        return ESP_FAIL;
+    }
+    return ESP_OK;
 }
 
 static esp_err_t disable_root_conflicts(void) {
@@ -109,39 +144,27 @@ static uint32_t uptime_milliseconds(void) {
     return (uint32_t)(esp_timer_get_time() / 1000);
 }
 
-/* Keep both recovery levels in the periodic control path, rather than in a disconnect event:
+/* Keep root voting in the periodic control path, rather than in a disconnect event:
  * a request observed while disconnected remains pending until the root has a
  * parent again. */
 static void try_root_recovery(void) {
     uint32_t now_ms = uptime_milliseconds();
-    omk_mesh_root_recovery_action_t action = mesh_root_recovery_should_execute(
-        &root_recovery, now_ms, esp_mesh_is_root(), parent_connected, is_rootless);
-    if (action == OMK_MESH_ROOT_RECOVERY_NONE) return;
-    if (action == OMK_MESH_ROOT_RECOVERY_PARENT_RESELECTION) {
-        ESP_LOGI(TAG, "root recovery requested: sustained_weak_root (level=2)");
-        /* ESP-IDF 6.0.1: select_parent=true makes a root disconnect from its
-         * router and children and search for a preferred parent as a non-root.
-         * Parent choice remains entirely with self-organized ESP-WIFI-MESH. */
-        esp_err_t err = esp_mesh_set_self_organized(true, true);
-        if (err != ESP_OK) {
-            ESP_LOGW(TAG, "root parent reselection failed: sustained_weak_root (%s)", esp_err_to_name(err));
-        } else {
-            mesh_root_recovery_mark_executed(&root_recovery, now_ms, action);
-            if (recovery.parent_reselection_count < UINT32_MAX) recovery.parent_reselection_count++;
-            ESP_LOGI(TAG, "root parent reselection executed: sustained_weak_root (level=2)");
-        }
-        /* On failure retry next status cycle, without a vote in this cycle or
-         * a successful-recovery cooldown/grace period. */
-        return;
-    }
-    const char *reason = mesh_root_recovery_reason_name(root_recovery.reason);
+    bool is_root = esp_mesh_is_root();
+    portENTER_CRITICAL(&recovery_lock);
+    bool execute = mesh_root_recovery_should_execute(
+        &root_recovery, now_ms, is_root, parent_connected, is_rootless);
+    portEXIT_CRITICAL(&recovery_lock);
+    if (!execute || !esp_mesh_is_root()) return;
+    const char *reason = "root_link_unhealthy";
     ESP_LOGI(TAG, "root reelection requested: %s (level=1)", reason);
     esp_err_t err = esp_mesh_waive_root(NULL, MESH_VOTE_REASON_ROOT_INITIATED);
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "root reelection deferred: %s (%s)", reason, esp_err_to_name(err));
         return;
     }
-    mesh_root_recovery_mark_executed(&root_recovery, now_ms, action);
+    portENTER_CRITICAL(&recovery_lock);
+    mesh_root_recovery_mark_executed(&root_recovery, uptime_milliseconds());
+    portEXIT_CRITICAL(&recovery_lock);
     ESP_LOGI(TAG, "root reelection executed: %s (level=1)", reason);
 }
 
@@ -173,21 +196,73 @@ static omk_mesh_recovery_input_t recovery_input(void) {
         .has_ip = current_ip.addr != 0,
         .mqtt_started = mqtt_registration_is_started(),
         .mqtt_connected = mqtt_registration_is_connected(),
+        .mqtt_progress = mqtt_registration_get_progress().ack_seen,
         .mqtt_disconnect_count = mqtt_registration_get_disconnect_count(),
     };
 }
 
 static void observe_recovery(void) {
     omk_mesh_recovery_input_t in = recovery_input();
+    portENTER_CRITICAL(&recovery_lock);
+    recovery_snapshot = in;
+    mesh_recovery_observe(&recovery, uptime_milliseconds(), &in);
+    portEXIT_CRITICAL(&recovery_lock);
+}
+
+static bool restart_still_valid(void) {
+    omk_mesh_recovery_input_t in;
+    portENTER_CRITICAL(&recovery_lock);
+    in = recovery_snapshot;
+    portEXIT_CRITICAL(&recovery_lock);
+    in.is_root = esp_mesh_is_root();
+    in.mqtt_started = mqtt_registration_is_started();
+    in.mqtt_connected = mqtt_registration_is_connected();
+    in.mqtt_progress = mqtt_registration_get_progress().ack_seen;
+    in.mqtt_disconnect_count = mqtt_registration_get_disconnect_count();
+    portENTER_CRITICAL(&recovery_lock);
+    in.started = recovery_snapshot.started;
+    in.parent_connected = recovery_snapshot.parent_connected;
+    in.rootless = recovery_snapshot.rootless;
+    in.has_ip = recovery_snapshot.has_ip;
+    /* esp_mesh_is_root is a RAM-only role read in the pinned IDF. */
+    in.is_root = esp_mesh_is_root();
+    uint32_t now = uptime_milliseconds();
+    in.control_stalled = recovery_control_waiting &&
+        (uint32_t)(now - recovery_control_since_ms) >= OMK_MESH_RECONNECT_SETTLE_MS;
+    bool valid = mesh_recovery_restart_valid(&restart_selection, &recovery, now,
+                                             &in, &root_recovery, restart_selected_root);
+    portEXIT_CRITICAL(&recovery_lock);
+    return valid;
+}
+
+/* Must be called under recovery_lock; esp_mesh_is_root is a RAM-only read. */
+static void observe_control_role_locked(void) {
+    omk_mesh_recovery_input_t in = recovery_snapshot;
+    in.is_root = esp_mesh_is_root();
     mesh_recovery_observe(&recovery, uptime_milliseconds(), &in);
 }
 
-static void run_recovery_action(omk_mesh_recovery_action_t action, uint32_t now_ms) {
+static void run_recovery_action(omk_mesh_recovery_action_t action, uint32_t now_ms,
+                                const omk_mesh_recovery_token_t *selection) {
+    (void)now_ms;
+    bool control = action == OMK_RECOVERY_CHILD_RESELECT ||
+                   action == OMK_RECOVERY_ROUTER_RECONNECT || action == OMK_RECOVERY_ROOT_VOTE;
+    if (control) {
+        portENTER_CRITICAL(&recovery_lock);
+        observe_control_role_locked();
+        bool valid = selection && selection->action == action &&
+                     mesh_recovery_action_matches(&recovery, selection);
+        portEXIT_CRITICAL(&recovery_lock);
+        if (!valid) return;
+    }
     esp_err_t err = ESP_OK;
     switch (action) {
     case OMK_RECOVERY_CHILD_RESELECT:
         /* Revalidate role immediately before a potentially disruptive API. */
-        if (esp_mesh_is_root() || (parent_connected && !is_rootless)) return;
+        portENTER_CRITICAL(&recovery_lock);
+        bool wait_ip = recovery_snapshot.started && !recovery_snapshot.has_ip;
+        portEXIT_CRITICAL(&recovery_lock);
+        if (esp_mesh_is_root() || (parent_connected && !is_rootless && !wait_ip)) return;
         err = esp_mesh_set_self_organized(true, true);
         break;
     case OMK_RECOVERY_ROUTER_RECONNECT:
@@ -198,66 +273,173 @@ static void run_recovery_action(omk_mesh_recovery_action_t action, uint32_t now_
             err = esp_mesh_connect();
         }
         break;
-    case OMK_RECOVERY_WEAK_ROOT:
-        recovery.reason = OMK_RECOVERY_SEVERE_ROOT;
-        try_root_recovery();
-        return;
     case OMK_RECOVERY_ROOT_VOTE:
-        recovery.reason = root_recovery.reason == OMK_MESH_ROOT_REELECTION_TOPOLOGY_CHANGE
-                              ? OMK_RECOVERY_TOPOLOGY : OMK_RECOVERY_ROOT_LINK;
+        portENTER_CRITICAL(&recovery_lock);
+        recovery.reason = OMK_RECOVERY_ROOT_LINK;
+        portEXIT_CRITICAL(&recovery_lock);
         try_root_recovery();
         return;
-    case OMK_RECOVERY_RESTART:
-        err = mesh_recovery_store_save(&recovery_record, true, recovery.reason);
-        mesh_recovery_complete(&recovery, now_ms, action, err == ESP_OK);
-        if (err == ESP_OK) {
-            const char *reason = recovery.reason == OMK_RECOVERY_MQTT_ONLY
-                                     ? "mesh_mqtt_liveness_timeout" : "mesh_parent_loss_timeout";
-            mesh_network_log_diagnostics(reason, 0);
+    case OMK_RECOVERY_RESTART: {
+        if (!restart_still_valid()) return;
+        omk_mesh_recovery_reason_t reason_code = restart_selection.reason;
+        portENTER_CRITICAL(&recovery_lock);
+        omk_mesh_recovery_record_t record = recovery_record;
+        portEXIT_CRITICAL(&recovery_lock);
+        err = mesh_recovery_store_save(&record, true, reason_code);
+        bool valid = err == ESP_OK && restart_still_valid();
+        if (valid) {
+            const char *reason = reason_code == OMK_RECOVERY_MQTT_ONLY
+                ? "mesh_mqtt_liveness_timeout" : reason_code == OMK_RECOVERY_IP_TIMEOUT
+                ? "mesh_ip_timeout" : "mesh_parent_loss_timeout";
             boot_diagnostics_record_restart_reason(reason);
-            esp_restart();
-        } else {
-            ESP_LOGE(TAG, "Recovery restart blocked: budget persistence failed (%s)", esp_err_to_name(err));
+            valid = restart_still_valid();
         }
+        /* An aborted restart keeps the durable reservation and cooldown. */
+        portENTER_CRITICAL(&recovery_lock);
+        recovery_record = record;
+        mesh_recovery_complete(&recovery, uptime_milliseconds(), action, err == ESP_OK);
+        portEXIT_CRITICAL(&recovery_lock);
+        if (valid && esp_mesh_is_root() == restart_selected_root &&
+            !(esp_mesh_is_root() && parent_connected)) esp_restart();
+        if (err != ESP_OK)
+            ESP_LOGE(TAG, "Recovery restart blocked: budget persistence failed (%s)", esp_err_to_name(err));
         return;
-    case OMK_RECOVERY_REARM:
-        err = mesh_recovery_store_save(&recovery_record, false, recovery.reason);
+    }
+    case OMK_RECOVERY_REARM: {
+        portENTER_CRITICAL(&recovery_lock);
+        omk_mesh_recovery_record_t record = recovery_record;
+        portEXIT_CRITICAL(&recovery_lock);
+        err = mesh_recovery_store_save(&record, false, (omk_mesh_recovery_reason_t)record.reason);
+        portENTER_CRITICAL(&recovery_lock);
+        recovery_record = record;
+        portEXIT_CRITICAL(&recovery_lock);
         break;
+    }
     default:
         return;
     }
-    mesh_recovery_complete(&recovery, now_ms, action, err == ESP_OK);
+    portENTER_CRITICAL(&recovery_lock);
+    if (control) observe_control_role_locked();
+    /* Validation and application share the lock: an event/monitor cannot reset
+     * the episode between this check and explicit_accepted being written. */
+    if (!control || mesh_recovery_action_matches(&recovery, selection))
+        mesh_recovery_complete(&recovery, uptime_milliseconds(), action, err == ESP_OK);
+    omk_mesh_recovery_t state = recovery;
+    portEXIT_CRITICAL(&recovery_lock);
     ESP_LOGI(TAG, "Mesh recovery action=%d reason=%s request=%s stage=%s budget_spent=%d",
-             action, mesh_recovery_reason_name(recovery.reason), esp_err_to_name(err),
-             mesh_recovery_stage_name(recovery.stage), recovery.restart_spent);
+             action, mesh_recovery_reason_name(state.reason), esp_err_to_name(err),
+             mesh_recovery_stage_name(state.stage), state.restart_spent);
 }
 
 static void try_recovery(void) {
+    uint32_t token = network_diag_begin(ND_RECOVERY);
     uint32_t now_ms = uptime_milliseconds();
-    omk_mesh_recovery_input_t in = recovery_input();
+    portENTER_CRITICAL(&recovery_lock);
+    omk_mesh_recovery_input_t in = recovery_snapshot;
+    portEXIT_CRITICAL(&recovery_lock);
+    in.is_root = esp_mesh_is_root();
+    in.mqtt_started = mqtt_registration_is_started();
+    in.mqtt_connected = mqtt_registration_is_connected();
+    in.mqtt_progress = mqtt_registration_get_progress().ack_seen;
+    in.mqtt_disconnect_count = mqtt_registration_get_disconnect_count();
+    portENTER_CRITICAL(&recovery_lock);
+    in.started = recovery_snapshot.started;
+    in.parent_connected = recovery_snapshot.parent_connected;
+    in.rootless = recovery_snapshot.rootless;
+    in.has_ip = recovery_snapshot.has_ip;
+    /* esp_mesh_is_root is a RAM-only role read in the pinned IDF. */
+    in.is_root = esp_mesh_is_root();
+    /* An event can have reset a policy timer while we sampled MQTT above. */
+    now_ms = uptime_milliseconds();
+    in.control_stalled = recovery_control_waiting &&
+        (uint32_t)(now_ms - recovery_control_since_ms) >= OMK_MESH_RECONNECT_SETTLE_MS;
     omk_mesh_recovery_action_t action = mesh_recovery_choose(&recovery, now_ms, &in, &root_recovery);
-    run_recovery_action(action, now_ms);
+    omk_mesh_recovery_token_t selection = mesh_recovery_action_token(&recovery, action);
+    omk_mesh_recovery_stage_t stage = recovery.stage;
+    bool spent = recovery.restart_spent;
+    bool deferred = action == OMK_RECOVERY_CHILD_RESELECT ||
+                    action == OMK_RECOVERY_ROUTER_RECONNECT || action == OMK_RECOVERY_ROOT_VOTE;
+    if (action == OMK_RECOVERY_RESTART) {
+        restart_selection = recovery;
+        restart_selected_root = in.is_root;
+    }
+    if (!recovery.loss_active && !recovery.ip_wait_active) recovery_control_waiting = false;
+    if (deferred) {
+        if (!recovery_control_waiting) {
+            recovery_control_waiting = true;
+            recovery_control_since_ms = now_ms;
+        }
+        /* The observer is faster; disruptive API retries retain the original
+         * 30-second cadence, even when an API fails immediately. */
+        if (recovery_action_pending || (recovery_action_attempted &&
+            (uint32_t)(now_ms - recovery_action_ms) < OMK_MESH_STATUS_INTERVAL_MS)) {
+            action = OMK_RECOVERY_NONE;
+        } else {
+            recovery_action_pending = recovery_action_attempted = true;
+            recovery_action_ms = now_ms;
+        }
+    } else if (action == OMK_RECOVERY_REARM) {
+        if (rearm_attempted && (uint32_t)(now_ms - rearm_attempt_ms) < OMK_MESH_STATUS_INTERVAL_MS)
+            action = OMK_RECOVERY_NONE;
+        else {
+            rearm_attempted = true;
+            rearm_attempt_ms = now_ms;
+        }
+    }
+    portEXIT_CRITICAL(&recovery_lock);
+    network_diag_recovery((in.started ? 1U : 0U) | (in.is_root ? 2U : 0U) |
+                         (in.parent_connected ? 4U : 0U) | (in.rootless ? 8U : 0U) |
+                         (in.has_ip ? 16U : 0U) | (in.mqtt_started ? 32U : 0U) |
+                         (in.mqtt_connected ? 64U : 0U) | (spent ? 128U : 0U) |
+                         (in.mqtt_progress ? 256U : 0U), stage, action);
+    if (deferred && action != OMK_RECOVERY_NONE) {
+        if (esp_event_post(OMK_MESH_CONTROL_EVENT, 1, &selection, sizeof(selection), 0) != ESP_OK) {
+            portENTER_CRITICAL(&recovery_lock);
+            recovery_action_pending = false;
+            portEXIT_CRITICAL(&recovery_lock);
+        }
+    } else if (!deferred) run_recovery_action(action, now_ms, NULL);
+    network_diag_end(token, 0, false);
+}
+
+static void recovery_task(void *argument) {
+    (void)argument;
+    for (;;) {
+        /* No MQTT mutex or network send/receive APIs in this task. */
+        try_recovery();
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
 }
 
 static void publish_recovery_status(uint64_t node_id) {
+    portENTER_CRITICAL(&recovery_lock);
+    omk_mesh_recovery_t state = recovery;
+    omk_mesh_recovery_record_t record = recovery_record;
+    portEXIT_CRITICAL(&recovery_lock);
+    omk_mqtt_progress_t progress = mqtt_registration_get_progress();
     /* A companion status avoids overflowing or removing existing 1152-byte
      * node/status fields. Counters survive reconnection; the restart record
      * also survives reboot. No backlog is accumulated while disconnected. */
     /* Default event-loop stack is small. This buffer has one serialized owner. */
-    static char payload[768];
+    static char payload[1024];
     int n = snprintf(payload, sizeof(payload),
         "{\"node_id\":\"%012" PRIx64 "\",\"uptime_s\":%" PRIu32
         ",\"recovery_stage\":\"%s\",\"last_recovery_reason\":\"%s\""
         ",\"no_parent_found_count\":%" PRIu32 ",\"last_scan_times\":%d"
         ",\"stop_reconnection_count\":%" PRIu32 ",\"parent_reselection_count\":%" PRIu32
         ",\"parent_loss_duration_s\":%" PRIu32 ",\"restart_budget_spent\":%s"
-        ",\"recovery_restart_count\":%" PRIu32 ",\"last_restart_reason\":\"%s\"}",
-        node_id, uptime_seconds(), mesh_recovery_stage_name(recovery.stage),
-        mesh_recovery_reason_name(recovery.reason), recovery.no_parent_found_count,
-        recovery.last_scan_times, recovery.stop_reconnection_count, recovery.parent_reselection_count,
-        mesh_recovery_loss_duration_s(&recovery, uptime_milliseconds()),
-        recovery.restart_spent ? "true" : "false", recovery_record.restart_count,
-        mesh_recovery_reason_name((omk_mesh_recovery_reason_t)recovery_record.reason));
+        ",\"recovery_restart_count\":%" PRIu32 ",\"last_restart_reason\":\"%s\""
+        ",\"mqtt_progress_fresh\":%s,\"mqtt_probe_pending_id\":%d"
+        ",\"mqtt_probe_ack_count\":%" PRIu32 ",\"mqtt_probe_last_ack_ms\":%" PRIu32
+        ",\"restart_retry_ready\":%s,\"restart_persistence_blocked\":%s}",
+        node_id, uptime_seconds(), mesh_recovery_stage_name(state.stage),
+        mesh_recovery_reason_name(state.reason), state.no_parent_found_count,
+        state.last_scan_times, state.stop_reconnection_count, state.parent_reselection_count,
+        mesh_recovery_loss_duration_s(&state, uptime_milliseconds()),
+        state.restart_spent ? "true" : "false", record.restart_count,
+        mesh_recovery_reason_name((omk_mesh_recovery_reason_t)record.reason),
+        progress.ack_seen ? "true" : "false", progress.pending_id, progress.ack_count, progress.ack_ms,
+        state.retry_ready ? "true" : "false", state.persistence_blocked ? "true" : "false");
     if (n > 0 && n < (int)sizeof(payload))
         (void)mqtt_registration_publish_mesh_recovery_status(payload);
 }
@@ -285,10 +467,12 @@ static void publish_status(void *argument) {
     int rssi = 0;
     bool rssi_valid = esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK;
     if (rssi_valid) rssi = ap_info.rssi;
-    mesh_root_recovery_observe_link(&root_recovery, uptime_milliseconds(), esp_mesh_is_root(),
+    bool is_root = esp_mesh_is_root();
+    portENTER_CRITICAL(&recovery_lock);
+    mesh_root_recovery_observe_link(&root_recovery, uptime_milliseconds(), is_root,
                                     rssi_valid, rssi, parent_disconnect_count,
                                     mqtt_registration_get_disconnect_count());
-    try_recovery();
+    portEXIT_CRITICAL(&recovery_lock);
     char ip_text[16];
     snprintf(ip_text, sizeof(ip_text), IPSTR, IP2STR(&current_ip));
     uint64_t node_id;
@@ -395,6 +579,7 @@ static void mesh_event_handler(void *argument, esp_event_base_t base, int32_t id
         parent_connected = true;
         is_rootless = false;
         rootless_since_s = 0;
+        observe_recovery();
         mesh_network_log_diagnostics("Mesh parent connected", 0);
         esp_err_t err = mesh_netifs_start(esp_mesh_is_root());
         if (err != ESP_OK) {
@@ -407,6 +592,8 @@ static void mesh_event_handler(void *argument, esp_event_base_t base, int32_t id
         const mesh_event_disconnected_t *event = data;
         parent_disconnect_count++;
         parent_connected = false;
+        current_ip.addr = 0;
+        observe_recovery();
         if (event != NULL) {
             last_parent_disconnect_reason = event->reason;
             /* ESP-IDF defines mesh_event_disconnected_t as the Wi-Fi STA
@@ -434,37 +621,28 @@ static void mesh_event_handler(void *argument, esp_event_base_t base, int32_t id
     case MESH_EVENT_NO_PARENT_FOUND: {
         const mesh_event_no_parent_found_t *event = data;
         observe_recovery();
+        portENTER_CRITICAL(&recovery_lock);
         mesh_recovery_note_no_parent(&recovery, event != NULL ? event->scan_times : -1);
+        omk_mesh_recovery_t state = recovery;
+        portEXIT_CRITICAL(&recovery_lock);
         ESP_LOGW(TAG, "Mesh no parent found: count=%" PRIu32 " scan_times=%d stage=%s",
-                 recovery.no_parent_found_count, recovery.last_scan_times,
-                 mesh_recovery_stage_name(recovery.stage));
+                 state.no_parent_found_count, state.last_scan_times, mesh_recovery_stage_name(state.stage));
         break;
     }
-    case MESH_EVENT_STOP_RECONNECTION:
+    case MESH_EVENT_STOP_RECONNECTION: {
         observe_recovery();
+        portENTER_CRITICAL(&recovery_lock);
         mesh_recovery_note_stopped(&recovery);
+        omk_mesh_recovery_t state = recovery;
+        portEXIT_CRITICAL(&recovery_lock);
         ESP_LOGW(TAG, "Mesh stopped reconnection: count=%" PRIu32 " stage=%s",
-                 recovery.stop_reconnection_count, mesh_recovery_stage_name(recovery.stage));
+                 state.stop_reconnection_count, mesh_recovery_stage_name(state.stage));
         break;
+    }
     case MESH_EVENT_ROOT_SWITCH_ACK:
         is_rootless = false;
         rootless_since_s = 0;
         observe_root_role();
-        break;
-    case MESH_EVENT_ROUTING_TABLE_ADD:
-        /* This is the Mesh-stack event for a newly joined descendant.  On the
-         * current root it covers a node joining or returning after maintenance;
-         * wait for topology stabilization before asking Mesh to vote again. */
-        if (esp_mesh_is_root()) {
-            uint32_t now_ms = uptime_milliseconds();
-            if (root_recovery.has_executed &&
-                (int32_t)(now_ms - root_recovery.cooldown_until_ms) < 0) {
-                ESP_LOGI(TAG, "root reelection deferred: cooldown");
-            } else {
-                mesh_root_recovery_note_topology_change(&root_recovery, now_ms, true);
-                ESP_LOGI(TAG, "root reelection requested: topology_change (stabilizing)");
-            }
-        }
         break;
     default:
         break;
@@ -475,15 +653,29 @@ static void mesh_event_handler(void *argument, esp_event_base_t base, int32_t id
 /* Timer callbacks never race Mesh/IP handlers or block the ESP timer task. */
 static void status_timer_callback(void *argument) {
     (void)argument;
+    uint64_t posted_us = esp_timer_get_time();
+    network_diag_tick(posted_us);
     esp_err_t err = esp_event_post(OMK_MESH_CONTROL_EVENT, 0, NULL, 0, 0);
+    network_diag_post(posted_us, err);
     if (err != ESP_OK) ESP_LOGW(TAG, "Mesh status cycle deferred: %s", esp_err_to_name(err));
 }
 
 static void status_event_handler(void *argument, esp_event_base_t base, int32_t id, void *data) {
     (void)base;
-    (void)id;
-    (void)data;
+    if (id == 1 && data != NULL) {
+        const omk_mesh_recovery_token_t *selection = data;
+        run_recovery_action(selection->action, uptime_milliseconds(), selection);
+        portENTER_CRITICAL(&recovery_lock);
+        recovery_action_pending = false;
+        recovery_control_waiting = false;
+        portEXIT_CRITICAL(&recovery_lock);
+        return;
+    }
+    uint32_t token = network_diag_begin(ND_CONTROL);
+    network_diag_control(true);
     publish_status(argument);
+    network_diag_control(false);
+    network_diag_end(token, 0, false);
 }
 
 esp_err_t mesh_network_start_prepared(void) {
@@ -497,6 +689,7 @@ esp_err_t mesh_network_start_prepared(void) {
         ESP_LOGW(TAG, "Recovery budget read failed; restart disabled: %s", esp_err_to_name(store_err));
     mesh_recovery_init(&recovery, recovery_record.spent != 0, node_id);
     recovery.reason = (omk_mesh_recovery_reason_t)recovery_record.reason;
+    recovery.persistence_blocked = store_err != ESP_OK;
     if (!mesh_credentials_test_vector_matches()) return ESP_FAIL;
     omk_gateway_credentials_t gateway = {0};
     esp_err_t err = gateway_credentials_load(&gateway);
@@ -538,9 +731,10 @@ esp_err_t mesh_network_start_prepared(void) {
     memcpy(config.mesh_ap.password, mesh_password, OMK_MESH_AP_PASSWORD_LENGTH);
     err = esp_mesh_set_config(&config);
     if (err != ESP_OK) return err;
+    err = configure_parent_switch_parameters();
+    if (err != ESP_OK) return err;
     err = esp_mesh_start();
     if (err != ESP_OK) return err;
-    log_parent_switch_parameters();
     err = mesh_netif_start_receive_task();
     if (err != ESP_OK) return err;
     err = esp_event_handler_register(OMK_MESH_CONTROL_EVENT, ESP_EVENT_ANY_ID, status_event_handler, NULL);
@@ -552,6 +746,11 @@ esp_err_t mesh_network_start_prepared(void) {
     err = esp_timer_start_periodic(status_timer, OMK_MESH_STATUS_INTERVAL_MS * 1000ULL);
     if (err != ESP_OK) return err;
     started = true;
+    portENTER_CRITICAL(&recovery_lock);
+    recovery_snapshot.started = true;
+    portEXIT_CRITICAL(&recovery_lock);
+    if (xTaskCreate(recovery_task, "mesh_recovery", 4096, NULL, 5, NULL) != pdPASS)
+        return ESP_ERR_NO_MEM;
     ESP_LOGI(TAG, "ESP-WIFI-MESH started");
     return ESP_OK;
 }

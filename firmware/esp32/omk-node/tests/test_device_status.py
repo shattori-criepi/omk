@@ -14,12 +14,12 @@ def test_registered_logical_device_status_replaces_retained_offline_on_connect()
     assert ".retain = device_status_configured ? 1 : 0" in mqtt_registration
 
     connected = mqtt_registration[
-        mqtt_registration.index("case MQTT_EVENT_CONNECTED:") : mqtt_registration.index("case MQTT_EVENT_DATA:")
+        mqtt_registration.index("static void synchronize_registration_connection") : mqtt_registration.index("static void mqtt_event_handler")
     ]
     assert 'publish_device_status("online");' in connected
 
     registration = mqtt_registration[
-        mqtt_registration.index("static void process_registration_config") : mqtt_registration.index("static void mqtt_event_handler")
+        mqtt_registration.index("static void apply_registration_config") : mqtt_registration.index("static void mqtt_event_handler")
     ]
-    assert "configure_device_status(logical_id->valuestring)" in registration
+    assert "configure_device_status(logical_id)" in registration
     assert 'publish_device_status("online");' in registration

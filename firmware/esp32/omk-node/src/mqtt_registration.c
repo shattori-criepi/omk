@@ -1,8 +1,13 @@
 #include "mqtt_registration.h"
+#include "network_diagnostics.h"
+#include "network_diagnostics_mqtt.h"
+#include "communication_limits.h"
+#include "mesh_netif.h"
 
 #include <inttypes.h>
 #include <math.h>
 #include <stdbool.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdarg.h>
@@ -22,6 +27,8 @@
 #include "node_protocol.h"
 #include "mesh_network.h"
 #include "sen66_sensor.h"
+#include "sen66_diagnostics.h"
+#include "sen66_delivery.h"
 
 #define OMK_MQTT_BROKER_URI "mqtt://192.168.50.1:1883"
 #define OMK_MQTT_TOPIC_SIZE 80
@@ -29,15 +36,18 @@
 /* Two 31-byte advertisement fragments rendered as hex plus fixed JSON fields. */
 #define OMK_MQTT_BLE_RELAY_PAYLOAD_SIZE 512
 #define OMK_MQTT_SEN66_PAYLOAD_SIZE 768
-#define OMK_MQTT_MESH_STATUS_PAYLOAD_SIZE 1408
+#define OMK_MQTT_MESH_STATUS_PAYLOAD_SIZE 2816
 /* Includes a maximum-length logical ID and both uint32 SEN66 diagnostics. */
 #define OMK_REGISTRATION_PAYLOAD_SIZE 256
 #define OMK_MQTT_CLIENT_ID_SIZE 32
 static const char *TAG = "omk-mqtt";
 static esp_mqtt_client_handle_t client;
-static bool client_started;
-static volatile bool client_connected;
-static uint32_t mqtt_disconnect_count;
+static atomic_bool client_started;
+static atomic_bool client_connected;
+static atomic_uint mqtt_disconnect_count;
+static portMUX_TYPE progress_lock = portMUX_INITIALIZER_UNLOCKED;
+static omk_mqtt_progress_t mqtt_progress;
+static char probe_topic[OMK_MQTT_TOPIC_SIZE];
 static int64_t mqtt_last_connected_us;
 static int64_t mqtt_disconnected_since_us;
 static bool ip_handler_registered;
@@ -54,20 +64,41 @@ static bool sen66_connected;
 static bool sen66_diagnostics_available;
 static uint32_t sen66_recovery_count;
 static uint32_t sen66_measurement_timeout_count;
+static portMUX_TYPE sensor_status_lock = portMUX_INITIALIZER_UNLOCKED;
+static uint32_t sensor_status_version, sensor_status_sent_version;
+/* Registration is desired state, not an operation log: Gateway keeps only
+ * its latest requested ID and ignores ACKs for superseded IDs. sen66_tx is the
+ * sole writer of NVS/registration output; callbacks only replace this mailbox.
+ * Keep a superseded clear's retained-config cleanup obligation: Gateway sends
+ * clears retained, but assignments non-retained. Otherwise a skipped clear
+ * would replay on reconnect and undo the latest assignment.
+ * If task creation fails, callbacks retain the original synchronous service;
+ * ownership never changes during this boot. */
+static bool registration_sender_enabled;
+static uint32_t registration_connection_version, registration_connection_handled;
+typedef struct {
+    char logical_id[OMK_NODE_LOGICAL_ID_MAX_LENGTH + 1]; /* empty means clear */
+    bool clear_retained_config;
+} registration_request_t;
+static registration_request_t registration_request;
+static bool registration_request_pending;
+static uint32_t registration_request_version;
 
 /* MQTT delivery diagnostics: all counts are per boot, across reconnects.
  * Sample the public byte-count API after enqueue and before status generation.
  * This is an observed maximum, not an atomic peak inside ESP-MQTT. */
 static portMUX_TYPE mqtt_diagnostic_lock = portMUX_INITIALIZER_UNLOCKED;
-static uint32_t mqtt_outbox_sampled_max_bytes;
+static uint32_t mqtt_outbox_sampled_max_bytes, mqtt_outbox_last_bytes;
 static uint32_t mqtt_expired_messages;
 static uint32_t mqtt_error_events;
 
 static uint32_t sample_mqtt_outbox(void) {
     /* Never call MQTT while holding our critical section (MQTT has its own lock). */
-    int bytes = client ? esp_mqtt_client_get_outbox_size(client) : 0;
+    int bytes = client ? esp_mqtt_client_get_outbox_size_nowait(client) : 0;
     uint32_t current = bytes > 0 ? (uint32_t)bytes : 0;
     portENTER_CRITICAL(&mqtt_diagnostic_lock);
+    if (bytes < 0) current = mqtt_outbox_last_bytes;
+    else mqtt_outbox_last_bytes = current;
     if (current > mqtt_outbox_sampled_max_bytes) mqtt_outbox_sampled_max_bytes = current;
     portEXIT_CRITICAL(&mqtt_diagnostic_lock);
     return current;
@@ -96,7 +127,8 @@ static bool format_mqtt_diagnostics(char *buffer, size_t size) {
 }
 
 static int enqueue_observed(const char *topic, const char *payload) {
-    int message_id = esp_mqtt_client_enqueue(client, topic, payload, 0, 0, 0, true);
+    int message_id = esp_mqtt_client_enqueue_bounded(client, topic, payload, 0, 0, 0,
+                                                       OMK_MQTT_DATA_BYTES, NULL);
     (void)sample_mqtt_outbox();
     return message_id;
 }
@@ -128,6 +160,14 @@ static bool registration_is_persisted(void) {
 }
 
 static void publish_registration_status(void) {
+    /* The registration owner snapshots sensor state briefly. Never hold this
+     * lock across NVS or a MQTT API. Callbacks cannot modify the payload while
+     * the sender waits inside publish. */
+    portENTER_CRITICAL(&sensor_status_lock);
+    bool connected = sen66_connected, diagnostics_available = sen66_diagnostics_available;
+    uint32_t recoveries = sen66_recovery_count, timeouts = sen66_measurement_timeout_count;
+    uint32_t version = sensor_status_version;
+    portEXIT_CRITICAL(&sensor_status_lock);
     bool registered = registration_is_persisted();
     const char *state = registered ? "registered" : "provisioned";
     char logical_id_field[OMK_NODE_LOGICAL_ID_MAX_LENGTH + 20] = {0};
@@ -146,11 +186,11 @@ static void publish_registration_status(void) {
         }
     }
     char sen66_diagnostic_fields[96] = {0};
-    if (sen66_diagnostics_available) {
+    if (diagnostics_available) {
         int diagnostic_written = snprintf(
             sen66_diagnostic_fields, sizeof(sen66_diagnostic_fields),
             ",\"sen66_rc\":%" PRIu32 ",\"sen66_to\":%" PRIu32,
-            sen66_recovery_count, sen66_measurement_timeout_count);
+            recoveries, timeouts);
         if (diagnostic_written < 0 || diagnostic_written >= (int)sizeof(sen66_diagnostic_fields)) {
             ESP_LOGE(TAG, "Could not build SEN66 diagnostic status fields");
             return;
@@ -162,19 +202,24 @@ static void publish_registration_status(void) {
                            "\"connected_sensors\":%s%s}",
                            OMK_NODE_PROTOCOL_VERSION, client_id + strlen("omk-node-"),
                            state, logical_id_field, OMK_NODE_CAPABILITIES,
-                           sen66_connected ? "[\"sen66\"]" : "[]", sen66_diagnostic_fields);
+                           connected ? "[\"sen66\"]" : "[]", sen66_diagnostic_fields);
     if (written < 0 || written >= (int)sizeof(registration_payload)) {
         ESP_LOGE(TAG, "Could not build registration status payload");
         return;
     }
-    int message_id = esp_mqtt_client_publish(client, registration_topic,
-                                             registration_payload, 0, 1, 1);
+    sen66_delivery_status_sending(true);
+    int message_id = esp_mqtt_client_publish_bounded(client, registration_topic,
+                                             registration_payload, 0, 1, 1, OMK_MQTT_OUTBOX_BYTES);
+    sen66_delivery_status_sending(false);
     if (message_id < 0) {
         ESP_LOGW(TAG, "Could not queue retained registration status: %d", message_id);
         return;
     }
     ESP_LOGI(TAG, "Published retained registration status (message_id=%d)",
              message_id);
+    portENTER_CRITICAL(&sensor_status_lock);
+    sensor_status_sent_version = version;
+    portEXIT_CRITICAL(&sensor_status_lock);
 }
 
 static bool logical_id_is_valid(const char *logical_id) {
@@ -257,8 +302,8 @@ static void publish_registration_ack(const char *logical_id) {
         ESP_LOGE(TAG, "Could not build registration ACK payload");
         return;
     }
-    int message_id = esp_mqtt_client_publish(client, registration_ack_topic,
-                                             payload, 0, 1, 1);
+    int message_id = esp_mqtt_client_publish_bounded(client, registration_ack_topic,
+                                             payload, 0, 1, 1, OMK_MQTT_OUTBOX_BYTES);
     if (message_id < 0) {
         ESP_LOGW(TAG, "Could not queue retained registration ACK: %d", message_id);
         return;
@@ -267,14 +312,56 @@ static void publish_registration_ack(const char *logical_id) {
 }
 
 static void clear_retained_registration_ack(void) {
-    if (esp_mqtt_client_publish(client, registration_ack_topic, "", 0, 1, 1) < 0) {
+    if (esp_mqtt_client_publish_bounded(client, registration_ack_topic, "", 0, 1, 1, OMK_MQTT_OUTBOX_BYTES) < 0) {
         ESP_LOGW(TAG, "Could not clear retained registration ACK");
     }
 }
 
 static void clear_retained_registration_config(void) {
-    if (esp_mqtt_client_publish(client, registration_config_topic, "", 0, 1, 1) < 0) {
+    if (esp_mqtt_client_publish_bounded(client, registration_config_topic, "", 0, 1, 1, OMK_MQTT_OUTBOX_BYTES) < 0) {
         ESP_LOGW(TAG, "Could not clear retained registration config");
+    }
+}
+
+static void apply_registration_config(const char *logical_id, bool superseded_clear) {
+    if (logical_id == NULL) {
+        esp_err_t clear_err = node_registration_clear();
+        if (clear_err == ESP_OK) {
+            sen66_delivery_invalidate();
+            if (device_status_configured) {
+                esp_mqtt_client_publish(client, device_status_topic, "", 0, 0, 1);
+                device_status_configured = false;
+            }
+            clear_retained_registration_ack();
+            clear_retained_registration_config();
+            publish_registration_status();
+            ESP_LOGI(TAG, "Cleared Node logical registration; Wi-Fi provisioning retained");
+        } else {
+            ESP_LOGE(TAG, "Could not clear Node registration: %s", esp_err_to_name(clear_err));
+        }
+        return;
+    }
+    esp_err_t save_err = node_registration_save(logical_id);
+    if (save_err == ESP_OK) {
+        sen66_delivery_invalidate();
+        if (superseded_clear) {
+            /* Preserve cleanup without publishing an intermediate provisioned
+             * state or erasing the newly saved final assignment. */
+            if (device_status_configured) {
+                esp_mqtt_client_publish(client, device_status_topic, "", 0, 0, 1);
+                device_status_configured = false;
+            }
+            clear_retained_registration_config();
+        }
+        if (!configure_device_status(logical_id)) {
+            ESP_LOGE(TAG, "Could not configure logical-device MQTT status after registration");
+        } else {
+            publish_device_status("online");
+        }
+        publish_registration_ack(logical_id);
+        publish_registration_status();
+    } else {
+        ESP_LOGE(TAG, "Could not persist registration: %s", esp_err_to_name(save_err));
     }
 }
 
@@ -288,7 +375,6 @@ static void process_registration_config(const esp_mqtt_event_handle_t event) {
         ESP_LOGW(TAG, "Ignoring fragmented registration config");
         return;
     }
-
     cJSON *root = cJSON_ParseWithLength(event->data, event->data_len);
     if (root == NULL) {
         ESP_LOGW(TAG, "Ignoring invalid registration config JSON");
@@ -296,50 +382,69 @@ static void process_registration_config(const esp_mqtt_event_handle_t event) {
     }
     const cJSON *protocol_version = cJSON_GetObjectItemCaseSensitive(root, "protocol_version");
     const cJSON *logical_id = cJSON_GetObjectItemCaseSensitive(root, "logical_id");
+    bool clear = cJSON_IsNull(logical_id);
     bool valid = cJSON_IsNumber(protocol_version) &&
-                 protocol_version->valueint == OMK_NODE_PROTOCOL_VERSION;
+                 protocol_version->valueint == OMK_NODE_PROTOCOL_VERSION &&
+                 (clear || (cJSON_IsString(logical_id) && logical_id->valuestring != NULL &&
+                            logical_id_is_valid(logical_id->valuestring)));
     if (!valid) {
         ESP_LOGW(TAG, "Ignoring invalid registration config fields");
-        cJSON_Delete(root);
-        return;
-    }
-    if (cJSON_IsNull(logical_id)) {
-        esp_err_t clear_err = node_registration_clear();
-        if (clear_err == ESP_OK) {
-            if (device_status_configured) {
-                esp_mqtt_client_publish(client, device_status_topic, "", 0, 0, 1);
-                device_status_configured = false;
-            }
-            clear_retained_registration_ack();
-            clear_retained_registration_config();
-            publish_registration_status();
-            ESP_LOGI(TAG, "Cleared Node logical registration; Wi-Fi provisioning retained");
-        } else {
-            ESP_LOGE(TAG, "Could not clear Node registration: %s", esp_err_to_name(clear_err));
-        }
-        cJSON_Delete(root);
-        return;
-    }
-    valid = cJSON_IsString(logical_id) && logical_id->valuestring != NULL &&
-            logical_id_is_valid(logical_id->valuestring);
-    if (!valid) {
-        ESP_LOGW(TAG, "Ignoring invalid registration config fields");
-        cJSON_Delete(root);
-        return;
-    }
-    esp_err_t save_err = node_registration_save(logical_id->valuestring);
-    if (save_err == ESP_OK) {
-        if (!configure_device_status(logical_id->valuestring)) {
-            ESP_LOGE(TAG, "Could not configure logical-device MQTT status after registration");
-        } else {
-            publish_device_status("online");
-        }
-        publish_registration_ack(logical_id->valuestring);
-        publish_registration_status();
+    } else if (!registration_sender_enabled) {
+        apply_registration_config(clear ? NULL : logical_id->valuestring, false);
     } else {
-        ESP_LOGE(TAG, "Could not persist registration: %s", esp_err_to_name(save_err));
+        portENTER_CRITICAL(&sensor_status_lock);
+        strcpy(registration_request.logical_id, clear ? "" : logical_id->valuestring);
+        registration_request.clear_retained_config |= clear;
+        ++registration_request_version;
+        registration_request_pending = true;
+        portEXIT_CRITICAL(&sensor_status_lock);
+        sen66_delivery_wake();
     }
     cJSON_Delete(root);
+}
+
+static void synchronize_registration_connection(void) {
+    if (!registration_is_persisted()) {
+        /* Delete stale retained assignments before subscribing. */
+        clear_retained_registration_ack();
+        clear_retained_registration_config();
+    }
+    if (esp_mqtt_client_subscribe(client, registration_config_topic, 1) < 0) {
+        ESP_LOGW(TAG, "Could not subscribe to registration config");
+    }
+    publish_registration_status();
+    publish_device_status("online");
+}
+
+omk_mqtt_progress_t mqtt_registration_get_progress(void) {
+    portENTER_CRITICAL(&progress_lock);
+    /* Sample AFTER acquiring the lock: an ACK on the other core must never
+     * look newer than now and underflow the unsigned freshness calculation. */
+    uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
+    /* Latch stale evidence so a full millisecond wrap cannot revive it. */
+    if (!mqtt_progress_is_fresh(&mqtt_progress, now)) mqtt_progress.ack_seen = false;
+    omk_mqtt_progress_t result = mqtt_progress;
+    portEXIT_CRITICAL(&progress_lock);
+    return result;
+}
+
+static void probe_submitted(int id) {
+    portENTER_CRITICAL(&progress_lock);
+    mqtt_progress_result(&mqtt_progress, (uint32_t)(esp_timer_get_time() / 1000), id);
+    portEXIT_CRITICAL(&progress_lock);
+}
+
+static void service_probe(void) {
+    uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
+    portENTER_CRITICAL(&progress_lock);
+    bool due = mqtt_progress_begin(&mqtt_progress, now, client_connected);
+    portEXIT_CRITICAL(&progress_lock);
+    if (!due) return;
+    /* Existing sender task only. Recovery never waits for this MQTT lock.
+     * At most one non-retained QoS 1 item, including across reconnects. */
+    int id = esp_mqtt_client_enqueue_bounded(client, probe_topic, "1", 1, 1, 0,
+                                            OMK_MQTT_OUTBOX_BYTES, probe_submitted);
+    if (id < 0) probe_submitted(id);
 }
 
 static void mqtt_event_handler(void *arg, esp_event_base_t event_base,
@@ -349,29 +454,40 @@ static void mqtt_event_handler(void *arg, esp_event_base_t event_base,
 
     record_mqtt_diagnostic_event((esp_mqtt_event_id_t)event_id);
     switch ((esp_mqtt_event_id_t)event_id) {
+    case MQTT_EVENT_PUBLISHED:
+    case MQTT_EVENT_DELETED: {
+        const esp_mqtt_event_handle_t event = event_data;
+        if (event != NULL) {
+            uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
+            portENTER_CRITICAL(&progress_lock);
+            mqtt_progress_event(&mqtt_progress, now, event->msg_id,
+                                event_id == MQTT_EVENT_PUBLISHED);
+            portEXIT_CRITICAL(&progress_lock);
+        }
+        break;
+    }
     case MQTT_EVENT_CONNECTED:
         client_connected = true;
         mqtt_last_connected_us = esp_timer_get_time();
         mqtt_disconnected_since_us = 0;
         mesh_network_log_diagnostics("MQTT connected", 0);
         ESP_LOGI(TAG, "MQTT connected");
-        if (!registration_is_persisted()) {
-            /* A reset Node must not replay an old broker's retained assignment.
-             * Publish deletions before subscribing on this ordered connection. */
-            clear_retained_registration_ack();
-            clear_retained_registration_config();
-        }
-        if (esp_mqtt_client_subscribe(client, registration_config_topic, 1) < 0) {
-            ESP_LOGW(TAG, "Could not subscribe to registration config");
-        }
-        publish_registration_status();
-        publish_device_status("online");
+        portENTER_CRITICAL(&sensor_status_lock);
+        ++registration_connection_version;
+        ++sensor_status_version;
+        portEXIT_CRITICAL(&sensor_status_lock);
+        if (registration_sender_enabled) sen66_delivery_wake();
+        else synchronize_registration_connection();
         break;
     case MQTT_EVENT_DATA:
         process_registration_config(event_data);
         break;
     case MQTT_EVENT_DISCONNECTED:
         client_connected = false;
+        portENTER_CRITICAL(&progress_lock);
+        mqtt_progress.ack_seen = false;
+        /* Do not discard pending_id: reconnect retains the MQTT outbox. */
+        portEXIT_CRITICAL(&progress_lock);
         if (mqtt_disconnected_since_us == 0) mqtt_disconnected_since_us = esp_timer_get_time();
         mqtt_disconnect_count++;
         mesh_network_log_diagnostics("MQTT disconnected", 0);
@@ -417,23 +533,72 @@ uint32_t mqtt_registration_get_disconnected_duration_s(void) {
 }
 
 void mqtt_registration_set_sen66_connected(bool connected) {
+    portENTER_CRITICAL(&sensor_status_lock);
     if (sen66_connected == connected) {
+        portEXIT_CRITICAL(&sensor_status_lock);
         return;
     }
     sen66_connected = connected;
-    if (client != NULL && client_connected) {
-        publish_registration_status();
-    }
+    ++sensor_status_version;
+    portEXIT_CRITICAL(&sensor_status_lock);
+    sen66_delivery_invalidate();
 }
 
 void mqtt_registration_set_sen66_diagnostics(uint32_t recovery_count,
                                              uint32_t measurement_timeout_count) {
+    portENTER_CRITICAL(&sensor_status_lock);
     sen66_diagnostics_available = true;
     sen66_recovery_count = recovery_count;
     sen66_measurement_timeout_count = measurement_timeout_count;
-    if (client != NULL && client_connected) {
-        publish_registration_status();
+    ++sensor_status_version;
+    portEXIT_CRITICAL(&sensor_status_lock);
+    sen66_delivery_wake();
+}
+
+void mqtt_registration_flush_sensor_status(void) {
+    if (!registration_sender_enabled || !client || !client_connected) return;
+    service_probe();
+    if (!client_connected) return;
+    /* Snapshot one desired state before I/O. A newer callback may replace it
+     * while NVS/MQTT blocks; completion acknowledges ONLY this version. One
+     * attempt per pass keeps repeated changes from starving sample delivery. */
+    portENTER_CRITICAL(&sensor_status_lock);
+    bool have = registration_request_pending;
+    registration_request_t request = registration_request;
+    uint32_t version = registration_request_version;
+    portEXIT_CRITICAL(&sensor_status_lock);
+    if (have) {
+        apply_registration_config(request.logical_id[0] ? request.logical_id : NULL,
+                                  request.clear_retained_config);
+        portENTER_CRITICAL(&sensor_status_lock);
+        if (registration_request_version == version) {
+            registration_request_pending = false;
+            registration_request.clear_retained_config = false;
+        }
+        portEXIT_CRITICAL(&sensor_status_lock);
     }
+    if (!client_connected) return;
+    portENTER_CRITICAL(&sensor_status_lock);
+    uint32_t connection = registration_connection_version;
+    bool reconnect = connection != registration_connection_handled;
+    registration_connection_handled = connection;
+    bool dirty = sensor_status_version != sensor_status_sent_version;
+    portEXIT_CRITICAL(&sensor_status_lock);
+    if (reconnect) synchronize_registration_connection();
+    else if (dirty) publish_registration_status();
+#ifdef OMK_NETWORK_DIAGNOSTICS
+    /* Existing sender is the only consumer. Observer/USB/flash never wait for
+     * MQTT. One complete, non-retained JSON every >=5 min; no ACK protocol. */
+    static char diagnostic[ND_REPORT_SIZE];
+    if (client_connected && network_diag_report(diagnostic, sizeof(diagnostic))) {
+        char topic[OMK_MQTT_TOPIC_SIZE];
+        int n = snprintf(topic, sizeof(topic), "omk/node/%s/network_diagnostics", client_id + 9);
+        int result = -1;
+        if (n > 0 && (size_t)n < sizeof(topic))
+            result = esp_mqtt_client_enqueue_diagnostic(client, topic, diagnostic);
+        network_diag_report_result(result >= 0);
+    }
+#endif
 }
 
 static esp_err_t publish_mesh_diagnostic(const char *payload, const char *suffix) {
@@ -472,6 +637,24 @@ esp_err_t mqtt_registration_publish_mesh_status(const char *payload) {
     int n = snprintf(combined, size, "%.*s,\"mqtt\":", (int)(length - 1), payload);
     bool complete = n >= 0 && (size_t)n < size - 1 &&
         format_mqtt_diagnostics(combined + n, size - (size_t)n - 1);
+    if (complete && sen66_diagnostics_snapshot().boot_id) {
+        size_t offset = strlen(combined);
+        n = snprintf(combined + offset, size - offset, ",\"sen66\":");
+        complete = n >= 0 && (size_t)n < size - offset - 1;
+        if (complete) {
+            offset += (size_t)n;
+            complete = sen66_diagnostics_format(combined + offset, size - offset - 1);
+        }
+        if (complete) {
+            offset = strlen(combined);
+            n = snprintf(combined + offset, size - offset, ",\"sen66_tx\":");
+            complete = n >= 0 && (size_t)n < size - offset - 1;
+            if (complete) {
+                offset += (size_t)n;
+                complete = sen66_delivery_format(combined + offset, size - offset - 1);
+            }
+        }
+    }
     if (complete) {
         size_t end = strlen(combined);
         combined[end] = '}';
@@ -560,8 +743,12 @@ esp_err_t mqtt_registration_start(void) {
     }
 
     load_persisted_device_status();
+    /* Outside omk/#: the broker ACK needs no subscriber, and the Gateway
+     * must not store/transform transport probes as measurements. */
+    snprintf(probe_topic, sizeof(probe_topic), "omk-liveness/%012" PRIx64, node_id);
     const esp_mqtt_client_config_t config = {
         .broker.address.uri = OMK_MQTT_BROKER_URI,
+        .outbox.limit = OMK_MQTT_OUTBOX_BYTES,
         .credentials.client_id = client_id,
         .session.last_will = {
             .topic = device_status_configured ? device_status_topic : NULL,
@@ -581,6 +768,15 @@ esp_err_t mqtt_registration_start(void) {
     if (err != ESP_OK) {
         return err;
     }
+    /* Independent of sensor presence. Failure never installs a synchronous
+     * sensor fallback; registration callbacks below remain fully functional. */
+    registration_sender_enabled = true;
+    esp_err_t delivery_err = sen66_delivery_start();
+    if (delivery_err != ESP_OK) {
+        registration_sender_enabled = false;
+        ESP_LOGE(TAG, "SEN66 sender unavailable: %s; registration continues", esp_err_to_name(delivery_err));
+    }
+
     err = esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP,
                                      ip_event_handler, NULL);
     if (err != ESP_OK) {
@@ -609,6 +805,8 @@ esp_err_t mqtt_registration_publish_environment(const char *sensor_id,
     if (client == NULL || !client_connected) {
         return ESP_ERR_INVALID_STATE;
     }
+
+    if (!mesh_netif_allow_data()) return ESP_ERR_NO_MEM;
 
     char topic[OMK_MQTT_TOPIC_SIZE];
     char payload[OMK_MQTT_PAYLOAD_SIZE];
@@ -644,6 +842,8 @@ esp_err_t mqtt_registration_publish_ble_relay(const char *relay_node_id, const c
     if (client == NULL || !client_connected) {
         return ESP_ERR_INVALID_STATE;
     }
+
+    if (!mesh_netif_allow_data()) return ESP_ERR_NO_MEM;
 
     char topic[OMK_MQTT_TOPIC_SIZE];
     char payload[OMK_MQTT_BLE_RELAY_PAYLOAD_SIZE];
@@ -716,7 +916,7 @@ static bool append_json_float(char *buffer, size_t size, size_t *offset,
     return append_text(buffer, size, offset, trailing_comma ? "%.2f," : "%.2f", (double)value);
 }
 
-esp_err_t mqtt_registration_publish_sen66(const char *sensor_id,
+static esp_err_t publish_sen66(const char *sensor_id,
                                           const sen66_measurement_t *measurement) {
     if (sensor_id == NULL || sensor_id[0] == '\0' || measurement == NULL) {
         return ESP_ERR_INVALID_ARG;
@@ -725,6 +925,8 @@ esp_err_t mqtt_registration_publish_sen66(const char *sensor_id,
         return ESP_ERR_INVALID_STATE;
     }
 
+    if (!mesh_netif_allow_data()) return ESP_ERR_NO_MEM;
+
     char topic[OMK_MQTT_TOPIC_SIZE];
     char payload[OMK_MQTT_SEN66_PAYLOAD_SIZE];
     int written = snprintf(topic, sizeof(topic), "omk/%s/sen66", sensor_id);
@@ -732,11 +934,15 @@ esp_err_t mqtt_registration_publish_sen66(const char *sensor_id,
         return ESP_ERR_INVALID_SIZE;
     }
 
+    sen66_diagnostics_t d = sen66_diagnostics_snapshot();
     size_t offset = 0;
     bool complete =
         append_text(payload, sizeof(payload), &offset,
-                    "{\"device_id\":\"%s\",\"uptime_ms\":%" PRIu32 ",",
-                    sensor_id, measurement->uptime_ms) &&
+                    "{\"device_id\":\"%s\",\"uptime_ms\":%" PRIu32
+                    ",\"meta\":{\"boot_id\":\"%016" PRIx64 "\",\"seq\":%" PRIu32
+                    ",\"enqueue_seq\":%" PRIu32 "},",
+                    sensor_id, measurement->uptime_ms, d.boot_id,
+                    measurement->sequence, d.enqueue_success + 1) &&
         append_json_float(payload, sizeof(payload), &offset, "pm1_0_ug_m3",
                           measurement->pm1_0_ug_m3, true) &&
         append_json_float(payload, sizeof(payload), &offset, "pm2_5_ug_m3",
@@ -760,6 +966,25 @@ esp_err_t mqtt_registration_publish_sen66(const char *sensor_id,
         return ESP_ERR_INVALID_SIZE;
     }
 
-    int message_id = enqueue_observed(topic, payload);
-    return message_id < 0 ? ESP_FAIL : ESP_OK;
+    sen66_delivery_phase(SEN66_TX_ENQUEUE, measurement->sequence);
+    int message_id = esp_mqtt_client_enqueue_bounded(client, topic, payload, 0, 0, 0,
+                                                       OMK_MQTT_DATA_BYTES, NULL);
+    sen66_diagnostics_enqueue_result(message_id >= 0, measurement->sequence);
+    sen66_delivery_phase(SEN66_TX_OUTBOX, measurement->sequence);
+    (void)sample_mqtt_outbox();
+    sen66_delivery_phase(SEN66_TX_IDLE, 0);
+    return message_id == -2 || message_id == -3 ? ESP_ERR_NO_MEM :
+           message_id < 0 ? ESP_FAIL : ESP_OK;
+}
+
+/* Called only by the sender task. enqueue_seq is committed only on acceptance;
+ * a failed enqueue reuses that ordinal on the next successful measurement. */
+esp_err_t mqtt_registration_publish_sen66(const char *sensor_id,
+                                          const sen66_measurement_t *measurement) {
+    uint64_t started_ms = (uint64_t)(esp_timer_get_time() / 1000);
+    sen66_diagnostics_publish_begin();
+    esp_err_t err = publish_sen66(sensor_id, measurement);
+    sen66_diagnostics_publish_end(err, measurement ? measurement->sequence : 0,
+        (uint64_t)(esp_timer_get_time() / 1000) - started_ms);
+    return err;
 }

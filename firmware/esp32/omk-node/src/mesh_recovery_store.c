@@ -22,7 +22,7 @@ esp_err_t mesh_recovery_store_load(omk_mesh_recovery_record_t *record) {
     }
     if (err != ESP_OK) return err;
     if (size != sizeof(loaded) || loaded.version != 1 || loaded.spent > 1 ||
-        loaded.reason > OMK_RECOVERY_ROOT_LINK) return ESP_ERR_INVALID_STATE;
+        loaded.reason > OMK_RECOVERY_IP_TIMEOUT) return ESP_ERR_INVALID_STATE;
     *record = loaded;
     return ESP_OK;
 }

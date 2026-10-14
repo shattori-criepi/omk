@@ -144,7 +144,7 @@ def test_reset_precedes_network_start_and_clears_broker_registration_before_subs
     wifi = (SOURCE/'wifi_station.c').read_text()
     assert wifi.index('gateway_credentials_clear_legacy_for_setup()') < wifi.index('gateway_credentials_migrate_legacy(')
     mqtt = (SOURCE/'mqtt_registration.c').read_text()
-    connected = mqtt[mqtt.index('case MQTT_EVENT_CONNECTED:'):mqtt.index('case MQTT_EVENT_DATA:')]
+    connected = mqtt[mqtt.index('static void synchronize_registration_connection'):mqtt.index('static void mqtt_event_handler')]
     assert connected.index('clear_retained_registration_config();') < connected.index('esp_mqtt_client_subscribe(')
     assert connected.index('clear_retained_registration_ack();') < connected.index('publish_registration_status();')
     assert 'if (!registration_is_persisted())' in connected

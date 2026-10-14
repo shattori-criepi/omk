@@ -90,6 +90,8 @@ static void sensor_slot_tick(sensor_slot_t *slot) {
 
     bool data_ready = false;
     esp_err_t err = slot->driver->read(slot->context, &data_ready);
+    const uint64_t read_completed_ms = monotonic_milliseconds();
+    const bool measurement_succeeded = err == ESP_OK && data_ready;
     if (err != ESP_OK) {
         ++slot->consecutive_read_failures;
         ESP_LOGW(TAG, "%s read failed: %s (consecutive_failures=%u)",
@@ -102,7 +104,7 @@ static void sensor_slot_tick(sensor_slot_t *slot) {
         }
     } else if (data_ready) {
         slot->consecutive_read_failures = 0;
-        slot->last_successful_measurement_ms = monotonic_milliseconds();
+        slot->last_successful_measurement_ms = read_completed_ms;
         if (slot->recovery_pending) {
             ESP_LOGI(TAG, "%s measurement recovered", slot->driver->driver_id);
             slot->recovery_pending = false;
@@ -118,22 +120,24 @@ static void sensor_slot_tick(sensor_slot_t *slot) {
             slot->logical_id_warning_logged = false;
             err = slot->driver->publish(slot->context, logical_id);
             if (err != ESP_OK && !slot->mqtt_warning_logged) {
-                ESP_LOGW(TAG, "%s MQTT publish unavailable: %s", slot->driver->driver_id, esp_err_to_name(err));
+                ESP_LOGW(TAG, "%s delivery handoff unavailable: %s", slot->driver->driver_id, esp_err_to_name(err));
                 slot->mqtt_warning_logged = true;
             } else if (err == ESP_OK) {
                 slot->mqtt_warning_logged = false;
             }
         }
     }
-    if (monotonic_milliseconds() - slot->last_successful_measurement_ms >= SENSOR_MEASUREMENT_LIVENESS_TIMEOUT_MS) {
+    /* Evaluate sensor health at read completion, never after delivery work. */
+    if (!measurement_succeeded &&
+        read_completed_ms - slot->last_successful_measurement_ms >= SENSOR_MEASUREMENT_LIVENESS_TIMEOUT_MS) {
         ++slot->measurement_timeout_count;
         ESP_LOGW(TAG, "%s measurement timeout: no successful measurement for %" PRIu64 " s; recovering",
                  slot->driver->driver_id,
-                 (monotonic_milliseconds() - slot->last_successful_measurement_ms) / 1000);
+                 (read_completed_ms - slot->last_successful_measurement_ms) / 1000);
         recover_sensor(slot, "measurement liveness timeout");
         return;
     }
-    slot->next_attempt_ms = monotonic_milliseconds() + SENSOR_MEASUREMENT_INTERVAL_MS;
+    slot->next_attempt_ms = read_completed_ms + SENSOR_MEASUREMENT_INTERVAL_MS;
 }
 
 static void sensor_manager_task(void *arg) {

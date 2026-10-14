@@ -1,4 +1,6 @@
+#include "mesh_tx_policy.h"
 #include "mesh_netif.h"
+#include "network_diagnostics.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -33,6 +35,15 @@ static esp_netif_t *mesh_ap_netif;
 static bool receive_task_running;
 static mesh_addr_t routing_table[CONFIG_MESH_ROUTE_TABLE_SIZE];
 static mesh_netif_diagnostics_t diagnostics;
+static portMUX_TYPE tx_policy_lock = portMUX_INITIALIZER_UNLOCKED;
+static omk_mesh_tx_policy_t tx_policy;
+
+bool mesh_netif_allow_data(void) {
+    portENTER_CRITICAL(&tx_policy_lock);
+    bool allowed = mesh_tx_policy_allow(&tx_policy, (uint32_t)(esp_timer_get_time() / 1000));
+    portEXIT_CRITICAL(&tx_policy_lock);
+    return allowed;
+}
 
 static uint32_t uptime_seconds(void) {
     return (uint32_t)(esp_timer_get_time() / 1000000);
@@ -45,6 +56,19 @@ static esp_err_t record_mesh_send_result(esp_err_t err) {
     } else {
         diagnostics.tx_failure_count++;
     }
+    return err;
+}
+
+static esp_err_t observed_mesh_send(unsigned op, const mesh_addr_t *to,
+                                    const mesh_data_t *data, int flags) {
+    uint32_t token = network_diag_begin(op);
+    esp_err_t err = esp_mesh_send(to, data, flags, NULL, 0);
+    portENTER_CRITICAL(&tx_policy_lock);
+    mesh_tx_policy_result(&tx_policy, (uint32_t)(esp_timer_get_time() / 1000),
+                         err == ESP_ERR_MESH_NO_MEMORY || err == ESP_ERR_MESH_TIMEOUT,
+                         err == ESP_OK);
+    portEXIT_CRITICAL(&tx_policy_lock);
+    network_diag_end(token, err, err != ESP_OK);
     return err;
 }
 
@@ -73,15 +97,15 @@ static esp_err_t transmit_root_ap(void *handle, void *buffer, size_t length) {
     mesh_data_t data = {.data = buffer, .size = length, .proto = MESH_PROTO_STA, .tos = MESH_TOS_P2P};
     memcpy(destination.addr, buffer, MESH_MAC_LENGTH);
     if (memcmp(destination.addr, broadcast, MESH_MAC_LENGTH) != 0) {
-        return record_mesh_send_result(esp_mesh_send(&destination, &data, MESH_DATA_P2P, NULL, 0));
+        return record_mesh_send_result(observed_mesh_send(ND_MESH_DOWN, &destination, &data, MESH_DATA_P2P));
     }
     int count = 0;
     esp_err_t result = esp_mesh_get_routing_table(routing_table, sizeof(routing_table), &count);
     if (result != ESP_OK) return result;
     for (int index = 0; index < count; ++index) {
         if (memcmp(routing_table[index].addr, driver->station_mac, MESH_MAC_LENGTH) != 0) {
-            (void)record_mesh_send_result(esp_mesh_send(&routing_table[index], &data,
-                                                        MESH_DATA_P2P, NULL, 0));
+            (void)record_mesh_send_result(observed_mesh_send(ND_MESH_BROADCAST, &routing_table[index],
+                                                             &data, MESH_DATA_P2P));
         }
     }
     return ESP_OK;
@@ -95,7 +119,7 @@ static esp_err_t transmit_root_ap_wrap(void *handle, void *buffer, size_t length
 static esp_err_t transmit_child_sta(void *handle, void *buffer, size_t length) {
     (void)handle;
     mesh_data_t data = {.data = buffer, .size = length, .proto = MESH_PROTO_AP, .tos = MESH_TOS_P2P};
-    return record_mesh_send_result(esp_mesh_send(NULL, &data, MESH_DATA_TODS, NULL, 0));
+    return record_mesh_send_result(observed_mesh_send(ND_MESH_UP, NULL, &data, MESH_DATA_TODS));
 }
 
 static esp_err_t transmit_child_sta_wrap(void *handle, void *buffer, size_t length, void *netstack_buffer) {

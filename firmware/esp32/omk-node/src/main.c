@@ -6,6 +6,7 @@
 #include "nvs_flash.h"
 #include "discovery_ble.h"
 #include "boot_diagnostics.h"
+#include "network_diagnostics.h"
 #include "node_state.h"
 #include "mqtt_registration.h"
 #include "mesh_network.h"
@@ -101,6 +102,7 @@ void app_main(void) {
     ESP_LOGI(TAG, "Normal boot begin");
     uint64_t node_id;
     ESP_ERROR_CHECK(node_identity_get_id(&node_id));
+    network_diag_start();
     bool has_wifi_credentials = false;
     esp_err_t wifi_err = wifi_station_init_network_core();
     if (wifi_err == ESP_OK) {

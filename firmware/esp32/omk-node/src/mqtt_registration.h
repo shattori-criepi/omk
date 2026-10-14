@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 #include "esp_err.h"
+#include "mesh_liveness.h"
 
 typedef struct sen66_measurement sen66_measurement_t;
 
@@ -20,10 +21,12 @@ esp_err_t mqtt_registration_publish_mesh_recovery_status(const char *payload);
 uint32_t mqtt_registration_get_disconnect_count(void);
 bool mqtt_registration_is_connected(void);
 bool mqtt_registration_is_started(void);
+/* RAM snapshot only; never takes MQTT's mutex. */
+omk_mqtt_progress_t mqtt_registration_get_progress(void);
 uint32_t mqtt_registration_get_last_connected_uptime_s(void);
 uint32_t mqtt_registration_get_disconnected_duration_s(void);
 
-/* Updates the retained Node registration status with physically detected SEN66 state. */
+/* Sensor task: RAM-only updates. Retained status is sent by sen66_tx. */
 void mqtt_registration_set_sen66_connected(bool connected);
 void mqtt_registration_set_sen66_diagnostics(uint32_t recovery_count,
                                              uint32_t measurement_timeout_count);
@@ -41,6 +44,10 @@ esp_err_t mqtt_registration_publish_ble_relay(const char *relay_node_id,
                                               const uint8_t *manufacturer_data, size_t manufacturer_length,
                                               const uint8_t *service_data, size_t service_length);
 
-/* Queues one non-retained SEN66 measurement through the established MQTT client. */
+/* Sender task only: may block on the MQTT library lock. */
 esp_err_t mqtt_registration_publish_sen66(const char *sensor_id,
                                           const sen66_measurement_t *measurement);
+
+/* Sender task only: apply the latest registration request and sensor status.
+ * May block on MQTT. No application lock is held across MQTT/NVS calls. */
+void mqtt_registration_flush_sensor_status(void);

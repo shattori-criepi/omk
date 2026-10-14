@@ -1,4 +1,5 @@
 #include "usb_provisioning.h"
+#include "network_diagnostics.h"
 
 #include <inttypes.h>
 #include <stdbool.h>
@@ -70,6 +71,9 @@ static bool schedule_reboot(void) {
 }
 
 static void handle_line(char *line) {
+#ifdef OMK_NETWORK_DIAGNOSTICS
+    if (network_diag_usb(line, provision_node_id)) return;
+#endif
     cJSON *root = cJSON_Parse(line);
     if (root == NULL) {
         write_status("invalid_request");

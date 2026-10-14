@@ -1,6 +1,9 @@
 #include "sensor_driver.h"
 #include "sen66_sensor.h"
 #include "mqtt_registration.h"
+#include "sen66_diagnostics.h"
+#include "sen66_delivery.h"
+#include "esp_timer.h"
 
 /* Per-endpoint context, allocated by the manager. No singleton sensor state. */
 typedef struct {
@@ -21,11 +24,17 @@ static esp_err_t start(const sensor_endpoint_t *endpoint, void *context) {
 }
 static esp_err_t read_sample(void *context, bool *ready) {
     sen66_context_t *ctx = context;
-    return sen66_sensor_read(&ctx->sensor, &ctx->sample, ready);
+    uint64_t started_ms = (uint64_t)(esp_timer_get_time() / 1000);
+    sen66_diagnostics_read_begin(started_ms);
+    esp_err_t err = sen66_sensor_read(&ctx->sensor, &ctx->sample, ready);
+    uint32_t seq = sen66_diagnostics_read_end(err, *ready,
+        (uint64_t)(esp_timer_get_time() / 1000) - started_ms);
+    if (err == ESP_OK && *ready) ctx->sample.sequence = seq;
+    return err;
 }
 static esp_err_t publish(void *context, const char *logical_id) {
     sen66_context_t *ctx = context;
-    return mqtt_registration_publish_sen66(logical_id, &ctx->sample);
+    return sen66_delivery_submit(logical_id, &ctx->sample);
 }
 static void close_sensor(void *context) {
     sen66_context_t *ctx = context;
