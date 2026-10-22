@@ -81,7 +81,7 @@ def test_registration_status_payload_has_dedicated_capacity_for_sensor_presence(
     source = (SOURCE / "mqtt_registration.c").read_text()
     assert "#define OMK_REGISTRATION_PAYLOAD_SIZE 256" in source
     assert "static char registration_payload[OMK_REGISTRATION_PAYLOAD_SIZE];" in source
-    status = source[source.index("static void publish_registration_status") : source.index("static bool logical_id_is_valid(const char *logical_id) {")]
+    status = source[source.index("static bool publish_registration_status") : source.index("static bool logical_id_is_valid(const char *logical_id) {")]
     assert '"\\\"connected_sensors\\\":%s%s}"' in status
     assert "esp_mqtt_client_publish_bounded(client, registration_topic," in status
     assert "OMK_MQTT_OUTBOX_BYTES" in status
@@ -116,7 +116,7 @@ def test_registration_status_payload_has_dedicated_capacity_for_sensor_presence(
 
 def test_registration_status_includes_sen66_recovery_diagnostics_only_after_recovery():
     source = (SOURCE / "mqtt_registration.c").read_text()
-    status = source[source.index("static void publish_registration_status") : source.index("static bool logical_id_is_valid(const char *logical_id) {")]
+    status = source[source.index("static bool publish_registration_status") : source.index("static bool logical_id_is_valid(const char *logical_id) {")]
 
     assert "if (diagnostics_available)" in status
     assert "sen66_rc" in status

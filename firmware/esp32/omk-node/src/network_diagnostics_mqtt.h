@@ -14,7 +14,12 @@ int esp_mqtt_client_enqueue_bounded(esp_mqtt_client_handle_t client,
     unsigned limit, void (*submitted)(int));
 int esp_mqtt_client_get_outbox_size_nowait(esp_mqtt_client_handle_t client);
 
-/* Registration-only synchronous publish; header/topic-inclusive capacity is
- * checked while holding the existing MQTT mutex through the publish call. */
+/* Registration publications use the same nonblocking outbox admission.
+ * The historical name is retained; success means queued, not delivered. */
 int esp_mqtt_client_publish_bounded(esp_mqtt_client_handle_t client,
     const char *topic, const char *data, int len, int qos, int retain, unsigned limit);
+
+/* MQTT 3.1.1 subscription queued for the existing MQTT task, with no I/O or
+ * mutex wait in the caller. Same -3/-2 admission failures as enqueue. */
+int esp_mqtt_client_subscribe_bounded(esp_mqtt_client_handle_t client,
+    const char *topic, int qos, unsigned limit);

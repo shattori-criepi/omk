@@ -35,7 +35,8 @@ def binary(tmp_path_factory):
 
 
 @pytest.mark.parametrize("scenario", ["timing", "parallel", "capacity", "token_wrap", "error_codes", "event_stall", "persistence",
-    "no_periodic_write", "failure", "space", "corrupt", "rtc_interrupted", "budget", "usb", "report", "multiple_restarts", "resolved_pending", "severity", "priority", "early_budget", "report_busy", "budget_restore", "fault_slot_parity", "minor_after_critical"])
+    "no_periodic_write", "failure", "space", "corrupt", "rtc_interrupted", "budget", "usb", "report", "multiple_restarts", "resolved_pending", "severity", "priority", "early_budget", "report_busy", "budget_restore", "fault_slot_parity", "minor_after_critical",
+    "report_live", "report_missing_saved", "report_size"])
 def test_recorder_and_storage(binary, scenario):
     result = subprocess.run([str(binary), scenario], capture_output=True, text=True, timeout=15)
     assert result.returncode == 0, result.stderr
@@ -44,9 +45,42 @@ def test_recorder_and_storage(binary, scenario):
         assert len(records) == 81
         assert all(r["nd"] == 1 for r in records)
     if scenario == "report":
-        assert len(records) == 3
+        assert [r["view"] for r in records] == [0, 1, 2, 0, 1, 2]
         assert records[0]["stats"][3][1] == 1
         assert records[0]["active"][0][2] == 3
+        assert [records[i]["seq"] for i in (0, 3)] == [1, 2]
+        assert records[3]["at_us"] - records[0]["at_us"] >= 900_000_000
+        assert records[1] == records[4] and records[2] == records[5]
+    if scenario == "report_busy":
+        assert [r["view"] for r in records] == [0, 0, 1, 1]
+        assert [r["seq"] for r in records[:2]] == [1, 2]
+        assert records[1]["at_us"] - records[0]["at_us"] >= 30_000_000
+        assert records[2] == records[3]
+    if scenario == "report_live":
+        assert [r["view"] for r in records] == [0, 1, 2, 0, 0, 1, 2, 0, 1, 2]
+        live = records[0]
+        assert live["mesh_errors"][:2] == [[0x4007, 1409], [0x400A, 1]]
+        assert live["stats"][0][1:7] == [1410, 1410, 1410, 0x400A, 1234, 1234]
+        assert live["active"][0][2] == 5
+        assert live["progress"][:5] == [1, 1, 0, 1, 1]
+        assert live["progress"][10:] == [0x175, 1, 0]
+        assert live["reasons"] == 0  # Short failures do not replace the old fault.
+        assert live["boot"] != records[1]["boot"] == records[2]["boot"]
+        assert live["elf"] == "2a" + "00" * 31
+        assert records[3]["seq"] == 2 and records[3]["at_us"] > live["at_us"]
+        for i in (4, 7):
+            assert records[i]["seq"] == 1 and records[i]["at_us"] < live["at_us"]
+            assert records[i]["mesh_errors"] == [[0, 0]] * 8
+            assert records[i + 1] == records[1] and records[i + 2] == records[2]
+        assert len({records[i]["boot"] for i in (0, 4, 7)}) == 3
+    if scenario == "report_missing_saved":
+        assert [r["view"] for r in records] == [0, 1, 0, 0, 1, 0]
+        assert [r["seq"] for r in records if r["view"] == 0] == [1, 2, 3, 4]
+        assert records[1] == records[4]
+    if scenario == "report_size":
+        assert [r["view"] for r in records] == [0, 1, 2]
+        assert all(len(line.encode()) < 3072 for line in result.stdout.splitlines())
+        assert all(r["mesh_errors"] == [[-(2**31), 2**32 - 1]] * 8 for r in records)
 
 
 def test_patch_is_reproducible_and_rejects_other_sources(tmp_path):
@@ -191,3 +225,4 @@ def test_relay_only_node_records_saves_and_sends_without_waiting_for_mqtt(tmp_pa
     assert result.returncode == 0, result.stderr
     record = json.loads(result.stdout)
     assert record["schema"] == 2 and record["critical"] == 1 and record["saves"] == 1
+    assert record["view"] == 0 and record["seq"] > 1  # Busy retries sampled live data.

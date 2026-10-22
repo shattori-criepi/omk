@@ -717,7 +717,8 @@ esp_err_t mesh_network_start_prepared(void) {
     if (err != ESP_OK) return err;
     (void)esp_mesh_set_vote_percentage(1);
     (void)esp_mesh_set_ap_assoc_expire(30);
-    (void)esp_mesh_send_block_time(30000);
+    /* Bound one slow peer in the isolated sender; retain reliable P2P. */
+    (void)esp_mesh_send_block_time(5000);
     mesh_cfg_t config = MESH_INIT_CONFIG_DEFAULT();
     memcpy(config.mesh_id.addr, mesh_id, sizeof(mesh_id));
     config.channel = 0;

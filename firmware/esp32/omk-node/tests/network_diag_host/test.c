@@ -15,7 +15,7 @@ static void *parallel(void *arg) {
 static void reboot(int reason) {
     memset(&retained,0,sizeof(retained));memset(&saved,0,sizeof(saved));
     saved_reasons=saved_critical=saves=sequence=usb_dropped=0;save_error=0;fault_slot=0;
-    storage_disabled=initialized=alternate=false;
+    storage_disabled=initialized=false;next_report_view=live_report_sequence=0;
     last_save_us=next_report_us=0;flash_started_us=flash_finished_us=0;fake_us=0;reset_kind=reason;
     network_diag_start();
 }
@@ -78,8 +78,16 @@ int main(int argc,char **argv) {
         memset(rtc_checkpoints,0xee,sizeof(rtc_checkpoints));reboot(ESP_RST_POWERON);
         assert(saves==2 && (saved_reasons&(1U<<ND_OUTBOX)) && saved.schema==ND_SCHEMA);
     } else if(!strcmp(argv[1],"no_periodic_write")) {
-        for(unsigned i=0;i<7200;++i) { fake_us+=1000000;observe_once(); }
-        assert(flash_writes==0);
+        unsigned reports=0;char out[ND_REPORT_SIZE];
+        for(unsigned i=0;i<7200;++i) {
+            fake_us+=1000000;observe_once();
+            if(network_diag_report(out,sizeof(out))) {
+                assert(strstr(out,"\"view\":0,"));
+                network_diag_report_result(true);++reports;
+            }
+        }
+        assert(reports==24 && flash_writes==0);
+        assert(!retained.schema && !saved.schema);
     } else if(!strcmp(argv[1],"failure")) {
         flash_error=ESP_ERR_NO_MEM;stall(ND_MESH_UP);assert(storage_disabled && saves==0);
         for(unsigned i=0;i<10;++i) { fake_us+=ND_SAVE_GAP_US;observe_once(); }
@@ -155,12 +163,16 @@ int main(int argc,char **argv) {
         fake_us+=ND_SAVE_GAP_US;observe_once();assert(saves==2 && (saved_critical&(1U<<ND_OUTBOX)));
     } else if(!strcmp(argv[1],"report_busy")) {
         stall(ND_ENQUEUE);char out[ND_REPORT_SIZE];uint32_t seq=retained.sequence;
-        assert(network_diag_report(out,sizeof(out)));network_diag_report_result(false);
+        assert(network_diag_report(out,sizeof(out)));puts(out);network_diag_report_result(false);
         assert(!network_diag_report(out,sizeof(out)));
-        fake_us+=30000000;assert(network_diag_report(out,sizeof(out)));
+        fake_us=next_report_us-1;assert(!network_diag_report(out,sizeof(out)));
+        fake_us=next_report_us;assert(network_diag_report(out,sizeof(out)));puts(out);
         assert(retained.sequence==seq);network_diag_report_result(true);
         fake_us+=30000000;assert(!network_diag_report(out,sizeof(out)));
-        fake_us+=ND_REPORT_GAP_US;assert(network_diag_report(out,sizeof(out)));
+        fake_us=next_report_us;assert(network_diag_report(out,sizeof(out)));puts(out);
+        network_diag_report_result(false);
+        fake_us=next_report_us;assert(network_diag_report(out,sizeof(out)));puts(out);
+        assert(retained.sequence==seq && flash_writes==1);
     } else if(!strcmp(argv[1],"budget")) {
         saves=ND_SAVE_LIMIT;stall(ND_ENQUEUE);assert(!flash_writes);
     } else if(!strcmp(argv[1],"budget_restore")) {
@@ -187,12 +199,69 @@ int main(int argc,char **argv) {
         assert(network_diag_usb("OMKDIAG 0 9999999999",1));
         assert(!network_diag_usb("{\"command\":\"identify\"}",1));
     } else if(!strcmp(argv[1],"report")) {
-        char out[ND_REPORT_SIZE];assert(!network_diag_report(out,sizeof(out)));
-        stall(ND_ENQUEUE);assert(network_diag_report(out,sizeof(out)));puts(out);
-        assert(!network_diag_report(out,sizeof(out)));fake_us+=ND_REPORT_GAP_US;
-        assert(network_diag_report(out,sizeof(out)));puts(out);
+        char out[ND_REPORT_SIZE];stall(ND_ENQUEUE);
+        nd_snapshot_t held=retained, disk=saved;
+        for(unsigned i=0;i<6;++i) {
+            assert(network_diag_report(out,sizeof(out)));puts(out);
+            network_diag_report_result(true);
+            assert(!network_diag_report(out,sizeof(out)));
+            fake_us=next_report_us-1;assert(!network_diag_report(out,sizeof(out)));
+            fake_us=next_report_us;
+        }
+        assert(!memcmp(&held,&retained,sizeof(held)) && !memcmp(&disk,&saved,sizeof(disk)));
+        assert(flash_writes==1);
+    } else if(!strcmp(argv[1],"report_live")) {
+        stall(ND_WRITE);reboot(ESP_RST_SW);
+        nd_snapshot_t held=retained, disk=saved;
+        uint32_t observer_seq=sequence;
+        for(unsigned i=0;i<1409;++i) {
+            uint32_t t=network_diag_begin(ND_MESH_UP);network_diag_end(t,0x4007,true);
+        }
+        uint32_t t=network_diag_begin(ND_MESH_UP);fake_us+=1234000;
+        network_diag_end(t,0x400a,true);
+        network_diag_tick(fake_us);network_diag_post(fake_us,0);
+        network_diag_control(true);network_diag_control(false);network_diag_recovery(0x175,1,0);
+        observe_once();assert(sequence==observer_seq+1);
+        t=network_diag_begin(ND_WRITE);
+        char out[ND_REPORT_SIZE];
+        for(unsigned i=0;i<4;++i) {
+            assert(network_diag_report(out,sizeof(out)));puts(out);
+            network_diag_report_result(true);
+            fake_us=next_report_us;
+        }
+        network_diag_end(t,0,false);
+        assert(!memcmp(&held,&retained,sizeof(held)) && !memcmp(&disk,&saved,sizeof(disk)));
+        assert(sequence==observer_seq+1 && flash_writes==1);
+        /* Both soft and cold restart reset the live sender, not saved history. */
+        for(unsigned i=0;i<2;++i) {
+            reboot(i ? ESP_RST_POWERON : ESP_RST_SW);
+            for(unsigned j=0;j<3;++j) {
+                assert(network_diag_report(out,sizeof(out)));puts(out);
+                network_diag_report_result(true);fake_us=next_report_us;
+            }
+            assert(!memcmp(&disk,&saved,sizeof(disk)) && flash_writes==1);
+        }
+    } else if(!strcmp(argv[1],"report_missing_saved")) {
+        flash_error=ESP_ERR_NO_MEM;stall(ND_MESH_UP);
+        assert(retained.schema && !saved.schema);
+        nd_snapshot_t held=retained;char out[ND_REPORT_SIZE];
+        for(unsigned i=0;i<6;++i) {
+            assert(network_diag_report(out,sizeof(out)));puts(out);
+            network_diag_report_result(true);fake_us=next_report_us;
+        }
+        assert(!memcmp(&held,&retained,sizeof(held)) && flash_writes==1);
+    } else if(!strcmp(argv[1],"report_size")) {
+        char out[ND_REPORT_SIZE];
         nd_snapshot_t s;memset(&s,0xff,sizeof(s));s.schema=ND_SCHEMA;
-        assert(format_report(&s,1,out,sizeof(out)));puts(out);
+        s.save_error=INT32_MIN;
+        for(unsigned i=0;i<ND_OPERATIONS;++i) s.stats[i].last_rc=INT32_MIN;
+        for(unsigned i=0;i<8;++i) s.mesh_errors[i].rc=INT32_MIN;
+        for(unsigned i=0;i<3;++i) { assert(format_report(&s,i,out,sizeof(out)));puts(out); }
+        /* A formatting failure must not produce a sendable partial JSON or
+         * a tight retry loop, and must leave saved records alone. */
+        assert(!network_diag_report(out,8));assert(!network_diag_report(out,sizeof(out)));
+        assert(next_report_view==0 && !flash_writes && !retained.schema && !saved.schema);
+        fake_us=next_report_us;assert(network_diag_report(out,sizeof(out)));
     } else assert(0);
     return 0;
 }

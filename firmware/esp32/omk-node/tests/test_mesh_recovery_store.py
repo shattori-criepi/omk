@@ -216,7 +216,7 @@ static void boots(void) {
         assert(recovery_record.spent==1 && recovery_record.restart_count==1);
         mesh_recovery_init(&recovery,recovery_record.spent,1);
         omk_mesh_recovery_input_t in={.started=true};
-        for(uint32_t t=0;t<3600000;t+=30000) {
+        for(uint32_t t=0;t<OMK_MESH_RESTART_RETRY_MS;t+=30000) {
             omk_mesh_recovery_action_t a=mesh_recovery_choose(&recovery,t,&in,&root_recovery);
             assert(a!=OMK_RECOVERY_RESTART && a!=OMK_RECOVERY_REARM);
             dispatch_now(a,t);
@@ -278,8 +278,8 @@ static void blocked_event_loop(void) {
     clock_ms=179999; try_recovery(); assert(!restarts);
     clock_ms=180000; try_recovery(); assert(restarts==1);
     assert(!deferred_posts); /* Reboot does not depend on the stalled event loop. */
-    clock_ms=3599999; try_recovery(); assert(restarts==1);
-    clock_ms=3780000; try_recovery(); assert(restarts==2 && durable.spent);
+    clock_ms=180000+OMK_MESH_RESTART_RETRY_MS-1; try_recovery(); assert(restarts==1);
+    clock_ms=180000+OMK_MESH_RESTART_RETRY_MS; try_recovery(); assert(restarts==2 && durable.spent);
     root=true;
     clock_ms=10000000; try_recovery(); assert(restarts==2);
 }
@@ -338,7 +338,7 @@ static void wait_ip(bool spent) {
     mesh_recovery_init(&recovery,spent,1); recovery.jitter_ms=0;
     parent_connected=true;
     recovery_snapshot=(omk_mesh_recovery_input_t){.started=true,.parent_connected=true};
-    uint32_t deadline=spent?3600000:600000;
+    uint32_t deadline=spent?OMK_MESH_RESTART_RETRY_MS:OMK_MESH_IP_RESTART_MS;
     for(clock_ms=0;clock_ms<deadline;clock_ms+=1000) try_recovery();
     assert(!restarts && deferred_posts==1);
     try_recovery(); assert(restarts==1);

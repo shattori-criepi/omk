@@ -32,7 +32,9 @@ static uint32_t saved_reasons, saved_critical, saves, sequence, usb_dropped;
 static int32_t save_error;
 static bool storage_disabled, initialized;
 static uint64_t last_save_us, next_report_us;
-static bool alternate;
+/* Sender-owned RAM only; independent of observer/RTC/NVS generations. */
+static unsigned next_report_view;
+static uint32_t live_report_sequence;
 static uint64_t flash_started_us, flash_finished_us;
 static StaticTask_t observer_tcb;
 static StackType_t observer_stack[4096 / sizeof(StackType_t)];
@@ -307,8 +309,14 @@ bool network_diag_report(char *out, size_t size) {
     uint64_t now=esp_timer_get_time();
     if (!initialized || now < next_report_us) return false;
     nd_snapshot_t s;
-    unsigned view=alternate?2:1;
-    if (!get_view(view,&s) && !get_view(view=1,&s)) return false;
+    unsigned view=next_report_view;
+    /* Missing history uses this same slot for live statistics, never an extra
+     * message. Keep retained/saved records untouched, including across boots. */
+    if (!get_view(view,&s) && !get_view(view=0,&s)) return false;
+    /* A live seq identifies an MQTT sample, not delivery success. Retries take
+     * a fresh sample; gaps are allowed. Compare (node,view,boot,seq,at_us), not
+     * seq alone. USB and persisted snapshot generations remain unchanged. */
+    if (view==0) s.sequence=++live_report_sequence;
     next_report_us=now+ND_REPORT_GAP_US;
     return format_report(&s,view,out,size);
 }
@@ -316,7 +324,7 @@ bool network_diag_report(char *out, size_t size) {
 void network_diag_report_result(bool enqueued) {
     /* Sender-only state; never acknowledges Gateway persistence or clears RAM. */
     next_report_us = esp_timer_get_time() + (enqueued ? ND_REPORT_GAP_US : 30000000ULL);
-    if (enqueued) alternate = !alternate;
+    if (enqueued) next_report_view = (next_report_view + 1U) % 3U;
 }
 
 bool network_diag_usb(const char *line, uint64_t node_id) {

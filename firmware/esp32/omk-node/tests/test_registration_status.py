@@ -18,8 +18,8 @@ def status_binary(tmp_path_factory):
     source = (SOURCE / "mqtt_registration.c").read_text()
     validation_start = source.index("static bool logical_id_is_valid(const char *logical_id) {")
     validation = source[validation_start:source.index("/* ``omk/", validation_start)]
-    persisted = source[source.index("static bool registration_is_persisted"):source.index("static void publish_registration_status")]
-    status = source[source.index("static void publish_registration_status"):validation_start]
+    persisted = source[source.index("static bool registration_is_persisted"):source.index("static bool publish_registration_status")]
+    status = source[source.index("static bool publish_registration_status"):validation_start]
     constants = "\n".join(re.search(r"^#define " + name + r" .+$", text, re.M).group(0) for name, text in (
         ("OMK_REGISTRATION_PAYLOAD_SIZE", source),
         ("OMK_MQTT_OUTBOX_BYTES", (SOURCE / "communication_limits.h").read_text()),
@@ -129,8 +129,8 @@ def test_registered_status_does_not_publish_invalid_or_unreadable_nvs_identity(s
 
 def test_connect_synchronizes_status_without_synthesizing_an_ack():
     source = (SOURCE / "mqtt_registration.c").read_text()
-    connected = source[source.index("static void synchronize_registration_connection"):source.index("static void mqtt_event_handler")]
-    assert "publish_registration_status();" in connected
+    connected = source[source.index("static bool synchronize_registration_connection"):source.index("static void mqtt_event_handler")]
+    assert "publish_registration_status()" in connected
     assert "publish_registration_ack" not in connected
-    configured = source[source.index("esp_err_t save_err = node_registration_save"):source.index("static void mqtt_event_handler")]
-    assert configured.index("publish_registration_ack(logical_id);") < configured.index("publish_registration_status();")
+    configured = source[source.index("static bool apply_registration_config"):source.index("static void mqtt_event_handler")]
+    assert configured.index("publish_registration_ack(logical_id)") < configured.index("publish_registration_status()")

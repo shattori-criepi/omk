@@ -250,7 +250,7 @@ int main(void) {
     mesh_root_recovery_mark_executed(&r,720000);
     assert(mesh_recovery_choose(&s,839999,&in,&r)==OMK_RECOVERY_NONE);
     assert(mesh_recovery_choose(&s,840000,&in,&r)==OMK_RECOVERY_RESTART);
-    s.restart_spent=true;
+    mesh_recovery_complete(&s,840000,OMK_RECOVERY_RESTART,true);
     assert(mesh_recovery_choose(&s,840001,&in,&r)!=OMK_RECOVERY_RESTART);
     assert(mesh_recovery_choose(&s,3601000,&in,&r)==OMK_RECOVERY_RESTART);
     s.persistence_blocked=true;
@@ -280,10 +280,11 @@ def test_registration_publish_packet_capacity_and_mutex(tmp_path):
         PROJECT / "managed_components/espressif__mqtt/mqtt_client.c", generated)
     source = generated.read_text()
     helper = source[source.index("int esp_mqtt_client_publish_bounded("):
-                    source.index("/* The caller callback runs before releasing MQTT ownership")]
+                    source.index("/* OMK uses MQTT 3.1.1.")] + source[source.index("int esp_mqtt_client_enqueue_bounded("):source.index("esp_err_t esp_mqtt_client_register_event(")]
     program = tmp_path / "registration_bound.c"
     program.write_text(r'''
 #include <assert.h>
+#include <stdbool.h>
 #include <errno.h>
 #include <pthread.h>
 #include <stddef.h>
@@ -297,16 +298,24 @@ static int publish_result=42;
 #define MQTT_API_LOCK(c) assert(!pthread_mutex_lock((c)->api_lock))
 #define MQTT_API_UNLOCK(c) assert(!pthread_mutex_unlock((c)->api_lock))
 static unsigned outbox_get_size(unsigned *box) { return *box; }
+static int esp_mqtt_client_get_outbox_size(esp_mqtt_client_handle_t c) {return *c->outbox;}
+#define pdTRUE 1
+static int xSemaphoreTakeRecursive(pthread_mutex_t *m, unsigned wait) {
+    assert(wait==0);return !pthread_mutex_trylock(m);
+}
+static void xSemaphoreGiveRecursive(pthread_mutex_t *m) {assert(!pthread_mutex_unlock(m));}
+int esp_mqtt_client_enqueue_bounded(esp_mqtt_client_handle_t,const char *,const char *,int,int,int,unsigned,void (*)(int));
 static void *check_owned(void *ptr) {
     assert(pthread_mutex_trylock(ptr)==EBUSY);return NULL;
 }
-static int esp_mqtt_client_publish(esp_mqtt_client_handle_t c,const char *topic,
-    const char *data,int len,int qos,int retain) {
+static int esp_mqtt_client_enqueue(esp_mqtt_client_handle_t c,const char *topic,
+    const char *data,int len,int qos,int retain,bool store) {
+    assert(store);
     (void)data;assert(qos==1 && retain==1);++calls;
-    // Another task cannot enqueue between the size check and synchronous publish.
+    // Another task cannot enqueue between the size check and outbox insertion.
     pthread_t t;assert(!pthread_create(&t,NULL,check_owned,c->api_lock));
     assert(!pthread_join(t,NULL));
-    MQTT_API_LOCK(c); // vendor publish recursively acquires the same mutex
+    MQTT_API_LOCK(c); // vendor enqueue recursively acquires the same mutex
     if(publish_result>=0) *c->outbox+=len+strlen(topic)+9;
     MQTT_API_UNLOCK(c);
     return publish_result;

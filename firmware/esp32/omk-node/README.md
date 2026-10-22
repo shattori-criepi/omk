@@ -282,7 +282,7 @@ omk/node/<node_id>/status
 | parent/IP/MQTT接続＋90秒未満の監視PUBACK | `healthy` |
 | 接続済みでもPUBACKが90秒途絶 | `mqtt_wait`（budget消費後は`budget_hold`） |
 | 上記停滞が180秒＋Node ID jitter 0〜120秒継続 | 子Nodeのみ`restart_pending`。正常時最後のACKから約270〜390秒＋監視周期1秒 |
-| 再起動後も通信不能 | budgetを消費したまま、起動後3600秒＋jitter経過後に低頻度で再起動を再試行。以降も各bootで待機し、永久holdを避ける |
+| 再起動後も通信不能 | budgetを消費したまま、起動後600秒＋jitter経過後に低頻度で再起動を再試行。以降も各bootで待機し、永久holdを避ける |
 | 子Nodeがparent接続後もIP未取得 | `wait_ip`。180秒で親再選択、以後300秒間隔。600秒＋jitterで共通budgetによる再起動候補。自分の親再選択による切断・再接続ではIP期限を延長しない。Root昇格／IP取得で解除 |
 | 実通信による`healthy`が900秒連続 | NVS clear・read-back成功後に通常budgetを再arm |
 | NVS読込／保存／検証失敗 | restart禁止。時間経過では解除しない |
@@ -447,7 +447,7 @@ mosquitto_sub -h 127.0.0.1 -F '%I %t %p' \
 | フィールド | 取得方法・限界 |
 | --- | --- |
 | `mqtt.outbox_bytes` | status生成直前にmutex待ちなしで取得した`esp_mqtt_client_get_outbox_size()`。busyなら直前の取得値。MQTT全topic合計の格納データbyte数。件数や全heap占有量ではなく、このstatus自身のenqueue前の値 |
-| `mqtt.outbox_sampled_max_bytes` | 各既存enqueue呼び出し後とstatus生成時に同APIで観測した起動後最大値。非同期送信との競合で瞬間的なpeakを逃す可能性があり、厳密な最大値ではない。registrationの同期publishによる瞬間peakも保証しない |
+| `mqtt.outbox_sampled_max_bytes` | 各既存enqueue呼び出し後とstatus生成時に同APIで観測した起動後最大値。非同期送信との競合で瞬間的なpeakを逃す可能性があり、厳密な最大値ではない。registrationのoutbox投入による瞬間peakも保証しない |
 | `mqtt.expired_messages` | `MQTT_EVENT_DELETED`受信回数。QoS 0を含む全topic累計。送信成功後の通常削除を含まない。ライブラリのイベント配送自体が失敗した分は数えられない |
 | `mqtt.error_events` | `MQTT_EVENT_ERROR`受信回数。接続・受信・TLS等も含むため、送信エラー専用カウンタとは解釈しない |
 
@@ -475,6 +475,14 @@ MQTT 1.1.0の`mqtt_delete_expired_messages()`は削除関数の戻り値を`>= 0
 負荷が同程度の区間で1秒付近の排出制約が解消し、outbox滞留と期限切れ増加が収まり、SEN66欠番も減るなら仮説を支持する。期限切れが増え続けるなら排出能力／負荷を再調査する。期限切れ0でも欠番が残る場合は、別の投入後損失経路を疑い、QoS等を自動で変更しない。変更前firmwareにはoutbox診断がないため、変更前の期限切れ件数を今回の結果から逆算して確定しない。
 
 ローカル検証はESP32テスト201件成功、AtomS3 Liteビルド成功、`git diff --check`成功。回帰テストは採用中outbox C実装による30秒境界とQoS 0の削除通知、診断のbyte数／観測最大値／イベント計数、SEN66連番とstatus容量、実効Kconfig／ビルド参照先を検証する。実際の無線送信間隔はローカルテストで模擬せず、実機captureで確認する。
+
+## 通信停止の局所化（2026-10-22、実機未検証）
+
+登録用publishとsubscribeは、既存のMQTT outboxへ待ち時間0で投入する。socket I/Oは既存MQTT taskだけが実行する。登録・再接続同期は投入できなかった段階から再試行し、NVS保存や成功済みの投入を繰り返さない。新しい登録要求は古い未完了要求を置き換え、retained config消去義務は保持する。QoS 1の制御パケットが期限切れになった場合も接続同期を再試行する。投入成功はBroker到達を意味しない。IP取得後のreconnectは固定版MQTTの既存のイベント要求APIを維持する。
+
+TCP/IPのMesh送信callbackはEthernetフレームを固定4枠（各最大1560バイト）へコピーして戻る。単一の`mesh_netif_tx`タスク（stack 4096バイト）が`esp_mesh_send()`を直列に実行する。満杯なら即座に失敗を返し、無制限に蓄積しない。親接続変更前・役割不一致・投入後10秒以上の未送信フレームは破棄する。現在実行中のMesh APIは中断できない。単発待機は5秒に短縮し、Root broadcastは送信開始位置を巡回させて遅い子Nodeによる偏りを抑える。TCP再送等に回復を委ねるため、負荷時の個々のパケット配送は保証しない。
+
+予算消費後の再起動再試行は、各bootの復旧判定開始から10分＋既存jitter（0～120秒）以降。15分の正常継続での予算解除、NVS保存・照合、役割再検証、接続中Rootの保護を維持する。故障継続中は10～12分ごとの再起動になり得るが、起動直後の連続再起動は許可しない。計測周期、ペイロード仕様、PUBACK監視、送信バックオフ、outbox容量、既存診断機能は維持する。
 
 ## Build
 
@@ -508,7 +516,7 @@ managed componentはmanifestとlockから再現します。`platformio.ini`が�
 
 ## Mesh/MQTT停止原因の診断計測版（2026-10-10、実機未適用）
 
-SEN66の有無に依存しない共通機能。Mesh方式、30秒送信timeout、MQTTの通常送信条件、センサ周期、復旧条件は変更しない。診断はCMakeの`OMK_NETWORK_DIAGNOSTICS`で有効化する（この試験ソースでは既定ON）。既存の未commit試験変更を含むため、HEAD名だけではバイナリを識別できない。
+SEN66の有無に依存しない共通の診断機能。診断追加時はMesh方式・送信timeout・復旧条件を維持した。現在の通信処理は上記「通信停止の局所化」のとおりで、診断の記録・保存条件は変更していない。診断はCMakeの`OMK_NETWORK_DIAGNOSTICS`で有効化する（この試験ソースでは既定ON）。既存の未commit試験変更を含むため、HEAD名だけではバイナリを識別できない。
 
 ### 観測範囲と保存
 
@@ -526,13 +534,13 @@ SEN66の有無に依存しない共通機能。Mesh方式、30秒送信timeout�
 
 ### Gatewayでの回収
 
-既存の`sen66_tx`タスク（SEN66なしでもMQTT登録開始時に起動）が、`omk/node/<node_id>/network_diagnostics`へ完全なJSONを非retain、QoS 0、store=trueで送る。起動後に前bootの記録または異常記録があれば開始し、以後は最大5分に1件。RTC/RAM側の保持記録（view=1）と最後のNVS記録（view=2）を交互に再掲する。通常のNode statusは増量しない。診断専用`esp_mqtt_client_enqueue_diagnostic()`はMQTT mutexを待ち時間0で取得し、取得不能なら見送る。取得後はrecursive lock下で既存enqueueへ渡すため、そのmutexを再び待たない。投入失敗は30秒後以降に再試行し、投入成功後は5分空ける。記録はどちらの場合も削除しない。既存enqueue内の短いメモリ確保・コピーとFlash/cache停止の影響は残るが、診断経路でsocket I/OやMQTT mutexの待機は行わない。observerとUSBは送信結果を待たない。
+既存の`sen66_tx`タスク（SEN66なしでもMQTT登録開始時に起動）が、`omk/node/<node_id>/network_diagnostics`へ完全なJSONを非retain、QoS 0、store=trueで送る。現在bootの統計（view=0）から開始し、RTC/RAM側の保持記録（view=1）、最後のNVS記録（view=2）の順で循環する。既存の5分周期の枠を使い、1枠に1件だけ送る。保存記録のない枠はview=0に置き換える。全viewが存在し投入成功が続く場合、各viewは15分間隔となる。保存記録がない正常時にも現在値を送るため、従来の送信ゼロからは増えるが、送信周期・3072バイトのJSONバッファ上限は増やさない。通常のNode statusは増量しない。診断専用`esp_mqtt_client_enqueue_diagnostic()`はMQTT mutexを待ち時間0で取得し、取得不能なら見送る。取得後はrecursive lock下で既存enqueueへ渡すため、そのmutexを再び待たない。投入失敗は同じ巡回位置で30秒後以降に再試行し、投入成功後だけ次の枠へ進めて5分空ける。view=0の再試行は現在値を再採取する。記録はどちらの場合も削除しない。既存enqueue内の短いメモリ確保・コピーとFlash/cache停止の影響は残るが、診断経路でsocket I/OやMQTT mutexの待機は行わない。observerとUSBは送信結果を待たない。
 
-collectorの既定購読`omk/#`と既存の日別JSONLがそのまま保存する。専用ACK、分割転送、Gatewayの新しい保存基盤はない。enqueue成功を到着とはみなさず、Node側の記録を送信後も削除しない。欠落・重複はあり得る。同じNode・`boot`・`seq`の重複を解析側で区別する。topicから物理Nodeを識別し、JSONLの`received_at`とpayloadのboot内`at_us`を分けて扱う。
+collectorの既定購読`omk/#`と既存の日別JSONLがそのまま保存する。専用ACK、分割転送、Gatewayの新しい保存基盤はない。enqueue成功を到着とはみなさず、Node側の記録を送信後も削除しない。欠落・重複はあり得る。Node・`view`・`boot`・`seq`・`at_us`の組で解析側が識別する。MQTT view=0の`seq`はbootごとに1から始まる採取連番で、失敗時の再採取でも進むため、欠番は配送損失数を意味しない。observerの連番やRTC/NVSには書き戻さず、view=1/2とUSBの既存連番は変更しない。topicから物理Nodeを識別し、JSONLの`received_at`とpayloadのboot内`at_us`を分けて扱う。エラー増分は同じNode・view=0・同じboot内で比較する。15分未満で再起動した障害やQoS 0の配送失敗では、直前の現在値を回収できない場合がある。
 
 | 項目 | 内容 |
 | --- | --- |
-| `elf` | 記録したbootの`app_elf_sha256`。現在動作中のfirmware確認はUSB view=0/page=0 |
+| `elf` | 記録したbootの`app_elf_sha256`。現在動作中のfirmware確認はMQTT view=0、またはUSB view=0/page=0 |
 | `reasons` | bit 0～7:下記operationが10秒超、bit 8:timer停止、9:event完了停止、10:復旧判断停止 |
 | `critical`, `saved_critical` | 同じbit配置の重大異常と、NVS保存済みの重大種別。`reasons`／`saved_reasons`の部分集合 |
 | `saved_reasons`, `saves`, `save_error` | このsnapshot時点の保存済み種別、成功回数、最後の保存エラー |

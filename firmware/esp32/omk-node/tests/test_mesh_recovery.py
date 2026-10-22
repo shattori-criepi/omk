@@ -76,19 +76,19 @@ static void restart(void) {
     assert(tick(780000) == OMK_RECOVERY_RESTART);
     mesh_recovery_complete(&s, 780000, OMK_RECOVERY_RESTART, true);
     assert(s.restart_spent);
-    for (uint32_t t = 810000; t < 3600000; t += 30000) {
+    for (uint32_t t = 810000; t < 900000; t += 30000) {
         omk_mesh_recovery_action_t a = tick(t);
         assert(a != OMK_RECOVERY_RESTART && a != OMK_RECOVERY_REARM);
         if (a != OMK_RECOVERY_NONE) mesh_recovery_complete(&s, t, a, true);
     }
     /* Brief success followed by MQTT-only failure is the SAME budget. */
-    healthy(); tick(3000000);
+    healthy(); tick(900000);
     in.mqtt_connected = false;
-    tick(3000001);
-    assert(tick(3300000) == OMK_RECOVERY_NONE);
+    tick(900001);
+    assert(tick(1200000) == OMK_RECOVERY_NONE);
     init(true); /* Simulate boot loading spent NVS marker. */
     tick(0); accepted(120000);
-    for (uint32_t t = 150000; t < 3600000; t += 30000) {
+    for (uint32_t t = 150000; t < OMK_MESH_RESTART_RETRY_MS; t += 30000) {
         omk_mesh_recovery_action_t a = tick(t);
         assert(a != OMK_RECOVERY_RESTART);
         if (a != OMK_RECOVERY_NONE) mesh_recovery_complete(&s, t, a, true);
@@ -306,6 +306,25 @@ static void retry_wrap(void) {
     mesh_recovery_complete(&s,base+OMK_MESH_RESTART_RETRY_MS,OMK_RECOVERY_RESTART,false);
     assert(tick(base+2*OMK_MESH_RESTART_RETRY_MS)==OMK_RECOVERY_NONE);
 }
+static void repeated_boots(void) {
+    for(unsigned boot=0;boot<8;boot++) {
+        init(true);healthy();in.mqtt_progress=false;
+        s.jitter_ms=boot%2 ? 120000 : 0;
+        uint32_t deadline=OMK_MESH_RESTART_RETRY_MS+s.jitter_ms;
+        assert(tick(0)==OMK_RECOVERY_NONE);
+        assert(tick(deadline-1)==OMK_RECOVERY_NONE);
+        assert(tick(deadline)==OMK_RECOVERY_RESTART);
+        // A Root transition invalidates a child's selected restart even after cooldown.
+        omk_mesh_recovery_t selected=s;
+        in.is_root=true;mesh_recovery_observe(&s,deadline,&in);
+        assert(!mesh_recovery_restart_valid(&selected,&s,deadline,&in,&root,false));
+        assert(tick(deadline+1000000)==OMK_RECOVERY_NONE);
+        in.is_root=false;
+        assert(tick(deadline+1000001)==OMK_RECOVERY_RESTART);
+        mesh_recovery_complete(&s,deadline+1000001,OMK_RECOVERY_RESTART,true);
+        assert(tick(deadline+1000002)==OMK_RECOVERY_NONE);
+    }
+}
 int main(int argc,char **argv) {
     assert(argc==2); init(false);
     if (!strcmp(argv[1],"transient")) transient();
@@ -327,6 +346,7 @@ int main(int argc,char **argv) {
     else if (!strcmp(argv[1],"stalled_connected")) stalled_connected();
     else if (!strcmp(argv[1],"retry_after_boot")) retry_after_boot();
     else if (!strcmp(argv[1],"retry_wrap")) retry_wrap();
+    else if (!strcmp(argv[1],"repeated_boots")) repeated_boots();
     else assert(false);
 }
 ''')
@@ -341,7 +361,7 @@ int main(int argc,char **argv) {
 @pytest.mark.parametrize("scenario", [
     "transient", "reselection", "restart", "rearm", "mqtt_flap", "parent_flap",
     "ip_flap", "rootless_flap", "roles", "priority", "grace", "events",
-    "api_failure", "wrap", "jitter", "mqtt", "repeated_reselection", "old_grace_25", "old_grace_30", "stalled_connected", "retry_after_boot", "retry_wrap",
+    "api_failure", "wrap", "jitter", "mqtt", "repeated_reselection", "old_grace_25", "old_grace_30", "stalled_connected", "retry_after_boot", "retry_wrap", "repeated_boots",
 ])
 def test_policy(policy_binary, scenario):
     subprocess.run([str(policy_binary), scenario], check=True)

@@ -27,6 +27,8 @@ static _Thread_local bool in_mqtt_callback;
 static unsigned starts, reconnects, status_calls, subscriptions, closes;
 static bool capacity_model;
 static unsigned registration_bytes;
+static const char *denied_control_topic;
+static bool deny_subscription;
 static char will_topic[80], will_payload[128];
 static sensor_slot_t slot;
 static esp_err_t read_result;
@@ -136,9 +138,11 @@ esp_err_t esp_mqtt_client_reconnect(void *c) { assert(c); ++reconnects; return E
 esp_err_t esp_mqtt_client_register_event(void *c, int id, event_handler_t h, void *arg) {
     assert(c && id==MQTT_EVENT_ANY); (void)arg; mqtt_handler=h; return ESP_OK;
 }
-int esp_mqtt_client_subscribe(void *c, const char *topic, int qos) {
+int esp_mqtt_client_subscribe_bounded(esp_mqtt_client_handle_t c, const char *topic, int qos, unsigned limit) {
+    assert(limit==OMK_MQTT_OUTBOX_BYTES);
     assert(!registration_sender_enabled || !in_mqtt_callback);
     assert(c && !strcmp(topic,registration_config_topic) && qos==1);
+    if (deny_subscription) return -3;
     ++subscriptions; note("subscribe"); return 1;
 }
 int esp_mqtt_client_publish(void *c, const char *topic, const char *payload, int len, int qos, int retain) {
@@ -196,7 +200,8 @@ static void block_at(int api) {
 }
 int esp_mqtt_client_publish_bounded(esp_mqtt_client_handle_t c,const char *t,const char *p,
                                     int len,int qos,int retain,unsigned limit) {
-    assert(limit==OMK_MQTT_OUTBOX_BYTES && qos==1);
+    assert(limit==OMK_MQTT_OUTBOX_BYTES && (qos==0 || qos==1));
+    if (denied_control_topic && !strcmp(t,denied_control_topic)) return -3;
     unsigned required=(len>0?(unsigned)len:strlen(p))+strlen(t)+9;
     if(capacity_model && (registration_bytes>limit || required>limit-registration_bytes)) return -2;
     return esp_mqtt_client_publish(c,t,p,len,qos,retain);
@@ -600,7 +605,45 @@ int main(int argc, char **argv) {
         puts(deliveries[0]);return 0;
     }
 #endif
-    if (!strcmp(argv[1],"registration_capacity")) {
+    if (!strcmp(argv[1],"registration_retry")) {
+        setup(true);defer_service=true;configure("retry-id");
+        denied_control_topic=registration_ack_topic;
+        for(unsigned i=1;i<=120;i++) {
+            tick(i*10000U);mqtt_registration_flush_sensor_status();
+            assert(registration_request_pending && nvs_saves==1);
+        }
+        assert(slot.recovery_count==0 && sen66_diagnostics_snapshot().read_success==120);
+        assert(trace_count==1 && !strcmp(trace[0],"online")); // successful steps not duplicated
+        send_latest();assert(deliveries_count==1); // measurement delivery can still run
+        denied_control_topic=NULL;mqtt_registration_flush_sensor_status();
+        assert(!registration_request_pending && nvs_saves==1);
+        assert(trace_count==3 && !strcmp(trace[1],"ack") && !strcmp(trace[2],"registration_status"));
+    } else if (!strcmp(argv[1],"subscription_retry")) {
+        setup(false);unsigned before=subscriptions;
+        deny_subscription=true;defer_service=true;
+        deliver_callback(MQTT_EVENT_DISCONNECTED,NULL);connect_mqtt();
+        for(unsigned i=0;i<120;i++) mqtt_registration_flush_sensor_status();
+        assert(subscriptions==before && registration_connection_handled!=registration_connection_version);
+        deny_subscription=false;status_fail=true;mqtt_registration_flush_sensor_status();
+        assert(subscriptions==before+1 && registration_connection_handled!=registration_connection_version);
+        status_fail=false;mqtt_registration_flush_sensor_status();
+        assert(subscriptions==before+1 && registration_connection_handled==registration_connection_version);
+        esp_mqtt_event_t e={.msg_id=1234};deliver_callback(MQTT_EVENT_DELETED,&e);
+        mqtt_registration_flush_sensor_status();assert(subscriptions==before+2); // expired control retried
+        assert(nvs_saves==0 && nvs_clears==0);
+    } else if (!strcmp(argv[1],"clear_retry_superseded")) {
+        setup(false);defer_service=true;configure(NULL);
+        denied_control_topic=registration_config_topic;mqtt_registration_flush_sensor_status();
+        assert(nvs_clears==1 && registration_request_pending && registration_apply_step==3);
+        for(unsigned i=0;i<10;i++) mqtt_registration_flush_sensor_status();
+        assert(nvs_clears==1);
+        configure("latest-id");mqtt_registration_flush_sensor_status();
+        assert(nvs_saves==1 && registration_request_pending);
+        denied_control_topic=NULL;mqtt_registration_flush_sensor_status();
+        assert(!registration_request_pending && nvs_saves==1 && nvs_clears==1);
+        assert(!strcmp(saved_id,"latest-id") && strstr(last_status,"latest-id"));
+        assert(!retained_payload(registration_config_topic)[0]);
+    } else if (!strcmp(argv[1],"registration_capacity")) {
         setup(false);capacity_model=true;
         registration_bytes=OMK_MQTT_OUTBOX_BYTES;
         clear_retained_registration_ack();

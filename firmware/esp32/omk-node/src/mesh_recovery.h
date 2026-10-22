@@ -8,9 +8,9 @@
 #define OMK_MESH_ISOLATION_RESTART_MS 600000U
 #define OMK_MESH_RESELECT_INTERVAL_MS 300000U
 #define OMK_MESH_HEALTHY_REARM_MS 900000U
-/* A spent budget permits one retry per hour of uptime, including after reboot.
+/* A spent budget permits one retry per ten minutes of uptime, including after reboot.
  * It is NOT rearmed by time alone. NVS errors still fail closed. */
-#define OMK_MESH_RESTART_RETRY_MS 3600000U
+#define OMK_MESH_RESTART_RETRY_MS 600000U
 #ifndef OMK_MESH_IP_RESELECT_MS
 #define OMK_MESH_IP_RESELECT_MS 180000U
 #endif

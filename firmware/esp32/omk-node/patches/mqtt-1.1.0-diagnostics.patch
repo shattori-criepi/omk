@@ -1,12 +1,13 @@
 --- a/mqtt_client.c
 +++ b/mqtt_client.c
-@@ -1,3 +1,5 @@
+@@ -1,3 +1,6 @@
 +#include "communication_limits.h"
++#include "network_diagnostics_mqtt.h"
 +#include "network_diagnostics.h"
  /*
   * SPDX-FileCopyrightText: 2025-2026 Espressif Systems (Shanghai) CO LTD
   *
-@@ -817,6 +819,7 @@
+@@ -817,6 +820,7 @@
  
  static inline esp_err_t esp_mqtt_write(esp_mqtt_client_handle_t client)
  {
@@ -14,7 +15,7 @@
      int wlen = 0, widx = 0, len = client->mqtt_state.connection.outbound_message.length;
  
      while (len > 0) {
-@@ -828,19 +831,19 @@
+@@ -828,19 +832,19 @@
          if (wlen < 0) {
              ESP_LOGE(TAG, "Writing failed: errno=%d", errno);
              esp_mqtt_client_dispatch_transport_error(client);
@@ -37,7 +38,7 @@
  }
  
  #ifdef MQTT_PROTOCOL_5
-@@ -2706,9 +2709,10 @@
+@@ -2706,9 +2710,10 @@
  int esp_mqtt_client_enqueue(esp_mqtt_client_handle_t client, const char *topic, const char *data, int len, int qos,
                              int retain, bool store)
  {
@@ -49,7 +50,7 @@
      }
  
      /* Acceptable publish messages:
-@@ -2722,18 +2726,20 @@
+@@ -2722,18 +2727,20 @@
  
      if (client->config->outbox_limit > 0) {
          if (len + outbox_get_size(client->outbox) > client->config->outbox_limit) {
@@ -75,7 +76,7 @@
          }
      }
  
-@@ -2743,10 +2749,71 @@
+@@ -2743,10 +2750,87 @@
  
      if (ret == 0 && store == false) {
          // messages with qos=0 are not enqueued if not overridden by store_in_outobx -> indicate as error
@@ -90,20 +91,36 @@
 +}
 +
 +
-+/* Registration keeps synchronous publish semantics. As with bounded enqueue,
-+ * reserve topic + maximum MQTT 3.1.1 header/packet-ID bytes, under the SAME
-+ * recursive mutex used by publish. A separate size query would race enqueue. */
++/* Registration uses the same bounded outbox as normal data, reserving its
++ * existing control allowance. Caller never waits for a socket or API mutex. */
 +int esp_mqtt_client_publish_bounded(esp_mqtt_client_handle_t client,
 +    const char *topic, const char *data, int len, int qos, int retain, unsigned limit)
 +{
-+    if (!client || !topic || !data || len < 0) return -1;
-+    if (!len) len = strlen(data);
-+    MQTT_API_LOCK(client);
-+    size_t required = (size_t)len + strlen(topic) + 9;
++    return esp_mqtt_client_enqueue_bounded(client, topic, data, len, qos, retain, limit, NULL);
++}
++
++/* OMK uses MQTT 3.1.1. Build the normal SUBSCRIBE packet but leave it QUEUED:
++ * the existing MQTT task sends/retries it and processes SUBACK/expiry. */
++int esp_mqtt_client_subscribe_bounded(esp_mqtt_client_handle_t client,
++    const char *topic, int qos, unsigned limit)
++{
++    if (!client || !topic || !topic[0] || qos < 0 || qos > 2) return -1;
++    if (xSemaphoreTakeRecursive(client->api_lock, 0) != pdTRUE) return -3;
++    int result = -1;
++    if (client->state != MQTT_STATE_CONNECTED ||
++        client->mqtt_state.connection.information.protocol_ver != MQTT_PROTOCOL_V_3_1_1)
++        goto done;
++    size_t required = strlen(topic) + 10; /* header, packet ID, length, qos */
 +    size_t used = outbox_get_size(client->outbox);
-+    int result = -2;
-+    if (used <= limit && required <= limit - used)
-+        result = esp_mqtt_client_publish(client, topic, data, len, qos, retain);
++    if (used > limit || required > limit - used) { result = -2; goto done; }
++    mqtt_reset_pending_message(client);
++    esp_mqtt_topic_t filter = {.filter = topic, .qos = qos};
++    mqtt_msg_subscribe(&client->mqtt_state.connection, &filter, 1,
++                      &client->mqtt_state.pending_msg_id);
++    if (!client->mqtt_state.connection.outbound_message.length) goto done;
++    client->mqtt_state.pending_msg_type = MQTT_MSG_TYPE_SUBSCRIBE;
++    if (mqtt_enqueue(client, NULL, 0)) result = client->mqtt_state.pending_msg_id;
++done:
 +    MQTT_API_UNLOCK(client);
 +    return result;
 +}
@@ -151,7 +168,7 @@
  }
  
  esp_err_t esp_mqtt_client_register_event(esp_mqtt_client_handle_t client, esp_mqtt_event_id_t event,
-@@ -2808,21 +2875,24 @@
+@@ -2808,21 +2892,24 @@
  
  int esp_mqtt_client_get_outbox_size(esp_mqtt_client_handle_t client)
  {

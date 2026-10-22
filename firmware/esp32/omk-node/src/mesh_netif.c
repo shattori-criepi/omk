@@ -14,6 +14,7 @@
 #include "esp_wifi_netif.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/queue.h"
 #include "lwip/lwip_napt.h"
 
 #define MESH_NETIF_RX_SIZE 1560
@@ -90,25 +91,110 @@ static void free_mesh_buffer(void *handle, void *buffer) {
     free(buffer);
 }
 
-static esp_err_t transmit_root_ap(void *handle, void *buffer, size_t length) {
-    static const uint8_t broadcast[MESH_MAC_LENGTH] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
-    mesh_netif_driver_t driver = handle;
+/* Copy Ethernet frames out of lwIP immediately. A single owner calls the
+ * non-reentrant Mesh API; radio waits must never hold up the TCP/IP thread.
+ * Fixed pool bounds memory; full queues fail admission and TCP can retry.
+ * No caller buffers or netif/driver pointers survive the callback. */
+#define MESH_TX_SLOTS 4
+#define MESH_TX_MAX_AGE_US 10000000ULL
+static struct {
+    uint8_t bytes[MESH_NETIF_RX_SIZE], station_mac[MESH_MAC_LENGTH];
+    size_t length;
+    uint64_t queued_us;
+    uint32_t generation;
+    bool root, occupied;
+} tx_frames[MESH_TX_SLOTS];
+static portMUX_TYPE tx_queue_lock = portMUX_INITIALIZER_UNLOCKED;
+static uint32_t tx_generation;
+static QueueHandle_t tx_queue;
+static StaticQueue_t tx_queue_control;
+static uint8_t tx_queue_storage[MESH_TX_SLOTS * sizeof(unsigned)];
+
+static void invalidate_tx(void) {
+    portENTER_CRITICAL(&tx_queue_lock);
+    ++tx_generation;
+    portEXIT_CRITICAL(&tx_queue_lock);
+}
+
+static bool tx_frame_current(unsigned index) {
+    portENTER_CRITICAL(&tx_queue_lock);
+    bool current = tx_frames[index].generation == tx_generation;
+    portEXIT_CRITICAL(&tx_queue_lock);
+    return current && tx_frames[index].root == esp_mesh_is_root() &&
+           (uint64_t)esp_timer_get_time() - tx_frames[index].queued_us < MESH_TX_MAX_AGE_US;
+}
+
+static void send_queued_frame(unsigned index) {
+    if (!tx_frame_current(index)) return;
+    mesh_data_t data = {.data = tx_frames[index].bytes, .size = tx_frames[index].length,
+        .proto = tx_frames[index].root ? MESH_PROTO_STA : MESH_PROTO_AP, .tos = MESH_TOS_P2P};
+    if (!tx_frames[index].root) {
+        (void)record_mesh_send_result(observed_mesh_send(ND_MESH_UP, NULL, &data, MESH_DATA_TODS));
+        return;
+    }
+    static const uint8_t broadcast[MESH_MAC_LENGTH] = {255,255,255,255,255,255};
     mesh_addr_t destination;
-    mesh_data_t data = {.data = buffer, .size = length, .proto = MESH_PROTO_STA, .tos = MESH_TOS_P2P};
-    memcpy(destination.addr, buffer, MESH_MAC_LENGTH);
+    memcpy(destination.addr, data.data, MESH_MAC_LENGTH);
     if (memcmp(destination.addr, broadcast, MESH_MAC_LENGTH) != 0) {
-        return record_mesh_send_result(observed_mesh_send(ND_MESH_DOWN, &destination, &data, MESH_DATA_P2P));
+        (void)record_mesh_send_result(observed_mesh_send(ND_MESH_DOWN, &destination, &data, MESH_DATA_P2P));
+        return;
     }
     int count = 0;
-    esp_err_t result = esp_mesh_get_routing_table(routing_table, sizeof(routing_table), &count);
-    if (result != ESP_OK) return result;
-    for (int index = 0; index < count; ++index) {
-        if (memcmp(routing_table[index].addr, driver->station_mac, MESH_MAC_LENGTH) != 0) {
-            (void)record_mesh_send_result(observed_mesh_send(ND_MESH_BROADCAST, &routing_table[index],
-                                                             &data, MESH_DATA_P2P));
-        }
+    if (esp_mesh_get_routing_table(routing_table, sizeof(routing_table), &count) != ESP_OK) return;
+    if (count <= 0 || count > CONFIG_MESH_ROUTE_TABLE_SIZE) return;
+    /* A slow first peer must not starve later peers on every ARP/DHCP frame. */
+    static unsigned broadcast_cursor;
+    unsigned first = broadcast_cursor % (unsigned)count;
+    for (int n = 0; n < count && tx_frame_current(index); ++n) {
+        unsigned i = (first + (unsigned)n) % (unsigned)count;
+        broadcast_cursor = (i + 1) % (unsigned)count;
+        if (memcmp(routing_table[i].addr, tx_frames[index].station_mac, MESH_MAC_LENGTH) != 0)
+            (void)record_mesh_send_result(observed_mesh_send(ND_MESH_BROADCAST, &routing_table[i],
+                                                           &data, MESH_DATA_P2P));
     }
-    return ESP_OK;
+}
+
+static void transmit_task(void *argument) {
+    (void)argument;
+    for (;;) {
+        unsigned index;
+        if (xQueueReceive(tx_queue, &index, portMAX_DELAY) != pdTRUE) continue;
+        send_queued_frame(index);
+        portENTER_CRITICAL(&tx_queue_lock);
+        tx_frames[index].occupied = false;
+        portEXIT_CRITICAL(&tx_queue_lock);
+    }
+}
+
+static esp_err_t queue_frame(void *handle, void *buffer, size_t length, bool root) {
+    if (!tx_queue) return ESP_ERR_INVALID_STATE;
+    if (!buffer || length < MESH_MAC_LENGTH || length > MESH_NETIF_RX_SIZE)
+        return ESP_ERR_INVALID_SIZE;
+    portENTER_CRITICAL(&tx_queue_lock);
+    unsigned index;
+    for (index = 0; index < MESH_TX_SLOTS && tx_frames[index].occupied; ++index) {}
+    if (index == MESH_TX_SLOTS) {
+        portEXIT_CRITICAL(&tx_queue_lock);
+        return ESP_ERR_NO_MEM;
+    }
+    tx_frames[index].occupied = true;
+    tx_frames[index].generation = tx_generation;
+    portEXIT_CRITICAL(&tx_queue_lock);
+    memcpy(tx_frames[index].bytes, buffer, length);
+    if (root) memcpy(tx_frames[index].station_mac,
+                     ((mesh_netif_driver_t)handle)->station_mac, MESH_MAC_LENGTH);
+    tx_frames[index].length = length;
+    tx_frames[index].root = root;
+    tx_frames[index].queued_us = esp_timer_get_time();
+    if (xQueueSend(tx_queue, &index, 0) == pdTRUE) return ESP_OK;
+    portENTER_CRITICAL(&tx_queue_lock);
+    tx_frames[index].occupied = false;
+    portEXIT_CRITICAL(&tx_queue_lock);
+    return ESP_ERR_NO_MEM;
+}
+
+static esp_err_t transmit_root_ap(void *handle, void *buffer, size_t length) {
+    return queue_frame(handle, buffer, length, true);
 }
 
 static esp_err_t transmit_root_ap_wrap(void *handle, void *buffer, size_t length, void *netstack_buffer) {
@@ -117,9 +203,7 @@ static esp_err_t transmit_root_ap_wrap(void *handle, void *buffer, size_t length
 }
 
 static esp_err_t transmit_child_sta(void *handle, void *buffer, size_t length) {
-    (void)handle;
-    mesh_data_t data = {.data = buffer, .size = length, .proto = MESH_PROTO_AP, .tos = MESH_TOS_P2P};
-    return record_mesh_send_result(observed_mesh_send(ND_MESH_UP, NULL, &data, MESH_DATA_TODS));
+    return queue_frame(handle, buffer, length, false);
 }
 
 static esp_err_t transmit_child_sta_wrap(void *handle, void *buffer, size_t length, void *netstack_buffer) {
@@ -264,6 +348,15 @@ static esp_err_t start_mesh_child_station(void) {
 }
 
 esp_err_t mesh_netifs_init(void) {
+    if (!tx_queue) {
+        tx_queue = xQueueCreateStatic(MESH_TX_SLOTS, sizeof(unsigned), tx_queue_storage, &tx_queue_control);
+        if (!tx_queue) return ESP_ERR_NO_MEM;
+        if (xTaskCreate(transmit_task, "mesh_netif_tx", 4096, NULL, 5, NULL) != pdPASS) {
+            vQueueDelete(tx_queue);
+            tx_queue = NULL;
+            return ESP_ERR_NO_MEM;
+        }
+    }
     return create_default_station();
 }
 
@@ -278,6 +371,7 @@ esp_err_t mesh_netif_start_receive_task(void) {
 }
 
 esp_err_t mesh_netifs_start(bool is_root) {
+    invalidate_tx();
     if (is_root) {
         bool default_station_created = false;
         ESP_LOGI(TAG, "Starting root external STA netif after Mesh parent connection");
@@ -318,6 +412,7 @@ esp_err_t mesh_netifs_start(bool is_root) {
 }
 
 esp_err_t mesh_netifs_stop(void) {
+    invalidate_tx();
     ESP_LOGI(TAG, "Stopping current Mesh IP netif");
     if (station_netif != NULL) {
         ESP_LOGI(TAG, "Destroying current STA netif after Mesh parent disconnect");

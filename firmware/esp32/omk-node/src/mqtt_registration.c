@@ -83,6 +83,10 @@ typedef struct {
 static registration_request_t registration_request;
 static bool registration_request_pending;
 static uint32_t registration_request_version;
+/* Sender-owned transaction cursors. Retry only the refused step; never repeat
+ * NVS writes or already queued publications merely because MQTT is busy. */
+static unsigned registration_apply_step, registration_sync_step;
+static uint32_t registration_apply_version, registration_sync_version;
 
 /* MQTT delivery diagnostics: all counts are per boot, across reconnects.
  * Sample the public byte-count API after enqueue and before status generation.
@@ -159,10 +163,10 @@ static bool registration_is_persisted(void) {
     return state == OMK_NODE_PROVISIONING_STATE_REGISTERED;
 }
 
-static void publish_registration_status(void) {
+static bool publish_registration_status(void) {
     /* The registration owner snapshots sensor state briefly. Never hold this
      * lock across NVS or a MQTT API. Callbacks cannot modify the payload while
-     * the sender waits inside publish. */
+     * the sender copies it into the outbox. */
     portENTER_CRITICAL(&sensor_status_lock);
     bool connected = sen66_connected, diagnostics_available = sen66_diagnostics_available;
     uint32_t recoveries = sen66_recovery_count, timeouts = sen66_measurement_timeout_count;
@@ -176,13 +180,13 @@ static void publish_registration_status(void) {
         esp_err_t err = node_registration_get_logical_id(logical_id, sizeof(logical_id));
         if (err != ESP_OK || !logical_id_is_valid(logical_id)) {
             ESP_LOGW(TAG, "Could not read a valid persisted logical ID for registration status");
-            return;
+            return false;
         }
         /* Validation excludes JSON metacharacters; never publish an invalid ID. */
         int id_written = snprintf(logical_id_field, sizeof(logical_id_field),
                                   ",\"logical_id\":\"%s\"", logical_id);
         if (id_written < 0 || id_written >= (int)sizeof(logical_id_field)) {
-            return;
+            return false;
         }
     }
     char sen66_diagnostic_fields[96] = {0};
@@ -193,7 +197,7 @@ static void publish_registration_status(void) {
             recoveries, timeouts);
         if (diagnostic_written < 0 || diagnostic_written >= (int)sizeof(sen66_diagnostic_fields)) {
             ESP_LOGE(TAG, "Could not build SEN66 diagnostic status fields");
-            return;
+            return false;
         }
     }
     int written = snprintf(registration_payload, sizeof(registration_payload),
@@ -205,7 +209,7 @@ static void publish_registration_status(void) {
                            connected ? "[\"sen66\"]" : "[]", sen66_diagnostic_fields);
     if (written < 0 || written >= (int)sizeof(registration_payload)) {
         ESP_LOGE(TAG, "Could not build registration status payload");
-        return;
+        return false;
     }
     sen66_delivery_status_sending(true);
     int message_id = esp_mqtt_client_publish_bounded(client, registration_topic,
@@ -213,13 +217,14 @@ static void publish_registration_status(void) {
     sen66_delivery_status_sending(false);
     if (message_id < 0) {
         ESP_LOGW(TAG, "Could not queue retained registration status: %d", message_id);
-        return;
+        return false;
     }
     ESP_LOGI(TAG, "Published retained registration status (message_id=%d)",
              message_id);
     portENTER_CRITICAL(&sensor_status_lock);
     sensor_status_sent_version = version;
     portEXIT_CRITICAL(&sensor_status_lock);
+    return true;
 }
 
 static bool logical_id_is_valid(const char *logical_id) {
@@ -273,9 +278,9 @@ static void load_persisted_device_status(void) {
     }
 }
 
-static void publish_device_status(const char *status) {
+static bool publish_device_status(const char *status) {
     if (!device_status_configured) {
-        return;
+        return true;
     }
     char payload[OMK_MQTT_PAYLOAD_SIZE];
     int written = snprintf(payload, sizeof(payload),
@@ -283,15 +288,17 @@ static void publish_device_status(const char *status) {
                            device_status_logical_id, status);
     if (written < 0 || written >= (int)sizeof(payload)) {
         ESP_LOGE(TAG, "Could not build logical-device status payload");
-        return;
+        return false;
     }
-    int message_id = esp_mqtt_client_publish(client, device_status_topic, payload, 0, 0, 1);
+    int message_id = esp_mqtt_client_publish_bounded(client, device_status_topic, payload, 0, 0, 1, OMK_MQTT_OUTBOX_BYTES);
     if (message_id < 0) {
         ESP_LOGW(TAG, "Could not queue retained logical-device status: %d", message_id);
+        return false;
     }
+    return true;
 }
 
-static void publish_registration_ack(const char *logical_id) {
+static bool publish_registration_ack(const char *logical_id) {
     char payload[OMK_MQTT_PAYLOAD_SIZE];
     int written = snprintf(payload, sizeof(payload),
                            "{\"protocol_version\":%u,\"node_id\":\"%s\","
@@ -300,69 +307,63 @@ static void publish_registration_ack(const char *logical_id) {
                            logical_id);
     if (written < 0 || written >= (int)sizeof(payload)) {
         ESP_LOGE(TAG, "Could not build registration ACK payload");
-        return;
+        return false;
     }
     int message_id = esp_mqtt_client_publish_bounded(client, registration_ack_topic,
                                              payload, 0, 1, 1, OMK_MQTT_OUTBOX_BYTES);
     if (message_id < 0) {
         ESP_LOGW(TAG, "Could not queue retained registration ACK: %d", message_id);
-        return;
+        return false;
     }
     ESP_LOGI(TAG, "Published retained registration ACK (message_id=%d)", message_id);
+    return true;
 }
 
-static void clear_retained_registration_ack(void) {
-    if (esp_mqtt_client_publish_bounded(client, registration_ack_topic, "", 0, 1, 1, OMK_MQTT_OUTBOX_BYTES) < 0) {
-        ESP_LOGW(TAG, "Could not clear retained registration ACK");
-    }
+static bool clear_retained_registration_ack(void) {
+    return esp_mqtt_client_publish_bounded(client, registration_ack_topic, "", 0, 1, 1,
+                                           OMK_MQTT_OUTBOX_BYTES) >= 0;
 }
 
-static void clear_retained_registration_config(void) {
-    if (esp_mqtt_client_publish_bounded(client, registration_config_topic, "", 0, 1, 1, OMK_MQTT_OUTBOX_BYTES) < 0) {
-        ESP_LOGW(TAG, "Could not clear retained registration config");
-    }
+static bool clear_retained_registration_config(void) {
+    return esp_mqtt_client_publish_bounded(client, registration_config_topic, "", 0, 1, 1,
+                                           OMK_MQTT_OUTBOX_BYTES) >= 0;
 }
 
-static void apply_registration_config(const char *logical_id, bool superseded_clear) {
-    if (logical_id == NULL) {
-        esp_err_t clear_err = node_registration_clear();
-        if (clear_err == ESP_OK) {
-            sen66_delivery_invalidate();
-            if (device_status_configured) {
-                esp_mqtt_client_publish(client, device_status_topic, "", 0, 0, 1);
-                device_status_configured = false;
-            }
-            clear_retained_registration_ack();
-            clear_retained_registration_config();
-            publish_registration_status();
-            ESP_LOGI(TAG, "Cleared Node logical registration; Wi-Fi provisioning retained");
-        } else {
-            ESP_LOGE(TAG, "Could not clear Node registration: %s", esp_err_to_name(clear_err));
-        }
-        return;
-    }
-    esp_err_t save_err = node_registration_save(logical_id);
-    if (save_err == ESP_OK) {
+static bool apply_registration_config(const char *logical_id, bool superseded_clear) {
+    if (registration_apply_step == 0) {
+        esp_err_t save_err = logical_id ? node_registration_save(logical_id) : node_registration_clear();
+        if (save_err != ESP_OK) return false;
         sen66_delivery_invalidate();
-        if (superseded_clear) {
-            /* Preserve cleanup without publishing an intermediate provisioned
-             * state or erasing the newly saved final assignment. */
-            if (device_status_configured) {
-                esp_mqtt_client_publish(client, device_status_topic, "", 0, 0, 1);
-                device_status_configured = false;
-            }
-            clear_retained_registration_config();
-        }
-        if (!configure_device_status(logical_id)) {
-            ESP_LOGE(TAG, "Could not configure logical-device MQTT status after registration");
-        } else {
-            publish_device_status("online");
-        }
-        publish_registration_ack(logical_id);
-        publish_registration_status();
-    } else {
-        ESP_LOGE(TAG, "Could not persist registration: %s", esp_err_to_name(save_err));
+        registration_apply_step = 1;
     }
+    if (registration_apply_step == 1) {
+        if ((!logical_id || superseded_clear) && device_status_configured) {
+            if (esp_mqtt_client_publish_bounded(client, device_status_topic, "", 0, 0, 1,
+                                                OMK_MQTT_OUTBOX_BYTES) < 0) return false;
+            device_status_configured = false;
+        }
+        registration_apply_step = 2;
+    }
+    if (registration_apply_step == 2) {
+        if (!logical_id && !clear_retained_registration_ack()) return false;
+        registration_apply_step = 3;
+    }
+    if (registration_apply_step == 3) {
+        if ((!logical_id || superseded_clear) && !clear_retained_registration_config()) return false;
+        registration_apply_step = 4;
+    }
+    if (registration_apply_step == 4) {
+        if (logical_id && (!configure_device_status(logical_id) || !publish_device_status("online")))
+            return false;
+        registration_apply_step = 5;
+    }
+    if (registration_apply_step == 5) {
+        if (logical_id && !publish_registration_ack(logical_id)) return false;
+        registration_apply_step = 6;
+    }
+    if (!publish_registration_status()) return false;
+    registration_apply_step = 0;
+    return true;
 }
 
 static void process_registration_config(const esp_mqtt_event_handle_t event) {
@@ -390,7 +391,8 @@ static void process_registration_config(const esp_mqtt_event_handle_t event) {
     if (!valid) {
         ESP_LOGW(TAG, "Ignoring invalid registration config fields");
     } else if (!registration_sender_enabled) {
-        apply_registration_config(clear ? NULL : logical_id->valuestring, false);
+        registration_apply_step = 0;
+        (void)apply_registration_config(clear ? NULL : logical_id->valuestring, false);
     } else {
         portENTER_CRITICAL(&sensor_status_lock);
         strcpy(registration_request.logical_id, clear ? "" : logical_id->valuestring);
@@ -403,17 +405,27 @@ static void process_registration_config(const esp_mqtt_event_handle_t event) {
     cJSON_Delete(root);
 }
 
-static void synchronize_registration_connection(void) {
-    if (!registration_is_persisted()) {
-        /* Delete stale retained assignments before subscribing. */
-        clear_retained_registration_ack();
-        clear_retained_registration_config();
+static bool synchronize_registration_connection(void) {
+    if (registration_sync_step == 0) {
+        if (!registration_is_persisted() && !clear_retained_registration_ack()) return false;
+        registration_sync_step = 1;
     }
-    if (esp_mqtt_client_subscribe(client, registration_config_topic, 1) < 0) {
-        ESP_LOGW(TAG, "Could not subscribe to registration config");
+    if (registration_sync_step == 1) {
+        if (!registration_is_persisted() && !clear_retained_registration_config()) return false;
+        registration_sync_step = 2;
     }
-    publish_registration_status();
-    publish_device_status("online");
+    if (registration_sync_step == 2) {
+        if (esp_mqtt_client_subscribe_bounded(client, registration_config_topic, 1,
+                                              OMK_MQTT_OUTBOX_BYTES) < 0) return false;
+        registration_sync_step = 3;
+    }
+    if (registration_sync_step == 3) {
+        if (!publish_registration_status()) return false;
+        registration_sync_step = 4;
+    }
+    if (!publish_device_status("online")) return false;
+    registration_sync_step = 0;
+    return true;
 }
 
 omk_mqtt_progress_t mqtt_registration_get_progress(void) {
@@ -460,9 +472,17 @@ static void mqtt_event_handler(void *arg, esp_event_base_t event_base,
         if (event != NULL) {
             uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
             portENTER_CRITICAL(&progress_lock);
+            bool probe = event->msg_id > 0 && event->msg_id == mqtt_progress.pending_id;
             mqtt_progress_event(&mqtt_progress, now, event->msg_id,
                                 event_id == MQTT_EVENT_PUBLISHED);
             portEXIT_CRITICAL(&progress_lock);
+            if (event_id == MQTT_EVENT_DELETED && event->msg_id > 0 && !probe) {
+                portENTER_CRITICAL(&sensor_status_lock);
+                ++registration_connection_version;
+                ++sensor_status_version;
+                portEXIT_CRITICAL(&sensor_status_lock);
+                sen66_delivery_wake();
+            }
         }
         break;
     }
@@ -477,7 +497,7 @@ static void mqtt_event_handler(void *arg, esp_event_base_t event_base,
         ++sensor_status_version;
         portEXIT_CRITICAL(&sensor_status_lock);
         if (registration_sender_enabled) sen66_delivery_wake();
-        else synchronize_registration_connection();
+        else { registration_sync_step = 0; (void)synchronize_registration_connection(); }
         break;
     case MQTT_EVENT_DATA:
         process_registration_config(event_data);
@@ -568,8 +588,12 @@ void mqtt_registration_flush_sensor_status(void) {
     uint32_t version = registration_request_version;
     portEXIT_CRITICAL(&sensor_status_lock);
     if (have) {
-        apply_registration_config(request.logical_id[0] ? request.logical_id : NULL,
-                                  request.clear_retained_config);
+        if (registration_apply_version != version) {
+            registration_apply_version = version;
+            registration_apply_step = 0;
+        }
+        if (!apply_registration_config(request.logical_id[0] ? request.logical_id : NULL,
+                                       request.clear_retained_config)) return;
         portENTER_CRITICAL(&sensor_status_lock);
         if (registration_request_version == version) {
             registration_request_pending = false;
@@ -581,11 +605,19 @@ void mqtt_registration_flush_sensor_status(void) {
     portENTER_CRITICAL(&sensor_status_lock);
     uint32_t connection = registration_connection_version;
     bool reconnect = connection != registration_connection_handled;
-    registration_connection_handled = connection;
     bool dirty = sensor_status_version != sensor_status_sent_version;
     portEXIT_CRITICAL(&sensor_status_lock);
-    if (reconnect) synchronize_registration_connection();
-    else if (dirty) publish_registration_status();
+    if (reconnect) {
+        if (registration_sync_version != connection) {
+            registration_sync_version = connection;
+            registration_sync_step = 0;
+        }
+        if (synchronize_registration_connection()) {
+            portENTER_CRITICAL(&sensor_status_lock);
+            registration_connection_handled = connection;
+            portEXIT_CRITICAL(&sensor_status_lock);
+        }
+    } else if (dirty) (void)publish_registration_status();
 #ifdef OMK_NETWORK_DIAGNOSTICS
     /* Existing sender is the only consumer. Observer/USB/flash never wait for
      * MQTT. One complete, non-retained JSON every >=5 min; no ACK protocol. */
