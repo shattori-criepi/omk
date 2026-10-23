@@ -58,6 +58,11 @@ typedef int portMUX_TYPE;
 #include <string.h>
 #include "sen66_diagnostics.c"
 #include "communication_limits.h"
+#define OMK_NETWORK_DIAGNOSTICS 1
+#include "network_diagnostics.h"
+nd_rejections_t network_diag_rejections(void) {
+    nd_rejections_t r;for(unsigned i=0;i<ND_REJECTIONS;i++)r.count[i]=UINT32_MAX;return r;
+}
 static bool mesh_netif_allow_data(void) { return true; }
 ''' + constants + "\ntypedef struct sen66_measurement" + measurement + "} sen66_measurement_t;\n" + r'''
 typedef int esp_mqtt_event_id_t;
@@ -72,7 +77,21 @@ static int enqueue_return;
 static char captured[2816];
 enum {SEN66_TX_ENQUEUE, SEN66_TX_OUTBOX, SEN66_TX_IDLE};
 static void sen66_delivery_phase(int p, uint32_t seq) {(void)p;(void)seq;}
-static bool sen66_delivery_format(char *b,size_t n) {return snprintf(b,n,"{}") == 2;}
+static bool sen66_delivery_format(char *buffer,size_t size) {
+    uint32_t s=UINT32_MAX,r=s,i=s,e=s,u=s,seq=s;
+    unsigned p=3;bool waiting=false;
+    uint64_t age=UINT64_MAX,enqueue=age,outbox=age,status_age=age,status_max=age;
+    int n = snprintf(buffer, size,
+        "{\"submitted\":%" PRIu32 ",\"replaced\":%" PRIu32
+        ",\"invalidated\":%" PRIu32 ",\"expired\":%" PRIu32
+        ",\"unavailable\":%" PRIu32 ",\"pending\":%s,\"phase\":%u"
+        ",\"active_seq\":%" PRIu32 ",\"phase_age_ms\":%" PRIu64
+        ",\"max_enqueue_ms\":%" PRIu64 ",\"max_outbox_ms\":%" PRIu64
+        ",\"status_age_ms\":%" PRIu64 ",\"max_status_ms\":%" PRIu64 "}",
+        s, r, i, e, u, waiting ? "true" : "false", p, seq, p ? age : 0, enqueue, outbox,
+        status_age, status_max);
+    return n >= 0 && (size_t)n < size;
+}
 static void *test_malloc(size_t n) { return fail_allocation ? NULL : malloc(n); }
 #define malloc test_malloc
 void esp_fill_random(void *b, size_t n) { memset(b, ++random_calls, n); }
@@ -181,6 +200,8 @@ def test_counters_enqueue_failures_and_restart(diagnostic_run):
     assert status["is_root"] is True
     assert maximum["sen66"]["max_read_ms"] == 2**64 - 1
     assert maximum["mqtt"]["expired_messages"] == 2**32 - 1
+    assert maximum["admission"] == [2**32 - 1] * 6
+    assert maximum["sen66_tx"]["submitted"] == 2**32 - 1
     assert wrap["meta"]["enqueue_seq"] == 0
     assert reboot["meta"]["boot_id"] != first["meta"]["boot_id"]
     assert reboot["meta"]["seq"] == reboot["meta"]["enqueue_seq"] == 1

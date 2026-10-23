@@ -76,7 +76,7 @@
          }
      }
  
-@@ -2743,10 +2750,87 @@
+@@ -2743,10 +2750,97 @@
  
      if (ret == 0 && store == false) {
          // messages with qos=0 are not enqueued if not overridden by store_in_outobx -> indicate as error
@@ -105,14 +105,20 @@
 +    const char *topic, int qos, unsigned limit)
 +{
 +    if (!client || !topic || !topic[0] || qos < 0 || qos > 2) return -1;
-+    if (xSemaphoreTakeRecursive(client->api_lock, 0) != pdTRUE) return -3;
++    if (xSemaphoreTakeRecursive(client->api_lock, 0) != pdTRUE) {
++        network_diag_rejected(ND_MQTT_BUSY);
++        return -3;
++    }
 +    int result = -1;
 +    if (client->state != MQTT_STATE_CONNECTED ||
 +        client->mqtt_state.connection.information.protocol_ver != MQTT_PROTOCOL_V_3_1_1)
 +        goto done;
 +    size_t required = strlen(topic) + 10; /* header, packet ID, length, qos */
 +    size_t used = outbox_get_size(client->outbox);
-+    if (used > limit || required > limit - used) { result = -2; goto done; }
++    if (used > limit || required > limit - used) {
++        network_diag_rejected(ND_MQTT_CAPACITY);
++        result = -2; goto done;
++    }
 +    mqtt_reset_pending_message(client);
 +    esp_mqtt_topic_t filter = {.filter = topic, .qos = qos};
 +    mqtt_msg_subscribe(&client->mqtt_state.connection, &filter, 1,
@@ -133,7 +139,10 @@
 +{
 +    if (!client || !topic || !data || len < 0) return -1;
 +#ifndef MQTT_DISABLE_API_LOCKS
-+    if (xSemaphoreTakeRecursive(client->api_lock, 0) != pdTRUE) return -3;
++    if (xSemaphoreTakeRecursive(client->api_lock, 0) != pdTRUE) {
++        network_diag_rejected(ND_MQTT_BUSY);
++        return -3;
++    }
 +#else
 +#error "OMK bounded enqueue requires MQTT API locks"
 +#endif
@@ -145,6 +154,7 @@
 +    size_t used = outbox_get_size(client->outbox);
 +    if (used <= limit && required <= limit - used)
 +        result = esp_mqtt_client_enqueue(client, topic, data, len, qos, retain, true);
++    else network_diag_rejected(ND_MQTT_CAPACITY);
 +    if (submitted) submitted(result);
 +    xSemaphoreGiveRecursive(client->api_lock);
 +    return result;
@@ -168,7 +178,7 @@
  }
  
  esp_err_t esp_mqtt_client_register_event(esp_mqtt_client_handle_t client, esp_mqtt_event_id_t event,
-@@ -2808,21 +2892,24 @@
+@@ -2808,21 +2902,24 @@
  
  int esp_mqtt_client_get_outbox_size(esp_mqtt_client_handle_t client)
  {

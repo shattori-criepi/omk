@@ -1,4 +1,5 @@
 #include "network_diagnostics.h"
+#include "diagnostic_runtime.h"
 #ifdef OMK_NETWORK_DIAGNOSTICS
 #include <inttypes.h>
 #include <stdarg.h>
@@ -100,20 +101,45 @@ static esp_err_t save_checkpoint(checkpoint_t *c) {
     return err;
 }
 
-/* A bounded priority slot, not an unbounded event history. At equal severity an
- * unsaved record wins; a same-boot superset may refresh its timing. A lesser
- * anomaly never replaces a critical record, including one already in NVS. */
+/* Persistence budgets are independent of the current-boot retention slot.
+ * Repeated reasons do not cause additional NVS writes. */
 static bool save_needed(const nd_snapshot_t *s) {
     return (s->critical_reasons & ~saved_critical) ||
            (!s->critical_reasons && !saved_critical && saves < ND_EARLY_SAVE_LIMIT &&
             (s->reasons & ~saved_reasons));
 }
 static bool newer(uint32_t a, uint32_t b) { return (int32_t)(a - b) > 0; }
+static bool active_critical(const nd_snapshot_t *s) {
+    for (unsigned i=0; i<ND_ACTIVE_SLOTS; ++i)
+        if (s->active[i].token && s->sampled_us >= s->active[i].started_us + 30000000ULL)
+            return true;
+    return false;
+}
 static bool prefer(const nd_snapshot_t *candidate, const nd_snapshot_t *held) {
     if (!candidate->reasons) return false;
     if (!held->reasons) return true;
+    /* Observer candidates are always the current boot. Old NVS stays view 2.
+     * Do not let a previous boot hide recurrence of an already-saved bit. */
+    if (candidate->boot_id != held->boot_id) return true;
     if (!!candidate->critical_reasons != !!held->critical_reasons)
         return candidate->critical_reasons != 0;
+    /* Freeze an in-flight critical sample after completion. A newly active
+     * critical episode may refresh it, even if its operation bit is unchanged. */
+    bool new_active = false;
+    for (unsigned i=0; i<ND_ACTIVE_SLOTS; ++i) {
+        const nd_active_t *a=&candidate->active[i];
+        if (!a->token || candidate->sampled_us < a->started_us+30000000ULL) continue;
+        bool found=false;
+        for (unsigned j=0; j<ND_ACTIVE_SLOTS; ++j)
+            if (held->active[j].token==a->token) found=true;
+        if (!found) new_active=true;
+    }
+    if (active_critical(candidate) && (new_active ||
+        ((candidate->reasons & held->reasons)==held->reasons &&
+         (candidate->critical_reasons & held->critical_reasons)==held->critical_reasons)))
+        return newer(candidate->sequence, held->sequence);
+    if (active_critical(held) && !(candidate->critical_reasons & ~held->critical_reasons))
+        return false;
     if (candidate->boot_id == held->boot_id &&
         (candidate->reasons & held->reasons) == held->reasons &&
         (candidate->critical_reasons & held->critical_reasons) == held->critical_reasons)
@@ -329,14 +355,15 @@ void network_diag_report_result(bool enqueued) {
 
 bool network_diag_usb(const char *line, uint64_t node_id) {
     if (strncmp(line,"OMKDIAG ",8)!=0) return false;
-    /* Strict fixed grammar: OMKDIAG <view 0..2> <page 0..26>. */
+    /* Pages 0..26 retain their schema; runtime pages 27..32 are view 0 only. */
     unsigned view=0, page=0;
     const char *p=line+8;
     if (*p<'0'||*p>'2'||p[1]!=' ') return true;
     view=(unsigned)(*p-'0'); p+=2;
     if (*p<'0'||*p>'9') return true;
-    while (*p>='0'&&*p<='9') { page=page*10+(unsigned)(*p++-'0'); if(page>26) return true; }
+    while (*p>='0'&&*p<='9') { page=page*10+(unsigned)(*p++-'0'); if(page>32) return true; }
     if (*p) return true;
+    if (page > 26 && view != 0) return true;
     nd_snapshot_t s;
     if (!get_view(view,&s)) memset(&s,0,sizeof(s));
     char response[240]; size_t used=0;
@@ -370,10 +397,25 @@ bool network_diag_usb(const char *line, uint64_t node_id) {
         ok=ok && append(response,sizeof(response),&used,"\"r\":[%" PRIu32 ",%" PRIu32 ",%" PRIu32
             ",%" PRId32 ",%" PRIu32 ",%" PRIu32 ",%" PRIu64 ",%" PRIu64 "]",s.reasons,
             s.saved_reasons,s.saves,s.save_error,s.dropped,s.usb_dropped,begin,end);
-    } else {
+    } else if (page <= 26) {
         const nd_mesh_error_t *e=&s.mesh_errors[page-19];
         ok=ok && append(response,sizeof(response),&used,"\"mesh_error\":[%" PRId32 ",%" PRIu32
             "],\"other\":%" PRIu32,e->rc,e->count,s.mesh_error_other);
+    } else if (page <= 30) {
+        ok=ok && diagnostic_runtime_page(page,response+used,sizeof(response)-used-2);
+        if (ok) used=strlen(response);
+    } else if (page == 31) {
+        ok=ok && append(response,sizeof(response),&used,
+            "\"boot\":\"%016" PRIx64 "\",\"at\":%" PRIu64
+            ",\"state\":[%" PRIu32 ",%" PRIu64 ",%" PRIu32 ",%" PRIu32 "]",
+            s.boot_id,s.sampled_us,s.progress.recovery_flags,s.progress.recovery_us,
+            s.progress.recovery_stage,s.progress.recovery_action);
+    } else {
+        nd_rejections_t r=network_diag_rejections();
+        ok=ok && append(response,sizeof(response),&used,
+            "\"at\":%" PRIu64 ",\"admission\":[%" PRIu32 ",%" PRIu32
+            ",%" PRIu32 ",%" PRIu32 ",%" PRIu32 ",%" PRIu32 "]",
+            s.sampled_us,r.count[0],r.count[1],r.count[2],r.count[3],r.count[4],r.count[5]);
     }
     ok=ok && append(response,sizeof(response),&used,"}\n");
     if (!ok || usb_serial_jtag_write_bytes(response,used,0)!=(int)used) {

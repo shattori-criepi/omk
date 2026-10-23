@@ -428,6 +428,20 @@ static bool synchronize_registration_connection(void) {
     return true;
 }
 
+void mqtt_registration_snapshot_sensor(uint32_t *recoveries, uint32_t *timeouts) {
+    portENTER_CRITICAL(&sensor_status_lock);
+    *recoveries = sen66_recovery_count;
+    *timeouts = sen66_measurement_timeout_count;
+    portEXIT_CRITICAL(&sensor_status_lock);
+}
+
+omk_mqtt_progress_t mqtt_registration_snapshot_progress(void) {
+    portENTER_CRITICAL(&progress_lock);
+    omk_mqtt_progress_t result = mqtt_progress;
+    portEXIT_CRITICAL(&progress_lock);
+    return result;
+}
+
 omk_mqtt_progress_t mqtt_registration_get_progress(void) {
     portENTER_CRITICAL(&progress_lock);
     /* Sample AFTER acquiring the lock: an ACK on the other core must never
@@ -669,6 +683,15 @@ esp_err_t mqtt_registration_publish_mesh_status(const char *payload) {
     int n = snprintf(combined, size, "%.*s,\"mqtt\":", (int)(length - 1), payload);
     bool complete = n >= 0 && (size_t)n < size - 1 &&
         format_mqtt_diagnostics(combined + n, size - (size_t)n - 1);
+    if (complete) {
+        nd_rejections_t r = network_diag_rejections();
+        size_t offset = strlen(combined);
+        n = snprintf(combined + offset, size - offset,
+            ",\"admission\":[%" PRIu32 ",%" PRIu32 ",%" PRIu32
+            ",%" PRIu32 ",%" PRIu32 ",%" PRIu32 "]",
+            r.count[0], r.count[1], r.count[2], r.count[3], r.count[4], r.count[5]);
+        complete = n >= 0 && (size_t)n < size - offset - 1;
+    }
     if (complete && sen66_diagnostics_snapshot().boot_id) {
         size_t offset = strlen(combined);
         n = snprintf(combined + offset, size - offset, ",\"sen66\":");

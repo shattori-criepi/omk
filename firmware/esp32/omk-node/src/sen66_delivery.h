@@ -16,3 +16,10 @@ void sen66_delivery_phase(sen66_tx_phase_t phase, uint32_t seq);
 /* Separate duration for registration status, including callback-only fallback. */
 void sen66_delivery_status_sending(bool sending);
 bool sen66_delivery_format(char *buffer, size_t size);
+typedef struct {
+    uint32_t submitted, replaced, invalidated, expired, unavailable;
+    uint32_t phase, active_seq;
+    bool pending;
+    uint64_t phase_age_ms;
+} sen66_delivery_snapshot_t;
+sen66_delivery_snapshot_t sen66_delivery_snapshot(void);

@@ -63,6 +63,7 @@ bool mesh_netif_allow_data(void) {
     portENTER_CRITICAL(&tx_policy_lock);
     bool allowed = mesh_tx_policy_allow(&tx_policy, (uint32_t)(esp_timer_get_time() / 1000));
     portEXIT_CRITICAL(&tx_policy_lock);
+    if (!allowed) network_diag_rejected(ND_BACKOFF);
     return allowed;
 }
 
@@ -124,6 +125,8 @@ static struct {
     uint32_t generation;
     bool root, occupied;
 } tx_frames[MESH_TX_SLOTS];
+/* Count one dropped frame, including a broadcast that expires between peers. */
+static bool tx_drop_counted[MESH_TX_SLOTS];
 static portMUX_TYPE tx_queue_lock = portMUX_INITIALIZER_UNLOCKED;
 static uint32_t tx_generation;
 static QueueHandle_t tx_queue;
@@ -140,8 +143,13 @@ static bool tx_frame_current(unsigned index) {
     portENTER_CRITICAL(&tx_queue_lock);
     bool current = tx_frames[index].generation == tx_generation;
     portEXIT_CRITICAL(&tx_queue_lock);
-    return current && tx_frames[index].root == esp_mesh_is_root() &&
-           (uint64_t)esp_timer_get_time() - tx_frames[index].queued_us < MESH_TX_MAX_AGE_US;
+    bool valid = current && tx_frames[index].root == esp_mesh_is_root();
+    bool fresh = (uint64_t)esp_timer_get_time() - tx_frames[index].queued_us < MESH_TX_MAX_AGE_US;
+    if ((!valid || !fresh) && !tx_drop_counted[index]) {
+        tx_drop_counted[index] = true;
+        network_diag_rejected(!valid ? ND_FRAME_INVALIDATED : ND_FRAME_EXPIRED);
+    }
+    return valid && fresh;
 }
 
 static void send_queued_frame(unsigned index) {
@@ -195,6 +203,7 @@ static esp_err_t queue_frame(void *handle, void *buffer, size_t length, bool roo
     for (index = 0; index < MESH_TX_SLOTS && tx_frames[index].occupied; ++index) {}
     if (index == MESH_TX_SLOTS) {
         portEXIT_CRITICAL(&tx_queue_lock);
+        network_diag_rejected(ND_QUEUE_FULL);
         return ESP_ERR_NO_MEM;
     }
     tx_frames[index].occupied = true;
@@ -206,10 +215,12 @@ static esp_err_t queue_frame(void *handle, void *buffer, size_t length, bool roo
     tx_frames[index].length = length;
     tx_frames[index].root = root;
     tx_frames[index].queued_us = esp_timer_get_time();
+    tx_drop_counted[index] = false;
     if (xQueueSend(tx_queue, &index, 0) == pdTRUE) return ESP_OK;
     portENTER_CRITICAL(&tx_queue_lock);
     tx_frames[index].occupied = false;
     portEXIT_CRITICAL(&tx_queue_lock);
+    network_diag_rejected(ND_QUEUE_FULL);
     return ESP_ERR_NO_MEM;
 }
 

@@ -148,6 +148,19 @@ esp_err_t sen66_delivery_start(void) {
     return ESP_OK;
 }
 
+sen66_delivery_snapshot_t sen66_delivery_snapshot(void) {
+    uint64_t time = now_ms();
+    portENTER_CRITICAL(&delivery_lock);
+    sen66_delivery_snapshot_t result = {
+        .submitted=submitted, .replaced=replaced, .invalidated=invalidated,
+        .expired=expired, .unavailable=unavailable, .pending=occupied,
+        .phase=phase, .active_seq=active_seq,
+        .phase_age_ms=phase && time >= phase_since_ms ? time-phase_since_ms : 0,
+    };
+    portEXIT_CRITICAL(&delivery_lock);
+    return result;
+}
+
 bool sen66_delivery_format(char *buffer, size_t size) {
     uint64_t time = now_ms();
     portENTER_CRITICAL(&delivery_lock);

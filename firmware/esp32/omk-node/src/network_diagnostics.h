@@ -12,6 +12,11 @@ enum { ND_ENTER = 1, ND_WAIT_LOCK, ND_LOCKED };
 #define ND_SCHEMA 2U
 #define ND_REPORT_SIZE 3072
 
+/* Per-boot admission failures; not part of the persisted schema-2 snapshot. */
+enum { ND_QUEUE_FULL, ND_FRAME_EXPIRED, ND_FRAME_INVALIDATED,
+       ND_MQTT_BUSY, ND_MQTT_CAPACITY, ND_BACKOFF, ND_REJECTIONS };
+typedef struct { uint32_t count[ND_REJECTIONS]; } nd_rejections_t;
+
 typedef struct {
     uint32_t calls, completed, errors;
     int32_t last_rc;
@@ -46,6 +51,8 @@ typedef struct {
 _Static_assert(sizeof(nd_snapshot_t) <= 1024, "Bound diagnostic copy and NVS size");
 
 #ifdef OMK_NETWORK_DIAGNOSTICS
+void network_diag_rejected(unsigned reason);
+nd_rejections_t network_diag_rejections(void);
 uint32_t network_diag_begin(unsigned op);
 void network_diag_wait(uint32_t token);
 void network_diag_locked(uint32_t token);
@@ -64,6 +71,8 @@ void network_diag_report_result(bool enqueued);
 /* ASCII request is parsed before cJSON: no allocation, network call or reset. */
 bool network_diag_usb(const char *line, uint64_t node_id);
 #else
+static inline void network_diag_rejected(unsigned reason) { (void)reason; }
+static inline nd_rejections_t network_diag_rejections(void) { return (nd_rejections_t){0}; }
 static inline uint32_t network_diag_begin(unsigned op) { (void)op; return 0; }
 static inline void network_diag_wait(uint32_t token) { (void)token; }
 static inline void network_diag_locked(uint32_t token) { (void)token; }

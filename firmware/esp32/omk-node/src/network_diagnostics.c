@@ -8,14 +8,28 @@
 
 static portMUX_TYPE lock = portMUX_INITIALIZER_UNLOCKED;
 static nd_snapshot_t state;
+static nd_rejections_t rejections;
 static uint32_t next_token;
 static void increment(uint32_t *v) { if (*v != UINT32_MAX) ++*v; }
+void network_diag_rejected(unsigned reason) {
+    if (reason >= ND_REJECTIONS) return;
+    portENTER_CRITICAL(&lock);
+    increment(&rejections.count[reason]);
+    portEXIT_CRITICAL(&lock);
+}
+nd_rejections_t network_diag_rejections(void) {
+    portENTER_CRITICAL(&lock);
+    nd_rejections_t result = rejections;
+    portEXIT_CRITICAL(&lock);
+    return result;
+}
 static uint32_t milliseconds(uint64_t us) {
     return us / 1000 > UINT32_MAX ? UINT32_MAX : (uint32_t)(us / 1000);
 }
 void network_diag_init_core(uint64_t boot_id, const uint8_t elf_sha[32]) {
     /* Startup, before networking or the observer task. */
     memset(&state, 0, sizeof(state));
+    memset(&rejections, 0, sizeof(rejections));
     state.schema = ND_SCHEMA;
     state.boot_id = boot_id;
     memcpy(state.elf_sha, elf_sha, sizeof(state.elf_sha));

@@ -13,6 +13,10 @@ def test_copied_frames_pressure_role_changes_and_radio_failures(tmp_path):
     sender = source[source.index("/* Copy Ethernet frames"):source.index("static esp_err_t attach_root_ap_driver")]
     program = r'''
 #include <assert.h>
+#define OMK_NETWORK_DIAGNOSTICS 1
+#include "network_diagnostics.h"
+static unsigned rejected[ND_REJECTIONS];
+void network_diag_rejected(unsigned reason) {assert(reason<ND_REJECTIONS);++rejected[reason];}
 #include <stdbool.h>
 #include <stdint.h>
 #include <stddef.h>
@@ -31,9 +35,6 @@ typedef int esp_err_t;
 #define MESH_TOS_P2P 1
 #define MESH_DATA_P2P 4
 #define MESH_DATA_TODS 8
-#define ND_MESH_UP 0
-#define ND_MESH_DOWN 1
-#define ND_MESH_BROADCAST 2
 #define pdTRUE 1
 #define portMAX_DELAY UINT32_MAX
 typedef int portMUX_TYPE;
@@ -93,13 +94,14 @@ int main(void) {
     assert(transmit_child_sta(NULL,frame,1561)==ESP_ERR_INVALID_SIZE);
     for(unsigned i=0;i<4;i++) assert(transmit_child_sta_wrap(NULL,frame,sizeof(frame),NULL)==ESP_OK);
     assert(!sends && transmit_child_sta(NULL,frame,sizeof(frame))==ESP_ERR_NO_MEM);
+    assert(rejected[ND_QUEUE_FULL]==1);
     memset(frame,77,sizeof(frame));drain();
     assert(sends==4 && captured[0]==42 && captured_op==ND_MESH_UP); // copied, not borrowed
     unsigned before=sends;
     assert(transmit_child_sta(NULL,frame,sizeof(frame))==ESP_OK);
     invalidate_tx();drain();assert(sends==before); // parent disconnect/reconnect invalidates pending frames
     assert(transmit_child_sta(NULL,frame,sizeof(frame))==ESP_OK);
-    root_role=true;drain();assert(sends==before); // role changed before event handler runs
+    root_role=true;drain();assert(sends==before);assert(rejected[ND_FRAME_INVALIDATED]==2); // role changed before event handler runs
     assert(transmit_root_ap(&driver,frame,sizeof(frame))==ESP_OK);
     drain();assert(sends==before+1 && captured_op==ND_MESH_DOWN);
     memset(frame,255,6);
@@ -119,8 +121,10 @@ int main(void) {
     radio_stalls=false;radio_result=0;before=sends;
     assert(transmit_root_ap(&driver,frame,sizeof(frame))==ESP_OK);
     now+=10000000;drain();assert(sends==before);
+    assert(rejected[ND_FRAME_EXPIRED]==5 && rejected[ND_FRAME_INVALIDATED]==3);
     deny_queue=true;
     for(unsigned i=0;i<100;i++) assert(transmit_root_ap(&driver,frame,sizeof(frame))==ESP_ERR_NO_MEM);
+    assert(rejected[ND_QUEUE_FULL]==101 && !rejected[ND_BACKOFF] && !rejected[ND_MQTT_BUSY]);
     deny_queue=false;
     for(unsigned i=0;i<4;i++) assert(transmit_root_ap(&driver,frame,sizeof(frame))==ESP_OK);
     drain();assert(sends==before+12); // denied insertions released every pool slot
@@ -130,7 +134,7 @@ int main(void) {
     path = tmp_path / "mesh_tx.c"
     path.write_text(program)
     binary = tmp_path / "mesh_tx"
-    subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", "-Werror", str(path), "-o", str(binary)], check=True)
+    subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-I", str(PROJECT / "src"), str(path), "-o", str(binary)], check=True)
     subprocess.run([str(binary)], check=True, timeout=5)
     start = source[source.index("esp_err_t mesh_netifs_start"):source.index("esp_err_t mesh_netif_start_root_ap")]
     assert start.count("invalidate_tx();") == 2

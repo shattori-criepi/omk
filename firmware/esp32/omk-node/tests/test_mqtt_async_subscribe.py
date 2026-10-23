@@ -15,6 +15,10 @@ def test_subscribe_never_waits_for_mutex_or_transport(tmp_path):
                     source.index("/* The caller callback runs")]
     program = r'''
 #include <assert.h>
+#define OMK_NETWORK_DIAGNOSTICS 1
+#include "network_diagnostics.h"
+static unsigned rejected[ND_REJECTIONS];
+void network_diag_rejected(unsigned reason) {assert(reason<ND_REJECTIONS);++rejected[reason];}
 #include <pthread.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -71,6 +75,7 @@ int main(void) {
     assert(!pthread_mutex_unlock(&mutex));
     used=85;assert(esp_mqtt_client_subscribe_bounded(&c,"config",1,100)==-2);
     assert(!builds && !enqueues);
+    assert(rejected[ND_MQTT_BUSY]==1 && rejected[ND_MQTT_CAPACITY]==1);
     used=84;assert(esp_mqtt_client_subscribe_bounded(&c,"config",1,100)==42);
     assert(used<=100 && builds==1 && enqueues==1);
     used=0;fail_build=true;assert(esp_mqtt_client_subscribe_bounded(&c,"config",1,100)==-1);
@@ -81,6 +86,7 @@ int main(void) {
     c.state=1;c.mqtt_state.connection.information.protocol_ver=5;
     assert(esp_mqtt_client_subscribe_bounded(&c,"config",1,100)==-1);
     assert(esp_mqtt_client_subscribe_bounded(NULL,"config",1,100)==-1);
+    assert(rejected[ND_MQTT_BUSY]==1 && rejected[ND_MQTT_CAPACITY]==1 && !rejected[ND_BACKOFF]);
     assert(!pthread_mutex_destroy(&mutex));
 }
 '''
@@ -88,5 +94,5 @@ int main(void) {
     path.write_text(program)
     binary = tmp_path / "subscribe"
     subprocess.run(["cc", "-D_GNU_SOURCE", "-std=c11", "-Wall", "-Wextra", "-Werror", "-pthread",
-                    str(path), "-o", str(binary)], check=True)
+                    "-I", str(PROJECT / "src"), str(path), "-o", str(binary)], check=True)
     subprocess.run([str(binary)], check=True, timeout=5)

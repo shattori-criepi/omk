@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include "network_diagnostics.c"
 #include "network_diagnostics_store.c"
+bool diagnostic_runtime_page(unsigned p,char *out,size_t n) {(void)p;(void)out;(void)n;return false;}
 
 static void *parallel(void *arg) {
     unsigned op=(uintptr_t)arg;
@@ -24,7 +25,28 @@ static void stall(unsigned op) {
 }
 int main(int argc,char **argv) {
     assert(argc==2);network_diag_start();
-    if(!strcmp(argv[1],"timing")) {
+    if(!strcmp(argv[1],"recurrence")) {
+        uint32_t t=network_diag_begin(ND_WRITE);fake_us+=31000000;observe_once();
+        uint64_t old_boot=saved.boot_id;assert(saves==1);
+        reboot(ESP_RST_SW);t=network_diag_begin(ND_WRITE);fake_us+=31000000;observe_once();
+        assert(retained.boot_id!=old_boot && saved.boot_id==old_boot && saves==1);
+        uint64_t at=retained.sampled_us;uint64_t current_boot=retained.boot_id;
+        network_diag_end(t,0,false);fake_us+=1000000;observe_once();
+        assert(retained.sampled_us==at && retained.active[0].token==t);
+        uint32_t t2=network_diag_begin(ND_WRITE);fake_us+=31000000;observe_once();
+        assert(retained.active[0].token==t2 && retained.sampled_us>at);
+        network_diag_end(t2,0,false);fake_us+=ND_SAVE_GAP_US;observe_once();
+        assert(retained.active[0].token==t2 && saves==1 && flash_writes==1);
+        reboot(ESP_RST_SW);assert(retained.boot_id==current_boot && saved.boot_id==old_boot);
+    } else if(!strcmp(argv[1],"rejections")) {
+        for(unsigned i=0;i<ND_REJECTIONS;i++) {
+            network_diag_rejected(i);assert(network_diag_rejections().count[i]==1);
+            rejections.count[i]=UINT32_MAX;network_diag_rejected(i);
+            assert(network_diag_rejections().count[i]==UINT32_MAX);
+        }
+        network_diag_rejected(ND_REJECTIONS);reboot(ESP_RST_SW);
+        for(unsigned i=0;i<ND_REJECTIONS;i++) assert(!network_diag_rejections().count[i]);
+    } else if(!strcmp(argv[1],"timing")) {
         fake_us=1000000;uint32_t t=network_diag_begin(ND_ENQUEUE);
         fake_us=2000000;network_diag_wait(t);
         fake_us=77000000;network_diag_locked(t);
@@ -136,14 +158,14 @@ int main(int argc,char **argv) {
         fake_us=begin+30000000;observe_once();assert(retained.critical_reasons==1 && saves==1);
         fake_us=begin+31000000;network_diag_end(t,0,false);observe_once();
         fake_us=ND_SAVE_GAP_US+12000000;observe_once();
-        assert(saves==2 && saved_critical==1 && saved.stats[0].last_ms==31000);
+        assert(saves==2 && saved_critical==1 && saved.active[0].token==t && saved.sampled_us==begin+30000000);
         for(unsigned i=0;i<20;++i) { fake_us+=ND_SAVE_GAP_US;observe_once(); }
         assert(saves==2);
     } else if(!strcmp(argv[1],"priority")) {
         uint32_t t=network_diag_begin(ND_WRITE);fake_us+=31000000;observe_once();
         network_diag_end(t,0,false);uint64_t fault_boot=retained.boot_id;
         reboot(ESP_RST_SW);t=network_diag_begin(ND_MESH_UP);fake_us+=11000000;network_diag_end(t,0,false);observe_once();
-        assert(retained.boot_id==fault_boot && retained.critical_reasons==(1U<<ND_WRITE));
+        assert(retained.boot_id!=fault_boot && retained.reasons==(1U<<ND_MESH_UP));
         fake_us+=ND_SAVE_GAP_US;observe_once();assert(saves==1);
     } else if(!strcmp(argv[1],"early_budget")) {
         for(unsigned i=0;i<5;++i) {

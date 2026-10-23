@@ -69,6 +69,10 @@ def test_mqtt_atomic_install_capacity_and_busy_mutex(tmp_path):
 #include <string.h>
 #include "mesh_liveness.h"
 #include "communication_limits.h"
+#define OMK_NETWORK_DIAGNOSTICS 1
+#include "network_diagnostics.h"
+static unsigned rejected[ND_REJECTIONS];
+void network_diag_rejected(unsigned reason) {assert(reason<ND_REJECTIONS);++rejected[reason];}
 #define pdTRUE 1
 typedef struct {pthread_mutex_t *api_lock; unsigned *outbox;} client_t;
 typedef client_t *esp_mqtt_client_handle_t;
@@ -149,6 +153,8 @@ int main(void) {
     assert(esp_mqtt_client_enqueue_bounded(&c,"probe","1",1,1,0,OMK_MQTT_OUTBOX_BYTES,NULL)==-2);
     used=0;assert(esp_mqtt_client_enqueue_diagnostic(&c,"diag","payload")==0);
     assert(esp_mqtt_client_get_outbox_size_nowait(&c)==20);
+    assert(rejected[ND_MQTT_BUSY]==1 && rejected[ND_MQTT_CAPACITY]==3);
+    assert(!rejected[ND_BACKOFF] && !rejected[ND_QUEUE_FULL]);
     return 0;
 }
 ''')
@@ -286,6 +292,10 @@ def test_registration_publish_packet_capacity_and_mutex(tmp_path):
 #include <stddef.h>
 #include <string.h>
 #include "communication_limits.h"
+#define OMK_NETWORK_DIAGNOSTICS 1
+#include "network_diagnostics.h"
+static unsigned rejected[ND_REJECTIONS];
+void network_diag_rejected(unsigned reason) {assert(reason<ND_REJECTIONS);++rejected[reason];}
 typedef struct {pthread_mutex_t *api_lock; unsigned *outbox;} client_t;
 typedef client_t *esp_mqtt_client_handle_t;
 static pthread_mutex_t mutex;
@@ -348,3 +358,37 @@ int main(void) {
     subprocess.run(["cc", "-std=c11", "-D_GNU_SOURCE", "-Wall", "-Wextra", "-Werror", "-pthread",
                     "-I", str(SOURCE), str(program), "-o", str(binary)], check=True)
     subprocess.run([str(binary)], check=True, timeout=5)
+
+
+def test_production_backoff_admission_counter(tmp_path):
+    source = (SOURCE / "mesh_netif.c").read_text()
+    function = source[source.index("bool mesh_netif_allow_data(void)"):source.index("static uint32_t uptime_seconds(void)")]
+    program = tmp_path / "admission.c"
+    program.write_text(r'''
+#include <assert.h>
+#include "mesh_tx_policy.h"
+#define OMK_NETWORK_DIAGNOSTICS 1
+#include "network_diagnostics.h"
+static unsigned rejected[ND_REJECTIONS], tx_policy_lock;
+static omk_mesh_tx_policy_t tx_policy;
+static uint32_t now;
+#define portENTER_CRITICAL(p) assert(++*(p)==1)
+#define portEXIT_CRITICAL(p) assert(--*(p)==0)
+static uint64_t esp_timer_get_time(void) {return (uint64_t)now*1000;}
+void network_diag_rejected(unsigned reason) {assert(!tx_policy_lock);++rejected[reason];}
+''' + function + r'''
+int main(void) {
+    assert(mesh_netif_allow_data());
+    mesh_tx_policy_result(&tx_policy,0,true,false);
+    assert(!mesh_netif_allow_data());now=999;assert(!mesh_netif_allow_data());
+    now=1000;assert(mesh_netif_allow_data());assert(!mesh_netif_allow_data());
+    now=OMK_MESH_BACKOFF_RECOVER_MS;
+    for(int i=0;i<3;i++) mesh_tx_policy_result(&tx_policy,now,false,true);
+    assert(mesh_netif_allow_data());assert(rejected[ND_BACKOFF]==3);
+    for(unsigned i=0;i<ND_BACKOFF;i++) assert(!rejected[i]);
+}
+''')
+    binary = tmp_path / "admission"
+    subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-I", str(SOURCE),
+                    str(program), str(SOURCE / "mesh_tx_policy.c"), "-o", str(binary)], check=True)
+    subprocess.run([str(binary)], check=True)

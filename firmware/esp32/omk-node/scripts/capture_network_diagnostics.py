@@ -44,7 +44,7 @@ def request(fd, node, view, page, timeout=1.0):
     return {"nd_timeout": True, "node": node, "v": view, "p": page}
 
 
-def capture(port, node, output, interval, once):
+def capture(port, node, output, interval, once, runtime=False):
     fd = os.open(port, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
     try:
         attrs = termios.tcgetattr(fd)
@@ -59,7 +59,7 @@ def capture(port, node, output, interval, once):
             while True:
                 started = time.monotonic()
                 for view in range(3):
-                    for page in range(27):
+                    for page in range(33 if runtime and view == 0 else 27):
                         record = request(fd, node, view, page)
                         stream.write(json.dumps({"received_at": datetime.now(timezone.utc).isoformat(),
                                                  "diagnostic": record}) + "\n")
@@ -79,13 +79,14 @@ def main():
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--interval", type=float, default=5.0)
     parser.add_argument("--once", action="store_true")
+    parser.add_argument("--runtime", action="store_true", help="Include current RAM pages 27..32 (readiness firmware)")
     args = parser.parse_args()
     if len(args.node) != 12 or any(c not in "0123456789abcdef" for c in args.node):
         parser.error("--node must be 12 lowercase hexadecimal digits")
     if args.interval < 5:
         parser.error("--interval must be at least 5 seconds")
     try:
-        capture(args.port, args.node, args.output, args.interval, args.once)
+        capture(args.port, args.node, args.output, args.interval, args.once, args.runtime)
     except KeyboardInterrupt:
         pass
     except (OSError, ValueError, TimeoutError) as error:

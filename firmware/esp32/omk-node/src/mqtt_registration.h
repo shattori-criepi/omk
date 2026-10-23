@@ -23,6 +23,9 @@ bool mqtt_registration_is_connected(void);
 bool mqtt_registration_is_started(void);
 /* RAM snapshot only; never takes MQTT's mutex. */
 omk_mqtt_progress_t mqtt_registration_get_progress(void);
+/* Pure RAM read for USB; no MQTT API, NVS, or freshness latch update. */
+omk_mqtt_progress_t mqtt_registration_snapshot_progress(void);
+void mqtt_registration_snapshot_sensor(uint32_t *recoveries, uint32_t *timeouts);
 uint32_t mqtt_registration_get_last_connected_uptime_s(void);
 uint32_t mqtt_registration_get_disconnected_duration_s(void);
 

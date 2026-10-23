@@ -528,13 +528,13 @@ SEN66の有無に依存しない共通の診断機能。診断追加時はMesh�
 - RTC NOINITは通常進捗用2スロットと異常保持用2スロットに分離する（CRC・形式v2・世代付き）。異常保持側は正常snapshotで上書きせず、soft reset時に無効化しない。各側の書込先を交互に使い、中断更新では以前の有効スロットへ戻る。power-on/brownout時だけRTCを信用せず、NVSの有効記録を使用する。RTC確保分は通常heapとして利用できる容量を減らす。
 - 10秒超のAPI呼び出しを早期検出、30秒以上（実行中／完了とも）を重大として`critical`で区別する。処理未完了だけでは重大にせず、30秒経過時に重大へ昇格する。90秒超のタイマー／イベント処理／復旧判断停滞も重大。10秒はMeshの30秒timeout到達を意味せず、復旧判定には影響しない。observerだけがNVSの`omk_netdiag/snapshot1`へ保存する。正常時の定期保存はしない。
 - **同じ種別・同じ重大度の再保存はしない**。早期→重大への昇格は追加保存対象。保存済み種別／重大種別と成功回数を同じblobに保持し、再起動・電源断で予算を再付与しない。初回以外は10分以上空け、最大16回。早期だけの保存は保存回数4未満の間に限定し、重大異常用の予算を残す。soft reset後も保留異常を保持し、保守的に再び10分待って保存する。再武装・消去コマンドは設けない。
-- 保留領域は優先度付きの固定1 snapshot。保存待ち中に異常が解消しても保持し、重大が早期より優先する。同じ重大度では未保存の先行記録を優先し、同じbootの異常種別をすべて含むsnapshotなら更新する。新しい軽微な異常が既存の重大記録（NVSを含む）を置換することはない。有限容量のため全異常履歴を保証せず、同時期の別異常や重大記録より軽い異常を省略し得る。
+- 保留領域は固定1 snapshot。現在bootの異常は過去bootのview=1記録より優先し、旧NVSはview=2から取得できる。同じbootでは重大が早期より優先する。30秒以上の実行中activeは処理完了後も保持し、新しいactive tokenの重大な再発は更新対象になる。保存予算・同種再保存の抑制は変更しない。有限容量のため全異常履歴は保証しない。詳細は[最小診断整備](docs/diagnostic-readiness.md)を参照。
 - 既存24KiB NVSを共有するため、保存前に必要量＋128 entriesの空きを要求する。不足・不正な保存内容・保存失敗は保存を停止し、既存NVSを消去しない。失敗後は同一bootで再試行せず、RTCに残った保存エラーも次のsoft resetへ引き継ぐ。
 - flash操作は通信の呼び出し元では実行しないが、cache/CPUへの遅延は発生し得る。`flash_us`で保存区間を区別する。NVS/MQTTライブラリ内部の動的確保は残る。電源断で失われるのは最後のcommit以降の情報であり、電源断直前の全記録を保証しない。中断・失敗したflash操作の物理的な書込回数を永続予算で完全に数えるものではない。
 
 ### Gatewayでの回収
 
-既存の`sen66_tx`タスク（SEN66なしでもMQTT登録開始時に起動）が、`omk/node/<node_id>/network_diagnostics`へ完全なJSONを非retain、QoS 0、store=trueで送る。現在bootの統計（view=0）から開始し、RTC/RAM側の保持記録（view=1）、最後のNVS記録（view=2）の順で循環する。既存の5分周期の枠を使い、1枠に1件だけ送る。保存記録のない枠はview=0に置き換える。全viewが存在し投入成功が続く場合、各viewは15分間隔となる。保存記録がない正常時にも現在値を送るため、従来の送信ゼロからは増えるが、送信周期・3072バイトのJSONバッファ上限は増やさない。通常のNode statusは増量しない。診断専用`esp_mqtt_client_enqueue_diagnostic()`はMQTT mutexを待ち時間0で取得し、取得不能なら見送る。取得後はrecursive lock下で既存enqueueへ渡すため、そのmutexを再び待たない。投入失敗は同じ巡回位置で30秒後以降に再試行し、投入成功後だけ次の枠へ進めて5分空ける。view=0の再試行は現在値を再採取する。記録はどちらの場合も削除しない。既存enqueue内の短いメモリ確保・コピーとFlash/cache停止の影響は残るが、診断経路でsocket I/OやMQTT mutexの待機は行わない。observerとUSBは送信結果を待たない。
+既存の`sen66_tx`タスク（SEN66なしでもMQTT登録開始時に起動）が、`omk/node/<node_id>/network_diagnostics`へ完全なJSONを非retain、QoS 0、store=trueで送る。現在bootの統計（view=0）から開始し、RTC/RAM側の保持記録（view=1）、最後のNVS記録（view=2）の順で循環する。既存の5分周期の枠を使い、1枠に1件だけ送る。保存記録のない枠はview=0に置き換える。全viewが存在し投入成功が続く場合、各viewは15分間隔となる。保存記録がない正常時にも現在値を送るため、従来の送信ゼロからは増えるが、送信周期・3072バイトのJSONバッファ上限は増やさない。network diagnosticsの転送方式は維持する。最小診断整備では通常Node statusに6件の`admission`配列を追加するが、既存2,816バイト枠は増やさない。診断専用`esp_mqtt_client_enqueue_diagnostic()`はMQTT mutexを待ち時間0で取得し、取得不能なら見送る。取得後はrecursive lock下で既存enqueueへ渡すため、そのmutexを再び待たない。投入失敗は同じ巡回位置で30秒後以降に再試行し、投入成功後だけ次の枠へ進めて5分空ける。view=0の再試行は現在値を再採取する。記録はどちらの場合も削除しない。既存enqueue内の短いメモリ確保・コピーとFlash/cache停止の影響は残るが、診断経路でsocket I/OやMQTT mutexの待機は行わない。observerとUSBは送信結果を待たない。
 
 collectorの既定購読`omk/#`と既存の日別JSONLがそのまま保存する。専用ACK、分割転送、Gatewayの新しい保存基盤はない。enqueue成功を到着とはみなさず、Node側の記録を送信後も削除しない。欠落・重複はあり得る。Node・`view`・`boot`・`seq`・`at_us`の組で解析側が識別する。MQTT view=0の`seq`はbootごとに1から始まる採取連番で、失敗時の再採取でも進むため、欠番は配送損失数を意味しない。observerの連番やRTC/NVSには書き戻さず、view=1/2とUSBの既存連番は変更しない。topicから物理Nodeを識別し、JSONLの`received_at`とpayloadのboot内`at_us`を分けて扱う。エラー増分は同じNode・view=0・同じboot内で比較する。15分未満で再起動した障害やQoS 0の配送失敗では、直前の現在値を回収できない場合がある。
 
@@ -549,14 +549,14 @@ collectorの既定購読`omk/#`と既存の日別JSONLがそのまま保存す�
 | `phase` | 1=入口、2=mutex取得待ち、3=取得済み。待ち中なら`at_us-wait_us`が観測時の経過時間 |
 | `mesh_errors` | Mesh送信エラーの`[rc,count]`、最大8種類。超過は`mesh_error_other` |
 | `progress` | `[ticks,posted,post_errors,entered,exited,tick_us,post_us,enter_us,exit_us,recovery_us,flags,stage,action]` |
-| `flags` | bit 0=started、1=root、2=parent、3=rootless、4=IP、5=MQTT started、6=MQTT connected、7=restart budget spent |
+| `flags` | bit 0=started、1=root、2=parent、3=rootless、4=IP、5=MQTT started、6=MQTT connected、7=予約（現在0）、8=MQTT probe fresh |
 | `flash_us` | observerによる直近flash保存の開始／終了。0の終了は未完了。NVS記録は自身のcommit完了時刻を含められない |
 
-operation番号: 0=Mesh上り、1=Root下り、2=Root broadcastの各宛先、3=MQTT enqueue、4=outbox size、5=MQTT write、6=status handler、7=復旧判定＋action。Mesh送信成功はBroker到着を意味しない。CPU全体停止やobserver自身の停止後に、新しい情報を保存する保証はない。
+operation番号: 0=Mesh上り、1=Root下り、2=Root broadcastの各宛先、3=MQTT enqueue、4=outbox size、5=MQTT write、6=status handler、7=復旧判定（actionは既存イベントループで実行）。Mesh送信成功はBroker到着を意味しない。CPU全体停止やobserver自身の停止後に、新しい情報を保存する保証はない。
 
 ### USBは補助回収（常設PC不要）
 
-Linuxのnative USB Serial/JTAGで、設定変更を含まないASCIIコマンド`OMKDIAG <view> <page>\n`を受け付ける。view=0は現在値、1は保持記録、2はNVSキャッシュ。page=0は識別と重大度mask、1～8はoperation別stats、9～16は実行中スロット、17はイベント進捗、18は保存状態、19～26はMeshエラー種類。各pageは独立した観測であり全pageの同時snapshotではない。未保存viewは識別値が0。
+Linuxのnative USB Serial/JTAGで、設定変更を含まないASCIIコマンド`OMKDIAG <view> <page>\n`を受け付ける。view=0は現在値、1は保持記録、2はNVSキャッシュ。page=0は識別と重大度mask、1～8はoperation別stats、9～16は実行中スロット、17はイベント進捗、18は保存状態、19～26はMeshエラー種類。追加page=27～32はview=0のSEN66/mailbox/probe/heap/接続キャッシュ/受付拒否。`capture_network_diagnostics.py --runtime`で取得する。配列定義と2回採取の手順は[最小診断整備](docs/diagnostic-readiness.md)を参照。各pageは独立した観測であり全pageの同時snapshotではない。未保存viewは識別値が0。
 
 応答は240バイト未満でUSB待ち時間0。TX満杯なら捨て、page 18の`usb_dropped`相当値で確認する。応答処理はMQTT/Mesh/NVSを呼ばず、再起動を要求しない。スクリプトはDTR/RTS操作やesptoolを使わず、HUPCLを解除してcloseによる切断動作を避ける。UART変換器の自動reset回路での利用は対象外。USBの接続で給電を切り替えないこと。
 

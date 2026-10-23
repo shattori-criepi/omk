@@ -34,7 +34,7 @@ def binary(tmp_path_factory):
     return output
 
 
-@pytest.mark.parametrize("scenario", ["timing", "parallel", "capacity", "token_wrap", "error_codes", "event_stall", "persistence",
+@pytest.mark.parametrize("scenario", ["recurrence", "rejections", "timing", "parallel", "capacity", "token_wrap", "error_codes", "event_stall", "persistence",
     "no_periodic_write", "failure", "space", "corrupt", "rtc_interrupted", "budget", "usb", "report", "multiple_restarts", "resolved_pending", "severity", "priority", "early_budget", "report_busy", "budget_restore", "fault_slot_parity", "minor_after_critical",
     "report_live", "report_missing_saved", "report_size"])
 def test_recorder_and_storage(binary, scenario):
@@ -131,7 +131,8 @@ def test_platformio_incremental_hook_rechecks_source(tmp_path):
 
 
 @pytest.mark.parametrize("wrong_node", [False, True])
-def test_usb_capture_over_native_serial_protocol(tmp_path, wrong_node):
+@pytest.mark.parametrize("runtime", [False, True])
+def test_usb_capture_over_native_serial_protocol(tmp_path, wrong_node, runtime):
     """Exercise the real CLI through a pseudo-terminal, without any device."""
     master, slave = pty.openpty()
     output = tmp_path / "capture.jsonl"
@@ -163,7 +164,7 @@ def test_usb_capture_over_native_serial_protocol(tmp_path, wrong_node):
     try:
         result = subprocess.run(["python3", str(PROJECT / "scripts/capture_network_diagnostics.py"),
                                  "--port", os.ttyname(slave), "--node", "9490b46aee0d",
-                                 "--output", str(output), "--once"],
+                                 "--output", str(output), "--once", *(["--runtime"] if runtime else [])],
                                 capture_output=True, text=True, timeout=10)
     finally:
         stop.set()
@@ -177,8 +178,9 @@ def test_usb_capture_over_native_serial_protocol(tmp_path, wrong_node):
     else:
         assert result.returncode == 0, result.stderr
         records = [json.loads(line) for line in output.read_text().splitlines()]
-        assert len(records) == 81
-        assert commands == [(view, page) for view in range(3) for page in range(27)]
+        assert len(records) == (87 if runtime else 81)
+        assert commands == [(view, page) for view in range(3)
+                            for page in range(33 if runtime and view == 0 else 27)]
         assert output.stat().st_mode & 0o777 == 0o600
 
 
