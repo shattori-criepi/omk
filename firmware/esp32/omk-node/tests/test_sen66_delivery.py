@@ -45,7 +45,7 @@ def delivery_binary(tmp_path_factory, request):
 
 
 @pytest.mark.parametrize("scenario", [
-    "registration_retry", "subscription_retry", "clear_retry_superseded",
+    "broker_outage_recovery", "registration_retry", "subscription_retry", "clear_retry_superseded",
     "enqueue_20min", "outbox_20min", "relay_registration", "startup_failure",
     "replace_expire", "registration_inflight", "sensor_recovery",
     "status_coalesce", "status_failure", "enqueue_failure", "status_20min", "uptime_wrap",

@@ -58,10 +58,7 @@ def recovery_binary(tmp_path_factory):
                 .mqtt_started=true, .mqtt_connected=mqtt_connected,
             };
             omk_mesh_recovery_action_t action = mesh_recovery_choose(&recovery, now_ms, &in, &root_recovery);
-            if (action == OMK_RECOVERY_RESTART) {
-                ++restarts;
-                mesh_recovery_complete(&recovery, now_ms, action, true);
-            }
+            assert(action <= OMK_RECOVERY_ROOT_VOTE);
         }
         static void tick(uint32_t now, bool is_root, bool valid, int rssi,
                          uint32_t parent_count, uint32_t mqtt_count) {
@@ -131,7 +128,7 @@ def recovery_binary(tmp_path_factory):
              * after reconnection, even if recovery grace has already elapsed. */
             parent_connected = false;
             check_mqtt_liveness();
-            assert(!recovery.mqtt_wait_active);
+            assert(recovery.loss_active);
             parent_connected = true;
             now_ms = 330000;
             check_mqtt_liveness();
@@ -140,7 +137,7 @@ def recovery_binary(tmp_path_factory):
             assert(restarts == 0);
             now_ms = 510000;
             check_mqtt_liveness();
-            assert(restarts == 0 && !recovery.restart_spent);
+            assert(restarts == 0 && recovery.stage == OMK_RECOVERY_MQTT_WAIT);
         }
         static void execution_guards(void) {
             weak(0);
@@ -165,7 +162,7 @@ def recovery_binary(tmp_path_factory):
         int main(int argc, char **argv) {
             assert(argc == 2);
             mesh_root_recovery_init(&root_recovery);
-            mesh_recovery_init(&recovery, false, 0);
+            mesh_recovery_init(&recovery, 0);
             recovery.jitter_ms = 0;
             const char *scenario = argv[1];
             if (!strcmp(scenario, "sustained")) sustained();

@@ -2,13 +2,6 @@
 
 #include <stddef.h>
 
-bool mesh_mqtt_liveness_should_recover(const omk_mesh_mqtt_liveness_state_t *state) {
-    return state != NULL && state->mesh_started && state->parent_connected &&
-           !state->rootless && state->has_ip && state->normal_operation &&
-           (!state->mqtt_connected || !state->mqtt_progress) &&
-           state->mqtt_disconnected_duration_s >= OMK_MESH_MQTT_LIVENESS_TIMEOUT_S;
-}
-
 bool mqtt_progress_probe_due(const omk_mqtt_progress_t *s, uint32_t now, bool connected) {
     return connected && !s->submitting && s->pending_id == 0 &&
            (!s->attempted || (uint32_t)(now - s->attempt_ms) >= OMK_MQTT_PROBE_INTERVAL_MS);

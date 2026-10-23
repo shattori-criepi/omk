@@ -14,7 +14,6 @@
 #define OMK_LAST_OMK_RESTART_REASON_KEY "last_omk_reason"
 #define OMK_MESH_MQTT_LIVENESS_RESTART_COUNT_KEY "mesh_mqtt_rc"
 #define OMK_RESTART_REASON_MAX_LENGTH 40
-#define OMK_MESH_MQTT_LIVENESS_REASON "mesh_mqtt_liveness_timeout"
 
 static const char *TAG = "omk-boot-diag";
 static esp_reset_reason_t reset_reason = ESP_RST_UNKNOWN;
@@ -90,33 +89,4 @@ uint32_t boot_diagnostics_boot_count(void) { return boot_count; }
 const char *boot_diagnostics_last_omk_restart_reason(void) { return last_omk_restart_reason; }
 uint32_t boot_diagnostics_mesh_mqtt_liveness_restart_count(void) {
     return mesh_mqtt_liveness_restart_count;
-}
-
-void boot_diagnostics_record_restart_reason(const char *reason) {
-    if (reason == NULL || reason[0] == '\0' || strlen(reason) >= OMK_RESTART_REASON_MAX_LENGTH) {
-        ESP_LOGW(TAG, "Refusing invalid OMK restart reason");
-        return;
-    }
-    nvs_handle_t nvs;
-    esp_err_t err = nvs_open(OMK_BOOT_DIAGNOSTICS_NAMESPACE, NVS_READWRITE, &nvs);
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "OMK restart reason NVS open failed: %s", esp_err_to_name(err));
-        return;
-    }
-    bool is_mesh_mqtt_liveness = strcmp(reason, OMK_MESH_MQTT_LIVENESS_REASON) == 0;
-    uint32_t next = mesh_mqtt_liveness_restart_count;
-    err = nvs_set_str(nvs, OMK_LAST_OMK_RESTART_REASON_KEY, reason);
-    if (err == ESP_OK && is_mesh_mqtt_liveness) {
-        next = mesh_mqtt_liveness_restart_count < UINT32_MAX
-                   ? mesh_mqtt_liveness_restart_count + 1 : UINT32_MAX;
-        err = nvs_set_u32(nvs, OMK_MESH_MQTT_LIVENESS_RESTART_COUNT_KEY, next);
-    }
-    if (err == ESP_OK) err = nvs_commit(nvs);
-    nvs_close(nvs);
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "OMK restart reason NVS write failed: %s", esp_err_to_name(err));
-    } else {
-        snprintf(last_omk_restart_reason, sizeof(last_omk_restart_reason), "%s", reason);
-        if (is_mesh_mqtt_liveness) mesh_mqtt_liveness_restart_count = next;
-    }
 }

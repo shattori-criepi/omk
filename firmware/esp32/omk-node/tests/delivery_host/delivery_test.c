@@ -377,6 +377,12 @@ static double field(const char *json, const char *key) {
     cJSON *v=cJSON_GetObjectItemCaseSensitive(j,key); assert(cJSON_IsNumber(v));
     double d=v->valuedouble; cJSON_Delete(j); return d;
 }
+static double sample_sequence(const char *json) {
+    cJSON *j=cJSON_Parse(json);assert(j);
+    cJSON *meta=cJSON_GetObjectItemCaseSensitive(j,"meta");assert(cJSON_IsObject(meta));
+    cJSON *seq=cJSON_GetObjectItemCaseSensitive(meta,"seq");assert(cJSON_IsNumber(seq));
+    double result=seq->valuedouble;cJSON_Delete(j);return result;
+}
 static void stall_test(int api) {
     setup(true); tick(10000);
     pthread_t thread=start_blocked(api);
@@ -540,26 +546,49 @@ static void probe_stall_test(void) {
     pthread_t thread=start_blocked_status(5);
     omk_mesh_recovery_t policy;
     omk_mesh_root_recovery_t root_policy;
-    mesh_recovery_init(&policy,false,1); policy.jitter_ms=0;
+    mesh_recovery_init(&policy,1); policy.jitter_ms=0;
     mesh_root_recovery_init(&root_policy);
     unsigned restart_count=0;
-    for (unsigned i=3;i<=32;i++) {
+    for (unsigned i=3;i<=122;i++) {
         tick(i*10000);
         omk_mesh_recovery_input_t in={.started=true,.parent_connected=true,.has_ip=true,
             .mqtt_started=true,.mqtt_connected=mqtt_registration_is_connected(),
             .mqtt_progress=mqtt_registration_get_progress().ack_seen};
         omk_mesh_recovery_action_t a=mesh_recovery_choose(&policy,i*10000,&in,&root_policy);
         if(i>=9) assert(policy.stage!=OMK_RECOVERY_HEALTHY);
-        if(a==OMK_RECOVERY_RESTART) {
-            assert(i==27); ++restart_count;
-            mesh_recovery_complete(&policy,i*10000,a,true);
-        }
+        assert(a==OMK_RECOVERY_NONE);
     }
-    assert(restart_count==1 && sen66_diagnostics_snapshot().read_success==30);
+    assert(restart_count==0 && sen66_diagnostics_snapshot().read_success==120);
     assert(mqtt_registration_is_connected() && !mqtt_registration_get_progress().ack_seen);
     unblock(thread);
     assert(mqtt_registration_get_progress().ack_seen);
+    send_latest();assert(deliveries_count==1 && !occupied);
+    assert(sample_sequence(deliveries[0])==120);
+    assert(slot.recovery_count==0 && slot.measurement_timeout_count==0);
     assert(!posts && !dropped);
+}
+static void broker_outage_recovery(void) {
+    setup(true);
+    omk_mesh_recovery_t policy;omk_mesh_root_recovery_t root_policy;
+    mesh_recovery_init(&policy,1);mesh_root_recovery_init(&root_policy);
+    for(unsigned cycle=0;cycle<3;cycle++) {
+        trace_count=0;deliver_callback(MQTT_EVENT_DISCONNECTED,NULL);
+        for(unsigned n=1;n<=360;n++) {
+            uint32_t time=(cycle*360+n)*10000U;tick(time);send_latest();
+            omk_mesh_recovery_input_t in={.started=true,.parent_connected=true,.has_ip=true,.mqtt_started=true};
+            assert(mesh_recovery_choose(&policy,time,&in,&root_policy)==OMK_RECOVERY_NONE);
+            assert(occupied && pending.sample.sequence==cycle*360+n && deliveries_count==cycle);
+        }
+        assert(slot.recovery_count==0 && slot.measurement_timeout_count==0);
+        ip_event_got_ip_t ip={0};ip_handler(NULL,IP_EVENT,IP_EVENT_STA_GOT_IP,&ip);
+        assert(reconnects==cycle+1 && starts==1);
+        connect_mqtt();assert(registration_connection_handled==registration_connection_version);
+        assert(subscriptions==cycle+2 && strstr(last_status,"sen66-002"));
+        send_latest();assert(!occupied && deliveries_count==cycle+1);
+        assert(sample_sequence(deliveries[cycle])== (cycle+1)*360);
+        assert(sen66_diagnostics_snapshot().read_success==(cycle+1)*360);
+    }
+    assert(!nvs_saves && !nvs_clears && !dropped && starts==1);
 }
 static void pressure_or_capacity(bool pressure) {
     setup(true);
@@ -611,7 +640,8 @@ int main(int argc, char **argv) {
         puts(deliveries[0]);return 0;
     }
 #endif
-    if (!strcmp(argv[1],"registration_retry")) {
+    if (!strcmp(argv[1],"broker_outage_recovery")) {broker_outage_recovery();}
+    else if (!strcmp(argv[1],"registration_retry")) {
         setup(true);defer_service=true;configure("retry-id");
         denied_control_topic=registration_ack_topic;
         for(unsigned i=1;i<=120;i++) {

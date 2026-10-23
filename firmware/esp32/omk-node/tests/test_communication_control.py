@@ -167,7 +167,7 @@ def test_ip_timeout_survives_reselection_but_not_root_promotion(tmp_path):
 int main(void) {
     omk_mesh_recovery_t s;
     omk_mesh_root_recovery_t r;
-    mesh_recovery_init(&s,false,1);s.jitter_ms=0;
+    mesh_recovery_init(&s,1);s.jitter_ms=0;
     mesh_root_recovery_init(&r);
     omk_mesh_recovery_input_t in={.started=true};
     mesh_recovery_choose(&s,0,&in,&r);
@@ -184,14 +184,13 @@ int main(void) {
     assert(mesh_recovery_choose(&s,1181000,&in,&r)==OMK_RECOVERY_NONE);
     assert(s.ip_since_ms==1000000); // Own disconnect/rejoin cannot extend deadline.
     assert(mesh_recovery_choose(&s,1599999,&in,&r)==OMK_RECOVERY_CHILD_RESELECT);
-    assert(mesh_recovery_choose(&s,1600000,&in,&r)==OMK_RECOVERY_RESTART);
-    omk_mesh_recovery_t selected=s;
+    assert(mesh_recovery_choose(&s,1600000,&in,&r)==OMK_RECOVERY_CHILD_RESELECT);
+    omk_mesh_recovery_token_t selected=mesh_recovery_action_token(&s,OMK_RECOVERY_CHILD_RESELECT);
     in.is_root=true;
-    assert(!mesh_recovery_restart_valid(&selected,&s,1600001,&in,&r,false));
     assert(mesh_recovery_choose(&s,1600001,&in,&r)==OMK_RECOVERY_NONE);
-    assert(!s.ip_wait_active);
+    assert(!s.ip_wait_active && !mesh_recovery_action_matches(&s,&selected));
     for(unsigned t=1600002;t<8000000;t+=1000)
-        assert(mesh_recovery_choose(&s,t,&in,&r)!=OMK_RECOVERY_RESTART);
+        assert(mesh_recovery_choose(&s,t,&in,&r)<=OMK_RECOVERY_ROOT_VOTE);
     in.is_root=false;
     assert(mesh_recovery_choose(&s,8000000,&in,&r)==OMK_RECOVERY_NONE);
     assert(s.ip_since_ms==8000000); // Newly demoted child gets DHCP grace.
@@ -217,7 +216,7 @@ def test_ip_deadline_with_subsecond_parent_flaps(tmp_path):
 int main(void) {
     omk_mesh_recovery_t s;
     omk_mesh_root_recovery_t r;
-    mesh_recovery_init(&s,false,1);s.jitter_ms=0;
+    mesh_recovery_init(&s,1);s.jitter_ms=0;
     mesh_root_recovery_init(&r);
     omk_mesh_recovery_input_t in={.started=true,.parent_connected=true};
     mesh_recovery_observe(&s,0,&in);
@@ -234,34 +233,31 @@ int main(void) {
             assert(t==180000 || t==480000);++reselects;
             mesh_recovery_complete(&s,t,a,true);
         }
-        if(t<600000) assert(a!=OMK_RECOVERY_RESTART);
-        else assert(a==OMK_RECOVERY_RESTART && s.reason==OMK_RECOVERY_IP_TIMEOUT);
+        assert(a==OMK_RECOVERY_NONE || a==OMK_RECOVERY_CHILD_RESELECT);
+        assert(s.reason==OMK_RECOVERY_IP_TIMEOUT);
     }
     assert(reselects==2 && s.ip_since_ms==0);
-    omk_mesh_recovery_t selected=s;
-    // Another flap during restart preparation preserves the original IP deadline.
+    omk_mesh_recovery_token_t selected=mesh_recovery_action_token(&s,OMK_RECOVERY_CHILD_RESELECT);
+    // Parent flaps preserve the IP episode; reselection continues without reboot.
     in.parent_connected=true;mesh_recovery_observe(&s,600100,&in);
     in.parent_connected=false;mesh_recovery_observe(&s,600600,&in);
-    assert(mesh_recovery_restart_valid(&selected,&s,601000,&in,&r,false));
+    assert(mesh_recovery_action_matches(&s,&selected));
     s.jitter_ms=120000;
-    assert(mesh_recovery_choose(&s,719999,&in,&r)!=OMK_RECOVERY_RESTART);
-    assert(mesh_recovery_choose(&s,720000,&in,&r)==OMK_RECOVERY_RESTART);
+    assert(mesh_recovery_choose(&s,779999,&in,&r)==OMK_RECOVERY_NONE);
+    assert(mesh_recovery_choose(&s,780000,&in,&r)==OMK_RECOVERY_CHILD_RESELECT);
     s.jitter_ms=0;
-    mesh_root_recovery_mark_executed(&r,720000);
-    assert(mesh_recovery_choose(&s,839999,&in,&r)==OMK_RECOVERY_NONE);
-    assert(mesh_recovery_choose(&s,840000,&in,&r)==OMK_RECOVERY_RESTART);
-    mesh_recovery_complete(&s,840000,OMK_RECOVERY_RESTART,true);
-    assert(mesh_recovery_choose(&s,840001,&in,&r)!=OMK_RECOVERY_RESTART);
-    assert(mesh_recovery_choose(&s,3601000,&in,&r)==OMK_RECOVERY_RESTART);
-    s.persistence_blocked=true;
-    assert(mesh_recovery_choose(&s,3601001,&in,&r)!=OMK_RECOVERY_RESTART);
-    s.persistence_blocked=false;
+    mesh_root_recovery_mark_executed(&r,780000);
+    assert(mesh_recovery_choose(&s,899999,&in,&r)==OMK_RECOVERY_NONE);
+    assert(mesh_recovery_choose(&s,900000,&in,&r)==OMK_RECOVERY_CHILD_RESELECT);
+    mesh_recovery_complete(&s,900000,OMK_RECOVERY_CHILD_RESELECT,true);
+    assert(mesh_recovery_choose(&s,900001,&in,&r)==OMK_RECOVERY_NONE);
+    assert(mesh_recovery_choose(&s,3601000,&in,&r)==OMK_RECOVERY_CHILD_RESELECT);
     in.parent_connected=in.has_ip=in.mqtt_started=in.mqtt_connected=in.mqtt_progress=true;
     assert(mesh_recovery_choose(&s,3601002,&in,&r)==OMK_RECOVERY_NONE);
     assert(!s.ip_wait_active && s.stage==OMK_RECOVERY_HEALTHY);
-    assert(!mesh_recovery_restart_valid(&selected,&s,3601003,&in,&r,false));
+    assert(!mesh_recovery_action_matches(&s,&selected));
     in.is_root=true;in.has_ip=false;in.parent_connected=false;
-    assert(mesh_recovery_choose(&s,3601004,&in,&r)!=OMK_RECOVERY_RESTART);
+    assert(mesh_recovery_choose(&s,3601004,&in,&r)<=OMK_RECOVERY_ROOT_VOTE);
     assert(!s.ip_wait_active && !s.explicit_accepted);
     return 0;
 }
