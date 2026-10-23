@@ -537,13 +537,14 @@ static void ip_event_handler(void *argument, esp_event_base_t base, int32_t id, 
     (void)argument;
     (void)base;
     if (id == IP_EVENT_STA_LOST_IP) {
+        if (!mesh_netif_accept_ip_event(data, false)) return;
         current_ip.addr = 0;
         observe_recovery();
         return;
     }
     if (id != IP_EVENT_STA_GOT_IP) return;
     ip_event_got_ip_t *event = data;
-    if (event == NULL) return;
+    if (!mesh_netif_accept_ip_event(event, true)) return;
     current_ip.addr = event->ip_info.ip.addr;
     observe_recovery();
     ESP_LOGI(TAG, "%s STA IP acquired: ip=" IPSTR " gw=" IPSTR " mask=" IPSTR,

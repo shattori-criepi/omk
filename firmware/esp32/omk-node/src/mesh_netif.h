@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #include "esp_err.h"
+#include "esp_netif.h"
 
 typedef struct {
     uint32_t rx_success_count;
@@ -13,7 +14,11 @@ typedef struct {
     uint32_t last_tx_success_uptime_s;
 } mesh_netif_diagnostics_t;
 
+/* Initialize on main before starting Wi-Fi/events. Lifecycle APIs below are
+ * main/default-event-loop only; never call them from a lwIP callback. */
 esp_err_t mesh_netifs_init(void);
+/* Default event loop only; reject stale handles before reading event netifs. */
+bool mesh_netif_accept_ip_event(const ip_event_got_ip_t *event, bool acquired);
 /* Must be called only after esp_mesh_start() has succeeded. */
 esp_err_t mesh_netif_start_receive_task(void);
 esp_err_t mesh_netifs_start(bool is_root);

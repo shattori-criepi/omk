@@ -191,7 +191,7 @@ def test_relay_only_node_records_saves_and_sends_without_waiting_for_mqtt(tmp_pa
          "esp_system.h", "freertos/FreeRTOS.h", "freertos/task.h", "nvs.h", "nvs_flash.h",
          "driver/usb_serial_jtag.h")),
         (delivery_headers, "idf_stubs.h", ("esp_err.h", "esp_timer.h", "esp_random.h", "esp_log.h",
-         "esp_event.h", "esp_netif_ip_addr.h", "esp_wifi.h", "nvs.h", "mqtt_client.h",
+         "esp_event.h", "esp_netif.h", "esp_netif_ip_addr.h", "esp_wifi.h", "nvs.h", "mqtt_client.h",
          "freertos/FreeRTOS.h", "freertos/task.h", "driver/i2c_master.h")),
     ):
         for name in names:

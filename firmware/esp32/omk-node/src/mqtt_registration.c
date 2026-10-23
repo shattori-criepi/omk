@@ -730,6 +730,7 @@ static void ip_event_handler(void *arg, esp_event_base_t event_base,
     (void)event_base;
     (void)event_id;
     const ip_event_got_ip_t *event = event_data;
+    if (!mesh_netif_accept_ip_event(event, true)) return;
     if (event != NULL) {
         ESP_LOGI(TAG, "STA IP acquired for MQTT: ip=" IPSTR " gw=" IPSTR " mask=" IPSTR,
                  IP2STR(&event->ip_info.ip), IP2STR(&event->ip_info.gw),

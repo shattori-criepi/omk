@@ -249,6 +249,8 @@ int esp_mqtt_client_enqueue_bounded(esp_mqtt_client_handle_t c,const char *t,con
 }
 int esp_mqtt_client_get_outbox_size_nowait(esp_mqtt_client_handle_t c) {return esp_mqtt_client_get_outbox_size(c);}
 #endif
+static bool accept_ip_event = true;
+bool mesh_netif_accept_ip_event(const ip_event_got_ip_t *event, bool acquired) {assert(acquired);return event && accept_ip_event;}
 bool mesh_netif_allow_data(void) {return mesh_tx_policy_allow(&tx_policy,(uint32_t)atomic_load(&clock_ms));}
 
 /* esp_event_loop_run(loop, 0) in IDF 6.0.1 executes at most one event.
@@ -407,7 +409,11 @@ static void relay_registration_test(void) {
     assert(strstr(last_status,"\"connected_sensors\":[]") && strstr(last_status,"relay-001"));
     trace_count=0; deliver_callback(MQTT_EVENT_DISCONNECTED,NULL);
     ip_event_got_ip_t ip={0}; ip_handler(NULL,IP_EVENT,IP_EVENT_STA_GOT_IP,&ip);
-    assert(reconnects==1); connect_mqtt();
+    assert(reconnects==1);
+    accept_ip_event=false; // the lifecycle module rejected a stale event
+    ip_handler(NULL,IP_EVENT,IP_EVENT_STA_GOT_IP,&ip);
+    assert(reconnects==1);
+    accept_ip_event=true; connect_mqtt();
     assert(trace_count==3 && !strcmp(trace[0],"subscribe") && !strcmp(trace[1],"registration_status") && !strcmp(trace[2],"online"));
     trace_count=0; configure(NULL);
     assert(trace_count==4 && !strcmp(trace[0],"clear_online") && !strcmp(trace[1],"clear_ack") && !strcmp(trace[2],"clear_config") && !strcmp(trace[3],"registration_status"));

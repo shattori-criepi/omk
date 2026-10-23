@@ -18,7 +18,7 @@ def delivery_binary(tmp_path_factory, request):
     # Keep thin IDF header adapters in one place; use the actual public OMK
     # headers and actual cJSON parser, not a second registration implementation.
     for name in ("esp_err.h", "esp_timer.h", "esp_random.h", "esp_log.h",
-                 "esp_event.h", "esp_netif_ip_addr.h", "esp_wifi.h", "nvs.h",
+                 "esp_event.h", "esp_netif.h", "esp_netif_ip_addr.h", "esp_wifi.h", "nvs.h",
                  "mqtt_client.h", "freertos/FreeRTOS.h", "freertos/task.h",
                  "driver/i2c_master.h"):
         path = root / name
