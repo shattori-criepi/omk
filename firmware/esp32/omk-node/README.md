@@ -2,7 +2,19 @@
 
 OMK NodeはAtomS3 Liteをproduction対象とする共通firmware基盤です。ボード固有のLCD、LED、ボタンはこの基盤に含めません。BLE中継（`ble_scan`）とSEN66計測は同じ基盤で共存できます。SEN66接続やBLE relay利用の有無にかかわらず、このfirmwareを標準とします。
 
-この文書はfirmwareの開発・デバッグ・特殊復旧向けです。一般利用者の初回Nodeセットアップは[「3-2. SEN66 Nodeをセットアップする」](../../../docs/user/esp32-node-setup.md)を使用します。既存Nodeの正式なfirmware更新は、[「OMK Nodeを更新・再設定する」](../../../docs/user/node-maintenance.md#ファームウェアを更新する)に従い`scripts/flash-omk-node.sh`を使用します。ここでは、実装済みかつ実機で確認済みのDiscovery、USB Serial/JTAG Provisioning、ESP-WIFI-MESH、SEN66、BLE relay、MQTTを記録します。3台のAtomS3 Liteでraw BLE relay、SEN66、Mesh/MQTTの同時動作を確認済みです。
+この文書はfirmwareの開発・デバッグ・特殊復旧向けです。一般利用者の初回Nodeセットアップは[「3-2. SEN66 Nodeをセットアップする」](../../../docs/user/esp32-node-setup.md)を使用します。既存Nodeの正式なfirmware更新は、[「OMK Nodeを更新・再設定する」](../../../docs/user/node-maintenance.md#ファームウェアを更新する)に従い`scripts/flash-omk-node.sh`を使用します。Discovery、USB Serial/JTAG Provisioning、ESP-WIFI-MESH、SEN66、BLE relay、MQTTの実装と過去の確認記録を記載します。過去の3台構成での同時動作確認は、以下の候補に含まれる全機能・全役割の実機検証を意味しません。
+
+## 021ff22基準のリリース候補（2026-11-04）
+
+通常AtomS3 Lite版を`021ff22`からクリーンビルドし、firmwareのホストテスト346件とpackageスクリプトのホストテスト7件が成功しました。今回の新規ビルドを実機へ書き込んでいません。SEN66-002の保存済み稼働版とのソース・設定対応、BINの違い、Root・親切替・第3階層中継の未確認事項は[候補の検証範囲と配布手順](docs/release-021ff22.md)を参照してください。
+
+配布app候補にはSEN66-002で稼働実績のある保存済みBIN（SHA-256 `c8ca0a32045a12b16934c82075fd5522a2353adc13166a2aa5bf6c3650e04781`）を採用し、`prebuilt/atom-s3-lite/`に7ファイルのpackageを配置しました。manifestの`source_commit`はソース対応を確認した`021ff22`、appの埋込みversionは保存当時の`26b3ac5`です。この違いと既存bootloaderの再利用を[provenance.json](prebuilt/atom-s3-lite/provenance.json)に記録し、manifest・SBOM・実ファイルの一致を確認しています。今回の候補を標準package生成スクリプトで再ビルド品へ置き換えないでください。
+
+Dashboardの初回セットアップはprebuiltを使います。既存の通常更新CLIはソースを再ビルドしてuploadするため、保存appそのものを使う経路ではありません。保存BINの直接適用手順は今回追加していません。[配布経路の区別](docs/release-021ff22.md#配布候補の構成と一般配布適性)を確認してください。
+
+第3階層Mesh中継問題は原因未特定・未解決です。Mesh lifecycle C、試験用memory metadata診断、P1の通常データ予約方式、通信障害によるMCU再起動の撤去はこの候補に含めません。prebuiltとソースの対応は上記のcheckpointと出所記録で確認し、Root・親切替・第3階層の実機受入れ確認は残っています。
+
+以下の日付付き節は各実装・試験時点の履歴を含みます。「未適用」「今回未実施」等はその時点の記録であり、候補全体の現在の確認範囲は上記文書で区別します。
 
 ## 有線センサの識別（M4）
 
@@ -250,11 +262,11 @@ AtomS3 Liteをproduction対象として、共通NodeはESP-WIFI-MESH、SEN66、B
 
 topologyはrootを頂点とするtreeで、childはparent経由でrootへ到達する。parentまたはrootの喪失時にはMeshが自動再構成する。弱いroot uplinkでparent/MQTT切断が増加した場合は、標準APIによるroot再選出を要求する。Nodeの参加・復帰や低RSSIの継続だけでは要求しない。[現行の再選出policyとlivenessとの関係](../../../docs/decisions/esp-wifi-mesh-node-networking.md#現行のroot再選出とlivenessの関係)を参照する。起動時は`esp_wifi_start()`、`esp_mesh_init()`、`esp_mesh_start()`の成功後にだけinternal-netif receive taskを開始する。Mesh初期化前に`esp_mesh_recv()`を呼ばない。
 
-### AtomS3 Lite運用RSSI profileと実機検証（2026-09）
+### AtomS3 Liteの過去のRSSI profileと実機検証（2026-09）
 
-AtomS3 Liteの正式な運用profileは`high=-78`、`medium=-80`、`low=-82 dBm`とする。`sdkconfig.atom-s3-lite`は`platformio.ini`で共通の`sdkconfig.defaults`の後に読み込まれるため、AtomS3 Lite固有の設定はこのfileで定義する。
+2026-09の実機確認時のprofileは`high=-78`、`medium=-80`、`low=-82 dBm`である。今回の候補の実効設定は`high=-78`、`medium=-82`、`low=-85 dBm`で、保存済みSEN66-002版の実効設定とも一致する。通常初期化では別の親切替パラメータ`cnx_rssi/backoff_rssi=-78`も設定する。以下の過去の実機確認を、候補の閾値と親切替全体の検証済み根拠にはしない。`sdkconfig.atom-s3-lite`は`platformio.ini`で共通の`sdkconfig.defaults`の後に読み込まれる。
 
-`low=-82 dBm`は新規parent選択時に弱い候補を除外する下限として有効である。一方、すでに接続済みのparentのRSSIがこの値を下回っただけでは、標準self-organized Meshは能動的なparent再選択を保証しない。このためOMKは、起動・再接続時の弱い親の回避とparent消失時の自動復旧にはこのprofileを用いるが、安定リンクに対するcustom RSSI roaming、manual parent選択、parent固定は実装しない。継続的な通信障害と低RSSIが確認された場合だけ、将来のparent selection手段を別途検討する。
+当時の`low=-82 dBm`による新規parent選択と、接続済みparentの能動的再選択は別の条件である。接続済みparentのRSSIがこの値を下回っただけでは、標準self-organized Meshは能動的なparent再選択を保証しない。候補にもmanual parent選択やparent固定は実装していない。現在の親切替パラメータの実機確認事項は候補の検証範囲を参照する。
 
 実機では、1階、階段付近、2階に配置した3台のNodeで確認した。以下の配置名は試験時の位置関係を表し、Node IDや役割の固定設定ではない。
 
@@ -289,12 +301,12 @@ omk/node/<node_id>/status
 
 独立`mesh_recovery`タスクが1秒ごとにRAM snapshotから既存arbiterを実行し、MQTT mutex、送信処理、statusのdefault event loopを待たない。Mesh再選択・root再選出はdefault event loopへ最大1件を渡し、API失敗の再試行間隔30秒、既存のgrace/cooldownを維持する。子NodeのMesh actionが180秒以上進まない場合は、イベント投入失敗（queue full／メモリ不足）も含めて監視し、孤立600秒＋jitter後には再起動できる。投入済みフラグと進捗停止の起点は分け、投稿失敗だけでは起点を消さない。RootはMQTT停滞だけでは再起動せず、既存のrouter再接続・リンク不安定時の再選出を維持する。再起動選択時の理由・役割・各障害の開始時刻を保持し、NVS予約前、予約後、restart理由の保存後に現在のpolicyで再検証する。昇格・降格や実通信の回復で条件が変われば中止する。永続予約後の中止は安全側でbudget消費とcooldownを保持する。役割変更時は親切断の猶予と明示的な復旧要求の受付状態もリセットし、子Node時代の親再選択をRootのrouter再接続として流用しない。
 
-`mesh_recovery/status`には`mqtt_progress_fresh`、`mqtt_probe_pending_id`、`mqtt_probe_ack_count`、`mqtt_probe_last_ack_ms`（32-bit uptime）、`restart_retry_ready`、`restart_persistence_blocked`を追加した。診断v2の`recovery_flags` bit 8は進捗確認ありを示す。正常時のSEN66 10秒計測、BLE中継、Mesh送信timeout 30秒、診断v2の保存・送信を維持する。PUBACKはブローカー到達の確認であり、Gateway collectorによる計測保存の確認ではない。Root自身のMQTT停滞・IP未取得だけでは再起動しない。子NodeのIP期限には`ip_timeout`（永続理由番号10、boot理由`mesh_ip_timeout`）を使用し、既存理由番号は変更しない。
+`mesh_recovery/status`には`mqtt_progress_fresh`、`mqtt_probe_pending_id`、`mqtt_probe_ack_count`、`mqtt_probe_last_ack_ms`（32-bit uptime）、`restart_retry_ready`、`restart_persistence_blocked`を追加した。診断v2の`recovery_flags` bit 8は進捗確認ありを示す。正常時のSEN66 10秒計測、BLE中継、診断v2の保存・送信を維持する。現在のMesh単発送信待ちは「通信停止の局所化」に記載する5秒である。PUBACKはブローカー到達の確認であり、Gateway collectorによる計測保存の確認ではない。Root自身のMQTT停滞・IP未取得だけでは再起動しない。子NodeのIP期限には`ip_timeout`（永続理由番号10、boot理由`mesh_ip_timeout`）を使用し、既存理由番号は変更しない。
 
 障害予防・拡大抑制（同日のレビュー反映）:
 
 - `mesh_tx_policy.c`は実際のMesh送信結果を短いRAM lockで記録する。NO_MEMORY/TIMEOUTごとに通常データの投入間隔を1→2→4→8→16→30秒へ広げ、失敗直後の投入を止める。最後の該当失敗から30秒以上かつ3回連続のMesh送信成功で通常へ戻す。単発の成功では制限を解除しない。制限中はNode全体の通常データを最大1件／間隔に抑える。
-- 対象はSEN66・環境計測・BLEのMQTT投入。センサの10秒計測、既存BLEの10秒制限、DHCP/TCP ACK/その他Mesh制御パケットは変更しない。PUBACK監視は制限を受けず、30秒間隔・未確認1件を維持する。既存MQTT/TCP/Meshの再送は別に動くため、無線上の送信回数が30秒に1回になるわけではない。Mesh送信timeoutは30秒のまま。
+- 対象はSEN66・環境計測・BLEのMQTT投入。センサの10秒計測、既存BLEの10秒制限、DHCP/TCP ACK/その他Mesh制御パケットは変更しない。PUBACK監視は制限を受けず、30秒間隔・未確認1件を維持する。既存MQTT/TCP/Meshの再送は別に動くため、無線上の送信回数が30秒に1回になるわけではない。現在のMesh単発送信待ちは「通信停止の局所化」の5秒である。
 - ESP-MQTT 1.1.0の`.outbox.limit`を12 KiBに設定する。通常データ・通常status・診断は8 KiBまでとし、監視・登録に4 KiBの余裕を残す。BLEの小さなburstと計測を収容しつつ滞留を有限化する初期値で、全heap占有量の上限ではない。新しいadapterではtopic・MQTT headerも含め、mutex取得と容量確認と投入を同じ所有区間で行う。
 - 通常enqueue・outbox観測はmutexを待たない。拒否されたSEN66は既存の最新値mailboxへ戻すが、新しい値や登録変更を上書きしない。次の既存sender周期で再試行し、30秒超は破棄する。BLEは既存の失敗時頻度制限をそのまま使い、新しい再送queueを作らない。混雑時にBLEのその回の中継が見送られることはある。
 - 既にoutboxに入ったデータの強制削除・順序変更は行わない。古いデータは既存30秒期限とMQTT所有の削除通知で処理する。MQTTタスク停止中は期限切れ処理も止まるが、その間にアプリ側の投入を増やさない。mutex busy時の`mqtt.outbox_bytes`は最後に取得できた値を表示する。
@@ -408,7 +420,9 @@ mosquitto_sub -h 127.0.0.1 -F '%I %t %p' \
   -t 'omk/sen66-002/sen66' | tee sen66-diagnostic-capture.log
 ```
 
-## MQTT poll 100ms比較試験（2026-10-08、実機未適用）
+## MQTT poll 100msの採用値と比較試験履歴（2026-10-08）
+
+通常AtomS3 Lite版の採用値は100msであり、比較基準のmainにも含まれます。以下は当時の比較試験の背景と手順です。今回の候補でMQTT poll設定を新たに変更したものではありません。
 
 読み取り／enqueue成功後の欠測に対する試験版。変更前の実測値は利用者の採取結果で、root `09dda0d5a8f2`の10分間のPUBLISHは592件（BLE raw 530、SEN66 50、Node status 8、Mesh recovery status 4）、間隔中央値1.014秒、591区間中563区間が0.8～1.2秒。SEN66 enqueue連番57件のうち未着7件（12.3%、別期間24.2%）。この作業では実機への適用・新たな実測は行っていない。
 
@@ -491,7 +505,7 @@ cd firmware/esp32/omk-node
 pio run -e atom-s3-lite
 ```
 
-AtomS3 Liteのbuild、upload、GatewayによるDiscovery v1検出を確認済みです。
+過去のAtomS3 Liteでbuild、upload、GatewayによるDiscovery v1検出を確認しています。今回の候補では通常版のクリーンビルドとホストテストを行い、実機へのupload・Gateway操作は行っていません。
 
 ## Repository hygiene
 
@@ -513,6 +527,8 @@ managed componentはmanifestとlockから再現します。`platformio.ini`が�
 配布バイナリの第三者許諾は[Third-party notices](prebuilt/atom-s3-lite/THIRD_PARTY_NOTICES.md)を参照し、バイナリの再配布時は同文書を同梱してください。[監査記録と更新手順](LICENSE_AUDIT.md)も参照してください。
 
 一般利用者は[「3-2. SEN66 Nodeをセットアップする」](../../../docs/user/esp32-node-setup.md)に従って設定します。開発者はsource commit後のclean HEADから`./scripts/build-omk-node-package.sh`を実行し、scriptはPlatformIO clean→buildを実行し、3 binaryとmanifestを更新します。SBOMと監査記録は自動更新しないため、同じbuild成果から再生成・照合してpackageと一緒に別commitへ含めます。第三者通知は依存・リンク構成の変化に応じて確認します。Gateway上ではbuildしません。詳細は[package更新とUSB setup設計](../../../docs/decisions/usb-node-setup.md)を参照してください。PC用flash scriptは開発・復旧用として維持します。
+
+今回の保存app配布候補には上記の再ビルド手順を使いません。保存app・manifest・SBOM・provenanceを正式なprebuiltへ配置し、既存bootloader・partition・第三者通知は維持しました。旧SBOMの不整合は10月6日の2回のbinary/manifest更新でSBOMが更新されなかったためで、配置済みSBOMでは修正しています。[保存app候補の更新手順](docs/release-021ff22.md#prebuiltを揃える手順)に従い、確定した保存appのSHAを維持します。
 
 ## Mesh/MQTT停止原因の診断計測版（2026-10-10、実機未適用）
 

@@ -1,0 +1,1538 @@
+{
+  "schema_version": 1,
+  "source_commit": "021ff22ee6a8ac478ec37043330da07b2a9e5616",
+  "source_commit_semantics": "Source-equivalent checkpoint, not the original build invocation or embedded app version.",
+  "app": {
+    "origin": "Preserved standalone normal app image with historical SEN66-002 operation records; not a flash dump.",
+    "chip": "esp32s3",
+    "segments": 6,
+    "bytes": 1567488,
+    "sha256": "c8ca0a32045a12b16934c82075fd5522a2353adc13166a2aa5bf6c3650e04781",
+    "version": "26b3ac5",
+    "elf_sha256": "ed2c443eb6b89a92a9a8edd2282c606dadcd29dc6c35eabae4aa7aa8f700f732",
+    "idf": "6.0.1",
+    "historical_elf_sha256": "ed2c443eb6b89a92a9a8edd2282c606dadcd29dc6c35eabae4aa7aa8f700f732",
+    "source_archive_sha256": "ebffc4b11e8a87f83862bfdcde58f65d882a3a71738161cc3eae3a4944a6e2a1",
+    "checkpoint_source_files_matched": 112,
+    "checkpoint_firmware_tree": "90c1f61392e134cd4b62549e95582a10ec674f32",
+    "effective_kconfig_sha256": "b914eaa2cc8e162b39f8fd5e05ff10b068782122db5d0181f7f264ac3d70ed21",
+    "effective_kconfig_identical_to_verification_rebuild": true,
+    "build_input_sha256": {
+      "platformio.ini": "e4aebf673b56412ee6b0d8577f2212e427672fc4fd79c6f75fdfd6d9d2c6a099",
+      "sdkconfig.defaults": "bb092cdeff71b7acd4accd428071f823999d66c80a94749740f5d85720da1532",
+      "sdkconfig.atom-s3-lite": "918a7cdfe6888096962891aa14013560071ce6558875657b7bb93b4970fb2b74",
+      "dependencies.lock": "72bc3aead638f13737ae854f4d157cb35fcf2a2914d879284f6197470c134fdb",
+      "partitions.csv": "f0fae32130a6278277bf084c97fe081a749a11ee10e40fd8e61fdd57586ac12b"
+    },
+    "embedded_version_is_checkpoint_hash": false,
+    "verification_rebuild_bin_sha256": "b6b2d00b6941edf524c9ed9f919672bcd89474f2646551c11dae0363e8bdc6a4",
+    "verification_rebuild_elf_sha256": "1af52a9bd844e619a880d2fe4ae59b6ef487f472b2f7e840ee66f06bb934c67f",
+    "bin_differing_bytes": 82,
+    "bin_differences": "App descriptor version, date/time and ELF SHA; trailing checksum and image hash.",
+    "allocated_elf_sections_identical_except_app_descriptor": true,
+    "recorded_runtime_window_jst": [
+      "2026-10-26T00:05:27.626+09:00",
+      "2026-10-27T07:43:34.788+09:00"
+    ],
+    "current_elf_observations": 127,
+    "registration_mapping_observations": 61,
+    "recent_seven_day_stability": "User report only; not reaggregated or independently checked in this preparation."
+  },
+  "bootloader": {
+    "origin": "Retained published bootloader; no bootloader update in this candidate.",
+    "original_manifest_source_commit": "0a386a9d11a88231c6c07631b5a01e8f50958da4",
+    "chip": "esp32s3",
+    "segments": 3,
+    "bytes": 21088,
+    "sha256": "8fc701ed4b0d2e3ef6373c98d950440aa0eee4d8017ae634935b3e68e9389ce5",
+    "differences_from_verification_rebuild_bytes": 43,
+    "differences_from_historical_saved_bootloader_bytes": 38,
+    "differences_limited_to_compile_date_time_and_trailing_checks": true
+  },
+  "partition_table": {
+    "sha256": "417facb149358cb4532fd2368e67453fc961890f1a56d6145092619a55fc365d",
+    "entries": [
+      {
+        "type": 1,
+        "subtype": 2,
+        "offset": 36864,
+        "size": 24576,
+        "label": "nvs",
+        "flags": 0
+      },
+      {
+        "type": 1,
+        "subtype": 64,
+        "offset": 61440,
+        "size": 4096,
+        "label": "factory_secret",
+        "flags": 0
+      },
+      {
+        "type": 0,
+        "subtype": 0,
+        "offset": 65536,
+        "size": 2097152,
+        "label": "factory",
+        "flags": 0
+      }
+    ],
+    "nvs_or_factory_secret_image_included": false
+  },
+  "tool_versions": {
+    "platformio_espressif32": "7.0.1",
+    "esp_idf": "6.0.1",
+    "esp_mqtt": "1.1.0",
+    "cjson": "1.7.19~2",
+    "xtensa_gcc": "15.2.0+20251204"
+  },
+  "excluded": [
+    "Mesh lifecycle C",
+    "memory metadata diagnostics",
+    "P1 admission",
+    "post-021ff22 changes",
+    "NVS or factory-secret dump",
+    "credential",
+    "Logical ID",
+    "device flash contents",
+    "ELF debug file"
+  ],
+  "compiled_synthetic_mesh_self_test": "OMK-Test-SSID and correct-horse-battery-staple are public test vectors, not deployed credentials.",
+  "third_layer_mesh_problem": "Cause unidentified and unresolved; this app is not a direct fix.",
+  "hardware_validation_this_preparation": false,
+  "combined_package_flashing_this_preparation": false,
+  "distribution_file_sha256": {
+    "THIRD_PARTY_NOTICES.md": "65d6e6159bd609bd1e39683903990727b0b11d8eebdc901a3dad036209d1e37c",
+    "bootloader.bin": "8fc701ed4b0d2e3ef6373c98d950440aa0eee4d8017ae634935b3e68e9389ce5",
+    "firmware.bin": "c8ca0a32045a12b16934c82075fd5522a2353adc13166a2aa5bf6c3650e04781",
+    "manifest.json": "55a43b6509d90b02368127f4006869d8ba4208841234c043788f27640005d307",
+    "partitions.bin": "417facb149358cb4532fd2368e67453fc961890f1a56d6145092619a55fc365d"
+  },
+  "verification_rebuild_archives": [
+    {
+      "kind": "app",
+      "name": "esp-idf/app_update/libapp_update.a",
+      "verification_archive_sha256": "0011d91ae2d5ea59dbccdf23627a18bc9509ee2c85d266b74529c6495d26e453",
+      "retained_members": [
+        "esp_ota_ops.c.o"
+      ],
+      "package": "SPDXRef-esp-idf"
+    },
+    {
+      "kind": "app",
+      "name": "esp-idf/bootloader_support/libbootloader_support.a",
+      "verification_archive_sha256": "081024f3df8ea50cbfd3a2050b9a1929d48255e6a4154c6530d6d24c94eb386b",
+      "retained_members": [
+        "bootloader_flash.c.o",
+        "bootloader_flash_config_esp32s3.c.o",
+        "bootloader_mem.c.o"
+      ],
+      "package": "SPDXRef-esp-idf"
+    },
+    {
+      "kind": "app",
+      "name": "esp-idf/bt/libbt.a",
+      "verification_archive_sha256": "37b9feaafb123d1127d18341ba9c5e81b9e9a4913e000c70af9c80b10cc6d98e",
+      "retained_members": [
+        "aes_encrypt.c.o",
+        "alarm.c.o",
+        "allocator.c.o",
+        "att_protocol.c.o",
+        "bdaddr.c.o",
+        "bt.c.o",
+        "bta_dm_act.c.o",
+        "bta_dm_api.c.o",
+        "bta_dm_cfg.c.o",
+        "bta_dm_co.c.o",
+        "bta_dm_main.c.o",
+        "bta_gatt_common.c.o",
+        "bta_gattc_act.c.o",
+        "bta_gattc_api.c.o",
+        "bta_gattc_cache.c.o",
+        "bta_gattc_co.c.o",
+        "bta_gattc_main.c.o",
+        "bta_gattc_utils.c.o",
+        "bta_gatts_act.c.o",
+        "bta_gatts_api.c.o",
+        "bta_gatts_co.c.o",
+        "bta_gatts_main.c.o",
+        "bta_gatts_utils.c.o",
+        "bta_sys_main.c.o",
+        "btc_alarm.c.o",
+        "btc_ble_storage.c.o",
+        "btc_config.c.o",
+        "btc_dev.c.o",
+        "btc_dm.c.o",
+        "btc_gap_ble.c.o",
+        "btc_gatt_common.c.o",
+        "btc_gatt_util.c.o",
+        "btc_gattc.c.o",
+        "btc_gatts.c.o",
+        "btc_main.c.o",
+        "btc_manage.c.o",
+        "btc_storage.c.o",
+        "btc_task.c.o",
+        "btc_util.c.o",
+        "bte_init.c.o",
+        "bte_main.c.o",
+        "btm_acl.c.o",
+        "btm_ble.c.o",
+        "btm_ble_addr.c.o",
+        "btm_ble_bgconn.c.o",
+        "btm_ble_gap.c.o",
+        "btm_ble_privacy.c.o",
+        "btm_dev.c.o",
+        "btm_devctl.c.o",
+        "btm_inq.c.o",
+        "btm_main.c.o",
+        "btm_sec.c.o",
+        "btu_hcif.c.o",
+        "btu_init.c.o",
+        "btu_task.c.o",
+        "cmac_mode.c.o",
+        "config.c.o",
+        "controller.c.o",
+        "ecc.c.o",
+        "ecc_dh.c.o",
+        "esp_bluedroid_hci.c.o",
+        "esp_bt_main.c.o",
+        "esp_gap_ble_api.c.o",
+        "fixed_pkt_queue.c.o",
+        "fixed_queue.c.o",
+        "future.c.o",
+        "gap_api.c.o",
+        "gap_ble.c.o",
+        "gatt_api.c.o",
+        "gatt_attr.c.o",
+        "gatt_auth.c.o",
+        "gatt_cl.c.o",
+        "gatt_db.c.o",
+        "gatt_main.c.o",
+        "gatt_sr.c.o",
+        "gatt_sr_hash.c.o",
+        "gatt_utils.c.o",
+        "hash_functions.c.o",
+        "hash_map.c.o",
+        "hci_hal_h4.c.o",
+        "hci_layer.c.o",
+        "hci_packet_factory.c.o",
+        "hci_packet_parser.c.o",
+        "hciblecmds.c.o",
+        "hcicmds.c.o",
+        "interop.c.o",
+        "l2c_api.c.o",
+        "l2c_ble.c.o",
+        "l2c_csm.c.o",
+        "l2c_link.c.o",
+        "l2c_main.c.o",
+        "l2c_utils.c.o",
+        "list.c.o",
+        "mutex.c.o",
+        "osi.c.o",
+        "packet_fragmenter.c.o",
+        "pkt_queue.c.o",
+        "semaphore.c.o",
+        "smp_act.c.o",
+        "smp_api.c.o",
+        "smp_cmac.c.o",
+        "smp_keys.c.o",
+        "smp_l2c.c.o",
+        "smp_main.c.o",
+        "smp_utils.c.o",
+        "stack_config.c.o",
+        "thread.c.o",
+        "utils.c.o"
+      ],
+      "package": "SPDXRef-bluedroid"
+    },
+    {
+      "kind": "app",
+      "name": "esp-idf/cxx/libcxx.a",
+      "verification_archive_sha256": "cb4a8d089cdcd376b64549c94a62866ec44c02c71bc7a99eb31b4c386ab3c622",
+      "retained_members": [
+        "cxx_exception_stubs.cpp.o",
+        "cxx_guards.cpp.o",
+        "cxx_init.cpp.o"
+      ],
+      "package": "SPDXRef-esp-idf"
+    },
+    {
+      "kind": "app",
+      "name": "esp-idf/efuse/libefuse.a",
+      "verification_archive_sha256": "1c7b62549630cf0e53857bf1e0ed0404e90fc214798cc63bb26c8919694ee6bd",
+      "retained_members": [
+        "esp_efuse_api.c.o",
+        "esp_efuse_api_key.c.o",
+        "esp_efuse_fields.c.o",
+        "esp_efuse_startup.c.o",
+        "esp_efuse_table.c.o",
+        "esp_efuse_utility.c.o"
+      ],
+      "package": "SPDXRef-esp-idf"
+    },
+    {
+      "kind": "app",
+      "name": "esp-idf/esp-tls/libesp-tls.a",
+      "verification_archive_sha256": "56abd6006e840ca55f3461b158570a57027a6eab280e89d50acc394c49085c0c",
+      "retained_members": [
+        "esp_tls.c.o",
+        "esp_tls_crypto.c.o",
+        "esp_tls_error_capture.c.o",
+        "esp_tls_mbedtls.c.o",
+        "esp_tls_platform_port.c.o"
+      ],
+      "package": "SPDXRef-esp-idf"
+    },
+    {
+      "kind": "app",
+      "name": "esp-idf/esp_app_format/libesp_app_format.a",
+      "verification_archive_sha256": "8326ff4bb5ce0300915a358d6e0b39ab77c53620e6aaf09bb4f48a5ebfaae458",
+      "retained_members": [
+        "esp_app_desc.c.o"
+      ],
+      "package": "SPDXRef-esp-idf"
+    },
+    {
+      "kind": "app",
+      "name": "esp-idf/esp_coex/libesp_coex.a",
+      "verification_archive_sha256": "43fc976344abd097e965db42c160994d0deeb98be751be694142528381df0547",
+      "retained_members": [
+        "coexist.c.o",
+        "esp_coex_adapter.c.o",
+        "lib_printf.c.o"
+      ],
+      "package": "SPDXRef-esp-idf"
+    },
+    {
+      "kind": "app",
+      "name": "esp-idf/esp_common/libesp_common.a",
+      "verification_archive_sha256": "5e27e6cc8d9949ba3505c09a5937ad3f1b47b0b855c4edd88defd8ec08583067",
+      "retained_members": [
+        "esp_err_to_name.c.o"
+      ],
+      "package": "SPDXRef-esp-idf"
+    },
+    {
+      "kind": "app",
+      "name": "esp-idf/esp_driver_dma/libesp_driver_dma.a",
+      "verification_archive_sha256": "6f5ff9199da6dcabf769fe60fd994173005fa62501ddd91da4f721d4df63436a",
+      "retained_members": [
+        "gdma.c.o"
+      ],
+      "package": "SPDXRef-esp-idf"
+    },
+    {
+      "kind": "app",
+      "name": "esp-idf/esp_driver_gpio/libesp_driver_gpio.a",
+      "verification_archive_sha256": "d7bddde5123b87e4b941216559a17f86afd2474c0325446fa2005cc24ed16a64",
+      "retained_members": [
+        "gpio.c.o",
+        "rtc_io.c.o"
+      ],
+      "package": "SPDXRef-esp-idf"
+    },
+    {
+      "kind": "app",
+      "name": "esp-idf/esp_driver_i2c/libesp_driver_i2c.a",
+      "verification_archive_sha256": "df138f3071ecb14b552751edf37d58d3922e3184428c7b22cd5e97054495cddc",
+      "retained_members": [
+        "i2c_common.c.o",
+        "i2c_master.c.o"
+      ],
+      "package": "SPDXRef-esp-idf"
+    },
+    {
+      "kind": "app",
+      "name": "esp-idf/esp_driver_usb_serial_jtag/libesp_driver_usb_serial_jtag.a",
+      "verification_archive_sha256": "c8bb4df2134d64fdfdb3b831548acdd896af97aac9745e413898e59fd0391992",
+      "retained_members": [
+        "usb_serial_jtag.c.o",
+        "usb_serial_jtag_connection_monitor.c.o",
+        "usb_serial_jtag_vfs.c.o"
+      ],
+      "package": "SPDXRef-esp-idf"
+    },
+    {
+      "kind": "app",
+      "name": "esp-idf/esp_event/libesp_event.a",
+      "verification_archive_sha256": "90638b88daf865ee2b0d102f1e6167b5cff53124ed8664edc4bf26cbc43b3e56",
+      "retained_members": [
+        "default_event_loop.c.o",
+        "esp_event.c.o"
+      ],
+      "package": "SPDXRef-esp-idf"
+    },
+    {
+      "kind": "app",
+      "name": "esp-idf/esp_hal_ana_conv/libesp_hal_ana_conv.a",
+      "verification_archive_sha256": "815979e11699f53d007694e30b5438700da045963b439d90db316c7465c07915",
+      "retained_members": [
+        "temperature_sensor_hal.c.o",
+        "temperature_sensor_periph.c.o"
+      ],
+      "package": "SPDXRef-esp-idf"
+    },
+    {
+      "kind": "app",
+      "name": "esp-idf/esp_hal_clock/libesp_hal_clock.a",
+      "verification_archive_sha256": "22139e392391cf9b8b78d3b4899e5c77a62a63e2839cfc8e04db2dbad62bf483",
+      "retained_members": [
+        "clk_tree_hal.c.o"
+      ],
+      "package": "SPDXRef-esp-idf"
+    },
+    {
+      "kind": "app",
+      "name": "esp-idf/esp_hal_dma/libesp_hal_dma.a",
+      "verification_archive_sha256": "44dc563b49b09fce9e50bc0b78005c7cc9babb078ec65a57e2b0c4f3842e0332",
+      "retained_members": [
+        "gdma_hal_ahb_v1.c.o",
+        "gdma_hal_top.c.o"
+      ],
+      "package": "SPDXRef-esp-idf"
+    },
+    {
+      "kind": "app",
+      "name": "esp-idf/esp_hal_gpio/libesp_hal_gpio.a",
+      "verification_archive_sha256": "fa6c700f4def327db170748101ae26a61a3a0f7065500b9bcae408f7244c915a",
+      "retained_members": [
+        "rtc_io_periph.c.o"
+      ],
+      "package": "SPDXRef-esp-idf"
+    },
+    {
+      "kind": "app",
+      "name": "esp-idf/esp_hal_i2c/libesp_hal_i2c.a",
+      "verification_archive_sha256": "bf01c0c1cc45695600cac80a9ce166d75163d305d6c1603f8de6096f134b7e73",
+      "retained_members": [
+        "i2c_hal.c.o",
+        "i2c_periph.c.o"
+      ],
+      "package": "SPDXRef-esp-idf"
+    },
+    {
+      "kind": "app",
+      "name": "esp-idf/esp_hal_mspi/libesp_hal_mspi.a",
+      "verification_archive_sha256": "78c2cf5b1fbef2d6e5b0b12f0c8058279b430d603c9ada247b7f778c9edcd89a",
+      "retained_members": [
+        "spi_flash_encrypt_hal_iram.c.o",
+        "spi_flash_hal.c.o",
+        "spi_flash_hal_gpspi.c.o",
+        "spi_flash_hal_iram.c.o"
+      ],
+      "package": "SPDXRef-esp-idf"
+    },
+    {
+      "kind": "app",
+      "name": "esp-idf/esp_hal_pmu/libesp_hal_pmu.a",
+      "verification_archive_sha256": "3e91b544e6b28d744d2eedfc3de11ad075e9e7efb819d124a68b3411f5e29384",
+      "retained_members": [
+        "brownout_hal.c.o"
+      ],
+      "package": "SPDXRef-esp-idf"
+    },
+    {
+      "kind": "app",
+      "name": "esp-idf/esp_hal_security/libesp_hal_security.a",
+      "verification_archive_sha256": "a20668bb1c8c292b362926f9116e2c646ac97afb8c6cfb898ce827cdcb205ed5",
+      "retained_members": [
+        "aes_hal.c.o",
+        "ds_hal.c.o",
+        "hmac_hal.c.o",
+        "mpi_hal.c.o",
+        "mpu_hal.c.o",
+        "sha_hal.c.o"
+      ],
+      "package": "SPDXRef-esp-idf"
+    },
+    {
+      "kind": "app",
+      "name": "esp-idf/esp_hw_support/libesp_hw_support.a",
+      "verification_archive_sha256": "9446eb4128fe470d33fb730a029e02e04aef3e3ea9787614e1d9ac4d6e8626e1",
+      "retained_members": [
+        "adc_share_hw_ctrl.c.o",
+        "brownout.c.o",
+        "chip_info.c.o",
+        "clk_ctrl_os.c.o",
+        "cpu.c.o",
+        "cpu_region_protect.c.o",
+        "esp_clk.c.o",
+        "esp_clk_tree.c.o",
+        "esp_clk_tree_common.c.o",
+        "esp_cpu_intr.c.o",
+        "esp_gpio_reserve.c.o",
+        "esp_memory_utils.c.o",
+        "esp_memprot.c.o",
+        "esp_memprot_conv.c.o",
+        "heap_align_hw.c.o",
+        "hw_random.c.o",
+        "intr_alloc.c.o",
+        "mac_addr.c.o",
+        "mspi_timing_config.c.o",
+        "mspi_timing_tuning.c.o",
+        "periph_ctrl.c.o",
+        "regi2c_ctrl.c.o",
+        "rtc_clk.c.o",
+        "rtc_init.c.o",
+        "rtc_module.c.o",
+        "rtc_sleep.c.o",
+        "rtc_time.c.o",
+        "sar_periph_ctrl.c.o",
+        "sar_tsens_ctrl.c.o",
+        "sleep_gpio.c.o",
+        "sleep_modes.c.o",
+        "spi_bus_lock.c.o",
+        "systimer.c.o"
+      ],
+      "package": "SPDXRef-esp-idf"
+    },
+    {
+      "kind": "app",
+      "name": "esp-idf/esp_libc/libesp_libc.a",
+      "verification_archive_sha256": "b23b8ecaa73b2c0d399008b3b2ee65bf32a7f56f42395924e1edc7f77a150141",
+      "retained_members": [
+        "abort.c.o",
+        "assert.c.o",
+        "bufio_setvbuf.c.o",
+        "errno.c.o",
+        "esp_time_impl.c.o",
+        "getentropy.c.o",
+        "heap.c.o",
+        "init.c.o",
+        "locks.c.o",
+        "picolibc_init.c.o",
+        "pthread.c.o",
+        "random.c.o",
+        "reent_syscalls.c.o",
+        "stdatomic.c.o",
+        "syscalls.c.o",
+        "time.c.o"
+      ],
+      "package": "SPDXRef-esp-idf"
+    },
+    {
+      "kind": "app",
+      "name": "esp-idf/esp_mm/libesp_mm.a",
+      "verification_archive_sha256": "0151174e9fa30c640aee974e965d4292e32819b992e4def554db5c9ed5533b5d",
+      "retained_members": [
+        "esp_cache_msync.c.o",
+        "esp_cache_utils.c.o",
+        "esp_mmu_map.c.o",
+        "ext_mem_layout.c.o"
+      ],
+      "package": "SPDXRef-esp-idf"
+    },
+    {
+      "kind": "app",
+      "name": "esp-idf/esp_netif/libesp_netif.a",
+      "verification_archive_sha256": "baff63cb5947a65d2cbc434ce97ccaeb088361e4aef24250df46bc3f4a528949",
+      "retained_members": [
+        "esp_netif_defaults.c.o",
+        "esp_netif_handlers.c.o",
+        "esp_netif_lwip.c.o",
+        "esp_netif_lwip_defaults.c.o",
+        "esp_netif_objects.c.o",
+        "wlanif.c.o"
+      ],
+      "package": "SPDXRef-esp-idf"
+    },
+    {
+      "kind": "app",
+      "name": "esp-idf/esp_partition/libesp_partition.a",
+      "verification_archive_sha256": "949842e7be011b258d722c2e7776ca18b2721383faadf7182355d4c72deddc72",
+      "retained_members": [
+        "partition.c.o",
+        "partition_target.c.o"
+      ],
+      "package": "SPDXRef-esp-idf"
+    },
+    {
+      "kind": "app",
+      "name": "esp-idf/esp_phy/libesp_phy.a",
+      "verification_archive_sha256": "cbbf9ffc0b848b4fbaa0faff3b4d0f8fdbdd9ac294b7479d6403e2380f0c3894",
+      "retained_members": [
+        "lib_printf.c.o",
+        "phy_common.c.o",
+        "phy_init.c.o",
+        "phy_init_data.c.o",
+        "phy_override.c.o"
+      ],
+      "package": "SPDXRef-esp-idf"
+    },
+    {
+      "kind": "app",
+      "name": "esp-idf/esp_ringbuf/libesp_ringbuf.a",
+      "verification_archive_sha256": "58f886383267b0fe4bb9cc9cee1b7ba205c34cd545303e5381990f3aaa4a91dd",
+      "retained_members": [
+        "ringbuf.c.o"
+      ],
+      "package": "SPDXRef-esp-idf"
+    },
+    {
+      "kind": "app",
+      "name": "esp-idf/esp_rom/libesp_rom.a",
+      "verification_archive_sha256": "25c012e14f4a6b288360b5faacd6da38d078773dd110de15164662619cf3acb6",
+      "retained_members": [
+        "esp_rom_cache_esp32s2_esp32s3.c.o",
+        "esp_rom_efuse.c.o",
+        "esp_rom_spiflash.c.o",
+        "esp_rom_sys.c.o"
+      ],
+      "package": "SPDXRef-esp-idf"
+    },
+    {
+      "kind": "app",
+      "name": "esp-idf/esp_security/libesp_security.a",
+      "verification_archive_sha256": "060002952253bccc30456abd14030fdabbaf2a3b8d50646092a68886ff1c6d1a",
+      "retained_members": [
+        "esp_crypto_lock.c.o",
+        "esp_crypto_periph_clk.c.o",
+        "esp_ds.c.o",
+        "esp_hmac.c.o",
+        "init.c.o"
+      ],
+      "package": "SPDXRef-esp-idf"
+    },
+    {
+      "kind": "app",
+      "name": "esp-idf/esp_stdio/libesp_stdio.a",
+      "verification_archive_sha256": "36918369b2f49fbfefc29163e6db71a08f7c9f8878255fc4cf252d684de11e89",
+      "retained_members": [
+        "stdio_vfs.c.o"
+      ],
+      "package": "SPDXRef-esp-idf"
+    },
+    {
+      "kind": "app",
+      "name": "esp-idf/esp_system/libesp_system.a",
+      "verification_archive_sha256": "653664463d43a848bc48258b737373dafd6e0ec071eefdf8bd3d4ec687152d2c",
+      "retained_members": [
+        "apb_backup_dma.c.o",
+        "cache_err_int.c.o",
+        "clk.c.o",
+        "cpu_start.c.o",
+        "crosscore_int.c.o",
+        "debug_helpers.c.o",
+        "debug_helpers_asm.S.o",
+        "esp_err.c.o",
+        "esp_ipc.c.o",
+        "esp_ipc_isr.c.o",
+        "esp_ipc_isr_handler.S.o",
+        "esp_ipc_isr_port.c.o",
+        "esp_system.c.o",
+        "esp_system_chip.c.o",
+        "freertos_hooks.c.o",
+        "highint_hdl.S.o",
+        "int_wdt.c.o",
+        "panic.c.o",
+        "panic_arch.c.o",
+        "panic_handler.c.o",
+        "panic_handler_asm.S.o",
+        "reset_reason.c.o",
+        "startup.c.o",
+        "startup_funcs.c.o",
+        "system_internal.c.o",
+        "task_wdt.c.o",
+        "task_wdt_impl_timergroup.c.o",
+        "ubsan.c.o"
+      ],
+      "package": "SPDXRef-esp-idf"
+    },
+    {
+      "kind": "app",
+      "name": "esp-idf/esp_timer/libesp_timer.a",
+      "verification_archive_sha256": "925c39906a7ec96ad6ee1a0172c10b96fe37744c491325a918f54656ba637c2f",
+      "retained_members": [
+        "esp_timer.c.o",
+        "esp_timer_impl_common.c.o",
+        "esp_timer_impl_systimer.c.o",
+        "esp_timer_init.c.o",
+        "ets_timer_legacy.c.o",
+        "system_time.c.o"
+      ],
+      "package": "SPDXRef-esp-idf"
+    },
+    {
+      "kind": "app",
+      "name": "esp-idf/esp_wifi/libesp_wifi.a",
+      "verification_archive_sha256": "5598d9675d2c6db047cf812b9da9fd2cd4cc80635bd309fafef35873d58a319c",
+      "retained_members": [
+        "esp_adapter.c.o",
+        "esp_wifi_regulatory.c.o",
+        "lib_printf.c.o",
+        "mesh_event.c.o",
+        "wifi_default.c.o",
+        "wifi_init.c.o",
+        "wifi_netif.c.o"
+      ],
+      "package": "SPDXRef-esp-idf"
+    },
+    {
+      "kind": "app",
+      "name": "esp-idf/espressif__cjson/libespressif__cjson.a",
+      "verification_archive_sha256": "ae7f8dc3bb38af7d5bb7abe9d7e88971828d427813e7e71329e149fca4ac8a7c",
+      "retained_members": [
+        "cJSON.c.o"
+      ],
+      "package": "SPDXRef-cjson"
+    },
+    {
+      "kind": "app",
+      "name": "esp-idf/espressif__mqtt/lib/mqtt_outbox/libmqtt_outbox_lib.a",
+      "verification_archive_sha256": "f331cf8392f9e3b5b696d2ebcfd0f782afe70c5d3e0215e651c17d59e640f96f",
+      "retained_members": [
+        "mqtt_outbox.c.o"
+      ],
+      "package": "SPDXRef-mqtt"
+    },
+    {
+      "kind": "app",
+      "name": "esp-idf/espressif__mqtt/lib/mqtt_utils/libmqtt_utils_lib.a",
+      "verification_archive_sha256": "976885f7d8e4c290d644feaa5fabfe6ef11ebf514dce05387466fcabec441ceb",
+      "retained_members": [
+        "mqtt_utils.c.o"
+      ],
+      "package": "SPDXRef-mqtt"
+    },
+    {
+      "kind": "app",
+      "name": "esp-idf/espressif__mqtt/libespressif__mqtt.a",
+      "verification_archive_sha256": "6c27845f890827f35cbcbe4b3b1b3753cd7ff46c2f2daf4e1b1cc4058eea5d13",
+      "retained_members": [
+        "mqtt_client.c.o",
+        "mqtt_msg.c.o",
+        "platform_esp32_idf.c.o"
+      ],
+      "package": "SPDXRef-mqtt"
+    },
+    {
+      "kind": "app",
+      "name": "esp-idf/freertos/libfreertos.a",
+      "verification_archive_sha256": "b971b8d3e043fd5858f0785abb1284ef1203fdd3e2d912c0c2c5b2d34027d00b",
+      "retained_members": [
+        "app_startup.c.o",
+        "event_groups.c.o",
+        "heap_idf.c.o",
+        "idf_additions.c.o",
+        "list.c.o",
+        "port.c.o",
+        "port_common.c.o",
+        "port_systick.c.o",
+        "portasm.S.o",
+        "queue.c.o",
+        "tasks.c.o"
+      ],
+      "package": "SPDXRef-freertos"
+    },
+    {
+      "kind": "app",
+      "name": "esp-idf/hal/libhal.a",
+      "verification_archive_sha256": "01bb1e47359adb57bbb3968d6bb63b8a04aa5eb41db746fbd4bfc66f587561d8",
+      "retained_members": [
+        "cache_hal.c.o",
+        "efuse_hal.c.o",
+        "mmu_hal.c.o",
+        "systimer_hal.c.o"
+      ],
+      "package": "SPDXRef-esp-idf"
+    },
+    {
+      "kind": "app",
+      "name": "esp-idf/heap/libheap.a",
+      "verification_archive_sha256": "3f754b7e015caba4d8e191629e24c251fa1a8058491d901a9f7f905a8859eeec",
+      "retained_members": [
+        "heap_caps.c.o",
+        "heap_caps_base.c.o",
+        "heap_caps_init.c.o",
+        "memory_layout.c.o",
+        "memory_layout_utils.c.o",
+        "multi_heap.c.o",
+        "tlsf.c.o"
+      ],
+      "package": "SPDXRef-esp-idf"
+    },
+    {
+      "kind": "app",
+      "name": "esp-idf/http_parser/libhttp_parser.a",
+      "verification_archive_sha256": "52f569868603d40d4758c28ca8a2ec13d9cef1e1482abc28716ccc584d6848a1",
+      "retained_members": [
+        "http_parser.c.o"
+      ],
+      "package": "SPDXRef-http-parser"
+    },
+    {
+      "kind": "app",
+      "name": "esp-idf/log/liblog.a",
+      "verification_archive_sha256": "5559186a4ee82bda6a67dc541b3f7286d8630b83b330daef4bfe50b7235f25ae",
+      "retained_members": [
+        "log.c.o",
+        "log_binary_heap.c.o",
+        "log_level.c.o",
+        "log_linked_list.c.o",
+        "log_lock.c.o",
+        "log_timestamp.c.o",
+        "log_write.c.o",
+        "tag_log_level.c.o",
+        "util.c.o"
+      ],
+      "package": "SPDXRef-esp-idf"
+    },
+    {
+      "kind": "app",
+      "name": "esp-idf/lwip/liblwip.a",
+      "verification_archive_sha256": "2f78c138439390a542eb584a9e10a002ad1729fb20cb1fe0489cf31093eacfcc",
+      "retained_members": [
+        "acd_dhcp_check.c.o",
+        "api_lib.c.o",
+        "api_msg.c.o",
+        "def.c.o",
+        "dhcp.c.o",
+        "dhcpserver.c.o",
+        "dns.c.o",
+        "err.c.o",
+        "etharp.c.o",
+        "ethernet.c.o",
+        "ethip6.c.o",
+        "icmp.c.o",
+        "icmp6.c.o",
+        "igmp.c.o",
+        "inet_chksum.c.o",
+        "init.c.o",
+        "ip.c.o",
+        "ip4.c.o",
+        "ip4_addr.c.o",
+        "ip4_frag.c.o",
+        "ip4_napt.c.o",
+        "ip6.c.o",
+        "ip6_addr.c.o",
+        "ip6_frag.c.o",
+        "lwip_default_hooks.c.o",
+        "mem.c.o",
+        "memp.c.o",
+        "mld6.c.o",
+        "nd6.c.o",
+        "netbuf.c.o",
+        "netdb.c.o",
+        "netif.c.o",
+        "pbuf.c.o",
+        "raw.c.o",
+        "sockets.c.o",
+        "sockets_ext.c.o",
+        "sys_arch.c.o",
+        "tcp.c.o",
+        "tcp_in.c.o",
+        "tcp_isn_default.c.o",
+        "tcp_out.c.o",
+        "tcpip.c.o",
+        "timeouts.c.o",
+        "udp.c.o",
+        "vfs_lwip.c.o"
+      ],
+      "package": "SPDXRef-lwip"
+    },
+    {
+      "kind": "app",
+      "name": "esp-idf/mbedtls/mbedtls/library/libmbedtls.a",
+      "verification_archive_sha256": "e348edd896469e8fd63d06f99a1ed8e24224e466dd393efefc2b09b0792b7597",
+      "retained_members": [
+        "esp_platform_time.c.o",
+        "esp_psa_crypto_init.c.o",
+        "net_sockets.c.o",
+        "ssl_ciphersuites.c.o",
+        "ssl_client.c.o",
+        "ssl_msg.c.o",
+        "ssl_tls.c.o",
+        "ssl_tls12_client.c.o",
+        "ssl_tls12_server.c.o"
+      ],
+      "package": "SPDXRef-mbedtls"
+    },
+    {
+      "kind": "app",
+      "name": "esp-idf/mbedtls/mbedtls/library/libmbedx509.a",
+      "verification_archive_sha256": "847476d3f7fe86c3518d2c80d11e70fe0328a2d3be7efa22e208853546af38d2",
+      "retained_members": [
+        "x509.c.o",
+        "x509_crt.c.o",
+        "x509_oid.c.o"
+      ],
+      "package": "SPDXRef-mbedtls"
+    },
+    {
+      "kind": "app",
+      "name": "esp-idf/mbedtls/mbedtls/tf-psa-crypto/core/libtfpsacrypto.a",
+      "verification_archive_sha256": "e06452fa39cf3eafaabc22307e36584297713749c712afbbc7888110da0f34ce",
+      "retained_members": [
+        "bignum_alt.c.o",
+        "esp_aes.c.o",
+        "esp_aes_common.c.o",
+        "esp_aes_dma_core.c.o",
+        "esp_aes_gcm.c.o",
+        "esp_aes_gdma_impl.c.o",
+        "esp_bignum.c.o",
+        "esp_crypto_shared_gdma.c.o",
+        "esp_hardware.c.o",
+        "esp_mem.c.o",
+        "esp_psa_its.c.o",
+        "esp_sha.c.o",
+        "esp_sha_gdma_impl.c.o",
+        "psa_crypto.c.o",
+        "psa_crypto_client.c.o",
+        "psa_crypto_driver_esp_aes.c.o",
+        "psa_crypto_driver_esp_aes_gcm.c.o",
+        "psa_crypto_driver_esp_cmac.c.o",
+        "psa_crypto_driver_esp_hmac_opaque.c.o",
+        "psa_crypto_driver_esp_hmac_transparent.c.o",
+        "psa_crypto_driver_esp_md5.c.o",
+        "psa_crypto_driver_esp_rsa_ds.c.o",
+        "psa_crypto_driver_esp_rsa_ds_utilities.c.o",
+        "psa_crypto_driver_esp_sha.c.o",
+        "psa_crypto_driver_esp_sha1.c.o",
+        "psa_crypto_driver_esp_sha256.c.o",
+        "psa_crypto_driver_esp_sha512.c.o",
+        "psa_crypto_driver_wrappers_no_static.c.o",
+        "psa_crypto_slot_management.c.o",
+        "psa_crypto_storage.c.o",
+        "sha.c.o"
+      ],
+      "package": "SPDXRef-tf-psa"
+    },
+    {
+      "kind": "app",
+      "name": "esp-idf/mbedtls/mbedtls/tf-psa-crypto/drivers/builtin/libmbed-builtin.a",
+      "verification_archive_sha256": "59fc905e3cb097c3df54163c0c357a97ee581c741c45d7ecb68938f9565716a2",
+      "retained_members": [
+        "aes.c.o",
+        "asn1parse.c.o",
+        "asn1write.c.o",
+        "base64.c.o",
+        "bignum.c.o",
+        "bignum_core.c.o",
+        "ccm.c.o",
+        "cipher.c.o",
+        "cipher_wrap.c.o",
+        "cmac.c.o",
+        "constant_time.c.o",
+        "ecdh.c.o",
+        "ecdsa.c.o",
+        "ecp.c.o",
+        "ecp_curves.c.o",
+        "gcm.c.o",
+        "hmac_drbg.c.o",
+        "md.c.o",
+        "oid.c.o",
+        "pem.c.o",
+        "pk.c.o",
+        "pk_ecc.c.o",
+        "pk_rsa.c.o",
+        "pk_wrap.c.o",
+        "pkcs5.c.o",
+        "pkparse.c.o",
+        "platform.c.o",
+        "platform_util.c.o",
+        "psa_crypto_aead.c.o",
+        "psa_crypto_cipher.c.o",
+        "psa_crypto_ecp.c.o",
+        "psa_crypto_ffdh.c.o",
+        "psa_crypto_mac.c.o",
+        "psa_crypto_rsa.c.o",
+        "psa_util.c.o",
+        "rsa.c.o",
+        "rsa_alt_helpers.c.o",
+        "sha256.c.o",
+        "threading.c.o"
+      ],
+      "package": "SPDXRef-tf-psa"
+    },
+    {
+      "kind": "app",
+      "name": "esp-idf/nvs_flash/libnvs_flash.a",
+      "verification_archive_sha256": "8355b95f4eff86bb2743ee11a8ee994ab3840e49942f8c7009db5f51a4fa2d4c",
+      "retained_members": [
+        "nvs_api.cpp.o",
+        "nvs_handle_simple.cpp.o",
+        "nvs_item_hash_list.cpp.o",
+        "nvs_page.cpp.o",
+        "nvs_pagemanager.cpp.o",
+        "nvs_partition.cpp.o",
+        "nvs_partition_lookup.cpp.o",
+        "nvs_partition_manager.cpp.o",
+        "nvs_platform.cpp.o",
+        "nvs_storage.cpp.o",
+        "nvs_types.cpp.o"
+      ],
+      "package": "SPDXRef-esp-idf"
+    },
+    {
+      "kind": "app",
+      "name": "esp-idf/nvs_sec_provider/libnvs_sec_provider.a",
+      "verification_archive_sha256": "26c315c6f282dca5d7232ca275fff38cdf1476811d72a2f007f306d55896faf1",
+      "retained_members": [
+        "nvs_sec_provider.c.o"
+      ],
+      "package": "SPDXRef-esp-idf"
+    },
+    {
+      "kind": "app",
+      "name": "esp-idf/pthread/libpthread.a",
+      "verification_archive_sha256": "701bb3058509d37dea262b7f9c900bcc8674aa807ee354e6da2c31996216a346",
+      "retained_members": [
+        "pthread.c.o",
+        "pthread_cond_var.c.o",
+        "pthread_local_storage.c.o",
+        "pthread_rwlock.c.o",
+        "pthread_semaphore.c.o"
+      ],
+      "package": "SPDXRef-esp-idf"
+    },
+    {
+      "kind": "app",
+      "name": "esp-idf/soc/libsoc.a",
+      "verification_archive_sha256": "0c206cb600710aa1ff8b78fab24d296fe8c35d6f024ea0d2f56efe48e2f26ddd",
+      "retained_members": [
+        "dport_access_common.c.o",
+        "gpio_periph.c.o",
+        "interrupts.c.o",
+        "mpi_periph.c.o"
+      ],
+      "package": "SPDXRef-esp-idf"
+    },
+    {
+      "kind": "app",
+      "name": "esp-idf/spi_flash/libspi_flash.a",
+      "verification_archive_sha256": "fd7d88bd653d451b8494b669cc527d518ff860970d6f1c4231dd7eb36e63d497",
+      "retained_members": [
+        "cache_utils.c.o",
+        "esp_flash_api.c.o",
+        "esp_flash_spi_init.c.o",
+        "flash_brownout_hook.c.o",
+        "flash_mmap.c.o",
+        "flash_ops.c.o",
+        "memspi_host_driver.c.o",
+        "spi_flash_chip_boya.c.o",
+        "spi_flash_chip_drivers.c.o",
+        "spi_flash_chip_gd.c.o",
+        "spi_flash_chip_generic.c.o",
+        "spi_flash_chip_issi.c.o",
+        "spi_flash_chip_mxic.c.o",
+        "spi_flash_chip_mxic_opi.c.o",
+        "spi_flash_chip_th.c.o",
+        "spi_flash_chip_winbond.c.o",
+        "spi_flash_hpm_enable.c.o",
+        "spi_flash_oct_flash_init.c.o",
+        "spi_flash_os_func_app.c.o",
+        "spi_flash_os_func_noos.c.o"
+      ],
+      "package": "SPDXRef-esp-idf"
+    },
+    {
+      "kind": "app",
+      "name": "esp-idf/tcp_transport/libtcp_transport.a",
+      "verification_archive_sha256": "c77408ec567d73cdb0b17a7ebad624a550d5f9899d777b7999152cd3f85f017d",
+      "retained_members": [
+        "transport.c.o",
+        "transport_internal.c.o",
+        "transport_ssl.c.o",
+        "transport_ws.c.o"
+      ],
+      "package": "SPDXRef-esp-idf"
+    },
+    {
+      "kind": "app",
+      "name": "esp-idf/vfs/libvfs.a",
+      "verification_archive_sha256": "7a833a5ebefd7d4ad6e7e4dbb79d6fe826c6b6d5ccefaede6a0ee43b8aa032e6",
+      "retained_members": [
+        "nullfs.c.o",
+        "vfs.c.o",
+        "vfs_calls.c.o"
+      ],
+      "package": "SPDXRef-esp-idf"
+    },
+    {
+      "kind": "app",
+      "name": "esp-idf/wpa_supplicant/libwpa_supplicant.a",
+      "verification_archive_sha256": "5b1ae676243af63e1b8e35388c297fff3da68a8c7d38e5f15483bd2cf4eea2ce",
+      "retained_members": [
+        "aes-ccm.c.o",
+        "aes-gcm.c.o",
+        "aes-siv.c.o",
+        "aes-unwrap.c.o",
+        "aes-wrap.c.o",
+        "ap_config.c.o",
+        "ccmp.c.o",
+        "comeback_token.c.o",
+        "common.c.o",
+        "crypto_mbedtls-bignum.c.o",
+        "crypto_mbedtls-ec.c.o",
+        "crypto_mbedtls.c.o",
+        "crypto_ops.c.o",
+        "dh_groups.c.o",
+        "dragonfly.c.o",
+        "eloop.c.o",
+        "esp_common.c.o",
+        "esp_eap_client.c.o",
+        "esp_hostap.c.o",
+        "esp_owe.c.o",
+        "esp_wpa3.c.o",
+        "esp_wpa_main.c.o",
+        "esp_wpas_glue.c.o",
+        "esp_wps.c.o",
+        "fastpsk.c.o",
+        "ieee802_11.c.o",
+        "ieee802_11_common.c.o",
+        "os_xtensa.c.o",
+        "pmksa_cache.c.o",
+        "pmksa_cache_auth.c.o",
+        "rc4.c.o",
+        "sae.c.o",
+        "sae_pk.c.o",
+        "sha1-prf.c.o",
+        "sha256-kdf.c.o",
+        "sha256-prf.c.o",
+        "sta_info.c.o",
+        "wpa.c.o",
+        "wpa_auth.c.o",
+        "wpa_auth_ie.c.o",
+        "wpa_common.c.o",
+        "wpa_ie.c.o",
+        "wpabuf.c.o"
+      ],
+      "package": "SPDXRef-wpa"
+    },
+    {
+      "kind": "app",
+      "name": "esp-idf/xtensa/libxtensa.a",
+      "verification_archive_sha256": "21622ed448c8c25a98cbcece1cfe988a6fb820bafaec36c79bf3f64377cc6a71",
+      "retained_members": [
+        "xtensa_context.S.o",
+        "xtensa_intr.c.o",
+        "xtensa_intr_asm.S.o",
+        "xtensa_vectors.S.o"
+      ],
+      "package": "SPDXRef-xtensa"
+    },
+    {
+      "kind": "app",
+      "name": "ESP-IDF/components/bt/controller/lib_esp32c3_family/esp32s3/libbtdm_app.a",
+      "verification_archive_sha256": "ff3538c403108897cf34a74b45251ad2a3d0e1beab70979c2e332832cbf04a6e",
+      "retained_members": [
+        "aes.o",
+        "arch_main.o",
+        "ble_util_buf.o",
+        "bt_rw_v9.o",
+        "coex_schm.o",
+        "emi.o",
+        "flash.o",
+        "hci.o",
+        "hci_msg.o",
+        "hci_tl.o",
+        "hl_itf.o",
+        "intc.o",
+        "ip_funcs.o",
+        "ke_msg.o",
+        "ke_task.o",
+        "llc.o",
+        "llc_chmap_upd.o",
+        "llc_con_upd.o",
+        "llc_dl_upd.o",
+        "llc_encrypt.o",
+        "llc_hci.o",
+        "llc_le_ping.o",
+        "llc_llcp.o",
+        "llc_phy_upd.o",
+        "lld.o",
+        "lld_adv.o",
+        "lld_con.o",
+        "lld_init.o",
+        "lld_scan.o",
+        "lld_test.o",
+        "llm.o",
+        "llm_adv.o",
+        "llm_hci.o",
+        "llm_init.o",
+        "llm_scan.o",
+        "modules_funcs.o",
+        "nvds.o",
+        "osi.o",
+        "plf_funcs.o",
+        "rf_coexist.o",
+        "rf_coexist_hook.o",
+        "rf_espressif.o",
+        "rf_txpwr.o",
+        "rwble.o",
+        "rwip.o",
+        "rwip_driver.o",
+        "sch_arb.o",
+        "sch_plan.o",
+        "sch_prog.o",
+        "sdk_config.o",
+        "task.o",
+        "vhci.o",
+        "vshci_task.o"
+      ],
+      "package": "SPDXRef-esp-idf"
+    },
+    {
+      "kind": "app",
+      "name": "ESP-IDF/components/esp_coex/lib/esp32s3/libcoexist.a",
+      "verification_archive_sha256": "a5a83cd6114127a453054929d7ff762c3c4d2241d2192294ba4dedcff75e949d",
+      "retained_members": [
+        "coexist_api.o",
+        "coexist_core.o",
+        "coexist_dbg.o",
+        "coexist_param.o",
+        "coexist_scheme.o"
+      ],
+      "package": "SPDXRef-esp-idf"
+    },
+    {
+      "kind": "app",
+      "name": "ESP-IDF/components/esp_phy/lib/esp32s3/libbtbb.a",
+      "verification_archive_sha256": "80d9976d6347be8b974e963d1a6b6a2f58bb4cff08cb5b0bbbb78e9841e8a018",
+      "retained_members": [
+        "bt_bb_v2.o"
+      ],
+      "package": "SPDXRef-esp-idf"
+    },
+    {
+      "kind": "app",
+      "name": "ESP-IDF/components/esp_phy/lib/esp32s3/libphy.a",
+      "verification_archive_sha256": "29dcc18a035801bd41486d5d59f3caeb62f8ed153533c488828bffef1abb99fd",
+      "retained_members": [
+        "phy_analog_cal.o",
+        "phy_api.o",
+        "phy_basic.o",
+        "phy_debug.o",
+        "phy_feature.o",
+        "phy_hw_freq.o",
+        "phy_i2c.o",
+        "phy_init.o",
+        "phy_pbus.o",
+        "phy_pwdet.o",
+        "phy_reg.o",
+        "phy_rfpll.o",
+        "phy_rx_cal.o",
+        "phy_rx_gain.o",
+        "phy_track.o",
+        "phy_tsens.o",
+        "phy_tx_cal.o",
+        "phy_tx_gain.o"
+      ],
+      "package": "SPDXRef-esp-idf"
+    },
+    {
+      "kind": "app",
+      "name": "ESP-IDF/components/esp_wifi/lib/esp32s3/libcore.a",
+      "verification_archive_sha256": "9cd4fdd28486c9708f427a1cd5d5c64e432972949e6564f142ade89d8f8a597e",
+      "retained_members": [
+        "misc_nvs.o"
+      ],
+      "package": "SPDXRef-esp-idf"
+    },
+    {
+      "kind": "app",
+      "name": "ESP-IDF/components/esp_wifi/lib/esp32s3/libespnow.a",
+      "verification_archive_sha256": "206d8682d1c1406a682d87b6229d291e448f7e5f7801d8ba30eff649c04c9fd8",
+      "retained_members": [
+        "manatick.o"
+      ],
+      "package": "SPDXRef-esp-idf"
+    },
+    {
+      "kind": "app",
+      "name": "ESP-IDF/components/esp_wifi/lib/esp32s3/libmesh.a",
+      "verification_archive_sha256": "395c3e893660e20ca23f65e400a5f5b2aa3cf46ad7b13b61c2149366ddc22b05",
+      "retained_members": [
+        "mesh.o",
+        "mesh_common.o",
+        "mesh_config.o",
+        "mesh_io.o",
+        "mesh_main.o",
+        "mesh_network.o",
+        "mesh_parent.o",
+        "mesh_quick.o",
+        "mesh_route.o",
+        "mesh_schedule.o",
+        "mesh_sleep.o",
+        "mesh_timer.o",
+        "mesh_utilities.o",
+        "mesh_wifi.o"
+      ],
+      "package": "SPDXRef-esp-idf"
+    },
+    {
+      "kind": "app",
+      "name": "ESP-IDF/components/esp_wifi/lib/esp32s3/libnet80211.a",
+      "verification_archive_sha256": "2be2c71c0f6126dc0467097294d4aa6eb49df90cce734d0a5d61802c9b42d8cd",
+      "retained_members": [
+        "ieee80211.o",
+        "ieee80211_action.o",
+        "ieee80211_action_vendor.o",
+        "ieee80211_api.o",
+        "ieee80211_crypto.o",
+        "ieee80211_crypto_ccmp.o",
+        "ieee80211_crypto_gcmp.o",
+        "ieee80211_crypto_sms4.o",
+        "ieee80211_crypto_tkip.o",
+        "ieee80211_crypto_wep.o",
+        "ieee80211_debug.o",
+        "ieee80211_ets.o",
+        "ieee80211_ftm.o",
+        "ieee80211_hostap.o",
+        "ieee80211_ht.o",
+        "ieee80211_ie_vendor.o",
+        "ieee80211_input.o",
+        "ieee80211_ioctl.o",
+        "ieee80211_mesh_quick.o",
+        "ieee80211_nvs.o",
+        "ieee80211_output.o",
+        "ieee80211_phy.o",
+        "ieee80211_power.o",
+        "ieee80211_proto.o",
+        "ieee80211_regdomain.o",
+        "ieee80211_rfid.o",
+        "ieee80211_scan.o",
+        "ieee80211_sta.o",
+        "ieee80211_supplicant.o",
+        "ieee80211_timer.o",
+        "wl_chm.o",
+        "wl_cnx.o",
+        "wl_offchan.o"
+      ],
+      "package": "SPDXRef-esp-idf"
+    },
+    {
+      "kind": "app",
+      "name": "ESP-IDF/components/esp_wifi/lib/esp32s3/libpp.a",
+      "verification_archive_sha256": "5e74f8b482f542851dfa595700aa4c6aba4e5152e3bf63659d4f09a70b9fff41",
+      "retained_members": [
+        "esf_buf.o",
+        "hal_ampdu.o",
+        "hal_coex.o",
+        "hal_crypto.o",
+        "hal_mac.o",
+        "hal_mac_rx.o",
+        "hal_mac_tx.o",
+        "hal_sniffer.o",
+        "hal_tsf.o",
+        "if_hwctrl.o",
+        "lmac.o",
+        "pm.o",
+        "pm_beacon_offset.o",
+        "pm_coex.o",
+        "pp.o",
+        "pp_debug.o",
+        "pp_timer.o",
+        "rate_control.o",
+        "trc.o",
+        "wdev.o"
+      ],
+      "package": "SPDXRef-esp-idf"
+    },
+    {
+      "kind": "app",
+      "name": "ESP-IDF/components/xtensa/esp32s3/libxt_hal.a",
+      "verification_archive_sha256": "4823e6c657199a6726f3163f15e1222edb85a8a33eeaafd2aad0cc06150cc4ec",
+      "retained_members": [
+        "interrupts--intlevel.o",
+        "state_asm--restore_extra_nw.o",
+        "state_asm--save_extra_nw.o",
+        "windowspill_asm.o"
+      ],
+      "package": "SPDXRef-xtensa"
+    },
+    {
+      "kind": "app",
+      "name": "toolchain/picolibc/xtensa-esp-elf/lib/esp32s3/no-rtti/libc.a",
+      "verification_archive_sha256": "6ce9c3243eaf1b391e1b082d9593d8995d7ffc5c7d9fbb483402f39d5228a0f7",
+      "retained_members": [
+        "libc_ctype_ctype_.c.o",
+        "libc_ctype_tolower.c.o",
+        "libc_misc_init.c.o",
+        "libc_stdlib_atoi.c.o",
+        "libc_stdlib_environ.c.o",
+        "libc_string_memmem.c.o",
+        "libc_string_strcasecmp.c.o",
+        "libc_string_strdup.c.o",
+        "libc_string_strerror.c.o",
+        "libc_string_strncasecmp.c.o",
+        "libc_string_strndup.c.o",
+        "libc_string_strnstr.c.o",
+        "libc_time_time.c.o",
+        "libc_tinystdio_asprintf.c.o",
+        "libc_tinystdio_atod_ryu.c.o",
+        "libc_tinystdio_atof_ryu.c.o",
+        "libc_tinystdio_bufio.c.o",
+        "libc_tinystdio_dtoa_ryu.c.o",
+        "libc_tinystdio_dtox_engine.c.o",
+        "libc_tinystdio_fflush.c.o",
+        "libc_tinystdio_fgetc.c.o",
+        "libc_tinystdio_filestrget.c.o",
+        "libc_tinystdio_filestrput.c.o",
+        "libc_tinystdio_filestrputalloc.c.o",
+        "libc_tinystdio_flockfile_init.c.o",
+        "libc_tinystdio_fprintf.c.o",
+        "libc_tinystdio_printf.c.o",
+        "libc_tinystdio_puts.c.o",
+        "libc_tinystdio_ryu_divpow2.c.o",
+        "libc_tinystdio_ryu_log10.c.o",
+        "libc_tinystdio_ryu_log2pow5.c.o",
+        "libc_tinystdio_ryu_pow5bits.c.o",
+        "libc_tinystdio_ryu_table.c.o",
+        "libc_tinystdio_ryu_umul128.c.o",
+        "libc_tinystdio_snprintf.c.o",
+        "libc_tinystdio_sprintf.c.o",
+        "libc_tinystdio_sscanf.c.o",
+        "libc_tinystdio_strtod.c.o",
+        "libc_tinystdio_strtol.c.o",
+        "libc_tinystdio_strtoul.c.o",
+        "libc_tinystdio_ungetc.c.o",
+        "libc_tinystdio_vfprintf.c.o",
+        "libc_tinystdio_vfscanf.c.o",
+        "libc_tinystdio_vprintf.c.o",
+        "libc_tinystdio_vsnprintf.c.o",
+        "libm_common_s_fpclassify.c.o",
+        "libm_common_s_isnan.c.o"
+      ],
+      "package": "SPDXRef-picolibc"
+    },
+    {
+      "kind": "app",
+      "name": "toolchain/picolibc/xtensa-esp-elf/lib/esp32s3/no-rtti/libstdc++.a",
+      "verification_archive_sha256": "c4ea4a6aff9cfe585c12c7169efb10db7c9093f7206f951492a066c6dee9df16",
+      "retained_members": [
+        "bad_alloc.o",
+        "class_type_info.o",
+        "del_op.o",
+        "del_ops.o",
+        "del_opv.o",
+        "eh_catch.o",
+        "eh_exception.o",
+        "eh_globals.o",
+        "eh_term_handler.o",
+        "eh_terminate.o",
+        "new_handler.o",
+        "new_op.o",
+        "new_opv.o",
+        "new_opvnt.o",
+        "si_class_type_info.o",
+        "tinfo.o"
+      ],
+      "package": "SPDXRef-gcc-runtime"
+    },
+    {
+      "kind": "bootloader",
+      "name": "esp-idf/bootloader_support/libbootloader_support.a",
+      "verification_archive_sha256": "d50967fc629b976958eed5ada45ed22fade91a8c8080f8e36669e1ad1dd04769",
+      "retained_members": [
+        "bootloader_clock_init.c.o",
+        "bootloader_common_loader.c.o",
+        "bootloader_console.c.o",
+        "bootloader_console_loader.c.o",
+        "bootloader_esp32s3.c.o",
+        "bootloader_flash.c.o",
+        "bootloader_flash_config_esp32s3.c.o",
+        "bootloader_init.c.o",
+        "bootloader_mem.c.o",
+        "bootloader_panic.c.o",
+        "bootloader_random.c.o",
+        "bootloader_random_esp32s3.c.o",
+        "bootloader_sha.c.o",
+        "bootloader_soc.c.o",
+        "bootloader_utility.c.o",
+        "esp_image_format.c.o",
+        "flash_partitions.c.o"
+      ],
+      "package": "SPDXRef-esp-idf"
+    },
+    {
+      "kind": "bootloader",
+      "name": "esp-idf/efuse/libefuse.a",
+      "verification_archive_sha256": "af0a4989e63ff82268b96dd04777a68001b86bf0d573a06316bd30750b8cb732",
+      "retained_members": [
+        "esp_efuse_fields.c.o"
+      ],
+      "package": "SPDXRef-esp-idf"
+    },
+    {
+      "kind": "bootloader",
+      "name": "esp-idf/esp_bootloader_format/libesp_bootloader_format.a",
+      "verification_archive_sha256": "02c99de105026ba74e01d375a31aa8e6cde2f515b13bde80db666a9a44544193",
+      "retained_members": [
+        "esp_bootloader_desc.c.o"
+      ],
+      "package": "SPDXRef-esp-idf"
+    },
+    {
+      "kind": "bootloader",
+      "name": "esp-idf/esp_hal_security/libesp_hal_security.a",
+      "verification_archive_sha256": "c3a200db8391a7084d28c9ef94a603c3803890426ad40978139dbc691a3d1d0c",
+      "retained_members": [
+        "mpu_hal.c.o"
+      ],
+      "package": "SPDXRef-esp-idf"
+    },
+    {
+      "kind": "bootloader",
+      "name": "esp-idf/esp_hal_uart/libesp_hal_uart.a",
+      "verification_archive_sha256": "e0cb53aa22a4756364aee34e78ddfe31e15c0eb43c6f502d710e9df8f029850c",
+      "retained_members": [
+        "uart_periph.c.o"
+      ],
+      "package": "SPDXRef-esp-idf"
+    },
+    {
+      "kind": "bootloader",
+      "name": "esp-idf/esp_hw_support/libesp_hw_support.a",
+      "verification_archive_sha256": "4e99736f770e343aec67308786f3dd237b4a42096f86e058b884f26f0854cdba",
+      "retained_members": [
+        "cpu_region_protect.c.o",
+        "rtc_clk.c.o",
+        "rtc_clk_init.c.o",
+        "rtc_init.c.o",
+        "rtc_time.c.o"
+      ],
+      "package": "SPDXRef-esp-idf"
+    },
+    {
+      "kind": "bootloader",
+      "name": "esp-idf/esp_rom/libesp_rom.a",
+      "verification_archive_sha256": "cf81dff6e07a07d638a7cd2942c58803c6ade2820637b31d769caac56bf04102",
+      "retained_members": [
+        "esp_rom_serial_output.c.o",
+        "esp_rom_sys.c.o"
+      ],
+      "package": "SPDXRef-esp-idf"
+    },
+    {
+      "kind": "bootloader",
+      "name": "esp-idf/hal/libhal.a",
+      "verification_archive_sha256": "be8979bc41a830df3d9da488f60ac4246ea6fe1546c47002b5fc75dd20a4eff0",
+      "retained_members": [
+        "cache_hal.c.o",
+        "efuse_hal.c.o",
+        "mmu_hal.c.o"
+      ],
+      "package": "SPDXRef-esp-idf"
+    },
+    {
+      "kind": "bootloader",
+      "name": "esp-idf/log/liblog.a",
+      "verification_archive_sha256": "a363e5344b1438125c5c19fdc2b5d9b1b00758dd306870467bb846e5e88e95fd",
+      "retained_members": [
+        "log_timestamp.c.o"
+      ],
+      "package": "SPDXRef-esp-idf"
+    },
+    {
+      "kind": "bootloader",
+      "name": "esp-idf/main/libmain.a",
+      "verification_archive_sha256": "29f8f71a7826ab09cbaec1abf4621015462f12e7b79310589909598dc8d1513f",
+      "retained_members": [
+        "bootloader_start.c.o"
+      ],
+      "package": "SPDXRef-esp-idf"
+    }
+  ],
+  "archive_provenance_note": "Archive hashes describe the verification rebuild, not unavailable historical build archives. App map member sets match the historical map; loaded app code/data match except app descriptor. Bootloader image differences are limited to compile date/time and checks."
+}

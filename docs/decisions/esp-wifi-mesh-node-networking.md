@@ -4,6 +4,16 @@
 - **ステータス:** 採用
 - **production対象:** AtomS3 Lite
 
+## 現行のroot再選出とlivenessの関係
+
+2026-11-04のリリース候補は`021ff22`を基準とする。以下の2026-10-06のRSSI説明、bounded restart、2段階root recoveryの節は導入時の履歴を含む。現在の候補と保存済み稼働版の対応、クリーンビルド・ホストテストの結果、残る実機確認は[候補の検証範囲](../../firmware/esp32/omk-node/docs/release-021ff22.md)を参照する。
+
+候補ではNode参加を理由とするroot再選挙と、低RSSI継続だけを理由とするLevel 2のroot親再選択を撤去している。rootの有効RSSIが-80 dBm以下で、観測間のparent切断が3回以上またはMQTT切断が2回以上増えた場合のvoteは残る。実行にはroot・parent接続済み・非rootlessを要求し、API成功後の15分cooldownと120秒graceを維持する。API成功は通信復旧完了を意味しない。
+
+親切替の`cnx_rssi/backoff_rssi`は通常起動時にも-78を設定する。high/medium/lowの実効設定は-78/-82/-85 dBmであり、これらは別の設定である。候補には従来の通信起因MCU再起動と永続budgetが残り、後続の再起動撤去、P1、Mesh lifecycle C、memory metadata診断は含まれない。
+
+今回のローカル検証はRoot・役割遷移・親切替のRF検証を追加していない。過去の2台・3台構成の確認と、候補の変更に対する受入れ確認を区別する。第3階層Mesh中継問題は原因未特定・未解決であり、この候補で直接修正したとは扱わない。
+
 ## 決定
 
 共通Node firmwareの通信層としてESP-WIFI-MESH internal IP networking/NAPTを採用する。1台のNodeはSEN66計測、BLE scan/SwitchBot relay、Mesh中継、通常TCP MQTT publishを同時に担う。root/parent/childは固定せず、保存済みGateway SSID/PSKを共通入力としてMeshが自動選択・自動再構成する。

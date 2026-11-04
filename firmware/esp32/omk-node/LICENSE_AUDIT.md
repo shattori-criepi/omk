@@ -1,5 +1,19 @@
 # AtomS3 Lite配布ファームウェアのライセンス監査
 
+## 2026-11-04の候補準備時点の対応関係
+
+後段の「2026-10-01の監査履歴」でいう「現在の配布物」「現在のbuild」は当時の監査対象を指します。更新前のprebuiltはmanifestが`0a386a9d11a88231c6c07631b5a01e8f50958da4`を指し、SBOMが`c375ca9`のapp/bootloader checksumを保持する不整合がありました。今回のprebuiltでは対応ソースを`021ff22`とし、manifest・SBOMを実ファイルへ揃えています。
+
+今回の配布候補は保存済みapp（SHA-256 `c8ca0a32045a12b16934c82075fd5522a2353adc13166a2aa5bf6c3650e04781`）を採用し、既存公開bootloaderとpartitionを再利用します。ソース対応は`021ff22`、app埋込みversionは保存当時の`26b3ac5`です。各ファイルの出所は[provenance.json](prebuilt/atom-s3-lite/provenance.json)へ記録しています。正式な`prebuilt/atom-s3-lite/`へ配置した7ファイルを対象に、manifest・SBOMとの一致を確認しました。
+
+不整合の原因は10月6日の`ff065df`と`7239c21`でbinary/manifestだけが更新され、SBOM・本監査履歴が10月1日のまま残ったことです。新SBOMでは配布6ファイル（SBOM自身を除く）のchecksum、appのversionInfo、出所記述を修正し、公式SPDX 2.2スキーマに合わなかった旧documentCommentもcommentへ変更しました。
+
+保存appと照合用再ビルドのロード対象code/dataはapp descriptor以外の7セクションが一致し、差は82 bytesのdescriptor・末尾検査値に限られます。app 70・bootloader 10 archiveの保持member集合も既存レビューと一致しました。18 packageのversion・license式・著作権、6抽出license本文、第三者通知を維持し、archive hashは照合用再ビルドから取得した値と明示しています。過去のarchive hashを推測していません。この作業は既存レビューとの構成照合と配布metadataの更新であり、以下の全source/header走査の再実行や脆弱性監査を意味しません。
+
+既存Gateway validator、manifest／SBOM／provenanceの実ファイル照合、破損・旧hash・不正offset・虚偽の出所記述等の拒否と配布経路の説明を含む30ホストテストが成功しました。新たな実機・Gateway操作は行っていません。識別・反映手順・Rootと第3階層の未確認事項は[候補の配布手順](docs/release-021ff22.md#prebuiltを揃える手順)を参照してください。以下は当時の監査履歴として保持します。
+
+## 2026-10-01の監査履歴
+
 監査日: 2026-10-01。対象は `prebuilt/atom-s3-lite/` の3バイナリと、現在の通常Node firmware。M5Stick-C、開発用reset/wifi-setイメージ、Gateway、開発ツール自体の再配布は対象外。
 
 **判定:** 下記の第三者通知をバイナリに伴わせることで、今回確認した構成について公開を妨げる未対応のライセンス条件は認められない。例外なしのGPL/LGPLコードの組込みは検出していない。ただし、libstdc++には **GPL-3.0-or-later WITH GCC-exception-3.1** が適用されるため、「GPLを全く含まない」とは表現しない。
