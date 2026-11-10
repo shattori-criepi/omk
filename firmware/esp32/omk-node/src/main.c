@@ -5,12 +5,9 @@
 #include "nvs.h"
 #include "nvs_flash.h"
 #include "discovery_ble.h"
-#include "boot_diagnostics.h"
-#include "network_diagnostics.h"
 #include "node_state.h"
-#include "mqtt_registration.h"
-#include "mesh_network.h"
-#include "mesh_netif.h"
+#include "node_messages.h"
+#include "mesh_transport.h"
 #include "node_registration.h"
 #include "node_identity.h"
 #include "node_protocol.h"
@@ -62,7 +59,6 @@ static void import_factory_pop(void) {
 
 void app_main(void) {
     ESP_ERROR_CHECK(nvs_flash_init());
-    boot_diagnostics_init();
 #ifdef OMK_DEVELOPMENT_CLEAR_REGISTRATION
     /* This image is built only by reset-omk-node-registration.sh.  Keep the
      * operation before all normal boot work so it cannot alter Wi-Fi, PoP, or
@@ -100,36 +96,37 @@ void app_main(void) {
     ESP_LOGI(TAG, "Factory provisioning state initialized");
 
     ESP_LOGI(TAG, "Normal boot begin");
+#if OMK_BLE_ENABLED
+    ESP_LOGI(TAG, "BLE boot: enabled (controller/host/advertising/scan)");
+#else
+    ESP_LOGI(TAG, "BLE boot: disabled (controller/host/advertising/scan not started)");
+#endif
     uint64_t node_id;
     ESP_ERROR_CHECK(node_identity_get_id(&node_id));
-    network_diag_start();
+    node_registration_init_cache();
     bool has_wifi_credentials = false;
     esp_err_t wifi_err = wifi_station_init_network_core();
     if (wifi_err == ESP_OK) {
         /* Match Espressif's Mesh examples: create and attach the default STA
          * netif before esp_wifi_init(), so its event handlers own the first
          * root association. */
-        wifi_err = mesh_netifs_init();
+        wifi_err = mesh_transport_init();
     }
     if (wifi_err == ESP_OK) wifi_err = wifi_station_prepare(&has_wifi_credentials);
+    /* Initialize identity, counters and the control handler before Mesh can
+     * deliver a retained Gateway configuration. */
+    ESP_ERROR_CHECK(node_messages_start());
     if (wifi_err != ESP_OK) {
         ESP_LOGW(TAG, "Wi-Fi credential check failed; discovery continues: %s",
                  esp_err_to_name(wifi_err));
     } else if (has_wifi_credentials) {
         ESP_LOGI(TAG, "Starting Mesh network");
-        wifi_err = mesh_network_start_prepared();
+        wifi_err = mesh_transport_start();
         if (wifi_err != ESP_OK) {
             ESP_LOGW(TAG, "Mesh network start failed: %s; discovery continues",
                      esp_err_to_name(wifi_err));
         } else {
-            ESP_LOGI(TAG, "Mesh network started; starting MQTT registration");
-            esp_err_t mqtt_err = mqtt_registration_start();
-            if (mqtt_err != ESP_OK) {
-                ESP_LOGW(TAG, "MQTT registration start failed: %s; discovery continues",
-                         esp_err_to_name(mqtt_err));
-            } else {
-                ESP_LOGI(TAG, "MQTT registration initialized");
-            }
+            ESP_LOGI(TAG, "Native Mesh started; only elected Root connects to MQTT");
         }
     }
     /* USB Serial/JTAG is available during the normal application lifecycle.
@@ -146,6 +143,7 @@ void app_main(void) {
     } else {
         ESP_LOGI(TAG, "Sensor manager started");
     }
+#if OMK_BLE_ENABLED
     // Safe once per boot for BLE-only operation; never repeat this in a
     // discovery lifecycle because the released Classic BT memory is permanent.
     ESP_ERROR_CHECK(esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT));
@@ -160,4 +158,5 @@ void app_main(void) {
     }
     ESP_ERROR_CHECK(discovery_ble_start(node_id, provisioning_state));
     ESP_LOGI(TAG, "OMK Node discovery advertising started");
+#endif
 }

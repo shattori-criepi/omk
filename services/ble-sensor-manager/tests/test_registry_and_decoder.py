@@ -139,7 +139,8 @@ def test_node_registration_removal_keeps_node_list_registration_path(tmp_path: P
     manager.record_advertisement(_node_candidate("112233445566", 1))
     assert manager.candidate_list() == []
 
-    manager.remove_node_registration("112233445566")
+    with pytest.raises(RuntimeError, match="MQTT client"):
+        manager.remove_node_registration("112233445566")
     assert manager.candidate_list() == []
     node = manager.node_list()[0]
     assert node["registration_state"] == "provisioned"
@@ -158,7 +159,7 @@ def test_provisioned_relay_node_with_later_sen66_uses_node_list_registration_pat
 
     manager.handle_node_mqtt(
         "omk/node/112233445566/registration/status",
-        b'{"protocol_version":1,"node_id":"112233445566","registration_state":"provisioned","capabilities":3,"connected_sensors":["sen66"]}',
+        b'{"protocol_version":2,"revision":1,"result":"applied","node_id":"112233445566","registration_state":"provisioned","capabilities":3,"connected_sensors":["sen66"]}',
     )
     node = manager.node_list()[0]
     assert node["registration_state"] == "provisioned"
@@ -543,8 +544,13 @@ class _MqttPublisher:
     def __init__(self) -> None:
         self.messages: list[tuple[str, str]] = []
 
-    def publish(self, topic: str, payload: str, **_kwargs: object) -> None:
+    def is_connected(self):
+        return True
+
+    def publish(self, topic: str, payload: str, **_kwargs: object):
+        from types import SimpleNamespace
         self.messages.append((topic, payload))
+        return SimpleNamespace(rc=0, is_published=lambda: True)
 
 
 def test_node_registration_request_and_ack_are_persisted(tmp_path: Path) -> None:
@@ -558,12 +564,12 @@ def test_node_registration_request_and_ack_are_persisted(tmp_path: Path) -> None
     assert manager.request_node_registration("112233445566", "ble-relay-001") == {
         "node_id": "112233445566", "logical_id": "ble-relay-001", "status": "request_sent",
     }
-    assert publisher.messages == [("omk/node/112233445566/registration/config", '{"protocol_version": 1, "logical_id": "ble-relay-001"}')]
-    manager.handle_node_mqtt("omk/node/112233445566/registration/ack", b'{"protocol_version":1,"node_id":"112233445566","logical_id":"ble-relay-001","registration_state":"registered"}')
+    assert publisher.messages == [("omk/node/112233445566/registration/config", '{"protocol_version": 2, "revision": 1, "logical_id": "ble-relay-001"}')]
+    manager.handle_node_mqtt("omk/node/112233445566/registration/ack", b'{"protocol_version":2,"revision":1,"result":"applied","node_id":"112233445566","logical_id":"ble-relay-001","registration_state":"registered"}')
     assert manager.node_list()[0]["registration_state"] == "registered"
     assert manager.request_node_registration("112233445566", "sen66-002")["status"] == "request_sent"
     assert node_registry.list()["112233445566"]["logical_id"] == "ble-relay-001"
-    manager.handle_node_mqtt("omk/node/112233445566/registration/ack", b'{"protocol_version":1,"node_id":"112233445566","logical_id":"sen66-002","registration_state":"registered"}')
+    manager.handle_node_mqtt("omk/node/112233445566/registration/ack", b'{"protocol_version":2,"revision":2,"result":"applied","node_id":"112233445566","logical_id":"sen66-002","registration_state":"registered"}')
     assert node_registry.list()["112233445566"]["logical_id"] == "sen66-002"
 
 
@@ -578,8 +584,8 @@ def test_node_registration_removal_preserves_wifi_metadata_and_ignores_old_ack(t
     assert saved["registration_state"] == "provisioned"
     assert "logical_id" not in saved
     assert saved["registration_revoked"] is True
-    assert json.loads(publisher.messages[0][1]) == {"protocol_version": 1, "logical_id": None}
-    manager.handle_node_mqtt("omk/node/112233445566/registration/ack", b'{"protocol_version":1,"node_id":"112233445566","logical_id":"sen66-001","registration_state":"registered"}')
+    assert json.loads(publisher.messages[0][1]) == {"protocol_version": 2, "revision": 1, "logical_id": None}
+    manager.handle_node_mqtt("omk/node/112233445566/registration/ack", b'{"protocol_version":2,"revision":1,"result":"applied","node_id":"112233445566","logical_id":"sen66-001","registration_state":"registered"}')
     assert "logical_id" not in node_registry.list()["112233445566"]
 
 
@@ -608,8 +614,8 @@ def test_node_registration_rejects_duplicate_logical_id_in_requests_and_acks(tmp
     with pytest.raises(ValueError, match="already assigned to node 112233445566"):
         manager.request_node_registration("9af9509eb8b6", "sen66-001")
 
-    manager.handle_node_mqtt("omk/node/112233445566/registration/ack", b'{"protocol_version":1,"node_id":"112233445566","logical_id":"sen66-001","registration_state":"registered"}')
-    manager.handle_node_mqtt("omk/node/9af9509eb8b6/registration/ack", b'{"protocol_version":1,"node_id":"9af9509eb8b6","logical_id":"sen66-001","registration_state":"registered"}')
+    manager.handle_node_mqtt("omk/node/112233445566/registration/ack", b'{"protocol_version":2,"revision":1,"result":"applied","node_id":"112233445566","logical_id":"sen66-001","registration_state":"registered"}')
+    manager.handle_node_mqtt("omk/node/9af9509eb8b6/registration/ack", b'{"protocol_version":2,"revision":1,"result":"applied","node_id":"9af9509eb8b6","logical_id":"sen66-001","registration_state":"registered"}')
     saved = node_registry.list()
     assert saved["112233445566"]["logical_id"] == "sen66-001"
     assert "9af9509eb8b6" not in saved
@@ -621,7 +627,7 @@ def test_provisioned_node_status_clears_only_its_gateway_registration_metadata(t
                          ack_seen_at="before", unrelated="preserved")
     manager = BleManager(SensorRegistry(tmp_path / "sensors.json"), node_registry=node_registry)
 
-    manager.handle_node_mqtt("omk/node/9af9509eb8b6/registration/status", b'{"protocol_version":1,"node_id":"9af9509eb8b6","registration_state":"provisioned","capabilities":1}')
+    manager.handle_node_mqtt("omk/node/9af9509eb8b6/registration/status", b'{"protocol_version":2,"revision":1,"result":"applied","node_id":"9af9509eb8b6","registration_state":"provisioned","capabilities":1,"connected_sensors":[]}')
 
     saved = node_registry.list()["9af9509eb8b6"]
     assert saved["registration_state"] == "provisioned"
@@ -634,13 +640,8 @@ def test_node_mqtt_status_validation_does_not_persist_invalid_messages(tmp_path:
     node_registry = NodeRegistry(tmp_path / "nodes.json")
     manager = BleManager(SensorRegistry(tmp_path / "sensors.json"), node_registry=node_registry)
     manager.handle_node_mqtt("omk/node/112233445566/registration/status", b'{"protocol_version":2,"node_id":"112233445566","registration_state":"registered","capabilities":1}')
-    manager.handle_node_mqtt("omk/node/112233445566/registration/status", b'{"protocol_version":1,"node_id":"112233445566","registration_state":"registered","capabilities":1}')
-    node = manager.node_list()[0]
-    assert node["node_id"] == "112233445566"
-    assert node["capabilities"] == ["ble_scan"]
-    assert node["registration_state"] == "registered"
-    assert node["online"] is False  # Registration status alone is not a heartbeat.
-    assert node["attached_sensors"] == []
+    manager.handle_node_mqtt("omk/node/112233445566/registration/status", b'{"protocol_version":2,"revision":1,"result":"applied","node_id":"112233445566","registration_state":"registered","capabilities":1}')
+    assert manager.node_list() == []
 
 
 def test_node_registration_api_sends_a_pending_request(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -713,7 +714,7 @@ def test_raw_relay_reuses_switchbot_decoder_and_resolves_registered_sensor_id(tm
 
     manager.handle_relay_mqtt(
         "omk-relay/09dda0d5a8f2/ble/raw",
-        b'{"protocol_version":1,"relay_node_id":"09dda0d5a8f2","ble_address":"020000000004","rssi":-42,'
+        b'{"protocol_version":2,"relay_node_id":"09dda0d5a8f2","ble_address":"020000000004","rssi":-42,'
         b'"manufacturer_data":[{"company_id":2409,"data":"020000000004f40304992c"}],"service_data":[]}',
     )
 
@@ -737,7 +738,7 @@ def test_raw_relay_does_not_publish_unregistered_or_disabled_devices(tmp_path: P
         manager.handle_relay_mqtt(
             "omk-relay/09dda0d5a8f2/ble/raw",
             json.dumps({
-                "protocol_version": 1, "relay_node_id": "09dda0d5a8f2", "ble_address": address, "rssi": -42,
+                "protocol_version": 2, "relay_node_id": "09dda0d5a8f2", "ble_address": address, "rssi": -42,
                 "manufacturer_data": [{"company_id": 2409, "data": address + "f40304992c"}], "service_data": [],
             }).encode(),
         )
@@ -762,7 +763,7 @@ def test_registered_plug_model_hint_is_used_for_direct_and_raw_relay(tmp_path: P
     relay_manager = BleManager(registry, relay_publisher)
     relay_manager.handle_relay_mqtt(
         "omk-relay/09dda0d5a8f2/ble/raw",
-        json.dumps({"protocol_version": 1, "relay_node_id": "09dda0d5a8f2", "ble_address": "020000000008", "rssi": -50,
+        json.dumps({"protocol_version": 2, "relay_node_id": "09dda0d5a8f2", "ble_address": "020000000008", "rssi": -50,
                     "manufacturer_data": [{"company_id": 2409, "data": packet}], "service_data": []}).encode(),
     )
     relay_payload = json.loads(relay_publisher.messages[-1][1])

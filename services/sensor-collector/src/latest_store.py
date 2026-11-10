@@ -23,7 +23,8 @@ ITEM_ID_PREFIX = "item_v1_"
 METADATA_FIELDS = frozenset({
     "device_id", "measured_at", "metered_at", "received_at", "quality",
     "quality_status", "errors", "error", "source", "relay_node_id",
-    "uptime_ms", "firmware_name", "firmware_version", "id", "uuid", "uid",
+    "uptime_ms", "uptime_s", "protocol_version", "revision", "seq",
+    "firmware_name", "firmware_version", "id", "uuid", "uid",
     "timestamp", "time", "date",
 })
 

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import os
+import asyncio
+import logging
+from contextlib import suppress
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -15,6 +18,7 @@ from .node_registry import NodeRegistry
 from .service import BleManager
 
 client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="omk-ble-sensor-manager")
+client.max_queued_messages_set(64)
 manager = BleManager(
     SensorRegistry(Path(os.getenv("OMK_BLE_REGISTRY", "/var/lib/omk/ble/sensors.json"))),
     client,
@@ -44,21 +48,42 @@ class NodeRegistrationRequest(BaseModel):
 
 def _on_mqtt_connect(client: mqtt.Client, userdata: Any, flags: Any, reason_code: Any, properties: Any) -> None:
     if reason_code == 0:
+        client.subscribe("omk/node/+/status", qos=0)
         client.subscribe("omk/node/+/registration/status", qos=1)
         client.subscribe("omk/node/+/registration/ack", qos=1)
-        client.subscribe("omk/+/sen66", qos=0)
+        client.subscribe("omk-relay/+/sen66/raw", qos=0)
         client.subscribe("omk-relay/+/ble/raw", qos=0)
+        try:
+            manager.mqtt_nodes_connected()
+        except RuntimeError as error:
+            logging.getLogger(__name__).warning("Node reconnect synchronization failed: %s", error)
 
 def _on_mqtt_message(client: mqtt.Client, userdata: Any, message: mqtt.MQTTMessage) -> None:
-    if message.topic.startswith("omk-relay/"):
-        manager.handle_relay_mqtt(message.topic, message.payload)
-    elif message.topic.endswith("/sen66"):
-        manager.handle_sen66_mqtt(message.topic, message.payload)
-    else:
-        manager.handle_node_mqtt(message.topic, message.payload)
+    try:
+        if message.topic.startswith("omk-relay/") and message.topic.endswith("/sen66/raw"):
+            manager.handle_sen66_mqtt(message.topic, message.payload, retain=message.retain)
+        elif message.topic.startswith("omk-relay/"):
+            manager.handle_relay_mqtt(message.topic, message.payload, retain=message.retain)
+        else:
+            manager.handle_node_mqtt(message.topic, message.payload, retain=message.retain)
+    except RuntimeError as error:
+        # A transient persistence failure must not terminate Paho's network
+        # thread; the durable desired state and next Node report drive retry.
+        logging.getLogger(__name__).warning("Node message synchronization failed: %s", error)
+
+async def _availability_loop() -> None:
+    while True:
+        try:
+            manager.retry_pending_node_configs()
+            manager.refresh_node_availability()
+        except RuntimeError as error:
+            logging.getLogger(__name__).warning("Node availability update failed: %s", error)
+        await asyncio.sleep(5)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    availability_task = None
     try:
         client.on_connect = _on_mqtt_connect
         client.on_message = _on_mqtt_message
@@ -70,8 +95,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             # Absence of Bluetooth must not make the gateway service unhealthy.
             import logging
             logging.getLogger(__name__).warning("BLE passive collection unavailable: %s", error)
+        availability_task = asyncio.create_task(_availability_loop())
         yield
     finally:
+        if availability_task:
+            availability_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await availability_task
         try:
             await manager.pause_collection()
         finally:

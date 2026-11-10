@@ -1,5 +1,7 @@
 #include "usb_provisioning.h"
-#include "network_diagnostics.h"
+#include "soc/soc_caps.h"
+
+#if SOC_USB_SERIAL_JTAG_SUPPORTED
 
 #include <inttypes.h>
 #include <stdbool.h>
@@ -71,9 +73,6 @@ static bool schedule_reboot(void) {
 }
 
 static void handle_line(char *line) {
-#ifdef OMK_NETWORK_DIAGNOSTICS
-    if (network_diag_usb(line, provision_node_id)) return;
-#endif
     cJSON *root = cJSON_Parse(line);
     if (root == NULL) {
         write_status("invalid_request");
@@ -250,3 +249,12 @@ esp_err_t usb_provisioning_start(uint64_t node_id) {
     ESP_LOGI(TAG, "USB Serial/JTAG provisioning ready");
     return ESP_OK;
 }
+
+#else
+/* ESP32 boards such as M5Stick-C have no native USB Serial/JTAG. Keep their
+ * pre-provisioned Mesh build usable without pretending USB setup is supported. */
+esp_err_t usb_provisioning_start(uint64_t node_id) {
+    (void)node_id;
+    return ESP_ERR_NOT_SUPPORTED;
+}
+#endif

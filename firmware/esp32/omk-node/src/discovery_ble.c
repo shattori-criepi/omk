@@ -29,8 +29,9 @@ static esp_ble_scan_params_t switchbot_scan_params = {
     .scan_type = BLE_SCAN_TYPE_ACTIVE,
     .own_addr_type = BLE_ADDR_TYPE_PUBLIC,
     .scan_filter_policy = BLE_SCAN_FILTER_ALLOW_ALL,
-    .scan_interval = 0x0010,
-    .scan_window = 0x0010,
+    /* Units are 0.625 ms. Coexistence may shorten the actual scan window. */
+    .scan_interval = 160, /* 100 ms */
+    .scan_window = 80,    /* 50 ms */
     .scan_duplicate = BLE_SCAN_DUPLICATE_DISABLE,
 };
 

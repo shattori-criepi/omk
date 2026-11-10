@@ -78,6 +78,8 @@ OMKで動作確認している推奨構成は次のとおりです。
 
 ## OMKを開発する
 
+このブランチは実機未検証のNative Mesh P1試験版です。[固定成果物・再現手順](experiments/native-mesh-p1-20261110/README.txt)と[移行資料](docs/developer/native-mesh-migration.md)を参照してください。既存公開用prebuiltは旧方式であり、今回の試験には使用しません。
+
 - [アーキテクチャ](docs/developer/architecture.md)
 - [開発ガイド](docs/developer/development.md)
 - [Gatewayネットワーク設計](docs/developer/networking.md)

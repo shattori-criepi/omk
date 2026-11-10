@@ -1,0 +1,21 @@
+{
+  "scope": "New/modified files, firmware BIN/ELF, and unpacked distribution archive members",
+  "credential_checks": "No full PEM private keys, GitHub tokens, AWS keys, credential URLs, real provisioning headers, NVS/Flash dumps, runtime registries or private inventory included.",
+  "reviewed_matches": [
+    "PEM BEGIN markers are NUL-terminated SDK parser strings, with no key body.",
+    "Device identifiers in two modified test files already occur in the published base with the same counts; retained fixtures, not new operational records.",
+    "Test password literals are synthetic USB fixture values.",
+    "Email addresses in third-party notices are required attribution; not operator personal records.",
+    "ELF retains original toolchain/SDK debug paths."
+  ],
+  "correspondence": {
+    "p1_source_test_support_files_matching": 438,
+    "runtime_test_service_files_matching": 80,
+    "actual_firmware_build_inputs_matching": 43,
+    "distribution_archives_match_repository": true,
+    "bin_embedded_elf_sha256_matches": true,
+    "old_public_prebuilt_unchanged": true
+  },
+  "extra_tests_or_builds_run": false,
+  "live_access_or_deployment": false
+}

@@ -14,6 +14,7 @@ import paho.mqtt.client as mqtt
 
 from .models import DecodedAdvertisement, RegisteredSensor, now_iso
 from .node_registry import NodeRegistry
+from .native_nodes import NativeNodeControl, NODE_AVAILABLE_SECONDS
 from .omk_node import decode as decode_omk_node
 from .registry import SensorRegistry
 from .switchbot import decode, device_key_for, unconfirmed_model_options, unconfirmed_registration_candidate
@@ -27,8 +28,8 @@ DIRECT_FRESHNESS_SECONDS = 30.0
 NODE_DISCOVERY_FRESHNESS_SECONDS = DIRECT_FRESHNESS_SECONDS
 # Relay and SEN66 normally send every 10 s. Allow six intervals of loss;
 # SEN66 firmware also considers measurements stale after 60 s.
-NODE_RELAY_FRESHNESS_SECONDS = 60.0
-NODE_SENSOR_FRESHNESS_SECONDS = 60.0
+NODE_RELAY_FRESHNESS_SECONDS = NODE_AVAILABLE_SECONDS
+NODE_SENSOR_FRESHNESS_SECONDS = NODE_AVAILABLE_SECONDS
 NODE_CAPABILITY_NAMES = ((1 << 0, "ble_scan"), (1 << 1, "sen66"))
 
 
@@ -39,12 +40,12 @@ def _fresh_node_timestamp(value: Any, now: datetime, seconds: float) -> bool:
         timestamp = datetime.fromisoformat(value)
         if timestamp.tzinfo is None:
             return False
-        return 0 <= (now - timestamp).total_seconds() <= seconds
+        return 0 <= (now - timestamp).total_seconds() < seconds
     except (ValueError, TypeError, OverflowError):
         return False
 
 
-class BleManager:
+class BleManager(NativeNodeControl):
     def __init__(
         self,
         registry: SensorRegistry,
@@ -75,6 +76,7 @@ class BleManager:
         self._timeout_task: asyncio.Task[None] | None = None
         self._mqtt = mqtt_client
         self._node_registration_lock = RLock()
+        self._node_control_init()
         self.offline_seconds = int(os.getenv("OMK_BLE_OFFLINE_SECONDS", "900"))
         self._now_provider = now_provider or (lambda: datetime.now(timezone.utc))
         self._monotonic_provider = monotonic_provider or monotonic
@@ -168,7 +170,7 @@ class BleManager:
             item["registration_state"] = item.get("registration_state", item.get("ble_state", "unregistered"))
             item["relay_active"] = _fresh_node_timestamp(item.get("relay_last_seen_at"), now, NODE_RELAY_FRESHNESS_SECONDS)
             item["online"] = (
-                bool(seen and _fresh_node_timestamp(seen.received_at, now, NODE_DISCOVERY_FRESHNESS_SECONDS))
+                _fresh_node_timestamp(item.get("heartbeat_last_seen_at"), now, NODE_AVAILABLE_SECONDS)
                 or item["relay_active"]
                 or _fresh_node_timestamp(item.get("sen66_last_seen_at"), now, NODE_SENSOR_FRESHNESS_SECONDS)
             )
@@ -188,136 +190,45 @@ class BleManager:
         if self.node_registry is None:
             return None
         for node_id, node in self.node_registry.list().items():
-            if node_id != excluding_node_id and logical_id in {node.get("logical_id"), node.get("requested_logical_id")}:
+            if node_id != excluding_node_id and logical_id in self._reserved_ids(node):
                 return node_id
         return None
 
-    def request_node_registration(self, node_id: str, logical_id: str) -> dict[str, Any]:
-        if not self._node_id_valid(node_id) or not self._logical_id_valid(logical_id):
-            raise ValueError("invalid node_id or logical_id")
-        with self._node_registration_lock:
-            current = next((item for item in self.node_list() if item["node_id"] == node_id), None)
-            if current is None:
-                raise KeyError(node_id)
-            if current.get("registration_state") not in {"provisioned", "registered"}:
-                raise ValueError("node Wi-Fi provisioning is not complete")
-            owner = self._logical_id_owner(logical_id, excluding_node_id=node_id)
-            if owner is not None:
-                raise ValueError(f"logical_id is already assigned to node {owner}")
-            if not self._mqtt:
-                raise RuntimeError("MQTT client is unavailable")
-            payload = json.dumps({"protocol_version": 1, "logical_id": logical_id})
-            info = self._mqtt.publish(f"omk/node/{node_id}/registration/config", payload, qos=1, retain=False)
-            if getattr(info, "rc", mqtt.MQTT_ERR_SUCCESS) != mqtt.MQTT_ERR_SUCCESS:
-                raise RuntimeError("MQTT publish failed")
-            if self.node_registry:
-                self.node_registry.update(node_id, requested_logical_id=logical_id, request_state="request_sent",
-                                          registration_revoked=False)
-        return {"node_id": node_id, "logical_id": logical_id, "status": "request_sent"}
-
-    def handle_node_mqtt(self, topic: str, payload: bytes) -> None:
+    def handle_sen66_mqtt(self, topic: str, payload: bytes, *, retain: bool = False) -> None:
+        """Authorize raw SEN66 once, before any shared-topic subscriber sees it."""
         parts = topic.split("/")
-        if len(parts) != 5 or parts[:2] != ["omk", "node"] or parts[3] != "registration" or not self._node_id_valid(parts[2]):
-            return
-        if parts[4] not in {"status", "ack"} or self.node_registry is None:
-            return
-        try:
-            value = json.loads(payload.decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError):
-            LOGGER.warning("Ignoring invalid OMK Node MQTT JSON")
-            return
-        if not isinstance(value, dict) or value.get("protocol_version") != 1 or value.get("node_id") != parts[2]:
-            LOGGER.warning("Ignoring invalid OMK Node MQTT fields")
-            return
-        if parts[4] == "status":
-            state = value.get("registration_state")
-            capabilities = value.get("capabilities")
-            connected_sensors = value.get("connected_sensors", [])
-            if (state not in {"provisioned", "registered"} or not isinstance(capabilities, int) or
-                    not isinstance(connected_sensors, list) or any(sensor != "sen66" for sensor in connected_sensors)):
-                return
-            status_values = {"protocol_version": 1, "capabilities": capabilities,
-                             "connected_sensors": connected_sensors, "registration_state": state,
-                             "mqtt_status_seen_at": now_iso()}
-            with self._node_registration_lock:
-                if state == "provisioned":
-                    self.node_registry.clear_registration(parts[2], **status_values)
-                else:
-                    # New firmware supplies its NVS identity on every connect.
-                    # Legacy registered status omits it: preserve the saved ID.
-                    if "logical_id" in value:
-                        logical_id = value["logical_id"]
-                        if not self._logical_id_valid(logical_id):
-                            LOGGER.warning("Ignoring invalid OMK Node status logical_id for node_id=%s", parts[2])
-                            return
-                        current = self.node_registry.list().get(parts[2], {})
-                        if current.get("registration_revoked"):
-                            LOGGER.info("Ignoring retained registration status after removal for node_id=%s", parts[2])
-                            return
-                        owner = self._logical_id_owner(logical_id, excluding_node_id=parts[2])
-                        if owner is not None:
-                            LOGGER.error("Ignoring duplicate OMK Node status logical_id=%s from node_id=%s; already assigned to node_id=%s",
-                                         logical_id, parts[2], owner)
-                            return
-                        # A pending edit is still completed only by its ACK.
-                        if current.get("requested_logical_id") is None:
-                            status_values["logical_id"] = logical_id
-                    self.node_registry.update(parts[2], **status_values)
-            return
-        logical_id = value.get("logical_id")
-        if value.get("registration_state") != "registered" or not self._logical_id_valid(logical_id):
-            return
-        with self._node_registration_lock:
-            current = self.node_registry.list().get(parts[2], {})
-            if current.get("registration_revoked"):
-                LOGGER.info("Ignoring retained registration ACK after removal for node_id=%s", parts[2])
-                return
-            requested = current.get("requested_logical_id")
-            if requested is not None and requested != logical_id:
-                LOGGER.warning("Ignoring stale registration ACK for node_id=%s", parts[2])
-                return
-            owner = self._logical_id_owner(logical_id, excluding_node_id=parts[2])
-            if owner is not None:
-                LOGGER.error("Ignoring duplicate OMK Node logical_id=%s from node_id=%s; already assigned to node_id=%s",
-                             logical_id, parts[2], owner)
-                return
-            self.node_registry.update(parts[2], protocol_version=1, logical_id=logical_id,
-                                      registration_state="registered", request_state="registered",
-                                      requested_logical_id=None, ack_seen_at=now_iso(), registration_revoked=False)
-
-    def handle_sen66_mqtt(self, topic: str, payload: bytes) -> None:
-        """Mark a SEN66 as physically observed only after valid telemetry arrives."""
-        parts = topic.split("/")
-        if len(parts) != 3 or parts[0] != "omk" or parts[2] != "sen66" or self.node_registry is None:
+        if (retain or len(parts) != 4 or parts[0] != "omk-relay" or parts[2:] != ["sen66", "raw"]
+                or self.node_registry is None):
             return
         try:
             value = json.loads(payload.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError):
             return
-        if not isinstance(value, dict) or value.get("device_id") != parts[1]:
+        if not isinstance(value, dict) or value.get("node_id") != parts[1]:
             return
-        for node_id, node in self.node_registry.list().items():
-            if node.get("logical_id") == parts[1]:
-                self.node_registry.update(node_id, sen66_last_seen_at=now_iso())
-
-    def remove_node_registration(self, node_id: str) -> dict[str, Any]:
-        if not self._node_id_valid(node_id) or self.node_registry is None:
-            raise KeyError(node_id)
+        node_id = value.get("node_id")
+        if not self._node_id_valid(node_id):
+            return
         with self._node_registration_lock:
-            if node_id not in self.node_registry.list():
-                raise KeyError(node_id)
-            self.node_registry.clear_registration(node_id, registration_state="provisioned",
-                                                  registration_revoked=True, removed_at=now_iso())
-            if self._mqtt:
-                payload = json.dumps({"protocol_version": 1, "logical_id": None})
-                info = self._mqtt.publish(f"omk/node/{node_id}/registration/config", payload, qos=1, retain=True)
-                if getattr(info, "rc", mqtt.MQTT_ERR_SUCCESS) != mqtt.MQTT_ERR_SUCCESS:
-                    raise RuntimeError("MQTT publish failed")
-        return {"node_id": node_id, "status": "removed"}
+            node = self.node_registry.list().get(node_id, {})
+            logical_id = value.get("device_id")
+            if (not self._logical_id_valid(logical_id) or node.get("logical_id") != logical_id
+                    or node.get("registration_revoked") or value.get("revision") != node.get("revision")
+                    or ("desired_revision" in node and
+                        (node["desired_revision"] != value.get("revision") or node.get("desired_logical_id") != logical_id))):
+                return
+            fields = {}
+            if not self._accept_telemetry(node_id, node, value, "sen66", fields):
+                return
+            self.node_registry.update(node_id, **fields)
+            # The same lock serializes revocation/reassignment with this QoS 0
+            # handoff. Preserve the payload; all public consumers see this gate.
+            self._publish_node(f"omk/{logical_id}/sen66", payload, qos=0, retain=False)
+        self.refresh_node_availability()
 
-    def handle_relay_mqtt(self, topic: str, payload: bytes) -> None:
+    def handle_relay_mqtt(self, topic: str, payload: bytes, *, retain: bool = False) -> None:
         """Reconstruct a raw observation and use the normal SwitchBot decoder."""
-        if len(payload) > 512:
+        if retain or len(payload) > 768:
             LOGGER.warning("Ignoring oversized relay MQTT payload topic=%s", topic)
             return
         parts = topic.split("/")
@@ -340,18 +251,24 @@ class BleManager:
             LOGGER.warning("Ignoring invalid relay MQTT fields topic=%s", topic)
             return
         address, rssi, manufacturer_data, service_data = observation
+        if self.node_registry:
+            with self._node_registration_lock:
+                fields = {}
+                node = self.node_registry.list().get(relay_node_id, {})
+                if not self._accept_telemetry(relay_node_id, node, value, "relay", fields):
+                    return
+                self.node_registry.update(relay_node_id, **fields)
         decoded = decode(address, rssi, manufacturer_data, service_data, now_iso(),
                          model_hint=self._registered_model_hint(address, manufacturer_data))
         if decoded is None or decoded.sensor_type == "unknown":
             LOGGER.debug("Ignoring unknown SwitchBot raw relay packet from node_id=%s", relay_node_id)
             return
-        if self.node_registry:
-            self.node_registry.update(relay_node_id, relay_last_seen_at=now_iso())
+        self.refresh_node_availability()
         self.record_advertisement(decoded, source="relay", relay_node_id=relay_node_id)
 
     @staticmethod
     def _parse_relay_observation(value: dict[str, Any], relay_node_id: str) -> tuple[str, int, dict[int, bytes], dict[str, bytes]] | None:
-        if value.get("protocol_version") != 1 or value.get("relay_node_id") != relay_node_id:
+        if value.get("protocol_version") != 2 or value.get("relay_node_id") != relay_node_id:
             return None
         address, rssi = value.get("ble_address"), value.get("rssi")
         if (not isinstance(address, str) or len(address) != 12 or any(char not in "0123456789abcdef" for char in address) or

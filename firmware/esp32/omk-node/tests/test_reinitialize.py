@@ -22,7 +22,7 @@ def reset_binary(tmp_path_factory):
     credentials = (SOURCE/'gateway_credentials.c').read_text()
     clear = credentials[credentials.index('esp_err_t gateway_credentials_clear(void)'):credentials.index('esp_err_t gateway_credentials_migrate_legacy')]
     registration = (SOURCE/'node_registration.c').read_text()
-    registration = registration[registration.index('esp_err_t node_registration_clear(void)'):registration.index('esp_err_t node_registration_clear_for_development')]
+    registration = '\n'.join(line for line in registration.splitlines() if not line.startswith('#include'))
     harness = r'''
 #include <assert.h>
 #include <stdbool.h>
@@ -33,6 +33,17 @@ def reset_binary(tmp_path_factory):
 #include <setjmp.h>
 #define ESP_OK 0
 #define ESP_FAIL -1
+#define ESP_ERR_INVALID_STATE -3
+#define ESP_ERR_INVALID_ARG -4
+#define ESP_ERR_NVS_INVALID_LENGTH -5
+#define OMK_NODE_LOGICAL_ID_MAX_LENGTH 48
+#define OMK_NODE_PROVISIONING_STATE_UNREGISTERED 0U
+#define OMK_NODE_PROVISIONING_STATE_PROVISIONED 1U
+#define OMK_NODE_PROVISIONING_STATE_REGISTERED 2U
+typedef int portMUX_TYPE;
+#define portMUX_INITIALIZER_UNLOCKED 0
+#define portENTER_CRITICAL(p) ((void)(p))
+#define portEXIT_CRITICAL(p) ((void)(p))
 #define ESP_ERR_NVS_NOT_FOUND -2
 #define NVS_READONLY 0
 #define NVS_READWRITE 1
@@ -56,7 +67,7 @@ static int mutations, fail_at;
 static unsigned char factory_data[4096];
 static esp_partition_t partition = {4096};
 struct cell { const char *key; unsigned char data[128]; size_t length; bool present; };
-static struct cell cells[] = {{.key="prov_pop"}, {.key="registered"}, {.key="logical_id"}, {.key="gw_cred"}, {.key="reset_sta"}, {.key="boot_count"}};
+static struct cell cells[] = {{.key="prov_pop"}, {.key="registered"}, {.key="logical_id"}, {.key="gw_cred"}, {.key="reset_sta"}, {.key="boot_count"}, {.key="reg_state"}};
 static void cut(void) { if (++mutations == fail_at) longjmp(restart, 1); }
 static struct cell *cell(const char *key) {
     for (unsigned i=0; i<sizeof(cells)/sizeof(cells[0]); i++) if (!strcmp(cells[i].key,key)) return &cells[i];
@@ -106,11 +117,17 @@ int main(int argc, char **argv) {
     fail_at=atoi(argv[2]); mutations=0;
     if(setjmp(restart)==0) { import_factory_pop(); ESP_ERROR_CHECK(gateway_credentials_clear_legacy_for_setup()); }
     fail_at=0;
+    /* longjmp models power loss, so discard volatile registration state. */
+    initialized=false;writer_active=false;cached_error=ESP_ERR_INVALID_STATE;
     import_factory_pop(); ESP_ERROR_CHECK(gateway_credentials_clear_legacy_for_setup());
     assert(cell("prov_pop")->present && !memcmp(cell("prov_pop")->data,new_pop,32));
     assert(cell("boot_count")->present && cell("boot_count")->data[0]==77);
     if(!strcmp(argv[1],"OMKR")) {
-        assert(!cell("logical_id")->present && !cell("registered")->present && !cell("gw_cred")->present);
+        assert(!cell("gw_cred")->present && cell("reg_state")->present);
+        node_registration_init_cache();
+        char id[49];uint32_t revision=0;
+        assert(node_registration_snapshot(id,sizeof(id),&revision)==ESP_OK && id[0]==0 && revision>0);
+        assert(node_registration_apply(0,"old-sen66")==ESP_ERR_INVALID_STATE);
         assert(!cell("reset_sta")->present);
         assert(!sta.sta.ssid[0] && !sta.sta.password[0] && !sta.sta.bssid_set);
     } else {
@@ -138,14 +155,9 @@ def test_factory_import_and_reinitialize_are_selective_and_restartable(reset_bin
     assert result.stdout.strip() == 'ok'
 
 
-def test_reset_precedes_network_start_and_clears_broker_registration_before_subscription():
+def test_reset_precedes_network_start():
     main = (SOURCE/'main.c').read_text()
     assert main.index('    import_factory_pop();') < main.index('wifi_station_prepare(&has_wifi_credentials)')
+    assert main.index('    import_factory_pop();') < main.index('    node_registration_init_cache();')
     wifi = (SOURCE/'wifi_station.c').read_text()
     assert wifi.index('gateway_credentials_clear_legacy_for_setup()') < wifi.index('gateway_credentials_migrate_legacy(')
-    mqtt = (SOURCE/'mqtt_registration.c').read_text()
-    connected = mqtt[mqtt.index('static bool synchronize_registration_connection'):mqtt.index('static void mqtt_event_handler')]
-    assert connected.index('clear_retained_registration_config()') < connected.index('esp_mqtt_client_subscribe_bounded(')
-    assert connected.index('clear_retained_registration_ack()') < connected.index('publish_registration_status()')
-    assert 'if (!registration_is_persisted() && !clear_retained_registration_ack())' in connected
-    assert 'if (!registration_is_persisted() && !clear_retained_registration_config())' in connected

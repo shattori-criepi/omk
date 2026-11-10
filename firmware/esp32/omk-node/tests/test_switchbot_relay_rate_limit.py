@@ -1,139 +1,113 @@
+"""Exercise real C BLE scheduler with deterministic advertisements and backpressure."""
 from pathlib import Path
+import subprocess
+
+ROOT = Path(__file__).parents[1]
 
 
-SOURCE = Path(__file__).resolve().parents[1] / "src" / "switchbot_relay.c"
-
-
-class _RelayPolicy:
-    """Timestamp-controlled model of the fixed-slot relay send policy."""
-
-    def __init__(self) -> None:
-        self.last_publish: float | None = None
-        self.published_parts = (False, False)
-
-    def observe(self, at: float, manufacturer: bool, service: bool) -> bool:
-        if self.last_publish is None or at - self.last_publish >= 10.0:
-            allowed = True
-        else:
-            allowed = (manufacturer and not self.published_parts[0]) or (service and not self.published_parts[1])
-        if allowed:
-            self.last_publish = at
-            self.published_parts = (manufacturer, service)
-        return allowed
-
-
-class _SlotPolicy:
-    """Timestamp-controlled model of the fixed 16-slot reclaim policy."""
-
-    TTL = 60.0
-
-    def __init__(self, slots: int = 16) -> None:
-        self.slots: list[dict[str, object] | None] = [None] * slots
-
-    def observe(self, address: str, at: float) -> dict[str, object] | None:
-        for slot in self.slots:
-            if slot and slot["address"] == address:
-                slot["last_fragment"] = at
-                return slot
-        for index, slot in enumerate(self.slots):
-            if slot is None:
-                self.slots[index] = {"address": address, "last_fragment": at}
-                return self.slots[index]
-        expired = [(index, slot) for index, slot in enumerate(self.slots)
-                   if slot and at - float(slot["last_fragment"]) >= self.TTL]
-        if not expired:
-            return None
-        index, _ = min(expired, key=lambda item: float(item[1]["last_fragment"]))
-        self.slots[index] = {"address": address, "last_fragment": at}
-        return self.slots[index]
-
-
-def test_relay_rate_limit_is_per_device_and_not_payload_hash_based() -> None:
-    source = SOURCE.read_text()
-    assert "payload_hash" not in source
-    assert "SWITCHBOT_RELAY_INTERVAL_US" in source
-    assert "Payload/counter/RSSI changes" in source
-    assert "published_has_manufacturer" in source
-    assert "published_has_service" in source
-
-
-def test_manufacturer_changes_are_suppressed_until_ten_seconds() -> None:
-    policy = _RelayPolicy()
-    assert policy.observe(0.0, True, False)
-    # Each call represents a changed counter/payload from the same device.
-    assert not any(policy.observe(float(second), True, False) for second in range(1, 10))
-    assert policy.observe(10.0, True, False)
-
-
-def test_fragment_completion_has_one_immediate_exception_then_is_limited() -> None:
-    policy = _RelayPolicy()
-    assert policy.observe(0.0, True, False)  # ADV
-    assert policy.observe(0.2, True, True)  # SCAN_RSP completes the observation
-    assert not policy.observe(0.3, True, True)
-    assert not policy.observe(1.0, True, True)
-    assert policy.observe(10.2, True, True)
-
-
-def test_service_only_observation_remains_supported() -> None:
-    policy = _RelayPolicy()
-    assert policy.observe(0.0, False, True)
-    assert not policy.observe(1.0, False, True)
-    assert policy.observe(10.0, False, True)
-
-
-def test_slot_source_uses_ttl_oldest_expired_and_full_reset() -> None:
-    source = SOURCE.read_text()
-    assert "SWITCHBOT_RELAY_SLOT_TTL_US (60LL * 1000LL * 1000LL)" in source
-    assert "find_slot(address, now_us)" in source
-    assert "slot->last_fragment_us < oldest_expired->last_fragment_us" in source
-    assert "memset(slot, 0, sizeof(*slot))" in source
-
-
-def test_empty_slots_are_used_before_any_reclaim() -> None:
-    policy = _SlotPolicy()
-    assert policy.observe("a", 0.0) is not None
-    assert policy.observe("b", 1.0) is not None
-    assert [slot["address"] for slot in policy.slots if slot] == ["a", "b"]
-
-
-def test_active_sixteen_slots_reject_seventeenth_without_overwrite() -> None:
-    policy = _SlotPolicy()
-    for index in range(16): assert policy.observe(str(index), 1.0) is not None
-    assert policy.observe("17", 59.0) is None
-    assert [slot["address"] for slot in policy.slots if slot] == [str(index) for index in range(16)]
-
-
-def test_expired_slot_is_reused_and_oldest_expired_wins() -> None:
-    policy = _SlotPolicy()
-    for index in range(16): assert policy.observe(str(index), float(index)) is not None
-    # At t=75, slots 0..15 are expired; slot 0 is the oldest.
-    reused = policy.observe("new", 75.0)
-    assert reused and reused["address"] == "new"
-    assert policy.slots[0] == {"address": "new", "last_fragment": 75.0}
-
-
-def test_suppressed_observation_keeps_slot_active_for_ttl() -> None:
-    slots = _SlotPolicy()
-    relay = _RelayPolicy()
-    assert slots.observe("active", 0.0) and relay.observe(0.0, True, False)
-    assert not relay.observe(1.0, True, False)  # rate-limited at the relay layer
-    assert slots.observe("active", 10.0)  # last_fragment still advances
-    for index in range(1, 16): assert slots.observe(str(index), 10.0)
-    assert slots.observe("new", 65.0) is None
-
-
-def test_reused_slot_does_not_carry_fragment_or_publish_state() -> None:
-    policy = _SlotPolicy(1)
-    old = policy.observe("old", 0.0)
-    assert old is not None
-    old.update(manufacturer=b"old", service=b"old", has_published=True, last_publish=5.0)
-    replacement = policy.observe("new", 60.0)
-    assert replacement == {"address": "new", "last_fragment": 60.0}
-
-
-def test_same_address_after_ttl_uses_its_existing_slot_and_can_publish_again() -> None:
-    slots = _SlotPolicy(1)
-    relay = _RelayPolicy()
-    assert slots.observe("same", 0.0) and relay.observe(0.0, True, False)
-    assert slots.observe("same", 61.0)
-    assert relay.observe(61.0, True, False)
+def test_native_ble_state_and_periodic_delivery(tmp_path):
+    (tmp_path / "esp_err.h").write_text('''#pragma once
+typedef int esp_err_t;
+#define ESP_OK 0
+#define ESP_FAIL -1
+#define ESP_ERR_NO_MEM -2
+#define ESP_ERR_INVALID_STATE -3
+''')
+    (tmp_path / "esp_timer.h").write_text('#pragma once\n#include <stdint.h>\nint64_t esp_timer_get_time(void);\n')
+    (tmp_path / "esp_log.h").write_text('#pragma once\n#define ESP_LOGW(tag, ...) do { (void)(tag); } while (0)\n')
+    (tmp_path / "test.c").write_text(r'''
+#include <assert.h>
+#include <stdio.h>
+#include <string.h>
+#include "switchbot_relay.c"
+static int64_t clock_us;
+static unsigned attempts,accepted;
+static esp_err_t queue_error;
+static relay_sample_t sent[100];
+int64_t esp_timer_get_time(void){return clock_us;}
+esp_err_t node_identity_get_id_hex(char *id,size_t size){assert(size==13);strcpy(id,"001122334455");return 0;}
+esp_err_t node_messages_publish_ble_relay(const char *node,const char *addr,int rssi,
+ const uint8_t *mf,size_t ml,const uint8_t *svc,size_t sl){
+ assert(!strcmp(node,"001122334455")&&strlen(addr)==12);++attempts;
+ if(queue_error)return queue_error;
+ assert(accepted<100);relay_sample_t *sample=&sent[accepted++];memset(sample,0,sizeof(*sample));
+ memcpy(sample->manufacturer_data,mf,ml);sample->manufacturer_length=ml;
+ memcpy(sample->service_data,svc,sl);sample->service_length=sl;sample->rssi=rssi;state_hint(sample);return 0;
+}
+static void reset(void){memset(relay_device_slots,0,sizeof(relay_device_slots));attempts=accepted=0;queue_error=0;clock_us=0;}
+static void observe(unsigned device,int64_t ms,const uint8_t *mf,size_t ml,const uint8_t *svc,size_t sl){
+ uint8_t addr[6]={(uint8_t)device,1,2,3,4,5};clock_us=ms*1000;
+ switchbot_relay_handle_observation(addr,-(int)(ms%80),mf,ml,svc,sl);
+}
+int main(void){
+ uint8_t env[12]={0}, motion[10]={0},contact[13]={0};motion[7]=0x2c;contact[7]=0x4c;
+ reset();observe(1,0,env,12,NULL,0);assert(accepted==1);
+ for(unsigned i=1;i<25;i++){env[9]=i;observe(1,i*1000,env,12,NULL,0);}assert(accepted==1);
+ observe(1,25000,env,12,NULL,0);assert(accepted==2); // changed counters/RSSI aren't events
+ reset();observe(1,0,motion,10,NULL,0);assert(accepted==1&&sent[0].state==0);
+ motion[9]++;observe(1,100,motion,10,NULL,0);assert(accepted==1);
+ motion[7]=0x6c;observe(1,200,motion,10,NULL,0);assert(accepted==2&&sent[1].state==1);
+ motion[7]=0x2c;observe(1,300,motion,10,NULL,0);assert(accepted==3&&sent[2].state==0);
+ observe(1,10299,motion,10,NULL,0);assert(accepted==3);
+ observe(1,10300,motion,10,NULL,0);assert(accepted==4);
+ reset();observe(1,0,contact,13,NULL,0);contact[7]=0x5c;observe(1,100,contact,13,NULL,0);
+ assert(accepted==2&&sent[1].state==1);contact[7]=0x6c;observe(1,200,contact,13,NULL,0);
+ assert(accepted==2);contact[7]=0xcc;observe(1,300,contact,13,NULL,0);assert(accepted==3&&sent[2].state==0);
+ // A failed open observation must survive a close before the next retry.
+ reset();motion[7]=0x2c;observe(1,0,motion,10,NULL,0);queue_error=ESP_ERR_NO_MEM;
+ motion[7]=0x6c;observe(1,100,motion,10,NULL,0);assert(accepted==1&&attempts==2);
+ motion[7]=0x2c;observe(1,200,motion,10,NULL,0);assert(attempts==2);
+ assert(relay_device_slots[0].pending_count==2);
+ queue_error=0;observe(1,1100,motion,10,NULL,0);
+ assert(accepted==3&&sent[1].state==1&&sent[2].state==0&&relay_device_slots[0].pending_count==0);
+ // An ordinary failed enqueue does not consume the 25-second interval either.
+ reset();queue_error=ESP_FAIL;observe(1,0,env,12,NULL,0);assert(!accepted);
+ queue_error=0;observe(1,999,env,12,NULL,0);assert(attempts==1);
+ observe(1,1000,env,12,NULL,0);assert(accepted==1);
+ // Fragment completion is forwarded once; manufacturer and service expire separately.
+ reset();uint8_t svc[3]={0x54,0,50};observe(1,0,env,12,NULL,0);
+ observe(1,100,NULL,0,svc,3);assert(accepted==2&&sent[1].manufacturer_length==12&&sent[1].service_length==3);
+ observe(1,500,env,12,NULL,0);observe(1,1500,env,12,NULL,0);observe(1,2500,env,12,NULL,0);
+ assert(relay_device_slots[0].latest.service_length==0);
+ observe(1,25100,env,12,NULL,0);assert(accepted==3&&sent[2].service_length==0);
+ // Service type fixes classification, manufacturer state has Gateway's precedence.
+ reset();uint8_t motion_svc[6]={0x73,0,50,0,0,1};motion[7]=0x2c;
+ observe(1,0,motion,10,motion_svc,6);motion[7]=0x6c;observe(1,100,motion,10,NULL,0);
+ assert(accepted==2&&sent[1].state==1);
+ reset();uint8_t contact_svc[9]={0x64,0,50,0};observe(1,0,NULL,0,contact_svc,9);
+ contact_svc[3]=2;observe(1,100,NULL,0,contact_svc,9);assert(accepted==2&&sent[1].state==1);
+ contact_svc[3]=4;observe(1,200,NULL,0,contact_svc,9);assert(accepted==2);
+ // Existing Gateway Presence Sensor Pro fixture (test_registry_and_decoder.py).
+ // Both service encodings must preserve absent -> present -> absent below 25s.
+ uint8_t presence[12]={0x02,0,0,0,0,0x03,0x20,0x8c,0,0x04,0,0x8c};
+ uint8_t presence_svc[7]={0x00,0x20,0x64,0x01,0x10,0xcc,0xc8};
+ for(unsigned encoding=0;encoding<2;encoding++) {
+   reset();presence_svc[0]=encoding?0x70:0x00;presence[7]=0x8c;
+   observe(1,0,presence,12,presence_svc,7);
+   presence[6]=0x1b;presence[7]=0xcc;presence[9]=0x08;
+   observe(1,1000,presence,12,presence_svc,7);
+   presence[7]=0x8c;observe(1,5000,presence,12,presence_svc,7);
+   assert(accepted==3&&sent[0].state==0&&sent[1].state==1&&sent[2].state==0);
+   assert(sent[1].manufacturer_data[7]==0xcc&&sent[2].manufacturer_data[7]==0x8c);
+   presence[6]++;observe(1,6000,presence,12,presence_svc,7);assert(accepted==3);
+ }
+ // An unrelated service remains periodic even with a Presence-shaped payload.
+ reset();presence_svc[0]=0x01;observe(1,0,presence,12,presence_svc,7);
+ presence[7]=0xcc;observe(1,1000,presence,12,presence_svc,7);assert(accepted==1);
+ // Pending slots and age are finite; old state is never replayed past expiry.
+ reset();motion[7]=0x2c;observe(1,0,motion,10,NULL,0);queue_error=ESP_FAIL;
+ motion[7]=0x6c;observe(1,100,motion,10,NULL,0);motion[7]=0x2c;observe(1,200,motion,10,NULL,0);
+ motion[7]=0x6c;observe(1,300,motion,10,NULL,0);assert(relay_device_slots[0].pending_count==2);
+ queue_error=0;observe(1,30400,motion,10,NULL,0);assert(accepted==2&&sent[1].state==1);
+ reset();for(unsigned i=0;i<16;i++)observe(i,0,env,12,NULL,0);assert(accepted==16);
+ observe(17,1000,env,12,NULL,0);assert(accepted==16);
+ observe(17,60000,env,12,NULL,0);assert(accepted==17&&relay_device_slots[0].address[0]==17);
+ return 0;
+}
+''')
+    binary = tmp_path / "ble-test"
+    result = subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-fsanitize=undefined",
+                             "-I", str(tmp_path), "-I", str(ROOT / "src"),
+                             str(tmp_path / "test.c"), "-o", str(binary)], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    subprocess.run([str(binary)], check=True, timeout=10)

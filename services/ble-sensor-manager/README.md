@@ -10,17 +10,21 @@ Pi上で`scripts/setup-ble-sensor-manager.sh`を実行すると、virtualenvの�
 
 Nodeの初回Wi-Fi設定はBLE Sensor Managerでは行わない。一般利用者はNodeをGatewayへUSB接続し、[Dashboardのセットアップ](../../docs/user/esp32-node-setup.md)でsystem-managerにprebuilt書込みとWi-Fi設定を要求する。通常firmware導入済みNodeへの開発用Wi-Fi設定には`python3 scripts/provision_omk_node_via_usb.py`も利用できる。USB transportはNode IDを取得し、credential保存・software reboot・MQTT registration statusまでを確認する。通常のBLE scan、SwitchBot relay、MQTT Node registrationはこの操作から独立して継続する。
 
-Nodeの`node_id`はeFuse由来の物理IDであり、`logical_id`はNode自身が測定値を`omk/<logical_id>/...`へ送る場合だけの論理IDである。`logical_id`は全Nodeで一意でなければならず、Gatewayは重複した登録要求・ACK・registration statusを拒否する。BLE relay専用Nodeはrelay topicに`node_id`を使うため、`logical_id`を登録する必要はない。
+Nodeの`node_id`はeFuse由来の物理IDであり、`logical_id`は測定値の公開topicで使う論理IDである。SEN66はRootから`omk-relay/<node_id>/sen66/raw`へ送り、このサービスが台帳の所有者・適用revision・希望revisionを照合してから`omk/<logical_id>/sen66`へ同じpayloadを転送する。`logical_id`は全Nodeで一意でなければならず、Gatewayは重複した登録要求・ACK・registration statusを拒否する。BLE relay専用Nodeはrelay topicに`node_id`を使うため、`logical_id`を登録する必要はない。
 
-新品Gatewayでも、NodeがMQTT接続時に送るretained `registration/status`の`logical_id`から登録情報を復元する。Node自身のNVSを情報源とし、以前のGateway registryやACKは不要。IDのない旧firmwareのregistered statusも受理し、既存のLogical IDを保持する。`provisioned` statusは従来どおり登録を解除する。payloadと互換性の詳細は[MQTT仕様](../../docs/developer/data-and-mqtt.md#payload)を参照。
+Node管理はnative Mesh protocol v2を使用する。Rootが代理publishする登録状態から適用済みID/revisionを復元し、Gatewayは登録・解除・ID変更の最新希望状態を`data/ble/nodes.json`へatomic保存してからretained QoS 1で送る。Nodeの適用結果または状態通知が一致するまで、5秒周期・再接続・状態受信時に再送する。古いACKでは新しい要求を完了させない。解除済みrevisionは保持する。MQTT v1との恒久併存はしない。
 
-機器管理画面では登録済みSEN66 NodeのLogical ID変更と登録解除ができる。変更はNodeのACKを受けるまでGateway上の現在値を変更せず、解除はWi-Fi credentialを残したままNodeのlogical registrationとretained ACKを消去する。オフライン中の解除要求もretain付き設定で次回接続時に適用される。
+30秒heartbeatと新しいSEN66/BLE転送からNode受信鮮度を管理し、120秒無受信でofflineとする。5秒ループは受信がない場合も動く。retained状態や重複seqは鮮度を更新しない。Gateway再起動後も保存済みの最終受信時刻から120秒の期限を判定し、再起動だけでは鮮度を延長しない。論理deviceのstatusはこのサービスがpublishし、Node別LWTは使用しない。
+
+機器管理の登録・変更・解除APIは維持する。変更・解除の適用確認までは旧IDと未確認の要求IDを予約し、他Nodeへの割当を拒否する。解除はWi-Fi credentialを残したまま行う。設定の周期publishはBroker接続中だけ行い、Paho送信キューは64件までとする。未完了publishと5秒未満の同revision再送を抑え、再接続時は保存済みの最新希望状態を送る。registry破損時は希望状態を空として上書きせずエラーにする。
+
+詳細は[MQTT仕様](../../docs/developer/data-and-mqtt.md#payload)と[移行資料](../../docs/developer/native-mesh-migration.md)を参照。
 
 `device_key`は物理的な識別子（`switchbot:<コロンを除いた小文字MAC>`）、`sensor_id`はOMKの論理的な識別子です。registryには`device_key`、`sensor_id`、`sensor_type`、vendor、model、location、`display_name`、`enabled`だけを保存します。最新の測定値、RSSI、受信時刻、生のBLEアドバタイズデータはruntime stateとして保持し、registryへは書き込みません。
 
 ## ESP32 Node relay入力
 
-ESP32 NodeはGatewayの`sensor_id`、SwitchBotの機種判定、decoderを持たない。Nodeはmanufacturer data、service data、BLE address、RSSIをraw observationとして次の内部MQTT topicへpublishし、Gatewayがdirect BLEと同じdecoderで`device_key`を決定する。
+ESP32 NodeはGatewayの`sensor_id`、SwitchBotの機種判定、decoderを持たない。Nodeはmanufacturer data、service data、BLE address、RSSIをraw observationとしてMeshでRootへ送り、Rootが次の内部MQTT topicへpublishし、Gatewayがdirect BLEと同じdecoderで`device_key`を決定する。
 
 ```text
 omk-relay/<relay_node_id>/ble/raw
@@ -54,7 +58,7 @@ OMKでは製品名と内部modelを分離しています。SwitchBot Meterおよ
 
 `enabled=false`は一時的な停止であり、registryと`sensor_id`の占有を維持しつつruntime stateの更新だけを続け、MQTT publishを止めます。一方、削除後はregistryから完全に外れ、以後MQTT publishしません。周囲で同じ物理デバイスのBLEアドバタイズを受信し続けていれば、未登録candidateとして再び表示され、セットアップから再登録できます。
 
-BLEアドバタイズはペアリングなしで継続受信します。`enabled=true`のenvironmentセンサは、最初に有効な値を受信した時点で即時publishし、その後は`device_key`ごとに最短10秒間隔でpublishします。runtime stateはBLE受信ごとに更新します。motionとcontactは状態変化時に即時publishし、加えて現在状態を最短10秒間隔でpublishします。これらの制限にはmonotonic clockを使用します。Plug Miniの電力も同じ10秒制限に従いますが、`switch_state`の変化時は即時publishします。`enabled=false`のセンサもruntime stateは更新しますが、MQTTはpublishしません。Plug Miniには`plug-xxx`を提案し、`power_w`と`switch_state`を含む`omk/<sensor_id>/power`をpublishします。
+BLEアドバタイズはペアリングなしで継続受信します。以下はGatewayのdirect受信側の制限です。Node relayの環境値は25秒間隔、認識済みMotion/Contact等は変化時と10秒の現在状態通知です。`enabled=true`のenvironmentセンサは、最初に有効な値を受信した時点で即時publishし、その後は`device_key`ごとに最短10秒間隔でpublishします。runtime stateはBLE受信ごとに更新します。motionとcontactは状態変化時に即時publishし、加えて現在状態を最短10秒間隔でpublishします。これらの制限にはmonotonic clockを使用します。Plug Miniの電力も同じ10秒制限に従いますが、`switch_state`の変化時は即時publishします。`enabled=false`のセンサもruntime stateは更新しますが、MQTTはpublishしません。Plug Miniには`plug-xxx`を提案し、`power_w`と`switch_state`を含む`omk/<sensor_id>/power`をpublishします。
 
 対応serviceのdevice typeを先に選び、登録済みmodel hintと矛盾したらunknownにします。serviceがないmanufacturer-only packetは、既存登録のhintに対応する形式だけを検証します。長さ・実測marker・正常値だけで新規機種を判定しません。MeterとMeter Pro CO2の観測済みmanufacturer形式も同じ方針です。CO2の2個体での実測は値形式の根拠であり、16-byte長の機種固有性を保証しません。
 

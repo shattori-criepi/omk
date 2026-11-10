@@ -1,6 +1,6 @@
 # データ経路とMQTT仕様
 
-MQTTは、各データ取得処理をRaspberry Piへ集約するLAN内の内部データバスである。ESP32などのセンサノードはOMK専用Wi-Fi経由で`192.168.50.1:1883`へ送信し、クラウドへ直接接続しない。Composeはbrokerを`127.0.0.1:1883`だけへ公開し、`wlan0`にbindしたsystemd socket proxyがAP clientの接続を中継する。Gateway上のhost serviceは`127.0.0.1:1883`を使用する。
+MQTTは、各データ取得処理をRaspberry Piへ集約するLAN内の内部データバスである。ESP32 Nodeはnative Meshで自動選出されたRootへ送り、RootだけがOMK専用Wi-Fi経由で`192.168.50.1:1883`へ接続する。各Nodeはクラウドへ直接接続しない。Composeはbrokerを`127.0.0.1:1883`だけへ公開し、`wlan0`にbindしたsystemd socket proxyがAP clientの接続を中継する。Gateway上のhost serviceは`127.0.0.1:1883`を使用する。
 
 現行の主経路は、センサ・Bルート・パワコン・BLEからMQTT、`sensor-collector`、JSONL、`data-transformer`、processed Parquet、Dashboardです。`harvest-uploader`は別clientとしてMQTTを直接購読し、JSONLやParquetを読まずに1分集約してSORACOM Harvestへ送信します。
 
@@ -15,25 +15,26 @@ MQTTは、各データ取得処理をRaspberry Piへ集約するLAN内の内部�
 | Bルート30分電力量 | `omk/<device_id>/interval-energy` | 0 | false |
 | Ichijo電力フロー | `omk/<device_id>/power-flow` | 0 | false |
 | Bルート・Ichijo可用性 | `omk/<device_id>/status` | 0 | true |
-| Node登録設定 | `omk/node/<node_id>/registration/config` | 1 | 登録/変更はfalse、解除はtrue |
+| Node登録設定 | `omk/node/<node_id>/registration/config` | 1 | true |
 | Node登録ACK | `omk/node/<node_id>/registration/ack` | 1 | true |
 | Node raw BLE relay | `omk-relay/<relay_node_id>/ble/raw` | 0 | false |
+| Node raw SEN66 relay | `omk-relay/<node_id>/sen66/raw` | 0 | false |
 | SEN66測定値 | `omk/<device_id>/sen66` | 0 | false |
 | 論理device可用性 | `omk/<logical_id>/status` | 0 | true |
 | OMK Node登録状態 | `omk/node/<node_id>/registration/status` | 1 | true |
-| OMK Node Mesh診断 | `omk/node/<node_id>/status` | 0 | false |
+| OMK Node heartbeat | `omk/node/<node_id>/status` | 0 | false |
 | BLE環境センサ | `omk/<sensor_id>/environment` | 0 | false |
 | BLE人感状態変化 | `omk/<sensor_id>/motion` | 0 | false |
 | BLE開閉状態変化 | `omk/<sensor_id>/contact` | 0 | false |
 | BLEプラグ電力 | `omk/<sensor_id>/power` | 0 | false |
 
-表のQoSはpublisher側の設定である。Bルート・Ichijoがそれぞれの測定値と可用性を、NodeがSEN66・可用性・registration status/ack・Mesh診断・raw relayをpublishする。BLE Sensor Managerはraw relayをdecodeして通常のBLE測定値をpublishし、Nodeへのregistration configも送信する。Nodeは自分のconfigをQoS 1で購読する。BLE Sensor Managerはregistration status/ackをQoS 1、SEN66とraw relayをQoS 0で購読し、Node registryと受信鮮度を更新する。
+表のQoSはpublisher側の設定である。Bルート・Ichijoは従来どおり各サービスがpublishする。Nodeのregistration status/ack・heartbeat・raw relayはRootが代理publishする。SEN66もRootから物理Node IDの内部raw topicへ送り、BLE Sensor Managerが台帳の現所有者・適用revision・希望revisionを照合してから既存のSEN66測定topicへpayloadを変更せずpublishする。これにより旧Nodeの滞留データをCollector・Dashboard・Harvestへの配信前に除外する。BLE Sensor Managerはraw BLEをdecodeして通常のBLE測定値へ変換し、Nodeへのregistration configと論理device可用性もpublishする。Rootは全NodeのconfigをQoS 1で購読し、対象NodeへMeshで転送する。
 
 collectorとHarvestは`omk/#`をQoS 0で購読する。collectorは管理メッセージもJSONLへ保存するが、transformerは管理topicをParquetから除外し、Harvestも測定対象以外を集約しない。USB provisioningの完了確認も対象Nodeのregistration statusを使用する。
 
 SEN66測定トピックの例は`omk/sen66-001/sen66`である。
 
-登録済みOMK NodeはMQTT接続時に`omk/<logical_id>/status`へretain付きで`online`を送信する。予期しないMQTT切断時は同一topicのretain付きLast Will`offline`がbrokerから送信される。これはlogical deviceのMQTT到達性であり、SEN66など個別測定値の鮮度は最新telemetryのGateway受信時刻で判定する。したがって復旧後の接続時`online`が古いretained `offline`を必ず上書きする。
+論理deviceの`omk/<logical_id>/status`はGatewayがretain付きでpublishする。Nodeの30秒heartbeatまたは新しいSEN66/BLE転送を受信するとonline、120秒受信がなければofflineとなる（判定周期5秒）。retained登録状態はonlineの根拠にしない。Node別のMQTT session/LWTは廃止する。
 
 ## Payload
 
@@ -61,84 +62,27 @@ Ichijoの`power-flow`は取得サイクル終了時の`measured_at`、PV・系�
 
 `harvest-uploader`はSEN66のtopic中のLogical IDをHarvest field prefixに使う。たとえば`omk/sen66-001/sen66`は`sen66-001_temperature_c`と`sen66-001_co2_ppm`を生成し、`omk/sen66-002/sen66`は別の`sen66-002_temperature_c`と`sen66-002_co2_ppm`を生成する。複数SEN66の1分平均は相互に混合しない。
 
-OMK NodeはMQTT接続後と登録変更時に、QoS 1・retain付きでregistration statusを送信する。登録済みの場合はNodeのNVSから読んだ`logical_id`を含める。
+Nodeの測定payloadには、従来の値に加えて`protocol_version:2`、`node_id`、`revision`、16桁hexの`boot_id`、種別ごとの`seq`を付ける。SEN66の`meta.boot_id`/`meta.seq`/`meta.enqueue_seq`も維持する。Gatewayの可用性管理は重複・既知の旧boot・逆順の受信で鮮度を延長しない。collectorのJSONL保存にexactly-onceや全経路の並べ替えを追加するものではない。
+
+Nodeは30秒ごとと登録変更時に、登録状態をRootへ送る。Rootは`registration/status`をQoS 1・retain付きでpublishする。
 
 ```json
-{"protocol_version":1,"node_id":"112233445566","registration_state":"registered","logical_id":"sen66-001","capabilities":3,"connected_sensors":["sen66"]}
+{"protocol_version":2,"node_id":"112233445566","revision":7,"registration_state":"registered","logical_id":"sen66-001","capabilities":3,"connected_sensors":["sen66"],"boot_id":"0123456789abcdef","seq":12,"uptime_s":360}
 ```
 
-新品Gatewayは、このstatusだけからNode registryのLogical IDを復元できる。旧Gatewayのregistryやretained ACKは不要。GatewayはIDの形式（1〜48文字のASCII英数字・`-`・`_`）と、他Nodeの確定済み・要求中IDとの重複を検証する。既存のprotocol version、capabilities、connected sensors、registration state、status受信時刻も保存する。
+新しいGatewayはこの状態から適用済みIDを取り込める。Gatewayに保存済みの解除・変更要求がある場合は希望状態を優先して再同期し、古いretained状態で登録を復活させない。IDは1〜48文字のASCII英数字・`-`・`_`、他Nodeとの重複は拒否する。
 
-旧firmwareの`logical_id`を含まないregistered statusも受理し、Gatewayに保存済みのIDは消さない。明示的な`provisioned` statusは登録情報を解除する。firmwareはこの状態で`logical_id`を出力しない。Gatewayで解除済みの登録は、古いretained statusでは復活させない。
+登録設定は`{"protocol_version":2,"revision":8,"logical_id":"sen66-002"}`、解除は同じ形式で`logical_id:null`。Gatewayは希望状態を永続化してからretained QoS 1で送り、未完了設定を5秒周期で再送する。NodeはNVSへ適用した実際のrevisionとIDを`registration/ack`で返し、`result`は`applied`または`rejected`。ACK消失時は次回状態通知からも適用完了を確認できる。変更なしの再接続でACKは作らない。適用済み解除のretained config/ackは消去するが、GatewayとNodeの解除revisionは保持する。
 
-登録・変更要求のconfigは`{"protocol_version":1,"logical_id":"sen66-001"}`、解除要求は`{"protocol_version":1,"logical_id":null}`である。登録ACKは`protocol_version`、`node_id`、`logical_id`、`registration_state: "registered"`を持つ。解除成功時はretained config/ackを空payloadで消去し、`provisioned` statusを送る。SEN66の診断情報がある場合、registration statusには`sen66_rc`（recovery総数）と`sen66_to`（liveness timeout数）も加わる。
+解除・変更の適用確認までは旧IDと途中の未確認要求IDを予約し、別Nodeへの割当を拒否する。設定再送はBroker接続中だけ行い、Paho標準キューを64件に制限する。送信中の要求と5秒以内の同revision要求は重複enqueueしない。再接続時は保存済みの最新希望状態から再送する。
 
-`registration/ack`は引き続き設定要求への応答であり、単なるMQTT再接続では送らない。GatewayからのID変更要求が進行中の場合は、従来どおり対応するACKで現在値を確定する。retained registration status自体はNodeのonline判定には使わない。
+登録MQTT v1との恒久的な互換経路はない。Gatewayと全Nodeの移行が必要。USB provisioning v2とDiscovery BLE v1は引き続き利用する。
 
-### Mesh診断status
+### Node heartbeat
 
-ESP-WIFI-MESH Nodeは30秒ごとに非retainの診断statusを送信する。
+`omk/node/<node_id>/status`は30秒周期・QoS 0・非retain。上記の登録状態と共通の識別field・`uptime_s`を持つ。旧版のMesh/MQTT接続診断fieldは出力しない。SEN66の`sen66_rc`/`sen66_to`はsensor復旧情報として維持する。旧netif/IP/restart budget/詳細ネットワーク診断のfieldとtopicは廃止する。
 
-```text
-omk/node/<node_id>/status
-```
-
-```json
-{"node_id":"112233445566","mesh_layer":2,"is_root":false,"parent_bssid":"02:00:00:00:00:01","rssi_dbm":-76,"rssi_valid":true,"ip":"10.0.0.2","parent_change_count":0,"parent_disconnect_count":2,"is_rootless":false,"rootless_duration_s":0,"last_parent_disconnect_reason":201,"last_wifi_disconnect_reason":201,"root_switch_count":0,"mqtt_disconnect_count":1,"mqtt_connected":true,"mqtt_disconnected_duration_s":0,"mqtt_last_connected_uptime_s":123,"mesh_rx_success_count":456,"mesh_tx_success_count":78,"mesh_tx_failure_count":0,"mesh_last_rx_success_uptime_s":122,"mesh_last_tx_success_uptime_s":123,"uptime_s":123,"free_heap_bytes":223000,"minimum_free_heap_bytes":180000,"reset_reason":"poweron","reset_reason_code":1,"boot_count":4,"last_omk_restart_reason":"none","mesh_mqtt_liveness_restart_count":0}
-```
-
-| Field | 意味 |
-| --- | --- |
-| `node_id` | eFuse由来の12桁Node ID |
-| `mesh_layer` | ESP-WIFI-MESH layer。transition中は`-1`になり得る |
-| `is_root` | 観測時点のroot状態 |
-| `parent_bssid` | 観測済みparent BSSID。transition中は旧値が残り得る |
-| `rssi_dbm` / `rssi_valid` | STA接続先RSSIと取得可否。取得失敗時は`rssi_valid=false` |
-| `ip` | 現在のSTA/internal-network IPv4。parent切断時は`0.0.0.0`へclearし、IP再取得時に更新する |
-| `parent_change_count` | 前回と異なるparent BSSIDへの接続回数 |
-| `parent_disconnect_count` | raw `MESH_EVENT_PARENT_DISCONNECTED` 回数 |
-| `is_rootless` | `MESH_EVENT_NETWORK_STATE`が示す、現在のMesh networkにrootがいない状態 |
-| `rootless_duration_s` | rootless状態の継続秒数。rootまたはparent接続成立時は0 |
-| `last_parent_disconnect_reason` | 最後の`MESH_EVENT_PARENT_DISCONNECTED`のWi-Fi reason。未取得時は`0` |
-| `last_wifi_disconnect_reason` | 最後のMesh管理STA切断reason。`MESH_EVENT_PARENT_DISCONNECTED` payloadから取得し、`201`は`WIFI_REASON_NO_AP_FOUND`。未取得時は`0` |
-| `root_switch_count` | 初期root選出を除く、Node自身のroot role変化回数。同一transitionの重複eventは数えない |
-| `mqtt_disconnect_count` | `MQTT_EVENT_DISCONNECTED` 回数 |
-| `mqtt_connected` | status生成時点でMQTT brokerへ接続中か |
-| `mqtt_disconnected_duration_s` | MQTT client開始後、現在の未接続状態が継続している秒数。接続中は0 |
-| `mqtt_last_connected_uptime_s` | 最後にMQTT接続が成立した時点のNode uptime秒。一度も接続していない場合は0 |
-| `mesh_rx_success_count` | Mesh internal networkで正常受信したpacketの累積数 |
-| `mesh_tx_success_count` | `esp_mesh_send()`成功の累積数 |
-| `mesh_tx_failure_count` | `esp_mesh_send()`失敗の累積数 |
-| `mesh_last_rx_success_uptime_s` | 最後にMesh受信成功した時点のuptime秒 |
-| `mesh_last_tx_success_uptime_s` | 最後にMesh送信成功した時点のuptime秒 |
-| `uptime_s` | boot後秒数 |
-| `free_heap_bytes` | 観測時点のfree heap |
-| `minimum_free_heap_bytes` | boot後の最小free heap |
-| `reset_reason` / `reset_reason_code` | ESP reset reasonの名前とコード |
-| `boot_count` | NVSに保持するboot回数 |
-| `last_omk_restart_reason` | OMK自身が意図的にsoftware restartした直近理由。liveness timeout時は`mesh_mqtt_liveness_timeout` |
-| `mesh_mqtt_liveness_restart_count` | Mesh/MQTT liveness timeoutによるsoftware restart累積回数。NVSに保持する |
-
-`parent_disconnect_count`と`mqtt_disconnect_count`は障害回数ではない。起動とtopology再構成の1回の事象で複数回増え得る。Dashboardや監視は単発のcounterで異常判定せず、MQTT接続状態、継続時間、計測欠測などを組み合わせて扱う。
-
-Mesh/MQTT recoveryのpolicyは[networking decision](../decisions/esp-wifi-mesh-node-networking.md#全nodeのparent-loss-recoveryとbounded-restart)で定義する。MQTT-onlyはMesh起動・parent接続・非rootless・有効IP・MQTT開始済み・MQTT未接続が180秒＋Node ID jitter（0〜120秒）続いた場合の最終fallbackとする。parent-lossと共有するNVS budgetはepisode中1回だけ消費可能で、15分の正常継続後だけ回復する。従来の`last_omk_restart_reason`とMQTT restart countも継続する。
-
-追加の復旧診断は`omk/node/<node_id>/mesh_recovery/status`へ30秒周期、QoS 0、非retainで送る。既存Node statusは1152-byte bufferを維持し、追加topicは768-byte bufferに収める。両方に`node_id`と`uptime_s`を含む。
-
-| field | 意味 |
-| --- | --- |
-| `recovery_stage` | `idle` / `healthy` / `self_healing` / `explicit` / `wait_ip` / `mqtt_wait` / `budget_hold` / `restart_pending` |
-| `last_recovery_reason` | `none` / `parent_loss` / `router_loss` / `rootless` / `no_parent_found` / `stop_reconnection` / `mqtt_only` / `sustained_weak_root` / `topology_change` / `root_link_unhealthy`。復帰後も直近理由を保持 |
-| `no_parent_found_count`, `last_scan_times` | boot内のevent回数と最後のscan_times（payloadなしは−1） |
-| `stop_reconnection_count` | boot内のreconnection停止event回数。これだけで再起動しない |
-| `parent_reselection_count` | boot内のOMK parent再選択要求の受付成功回数（child lossとweak-root Level 2）。復旧完了回数ではない |
-| `parent_loss_duration_s` | parent未接続またはrootlessの連続秒数。解除後は0 |
-| `restart_budget_spent` | trueなら自動restart禁止。NVS障害時もtrue |
-| `recovery_restart_count`, `last_restart_reason` | NVSの累積restart予約回数と最後の予約理由。bootを跨ぐ。commit後の電源断などでは実reset回数と異なり得る |
-
-孤立中のMQTT送信はできない。復帰後のboot内counter・最後の理由と、bootを跨ぐrestart診断を合わせて読む。data-transformerではこのtopicもstatusとして計測変換から除外する。
-
-`is_rootless`、layer、parent BSSID、IPも再構成の途中値である。特に同一SSIDで異なるBSSIDを持つGateway／市販中継機の環境では、異なるroot/treeが形成されるリスクを実機評価中である。非同期起動やNode移設後に最適rootへ自動復帰する保証はないため、現在はNode参加後の安定待ちや、弱いroot uplinkでの切断増加を条件にroot再選出を要求する。成功後のcooldownと120秒のliveness restart抑止を含む[現行policy](../decisions/esp-wifi-mesh-node-networking.md#現行のroot再選出とlivenessの関係)を参照する。市販中継機との併用自体は否定せず、今後の実住宅試験で評価する。
+通信queueは有限で、期限切れやRoot交代時にはデータを破棄する。SDK内の滞留を含む端到端の期限や無欠測は保証しない。責務と限界は[Mesh設計](../decisions/esp-wifi-mesh-node-networking.md)を参照。
 
 ## 汎用JSONL収集
 

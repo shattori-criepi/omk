@@ -19,12 +19,12 @@ def test_real_relay_fragment_join_and_gap_expiry_preserve_model_evidence(tmp_pat
     (tmp_path / "switchbot_relay.h").write_text("#include <stdint.h>\n#include <stddef.h>\n")
     (tmp_path / "esp_log.h").write_text('#define ESP_LOGW(...) ((void)0)\n')
     (tmp_path / "esp_timer.h").write_text('#include <stdint.h>\nint64_t esp_timer_get_time(void);\n')
-    (tmp_path / "mqtt_registration.h").write_text('''
+    (tmp_path / "node_messages.h").write_text('''
 typedef int esp_err_t;
 #define ESP_OK 0
 #define ESP_ERR_INVALID_STATE 1
 const char *esp_err_to_name(int);
-int mqtt_registration_publish_ble_relay(const char *, const char *, int,
+int node_messages_publish_ble_relay(const char *, const char *, int,
                                         const uint8_t *, size_t, const uint8_t *, size_t);
 ''')
     (tmp_path / "node_identity.h").write_text('''
@@ -41,7 +41,7 @@ const char *esp_err_to_name(int err) { return "fake"; }
 int node_identity_get_id_hex(char *out, size_t length) {
     snprintf(out, length, "020000000041"); return ESP_OK;
 }
-int mqtt_registration_publish_ble_relay(const char *node, const char *address, int rssi,
+int node_messages_publish_ble_relay(const char *node, const char *address, int rssi,
                                         const uint8_t *md, size_t ml, const uint8_t *sd, size_t sl) {
     printf("%s ", address);
     for (size_t i=0; i<ml; i++) printf("%02x", md[i]);
@@ -58,7 +58,7 @@ int main(void) {
     switchbot_relay_handle_observation(address, -50, NULL, 0, service, sizeof(service));
     fake_time = 300000;
     switchbot_relay_handle_observation(address, -50, md, sizeof(md), NULL, 0);
-    fake_time = 11000000; /* Gap expiry must discard the old service field. */
+    fake_time = 26000000; /* New 25s cadence; gap expiry discards old service. */
     switchbot_relay_handle_observation(address, -50, md, sizeof(md), NULL, 0);
     return 0;
 }

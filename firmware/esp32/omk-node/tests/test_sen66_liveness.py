@@ -24,10 +24,10 @@ def test_sen66_liveness_resets_only_after_a_successful_measurement_read():
 
 def test_sen66_read_failures_and_liveness_timeouts_have_separate_diagnostics():
     source = (SOURCE / "sensor_manager.c").read_text()
-    mqtt = (SOURCE / "mqtt_registration.c").read_text()
+    messages = (SOURCE / "node_messages.c").read_text()
 
     assert "++slot->measurement_timeout_count;" in source
     assert 'recover_sensor(slot, "identity lost or consecutive read failures")' in source
     assert "slot->consecutive_read_failures >= 3" in source
     for field in ("sen66_rc", "sen66_to"):
-        assert field in mqtt
+        assert field in messages

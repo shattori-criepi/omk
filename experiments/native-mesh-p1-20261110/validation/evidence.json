@@ -1,0 +1,32 @@
+{
+  "tests-firmware-gateway.log": {
+    "original_sha256": "90971ca7611fd8536ecd10fc0c609aeee9d87a00e43137b5404d39a59b2111cc",
+    "published_sha256": "90971ca7611fd8536ecd10fc0c609aeee9d87a00e43137b5404d39a59b2111cc",
+    "normalization": "Local path prefixes replaced with $REPO/$LOCAL_SNAPSHOT/$P1_BUILD/$NATIVE_BUILD/$DEVELOPER_HOME; trailing whitespace stripped."
+  },
+  "tests-collector.log": {
+    "original_sha256": "a4ba6a0b833ef7026d4d291578c1a66aa7b84a732bb259d96dc88bdb89ae3418",
+    "published_sha256": "a4ba6a0b833ef7026d4d291578c1a66aa7b84a732bb259d96dc88bdb89ae3418",
+    "normalization": "Local path prefixes replaced with $REPO/$LOCAL_SNAPSHOT/$P1_BUILD/$NATIVE_BUILD/$DEVELOPER_HOME; trailing whitespace stripped."
+  },
+  "tests-scripts-supported.log": {
+    "original_sha256": "3823f2c7aad1a91f8896d306f5acbf8f9d7cd172d3d3398b85ff61bd4f7867c2",
+    "published_sha256": "3823f2c7aad1a91f8896d306f5acbf8f9d7cd172d3d3398b85ff61bd4f7867c2",
+    "normalization": "Local path prefixes replaced with $REPO/$LOCAL_SNAPSHOT/$P1_BUILD/$NATIVE_BUILD/$DEVELOPER_HOME; trailing whitespace stripped."
+  },
+  "tests-usb.log": {
+    "original_sha256": "b7a68330073d101edb4d3a41b8a218fac09818af343cd82e2f9d5fd411a73c4d",
+    "published_sha256": "b7a68330073d101edb4d3a41b8a218fac09818af343cd82e2f9d5fd411a73c4d",
+    "normalization": "Local path prefixes replaced with $REPO/$LOCAL_SNAPSHOT/$P1_BUILD/$NATIVE_BUILD/$DEVELOPER_HOME; trailing whitespace stripped."
+  },
+  "tests-scripts-offline.log": {
+    "original_sha256": "d58902dc642945ad0a26191d750886ec69a7b075c7d2ca87e6bf7be3b4a6e1ad",
+    "published_sha256": "96c047c970b1ef26f77d0dd4814493f114d046166261cffe24bde06b11409ca4",
+    "normalization": "Local path prefixes replaced with $REPO/$LOCAL_SNAPSHOT/$P1_BUILD/$NATIVE_BUILD/$DEVELOPER_HOME; trailing whitespace stripped."
+  },
+  "build-atom-s3-lite.log": {
+    "original_sha256": "bfe692cba411e6584140674aad25e0cd0cd0ebbb4c6165a7831cccafc42757c4",
+    "published_sha256": "2a46d0da487854c666eff2e42d12b86a891dcbe62ffd9ca56b92afa5c959cc26",
+    "normalization": "Local path prefixes replaced with $REPO/$LOCAL_SNAPSHOT/$P1_BUILD/$NATIVE_BUILD/$DEVELOPER_HOME; trailing whitespace stripped."
+  }
+}

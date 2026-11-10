@@ -29,7 +29,7 @@ typedef struct {
     void *context;
     unsigned consecutive_read_failures;
     bool logical_id_warning_logged;
-    bool mqtt_warning_logged;
+    bool delivery_warning_logged;
     bool recovery_pending;
     uint32_t recovery_count;
     uint32_t measurement_timeout_count;
@@ -119,11 +119,11 @@ static void sensor_slot_tick(sensor_slot_t *slot) {
         } else {
             slot->logical_id_warning_logged = false;
             err = slot->driver->publish(slot->context, logical_id);
-            if (err != ESP_OK && !slot->mqtt_warning_logged) {
+            if (err != ESP_OK && !slot->delivery_warning_logged) {
                 ESP_LOGW(TAG, "%s delivery handoff unavailable: %s", slot->driver->driver_id, esp_err_to_name(err));
-                slot->mqtt_warning_logged = true;
+                slot->delivery_warning_logged = true;
             } else if (err == ESP_OK) {
-                slot->mqtt_warning_logged = false;
+                slot->delivery_warning_logged = false;
             }
         }
     }

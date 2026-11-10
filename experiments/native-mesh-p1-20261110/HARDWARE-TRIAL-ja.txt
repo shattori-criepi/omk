@@ -1,0 +1,344 @@
+OMK Native Mesh P1 — 実機試験手順（公開版）
+release: native-mesh-p1-20261110 / 対応commit: このファイルを含む保存commit
+
+ここに記載するサービス変更・USB操作・書込みは未実施。実施には別途承認が必要。
+このディレクトリをPREPとする。manifest.json / SHA256SUMS / README.txtで成果物と版を確認する。
+Gatewayソース配布は distribution/gateway-services.tar.gz、USB helperは distribution/usb-tools.tar.gz。
+Node appは atom-s3-lite-app-only/firmware.bin。対応ELFと第三者通知も同梱する。
+公開用 firmware/esp32/omk-node/prebuilt/ は旧版であり今回の書込みには使わない。
+Dashboard初期化、pio upload、build-omk-node-package.sh、旧trial flash_app.pyを通常更新に使わない。
+
+1. 試験対象と版の識別
+
+A=Root候補、B=中継候補、C=SEN66接続末端。全台、現物で確認済みのAtomS3 Lite、BLE ONとする。
+実機Node ID、MAC、現firmware、USB by-id、旧版復帰先は公開しない。非公開台帳へ現場で記録する。
+記録だけで実機を推測しない。未確認のB/CをESP32-S3という理由だけでAtomS3 Liteと扱わない。
+M5Stick-C等は試験対象外。旧方式と修正前Nativeを含む他Nodeは同じBrokerへ送信しないよう停止する。
+旧運用を停止できない場合は、別Gateway/Brokerと別SSID/PSKの試験系を用意する。
+
+BINの表示app versionは「1」でありcommit識別に使えない。commit SHA、BIN SHA-256、ELF SHA-256を
+非公開実機台帳へNode IDと組にして記録する。Gatewayにもcommitとtar SHAを記録する。
+ESP-IDF 6.0.1、Mesh domain v2、登録protocol v2。Gateway BLE Sensor ManagerはSEN66転送にも必須。
+
+2. 書込み前の保全（実施日は別工程）
+
+Gateway:
+- 管理接続はEthernetまたはローカルconsole等を確保。Mesh経由の管理接続に依存しない。
+- 実効unit/全drop-in、ExecStart/PYTHONPATH、OMK_NODE_REGISTRY/OMK_BLE_REGISTRY、
+  venv/Python/pip版、Collectorのcontainer image ID、Compose project/files/volume実パスを記録。
+  Gatewayのhostname・管理ユーザー・稼働checkoutは現在未確認。ローカル開発コピーで代用しない。
+- 更新前のサービスソースとvenv、unit/drop-in、Collector image（docker save）を保全。
+  imageの可変tagだけで復帰先を記録しない。旧venvは上書きせず保存する。
+- 管理画面の登録変更を止め、Node一覧、Node ID↔logical ID、未完了要求、BLE sensor登録を保存。
+- BLE Sensor Managerを停止した一貫した時点で、実効パスのnodes.jsonとsensors.jsonをcopy。
+  標準は <OMK_ROOT>/data/ble/{nodes,sensors}.json、未設定時のコードdefaultは /var/lib/omk/ble/。
+  実効Environmentを優先する。試験後に台帳を空にしない。
+- <OMK_ROOT>/data/provisioning/nodes/*.json（PoP）とNetworkManager AP profile、/etc/omkの
+  関連設定・token/envを非公開backupへ保存。内容をterminal/chatや配布archiveへ出さない。
+- 対象Nodeのretained registration/{config,ack,status}、旧logical ID/status、root/statusを
+  topicごとに存在/不存在・payload・QoSを記録。復帰時に対象topicだけ再現できる形にする。
+  Broker全体を戻す必要に備える場合は停止中の永続DBも保存するが、通常rollbackでDB全体を戻さない。
+  標準Mosquitto volumeは services/mosquitto/data、実効Composeを確認する。
+- 既存の計測JSONL/Parquet、Harvest queueは維持し、台帳rollbackとともに巻き戻さない。
+
+Node:
+- 個体ごとにNode ID、eFuse MAC、基板、USB by-id/物理ポート、配置、接続SEN66、
+  現logical ID、BLE ON/OFF、現在app/ELF SHA、partition配置を記録。
+- ROM modeで現Flash全体を保存し、SHAと別媒体copyを確保。8 MiBは確認済みAtomS3 Liteだけ。
+  boot/table/app/NVS/factory_secretを個体別に取り出す。元のtableにcoredumpがあればそれも保持する。
+- NVS(0x9000,0x6000)にはWi-Fi/PoP/登録等が入る。app-only書込みでは範囲外だが、
+  起動後にcredential移行・登録revision適用等で内容が変わるため「永久に同一」ではない。
+- factory_secret(0xf000,0x1000)は通常PoPをNVSへ取り込んだ後に消去済みでよい。
+  空だから新PoPを発行しない。Gateway credentialとNVSの保全が必要。
+  OMKP/OMKRが残る場合は取り込み/再初期化が未完了の可能性があるので、通常更新へ進まない。
+- Wi-Fiの正式保存先は omk_net/gw_cred。古いdriver STA設定しかない場合、安全に移行可能な
+  Gateway credentialだけを採用する。Mesh親BSSID固定等の旧状態はSSID/PSKとして推測しない。
+  起動後wifi_configured=falseの場合のみ、後述の既存USB v2手順で正しいGateway APを設定する。
+- logical IDの旧registered/logical_idはNativeでrevision 0として読める。新要求はreg_state blobへ
+  保存する。旧firmwareだけに戻すと古いIDが見えることがあるので、台帳とNode NVSを一組で戻す。
+- factory MAC/eFuseから導くNode IDはapp更新で変わらない。NVS全消去やeFuse変更はしない。
+- backupは個体別/private directory 0700、ファイル0600。NVS/Flash全体/PoPは配布物やGitに含めない。
+
+3. Gateway USBでの識別とapp-only更新
+
+以下は将来実施用。各コマンド失敗・ID不一致・USB再列挙・接続断で停止する。
+通常書込みはGatewayに対象Nodeを1台だけ接続して実施する。modem/FTDI等をUSB Nodeと扱わない。
+画面上のttyACM0という番号や接続順では個体を決めない。
+
+(1) ラベル/基板と台帳を照合し、kernel descriptorを読む（serialを開く前）。
+    ls -l /dev/serial/by-id/
+    udevadm info --query=property --name="$OMK_NODE_PORT"
+    readlink -f "$OMK_NODE_PORT"
+    fuser -v "$OMK_NODE_PORT"
+    OMK_NODE_PORTは今回確認した /dev/serial/by-id/... の完全パスを指定する。
+    同portを使うmonitor、Dashboard USB操作、captureを終了する。fuserは未使用なら非0もあり得る。
+    by-id/descriptorが得られない場合は物理的な抜差し差分・基板確認・ROM eFuse MACを
+    一緒に記録する。分からないまま別のttyへ書かない。
+
+(2) 配布USB helperを新規release directoryへ展開。identifyだけを呼びNode IDを照合する。
+    例（RELEASEは今回のtoolsを展開した絶対パス、EXPECTEDは事前台帳のID）:
+
+    PYTHONPATH="$RELEASE/services/system-manager/src" python3 -B - "$OMK_NODE_PORT" "$EXPECTED" <<'PYID'
+import json, sys
+from omk_system_manager.node_provisioning import identify
+value = identify(sys.argv[1], 10)
+if not value or value.get('node_id') != sys.argv[2]:
+    raise SystemExit('Identity unavailable/mismatch; stop without flashing')
+print(json.dumps(value))
+PYID
+
+    identifyの返答はID/protocol/Wi-Fi設定有無で、firmware版を証明しない。
+    旧Nodeが応答しない場合は推測で進まず、物理確認とROM MAC/readbackで個体・旧imageを確定する。
+    provision_omk_node_via_usb.pyをidentify目的で実行しない（Wi-Fi保存・rebootを行う）。
+
+(3) 既存のesptool 5.1.0環境を指定し、手動でROM download modeへ入る。
+    現Gatewayのtool path/versionは未確認なので OMK_ESPTOOL_PY を実在するPythonへ設定する。
+    firmware保存物にあるesptool 4系のスクリプトへ5系optionを混ぜない。
+    Nativeのpackageを既存trial専用flash_app.pyへ渡さない（別manifest/対象専用guard）。
+
+    omk_rom() {
+      "$OMK_ESPTOOL_PY" -B -m esptool --chip esp32s3 --port "$OMK_NODE_PORT" \
+        --baud 115200 --before no-reset --after no-reset "$@"
+    }
+    omk_rom read-mac
+    omk_rom flash-id
+    omk_rom get-security-info
+
+    eFuse MACとchipを台帳に照合する。各個体のMACは非公開の実機台帳で確認する。
+    Node IDはMAC文字列そのものではなく、6byte factory MACのFNV-1a64下位48bit。
+    B/CのMACは不明なので、その場で実機/identifyと結び付ける。SoftAP MACで代用しない。
+    Flash 8 MiB、ESP32-S3、Secure Boot/Flash encryption無効が前提。
+    相違があればこの手順を使わない。--forceで迂回しない。
+    以降通常起動せず、同じUSBケーブル/個体のまま保全・書込み・照合する。
+
+(4) private backupとtableを確認する。
+
+    umask 077
+    mkdir -m 700 "$OMK_CAPTURE"
+    omk_rom read-flash 0x0 0x800000 "$OMK_CAPTURE/full-before.bin"
+    sha256sum "$OMK_CAPTURE/full-before.bin" > "$OMK_CAPTURE/full-before.sha256"
+    python3 -B - "$OMK_CAPTURE" <<'PYBACK'
+from pathlib import Path
+import sys
+p = Path(sys.argv[1]); data = (p/'full-before.bin').read_bytes()
+if len(data) != 0x800000: raise SystemExit('Unexpected flash size')
+for name, off, size in [('boot',0,0x8000),('table',0x8000,0x1000),
+                        ('nvs',0x9000,0x6000),('factory-secret',0xf000,0x1000),
+                        ('app-partition',0x10000,0x200000)]:
+    (p/(name+'-before.bin')).write_bytes(data[off:off+size])
+PYBACK
+
+    切出しはtable内容を承認する処理ではない。書込み前にtableをdecodeし、次の全entryを照合:
+      nvs: data/nvs offset 0x9000 size 0x6000
+      factory_secret: data/subtype 0x40 offset 0xf000 size 0x1000
+      factory: app/factory offset 0x10000 size 0x200000
+    3-entry通常tableは参照partitions.bin SHA 417facb149358cb4532fd2368e67453fc961890f1a56d6145092619a55fc365d。
+    既存Stage 2の4-entry table（上記3領域が同じでcoredump 0x210000/0x40000追加）は保持できる。
+    Nativeはcoredump OFFなので追加領域を利用しない。tableや過去dumpを消す必要はない。
+    table binaryは長さが0xc00/0x1000で異なることがある。sector末尾padding差をentry差と混同しない。
+    その他のtable/boot構成なら通常更新を中止する。blank Nodeの初期設定は今回の対象外。
+    full backupと切出しSHA、旧app descriptor/ELF SHAを記録し、別媒体copyを完了してから進む。
+    このGit保存物には個体の旧版を同梱しない。個体のapp-partition-before.binが復帰の基準となる。
+
+(5) 配布元のSHAを照合し、ROM MACを再確認してappだけ書く。
+
+    # OMK_APP=今回確認した atom-s3-lite-app-only の絶対パス
+    omk_rom read-mac
+    # 出力が対象台帳と一致し、個体の接続を変えていないことを確認
+    omk_rom write-flash --flash-mode keep --flash-freq keep --flash-size keep \
+      0x10000 "$OMK_APP/firmware.bin"
+    omk_rom verify-flash --flash-mode keep --flash-freq keep --flash-size keep \
+      0x10000 "$OMK_APP/firmware.bin"
+    omk_rom read-flash 0x0 0x10000 "$OMK_CAPTURE/prefix-after.bin"
+    python3 -B - "$OMK_CAPTURE" <<'PYCMP'
+from pathlib import Path
+import sys
+p=Path(sys.argv[1])
+if (p/'prefix-after.bin').read_bytes() != (p/'full-before.bin').read_bytes()[:0x10000]:
+    raise SystemExit('Boot/table/NVS/factory changed; stop before normal boot')
+PYCMP
+
+    BIN長1,534,384 bytes、書込みend 0x1869b0、sector切上げend 0x187000で2 MiB app内。
+    bootloader/table/NVS/factoryは通常更新で書かない。erase-flash/erase-all/initial-setup/
+    reinitialize/registration-reset/Wi-Fi強制消去は使わない。通常起動前に保全範囲を照合する。
+    失敗時は通常起動を繰り返さず、個体と既存backupを保持してrollbackへ進む。
+
+(6) 対象全台の更新完了まで通常Meshへ参加させず、電源を切って保管する。
+    旧Nodeを停止しGatewayを切替済みにしてから、次節の順で通常起動する。
+    起動後はUSB identify、BLE boot: enabled、Active SwitchBot scan開始、Native Mesh開始、
+    protocol_version=2の新しいNode statusを確認する。古いretainedだけで合格としない。
+    通常更新ではWi-Fiの再設定は不要。wifi_configured=falseと判明した場合に限り、
+    正しいGateway AP profileを確認したうえで既存の以下を使用する（Wi-Fi保存/rebootを伴う）:
+
+    python3 -B "$RELEASE/scripts/provision_omk_node_via_usb.py" \
+      --device "$OMK_NODE_PORT" --node-id "$EXPECTED" --profile omk-ap \
+      --mqtt-broker 127.0.0.1
+
+    --deviceと--node-idを必ず両方指定する。実profile/Brokerが異なれば確認済み値を使う。
+    これはPoPの新規発行やNVS全消去の代替ではない。credential不明を理由に再初期化しない。
+
+4. 切替順序（サービス操作は将来の移行時間帯のみ）
+
+A. 保全・配布物のステージング
+  1) 全Node inventoryを現物と照合。今回の3台、旧版/修正前Nativeを含む試験外全台を区別。
+     予定する停止時間と元の配置/給電を記録する。
+  2) PREPをGatewayの新規directoryへ転送しSHAを照合。既存checkout/prebuiltへ上書きしない。
+     gateway-services.tar.gzとusb-tools.tar.gzを同じ新規RELEASE directoryへ展開する。
+  3) 新しいvenvへrequirementsを導入し、Collectorを別tagで準備する。旧環境は保持。
+     例: python3 -m venv "$RELEASE/ble-venv"
+         "$RELEASE/ble-venv/bin/pip" install -r "$RELEASE/services/ble-sensor-manager/requirements.txt"
+         docker build -t omk-sensor-collector:native-mesh-p1-20261110 "$RELEASE/services/sensor-collector"
+     現Gatewayでの依存導入可否は未確認。失敗したら旧サービス稼働中に止め、切替に進まない。
+     新旧BLE Managerを同じclient ID/port8787で同時起動しない。
+
+B. 旧経路の停止と整合したバックアップ
+  4) 旧Nodeを末端→中継→旧Rootの順で停止。今回更新しない機種も同じBrokerへ送らないよう停止。
+     IP/NAT版はMesh domain v1、Nativeはv2だが、domain分離だけを混在防止に頼らない。
+     P1修正前Nativeは同じv2なので必ず停止する。旧NodeのLWT/切断がBrokerで処理されたことを確認。
+  5) Node登録操作を止め、旧BLE Managerを停止。第2節の台帳・retained・運用版backupを確定。
+     旧config/ackは勝手に一括消去しない。新Gatewayはv1を適用結果として扱わず、保存pendingを
+     新revisionへ同期する。試験中のstatusは必ず非retained受信/新bootと合わせて判断する。
+
+C. Gatewayサービスだけ先に切替
+  6) BLE Managerは既存unitのUser/Group、API隔離、registry実パス、ReadWritePathsを維持し、
+     trial専用drop-inでWorkingDirectory、PYTHONPATH、ExecStartだけを新RELEASEへ向ける。
+     drop-in例（実際の絶対パスへ置換、既存drop-in競合を確認）:
+       [Service]
+       WorkingDirectory=/確認済みRELEASE/services/ble-sensor-manager
+       Environment=PYTHONPATH=/確認済みRELEASE/services/ble-sensor-manager/src
+       ExecStart=
+       ExecStart=/確認済みRELEASE/ble-venv/bin/uvicorn omk_ble.main:app --host 0.0.0.0 --port 8787
+     systemctl daemon-reload後にomk-ble-sensor-manager.serviceを起動。
+     http://127.0.0.1:8787/healthとjournalを確認し、registry読み込みエラーがないことを確認する。
+     setup-ble-sensor-manager.shの全面再実行（他設定やdependencyの一括更新）で代用しない。
+  7) Collectorだけを既存Compose project/volumesで新imageに切替。
+     専用overrideに services: sensor-collector: image: omk-sensor-collector:native-mesh-p1-20261110
+     を設定し、確認済みproject名とbase composeを明示して
+       docker compose -p "$CONFIRMED_PROJECT" -f "$CONFIRMED_COMPOSE" -f "$TRIAL_OVERRIDE" \
+         up -d --no-deps --no-build sensor-collector
+     を実施する。Dashboard/Harvest/Broker/AP/system-managerは同時に更新しない。
+     既存BrokerのAP側proxy(標準192.168.50.1:1883)とloopback到達を確認する。
+
+D. Node書込み・起動
+  8) 第3節で3台を1台ずつ書き込み。順序A→B→C、各台終了後は電源OFF。
+     3台とも同じP1 BIN SHAであること、未更新Nodeが起動していないことを確認する。
+  9) AをGateway AP近くで起動し、layer=1 root=1とRoot MQTT client omk-root-<A>を確認。
+     Bを起動しlayer=2 root=0、Cを起動しlayer=3 root=0を既存USBログで確認。
+     SDK自己組織化なので指定個体がRootになる保証はない。実際の役割を記録し、
+     成立しない場合は配置を調整する。固定Root/独自経路制御/新ビルドは追加しない。
+
+5. 最小3台の実機試験
+
+構成: Gateway(AP/Broker) ← A Root(L1) ← B 中継(L2) ← C SEN66(L3)
+全台BLE ON。同じ確認済みGateway SSID/PSK、同じP1 BINを使う。
+RootはMeshのLayer 1。GatewayはMesh Nodeのlayerには数えない。
+Root/BはSEN66なしでも動作する。CのI2C接続とセンサ電源を確認する。
+
+観測:
+- Cまで独立したUSB受信機/長いケーブル等を用意し、試験配置を変えず既存consoleを記録する。
+  同一USBを複数processで開かない。ログファイルには照合済みNode IDと受信日時を付ける。
+- 現NativeのMQTT heartbeatにはlayer/parent MACが入らない。USBの
+  「Parent connected, layer=... root=...」を各個体で採取しL1/L2/L3成立を確認する。
+  層を記録できなければ「3台動いた」だけでLayer 3合格としない。新診断機能は追加しない。
+- Gatewayの既存Collector JSONL、Broker接続ログ、BLE Manager journalを保存。
+  試験期間だけ既存mosquitto_subでraw/controlも受信保存できる（新しいserviceは作らない）:
+    mosquitto_sub -h 127.0.0.1 -R -v \
+      -t 'omk/node/+/status' -t 'omk/node/+/registration/#' \
+      -t 'omk-relay/+/sen66/raw' -t 'omk-relay/+/ble/raw' -t 'omk-mesh/root/status'
+  -Rは購読時のretained replayを除外。controlのretained snapshotは第2節で別に保存する。
+  経過時間にはGateway受信日時を使う。retained root/status単独を現在のRootの証明にしない。
+- MQTT/SEN66のboot_id/seq/revision、heartbeat uptime、公開topic、BLE source/relay_node_idを照合。
+  rawが来て公開値が来ない場合は所有者/revision/登録/BLE経路選択を確認し、Mesh断と混同しない。
+
+順序と合格条件:
+  1) 基本通信を30分: L3成立を確認後、SEN66の連続値、30秒程度のNode状態、BLE環境値を確認。
+     BLE送信機をC近く、Gateway直受信範囲外へ置く。direct受信後30秒はrelayが抑止されるため、
+     公開BLEに source=relay, relay_node_id=C が出ることを確認する。rawだけで合格にしない。
+     Presence/Motion/Contactは実際の在→不在/開→閉を25秒以内に数回行い、両変化を照合。
+     センサ本体が当該時間内に広告しない場合はNode欠落と断定せず、その試験は未確認と記録する。
+  2) 登録とID変更: 未使用の試験ID（例trial-sen66-c、trial-sen66-c2）を使う。
+     API/管理画面から登録・変更し、desired_revisionとNode適用revisionの一致、
+     旧topic停止・新topicでCの計測継続を確認する。raw MQTT configを手作りして送らない。
+     C停止中に解除要求し、適用前の旧IDをA/Bへ割当すると拒否されること、120秒無受信で
+     Nodeがofflineになることを確認。C再開後に解除が確定し、その後だけID再利用可能になる。
+     Cの再登録後は現revisionだけが公開されることを確認する。試験前後のID対応を保存する。
+  3) 親切替: 3台だけで代替経路の成立を確認できる配置へ調整する。
+     初期CはL3(B経由)、Aへも弱い代替電波が届く条件を確保してからBを1回停止。
+     Cのparent接続ログがL2へ変わり、A経由で計測/状態/登録が180秒以内に戻るか測る。
+     CからAへ無線到達不能なら単なる孤立であり切替試験は未成立。4台追加や固定親設定で補わない。
+     Bを戻し安定を確認。CがL2に残ってもSDKは最短/最適経路へ必ず戻す仕様ではないので、
+     続く長時間L3試験の前には配置とログでL3を改めて確認する。
+  4) Root交代: BがGateway APへ到達できる配置でAを1回停止。
+     BがL1 RootになりBrokerにomk-root-<B>が接続、Cの状態・SEN66・BLEが180秒以内に戻ることを確認。
+     pending登録があれば最新desiredへ収束することを確認。Aを戻しても元Rootへの復帰は要求しない。
+     旧Root由来の古いrevision/測定が再利用IDの共通topicへ出ないことも受信記録で確認する。
+  5) Broker切断/復帰: 初期試験が通った後、計画停止としてBrokerを1回だけ停止・再開する。
+     Gateway RSSとjournalを既存OS手段で観測し、切断中の再送増大がなく、再開後の最新desiredと
+     Root接続/計測の復帰を確認する。新たな再送queueや診断endpointは追加しない。
+  6) 24時間以上のL3連続稼働: 最終配置でL1/L2/L3を再確認し全台BLE ONを継続。
+     介入はせず、受信間隔30/60/120秒超の回数・最大空白・未復帰空白、boot変化、
+     Node別受信/公開SEN66/BLEを分けて記録する。計画停止区間は通常時評価から分ける。
+     親接続ログが残るのに受信停止した場合も、切断イベントがないだけで正常と判断しない。
+     120秒無受信でoffline、代替経路があるのに180秒超で戻らない場合は未達として時刻を記録。
+     自動/反復再起動で一時復帰させて合格としない。既存ログを保全して試験停止・rollback判断へ。
+
+本番移行の判断: 通常時120秒超の停止反復、代替経路ありで180秒以内に戻らない、panic、
+登録不収束、必要イベント欠落があれば本番導入を見送る。24時間成功でも長期安定を保証しない。
+具体的な問題が出たときだけ、その事象を対象に次の調査/修正を決める。
+
+6. 失敗時の旧構成への復帰
+
+1) 障害時刻、Node別最後のraw/公開/status、USBログ、Gateway journalを保存。
+   親ありのまま停止している場合も先に記録し、書込み前の証拠を失う電源反復をしない。
+2) 試験NodeをC→B→Aの順に停止。新BLE ManagerとCollectorも停止。
+   Broker/APは復帰作業に必要な範囲で維持する。新旧publisherを同時稼働させない。
+3) Nodeごとに同じUSB識別を行い、ROM modeでその個体の旧appと試験前NVSを戻す。
+   app-only移行ではboot/tableは変えていないため、原則そのまま保持する。
+   logical ID試験やcredential移行があるので、単に旧firmwareへ戻すだけでは不十分。
+   例（対象個体のbackupをSHAで確認済み、同じlayoutのときだけ）:
+     omk_rom write-flash --flash-mode keep --flash-freq keep --flash-size keep \
+       0x10000 "$OMK_CAPTURE/app-partition-before.bin"
+     omk_rom verify-flash 0x10000 "$OMK_CAPTURE/app-partition-before.bin"
+     omk_rom write-flash 0x9000 "$OMK_CAPTURE/nvs-before.bin"
+     omk_rom verify-flash 0x9000 "$OMK_CAPTURE/nvs-before.bin"
+   factory_secretが試験前と異なる場合だけ同じ個体のbackupを復元する。
+   boot/table破損等が判明した場合も、別Nodeや別layoutのbackupで代用しない。
+   新appが部分書込みでもROMへ入れれば当日backupから復元できる。起動不能ならROM接続手順を確認し、
+   全消去や機種不一致のイメージで突破しない。
+   元appが意図的panicを含む開発版なら正常稼働の復帰先にしない。停止保管か、
+   事前に選定した当該個体用の通常旧版と対応状態へ戻す。
+4) Gatewayのtrial drop-inだけを除去/復元し、旧ソース/venv/実効unitへ戻す。
+   Collectorは保存済み旧image ID/tagと元Compose設定へ戻す。全dataディレクトリは上書きしない。
+   BLE Manager停止中に試験前nodes.json/sensors.jsonとowner/modeを復元。
+   旧版へ戻したNodeのNVS/IDとこの台帳が同じ時点の組であることを照合する。
+5) 全NodeとBLE Managerを停止したまま、対象NodeのNative config/ack/registration status、
+   Native root/status、試験ID/statusのretainedだけを削除し、保存済み旧topicを復元する。
+   削除は実topic名へ空payload+retain（mosquitto_pub -r -n -t 対象topic）。wildcard削除をしない。
+   存在しなかったtopicは再作成しない。計測履歴、他センサのretained、Harvest queueは巻き戻さない。
+   古いNative desiredがBrokerに残って復帰後の登録へ干渉しないことを確認する。
+6) 旧Gatewayサービスを起動し、元のRoot→中継→末端の順に旧Nodeを元の配置/給電で再開。
+   停止した試験外の旧Nodeもこの段階で再開する。Node ID/logical ID/BLE設定、旧方式のMesh/MQTT、
+   SEN66/BLE公開値を確認する。Native Nodeが残っていれば起動しない。
+7) 旧構成の復帰時刻と試験による欠測時間を記録。private backupと試験記録を保持する。
+
+7. 実行前に埋める項目
+
+[ ] B/CのAtomS3 Lite現物確認、A/B/CのeFuse MAC・Node ID・USB経路・現app/ELF・layout
+[ ] Gateway管理先・稼働版・実効registry/credentialのパス・旧image/venvの退避先
+[ ] 各個体の復帰imageとNVS/factory/full backupを結び付けた台帳、別媒体copy
+[ ] 試験対象外も含む全旧Nodeの停止/隔離一覧、停止による既存計測中断時間
+[ ] 使用するBLE送信機の登録ID、SEN66実接続、L3ログ採取方法、代替経路を持つ配置
+[ ] 新規依存環境/Collector imageをGatewayにステージできたこと（サービス切替とは分離）
+
+これらが未確定のまま個体を推測して書き込まない。現在の準備成果物は試験計画・配布元であり、
+実機の識別確認やbackupを取得済みという意味ではない。
+
+参照（repo rootからの相対パス。個体別evidenceは非公開台帳に記録）:
+- P1修正済み docs/developer/native-mesh-migration.md
+- firmware/esp32/omk-node/{partitions.csv,src/main.c,src/node_registration.c,src/wifi_station.c}
+- services/ble-sensor-manager/README.md、既存systemd/Compose設定
+- Espressif ESP-IDF 6.0.1 partition tables:
+  https://docs.espressif.com/projects/esp-idf/en/v6.0.1/esp32s3/api-guides/partition-tables.html
+- Espressif esptool commands/reset options（コマンドは既存5.1.0環境に合わせる）:
+  https://docs.espressif.com/projects/esptool/en/latest/esp32s3/esptool/basic-commands.html
+  https://docs.espressif.com/projects/esptool/en/latest/esp32s3/esptool/advanced-options.html

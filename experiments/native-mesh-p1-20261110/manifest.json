@@ -1,0 +1,123 @@
+{
+  "release_label": "native-mesh-p1-20261110",
+  "branch": "experiment/native-mesh-p1-20261110",
+  "source_commit": "The immutable Git commit containing this manifest; obtain with git log -1 --format=%H -- experiments/native-mesh-p1-20261110/manifest.json",
+  "published_base_commit": "c651e66eb29bfce7b0a68d51a5848208d4427479",
+  "source_origin": {
+    "snapshot": "p1-fixes-20261110-7zhc7xar/corrected-source.tar.gz",
+    "archive_sha256": "3e62d8e9ad5bed8e4aa60fa5daecc821d778b1b90b97a7274ca8995dec74b415",
+    "archive_included": false,
+    "reason": "Includes obsolete prebuilt and private historical material; selected source/tests imported by hash instead.",
+    "matching_source_test_support_files": 438,
+    "firmware_build_inputs_verified_against_original_build": 43
+  },
+  "build": {
+    "board": "AtomS3 Lite",
+    "environment": "atom-s3-lite",
+    "chip": "esp32s3",
+    "platformio_core": "6.2.0",
+    "platform": "espressif32@7.0.1",
+    "framework_package": "framework-espidf@4.60001.0",
+    "esp_idf": "6.0.1",
+    "esp_mqtt": "1.1.0 (unpatched)",
+    "cjson": "1.7.19~2",
+    "paho_mqtt": "2.1.0",
+    "toolchain_xtensa_esp_elf": "15.2.0+20251204",
+    "embedded_project": "omk_node",
+    "embedded_app_version": "1",
+    "embedded_build_date": "Nov 10 2026",
+    "embedded_build_time": "12:08:41",
+    "static_ram_bytes": 72880,
+    "flash_bytes": 1533957,
+    "built_before_this_commit": true,
+    "rebuilt_for_commit": false,
+    "byte_reproducibility_claim": false,
+    "dependency_lock_note": "Source snapshot target is esp32 from the other board build. Actual AtomS3 build lock differs only by target esp32s3 and is preserved in build-inputs/dependencies.esp32s3.lock. Runtime sources and effective atom-s3-lite sdkconfig exactly match the original build."
+  },
+  "validation": {
+    "date": "2026-11-10",
+    "firmware_and_ble_manager_passed": 491,
+    "collector_passed": 11,
+    "scripts_passed": 234,
+    "usb_passed_included_in_scripts": 132,
+    "distinct_passed": 736,
+    "existing_fixtures_not_completed": [
+      "scripts/tests/test_host_mqtt_persistence.py",
+      "scripts/tests/test_final_review_mutations.py"
+    ],
+    "fixture_limitation": "Collection/setup reached pre-existing B-route sudo operation and stopped under container restrictions. Not counted as passed.",
+    "outside_offline_scope": [
+      "scripts/tests/test_ap_socket_kernel.py"
+    ],
+    "atom_s3_lite_build": "SUCCESS",
+    "prior_incremental_review_new_P0": 0,
+    "prior_incremental_review_new_P1": 0,
+    "hardware_tested": false,
+    "additional_tests_or_builds_for_commit": false
+  },
+  "preserved_legacy_prebuilt": {
+    "directory": "firmware/esp32/omk-node/prebuilt/atom-s3-lite",
+    "source": "published_base_commit",
+    "native_trial_artifact": false
+  },
+  "privacy": {
+    "excluded": [
+      "NVS and full Flash backups",
+      "factory secret and PoP",
+      "Wi-Fi credentials and Gateway runtime registries/data",
+      "actual fleet inventory/IDs/MACs/locations",
+      "private historical diagnostics and local baseline commits"
+    ],
+    "elf_note": "Original ELF preserved byte for byte, including compiler/SDK build paths in debug information; not stripped or rebuilt.",
+    "existing_public_test_identifiers": "Existing published fixture identifiers are retained unchanged; no private inventory or new device identifiers were imported."
+  },
+  "files": {
+    "atom-s3-lite-app-only/THIRD_PARTY_NOTICES.txt": {
+      "sha256": "d6cf1f31328edda155b3f5d02a04127dd3fdd2f6b8db631e9e2ac0df5f197436",
+      "bytes": 91462
+    },
+    "atom-s3-lite-app-only/firmware.bin": {
+      "sha256": "a906ce5fd7e833ba12e6be47fa0b5b073cadc8a8047a28518988e758ce88f211",
+      "bytes": 1534384,
+      "flash_offset": "0x10000",
+      "matching_elf": "atom-s3-lite-app-only/firmware.elf"
+    },
+    "atom-s3-lite-app-only/firmware.elf": {
+      "sha256": "0afe4bfeb10319b93917a3d8a7b600f8d22208afcbfc8ce928c4382e2b40c530",
+      "bytes": 13763056,
+      "embedded_elf_sha256_in_app": "0afe4bfeb10319b93917a3d8a7b600f8d22208afcbfc8ce928c4382e2b40c530"
+    },
+    "reference-only/README.txt": {
+      "sha256": "3e25e82e1bc67998ea62b41c8db44e6fac8896b45c284a6b3bba718333f312d5",
+      "bytes": 215
+    },
+    "reference-only/bootloader.bin": {
+      "sha256": "eee3f6c5596412b306ffe9c2b133c749f16c240234c959161de38edae59ad47a",
+      "bytes": 21088
+    },
+    "reference-only/partitions.bin": {
+      "sha256": "417facb149358cb4532fd2368e67453fc961890f1a56d6145092619a55fc365d",
+      "bytes": 3072
+    },
+    "distribution/gateway-services.tar.gz": {
+      "sha256": "cd6ed061330c34bb0c5d27b7e248e75edf75d29091c0c9a70703ed6f98b7dafc",
+      "bytes": 27854
+    },
+    "distribution/usb-tools.tar.gz": {
+      "sha256": "46e981f2799fe2b09655fd596059c8abe91ad3b68804b28fd003545f78871cb7",
+      "bytes": 6546
+    },
+    "build-inputs/dependencies.esp32s3.lock": {
+      "sha256": "72bc3aead638f13737ae854f4d157cb35fcf2a2914d879284f6197470c134fdb",
+      "bytes": 815
+    },
+    "build-inputs/sdkconfig.json": {
+      "sha256": "eda89a02fe9ed7324f2b1a577a2266eee78a6c6da2361c94cd6fa85801ea1b93",
+      "bytes": 67712
+    },
+    "build-inputs/source-files.sha256.json": {
+      "sha256": "1d8206e02eb1c6a07449983013cf09277960e66fd5e2b6a000dcb5f2d891524b",
+      "bytes": 5036
+    }
+  }
+}

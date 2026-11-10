@@ -1,0 +1,24 @@
+
+==================================== ERRORS ====================================
+________ ERROR collecting scripts/tests/test_final_review_mutations.py _________
+scripts/tests/test_final_review_mutations.py:57: in <module>
+    assert baseline.returncode == 0, (name, 'fixed baseline failed', baseline.stdout, baseline.stderr)
+E   AssertionError: ('YAML secret leak', 'fixed baseline failed', '', 'Traceback (most recent call last):
+E       File "$DEVELOPER_HOME/projects/o...        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E     AssertionError
+E     ')
+E   assert 1 == 0
+E    +  where 1 = CompletedProcess(args=['$REPO/.venv/bin/python', '$REPO/firmware-stability-bac...        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError\n').returncode
+------------------------------- Captured stdout --------------------------------
+PASS: regression test rejects restored old bug: async deactivation
+PASS: regression test rejects restored old bug: old image pinning
+PASS: regression test rejects restored old bug: rollback health verification
+_________ ERROR collecting scripts/tests/test_host_mqtt_persistence.py _________
+scripts/tests/test_host_mqtt_persistence.py:55: in <module>
+    assert ('YAML is invalid' if name == 'malformed' else 'legacy Gateway MQTT host detected') in logs
+E   AssertionError: assert 'YAML is invalid' in '[2026-11-10T12:13:34+09:00] B-route meter setup started. Log file: /tmp/omk-mqtt-settings-y2mbjja7/logs/broute-meter-...t.\nsudo: If sudo is running in a container, you may need to adjust the container configuration to disable the flag.\n'
+=========================== short test summary info ============================
+ERROR scripts/tests/test_final_review_mutations.py - AssertionError: ('YAML s...
+ERROR scripts/tests/test_host_mqtt_persistence.py - AssertionError: assert 'Y...
+!!!!!!!!!!!!!!!!!!! Interrupted: 2 errors during collection !!!!!!!!!!!!!!!!!!!!
+2 errors in 146.72s (0:02:26)

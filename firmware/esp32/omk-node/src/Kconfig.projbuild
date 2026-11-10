@@ -10,31 +10,4 @@ config MESH_ROUTE_TABLE_SIZE
     range 1 300
     default 50
 
-config MESH_PARENT_RSSI_HIGH
-    int "Mesh parent RSSI high threshold (dBm)"
-    range -120 10
-    default -78
-    help
-        High boundary used by ESP-WIFI-MESH when comparing a current parent
-        and a candidate parent RSSI.
-
-config MESH_PARENT_RSSI_MEDIUM
-    int "Mesh parent RSSI medium threshold (dBm)"
-    range -120 10
-    default -82
-    help
-        Medium boundary used by ESP-WIFI-MESH when comparing a current parent
-        and a candidate parent RSSI.
-
-config MESH_PARENT_RSSI_LOW
-    int "Mesh parent RSSI low threshold (dBm)"
-    range -120 10
-    default -85
-    help
-        ESP-IDF standard low boundary (-85 dBm), used to compare parent
-        RSSI ranges and report a persistently weak current parent. Keep the
-        standard high/medium/low values (-78/-82/-85) on AtomS3 Lite; a
-        -84 to -85 dBm link can still carry measurements. This is not an
-        application-enforced candidate cutoff.
-
 endmenu

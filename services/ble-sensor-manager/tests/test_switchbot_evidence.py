@@ -245,10 +245,13 @@ class Publisher:
     def publish(self, topic, payload, **kwargs):
         self.messages.append((topic, json.loads(payload)))
 
+    def is_connected(self):
+        return True
+
 
 def relay_json(md, sd):
     return {
-        "protocol_version": 1, "relay_node_id": NODE, "ble_address": IDENTITY, "rssi": -50,
+        "protocol_version": 2, "relay_node_id": NODE, "ble_address": IDENTITY, "rssi": -50,
         "manufacturer_data": [{"company_id": company, "data": data.hex()} for company, data in md.items()],
         "service_data": [{"uuid": uuid, "data": data.hex()} for uuid, data in sd.items()],
     }

@@ -59,7 +59,6 @@ esp_err_t i2c_del_master_bus(void *);
 #include <math.h>
 #include "sen66_sensor.h"
 #include "sensor_manager.c"
-#include "sen66_diagnostics.h"
 
 void esp_fill_random(void *b, size_t n) { memset(b, 0x12, n); }
 static uint64_t clock_ms;
@@ -68,6 +67,7 @@ static uint16_t last_command;
 static unsigned mutations, identities, handles, publishes, recoveries, timeouts;
 static bool present = true, connected, ready = true, bad_crc, truncated, read_error, partial, measuring, value_crc;
 static esp_err_t mqtt_error, logical_error;
+static unsigned last_sample_seq;
 static uint8_t crc(const uint8_t *b) {
     uint8_t c=255;
     for (int i=0;i<2;i++) { c ^= b[i]; for (int j=0;j<8;j++) c=c&128?(c<<1)^0x31:c<<1; }
@@ -110,10 +110,10 @@ void vTaskDelay(unsigned ms) {clock_ms+=ms;}
 esp_err_t i2c_new_master_bus(const i2c_master_bus_config_t *c,void **b){(void)c;*b=(void *)1;return ESP_OK;}
 esp_err_t i2c_del_master_bus(void *b){(void)b;return ESP_OK;}
 int xTaskCreate(void (*f)(void *),const char *n,unsigned s,void *a,unsigned p,void *h){(void)f;(void)n;(void)s;(void)a;(void)p;(void)h;return 1;}
-void mqtt_registration_set_sen66_connected(bool v){connected=v;}
-void mqtt_registration_set_sen66_diagnostics(uint32_t r,uint32_t t){recoveries=r;timeouts=t;}
+void node_messages_set_sen66_connected(bool v){connected=v;}
+void node_messages_set_sen66_diagnostics(uint32_t r,uint32_t t){recoveries=r;timeouts=t;}
 esp_err_t node_registration_get_logical_id(char *s,size_t n){assert(n>10);strcpy(s,"sen66-001");return logical_error;}
-esp_err_t sen66_delivery_submit(const char *id,const sen66_measurement_t *m){assert(!strcmp(id,"sen66-001"));assert(m->pm2_5_ug_m3==10);assert(m->sequence==sen66_diagnostics_snapshot().read_success);publishes++;return mqtt_error;}
+esp_err_t node_messages_publish_sen66(const char *id,const sen66_measurement_t *m){assert(!strcmp(id,"sen66-001"));assert(m->pm2_5_ug_m3==10);assert(m->sequence > last_sample_seq);last_sample_seq=m->sequence;publishes++;return mqtt_error;}
 static sensor_identity_t fake_result;
 static unsigned fake_calls;
 static sensor_identity_t fake_identify(const sensor_endpoint_t *e){(void)e;fake_calls++;return fake_result;}
@@ -164,16 +164,9 @@ int main(void) {
     logical_error=ESP_ERR_NOT_FOUND;tick(&slot);assert(publishes==0 && connected);logical_error=ESP_OK;
     mqtt_error=ESP_ERR_TIMEOUT;tick(&slot);assert(publishes==1 && connected);mqtt_error=ESP_OK;
     tick(&slot);assert(publishes==2 && connected);
-    sen66_diagnostics_t diag=sen66_diagnostics_snapshot();
-    assert(diag.read_attempts==3 && diag.read_success==3 && !diag.read_errors && !diag.not_ready);
-    assert(diag.last_interval_ms==10060 && diag.max_read_ms==60);
-    uint64_t boot_id=diag.boot_id;
     unsigned before=mutations, old_publishes=publishes, old_identities=identities;
     present=false;tick(&slot);assert(!connected && !slot.driver && handles==0 && mutations==before);
     assert(recoveries==1 && !timeouts);
-    diag=sen66_diagnostics_snapshot();
-    assert(diag.read_attempts==4 && diag.read_errors==1 && diag.read_success==3);
-    assert(diag.last_read_error==ESP_ERR_INVALID_STATE);
     present=true;product("SEN0466");tick(&slot);assert(!connected && !slot.driver && publishes==old_publishes && mutations==before);
     product("SEN66");tick(&slot);assert(connected && identities>old_identities && mutations==before+3);
     uint64_t deadline=slot.next_attempt_ms;
@@ -183,32 +176,22 @@ int main(void) {
     ready=false;for(int i=0;i<7 && slot.driver;i++)tick(&slot);
     assert(!connected && timeouts==1 && recoveries==2 && handles==0);
     assert(slot.next_attempt_ms-clock_ms==60000);
-    diag=sen66_diagnostics_snapshot();
-    assert(diag.not_ready==6 && diag.read_success==3 && diag.read_errors==1);
-    assert(diag.boot_id==boot_id && diag.max_interval_ms>60000);
     ready=true;tick(&slot);assert(connected);
     read_error=true;for(int i=0;i<3;i++)tick(&slot);assert(!connected && recoveries==3);read_error=false;
     tick(&slot);assert(connected);
-    diag=sen66_diagnostics_snapshot();
-    assert(diag.read_errors==4 && diag.last_read_error==ESP_ERR_TIMEOUT);
     // Recovery preserves the successful-read sequence.
-    tick(&slot);assert(sen66_diagnostics_snapshot().read_success==4);
     // Seamless exchange must fail identity before reading/publishing measurements.
     product("SEN65");before=mutations;old_publishes=publishes;tick(&slot);
     assert(!connected && !slot.driver && mutations==before && publishes==old_publishes && handles==0);
     product("SEN66");tick(&slot);assert(connected);
-    diag=sen66_diagnostics_snapshot();
     value_crc=true;tick(&slot);value_crc=false;
     assert(connected && slot.driver && publishes==old_publishes);
     // data_ready was true but the measured-values CRC failed: error, not success.
-    assert(sen66_diagnostics_snapshot().read_errors==diag.read_errors+1);
-    assert(sen66_diagnostics_snapshot().read_success==diag.read_success);
-    assert(sen66_diagnostics_snapshot().last_read_error==ESP_ERR_INVALID_CRC);
     return 0;
 }
 ''')
     binary = tmp_path / "identity-test"
     subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-I", str(tmp_path), "-I", str(SOURCE),
                     str(harness), str(SOURCE / "sen66_sensor.c"), str(SOURCE / "sensor_driver.c"),
-                    str(SOURCE / "sensor_drivers.c"), str(SOURCE / "sen66_diagnostics.c"), "-o", str(binary)], check=True, capture_output=True, text=True)
+                    str(SOURCE / "sensor_drivers.c"), "-o", str(binary)], check=True, capture_output=True, text=True)
     subprocess.run([str(binary)], check=True, capture_output=True, text=True)

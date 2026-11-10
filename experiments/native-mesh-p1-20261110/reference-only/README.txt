@@ -1,0 +1,1 @@
+Build-time bootloader and partition table, reference only. Normal trial update writes only the app at 0x10000. Do not flash these automatically. Third-party notices: ../atom-s3-lite-app-only/THIRD_PARTY_NOTICES.txt
