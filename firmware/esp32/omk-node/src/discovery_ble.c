@@ -1,6 +1,7 @@
 #include "discovery_ble.h"
 #include "node_protocol.h"
 #include "switchbot_relay.h"
+#include "ble_scan_runtime.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -8,12 +9,14 @@
 #include "esp_log.h"
 #include "esp_bt_main.h"
 #include "esp_gap_ble_api.h"
+#include "freertos/FreeRTOS.h"
 
 static const char *TAG = "omk_discovery_ble";
 static const uint8_t SERVICE_UUID_LE[16] = {0x01,0x51,0x7b,0x7d,0xe7,0x95,0x37,0x9f,0x3a,0x4e,0x64,0x7b,0x90,0x4d,0x2a,0x7d};
 static bool controller_started;
 static bool bluedroid_started;
-static bool scan_started;
+void discovery_ble_set_mesh_role(bool root) { ab_runtime_role(root); }
+static bool accept_scan_result(void) { return ab_runtime_receiving(); }
 /* ESP-IDF GAP API accepts a non-const pointer for these immutable settings. */
 static esp_ble_adv_params_t discovery_adv_params = {
     .adv_int_min = 0x80,
@@ -77,36 +80,23 @@ static void gap_callback(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *p
     } else if (event == ESP_GAP_BLE_ADV_START_COMPLETE_EVT) {
         ESP_LOGI(TAG, "Discovery advertising start complete status=%d", param->adv_start_cmpl.status);
         if (param->adv_start_cmpl.status == ESP_BT_STATUS_SUCCESS) {
-            esp_err_t err = esp_ble_gap_set_scan_params(&switchbot_scan_params);
-            if (err != ESP_OK) {
-                ESP_LOGE(TAG, "Failed to configure active SwitchBot scan: %s",
-                         esp_err_to_name(err));
-            }
+            ab_runtime_ready();
         }
     } else if (event == ESP_GAP_BLE_ADV_STOP_COMPLETE_EVT) {
         ESP_LOGI(TAG, "Discovery advertising stop complete status=%d", param->adv_stop_cmpl.status);
     } else if (event == ESP_GAP_BLE_SCAN_PARAM_SET_COMPLETE_EVT) {
-        if (param->scan_param_cmpl.status != ESP_BT_STATUS_SUCCESS) {
-            ESP_LOGE(TAG, "Active SwitchBot scan configuration failed status=%d",
-                     param->scan_param_cmpl.status);
-            return;
-        }
-        esp_err_t err = esp_ble_gap_start_scanning(0);
-        if (err != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to start active SwitchBot scan: %s",
-                     esp_err_to_name(err));
-            return;
-        }
+        ab_runtime_complete(AB_OP_PARAM, param->scan_param_cmpl.status == ESP_BT_STATUS_SUCCESS);
     } else if (event == ESP_GAP_BLE_SCAN_START_COMPLETE_EVT) {
-        scan_started = param->scan_start_cmpl.status == ESP_BT_STATUS_SUCCESS;
+        ab_runtime_complete(AB_OP_START, param->scan_start_cmpl.status == ESP_BT_STATUS_SUCCESS);
         ESP_LOGI(TAG, "Active SwitchBot scan start complete status=%d",
                  param->scan_start_cmpl.status);
     } else if (event == ESP_GAP_BLE_SCAN_STOP_COMPLETE_EVT) {
+        ab_runtime_complete(AB_OP_STOP, param->scan_stop_cmpl.status == ESP_BT_STATUS_SUCCESS);
         ESP_LOGI(TAG, "Active SwitchBot scan stop complete status=%d",
                  param->scan_stop_cmpl.status);
     } else if (event == ESP_GAP_BLE_SCAN_RESULT_EVT &&
                param->scan_rst.search_evt == ESP_GAP_SEARCH_INQ_RES_EVT) {
-        log_switchbot_advertisement(param);
+        if (accept_scan_result()) log_switchbot_advertisement(param);
     }
 }
 
@@ -135,12 +125,9 @@ fail:
 
 esp_err_t discovery_ble_stop(void) {
     esp_err_t first = esp_ble_gap_stop_advertising();
-    if (scan_started) {
+    if (ab_runtime_receiving()) {
         esp_err_t err = esp_ble_gap_stop_scanning();
-        if (first == ESP_OK && err != ESP_OK) {
-            first = err;
-        }
-        scan_started = false;
+        if (first == ESP_OK && err != ESP_OK) first = err;
     }
     if (bluedroid_started) {
         esp_err_t err=esp_bluedroid_disable(); if (first==ESP_OK && err!=ESP_OK) first=err;
@@ -153,4 +140,21 @@ esp_err_t discovery_ble_stop(void) {
         controller_started=false;
     }
     return first;
+}
+
+/* Only the existing node-state task submits GAP operations. Callbacks merely
+ * complete a pending operation; they cannot recursively start another one. */
+void discovery_ble_control_tick(void) {
+    uint16_t window;
+    enum ab_op op=ab_runtime_tick(&window);
+    esp_err_t result=ESP_OK;
+    if (op==AB_OP_STOP) result=esp_ble_gap_stop_scanning();
+    else if (op==AB_OP_PARAM) {
+        switchbot_scan_params.scan_window=window;
+        result=esp_ble_gap_set_scan_params(&switchbot_scan_params);
+    } else if (op==AB_OP_START) result=esp_ble_gap_start_scanning(0);
+    if (op!=AB_OP_NONE && result!=ESP_OK) {
+        ESP_LOGW(TAG,"Scan operation=%u window=%u failed=%d",(unsigned)op,(unsigned)window,(int)result);
+        ab_runtime_complete(op,false);
+    }
 }

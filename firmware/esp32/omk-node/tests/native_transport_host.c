@@ -16,7 +16,7 @@ static void wire(void) {
     uint8_t buffer[MESH_WIRE_MAX_SIZE + 1];
     mesh_wire_message_t decoded;
     size_t written;
-    for (int kind = MESH_MESSAGE_SEN66; kind <= MESH_MESSAGE_CONFIG; ++kind) {
+    for (int kind = MESH_MESSAGE_SEN66; kind <= MESH_MESSAGE_STATUS_RECEIPT; ++kind) {
         source.kind = kind;
         assert(mesh_wire_encode(&source, buffer, sizeof(buffer), &written));
         assert(written == MESH_WIRE_MAX_SIZE);

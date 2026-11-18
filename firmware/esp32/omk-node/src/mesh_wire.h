@@ -18,6 +18,8 @@ typedef enum {
     MESH_MESSAGE_REGISTRATION_ACK,
     /* Transport-private downlink, never accepted by publish(). */
     MESH_MESSAGE_CONFIG,
+    MESH_MESSAGE_STATUS_RECEIPT,
+    MESH_MESSAGE_MEASUREMENT = 8,
 } mesh_message_kind_t;
 
 typedef struct {
@@ -40,8 +42,10 @@ bool mesh_wire_decode(const uint8_t *buffer, size_t length,
 /* Topic target is a single validated 12-hex Node ID, not a wildcard. */
 bool mesh_wire_config_topic(const char *topic, size_t length, char node_id[13]);
 
+bool mesh_wire_scan_topic(const char *topic, size_t length, char node_id[13]);
+
 typedef struct {
-    bool valid;
+    bool valid, scan;
     size_t received;
     mesh_wire_message_t message;
 } mesh_config_assembler_t;

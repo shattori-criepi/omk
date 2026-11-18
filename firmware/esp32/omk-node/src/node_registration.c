@@ -38,7 +38,7 @@ static bool valid_record(const registration_record_t *record) {
     return record->magic == REGISTRATION_MAGIC && record->version == REGISTRATION_VERSION &&
            record->registered <= 1 && record->reserved[0] == 0 && record->reserved[1] == 0 &&
            memchr(record->logical_id, 0, sizeof(record->logical_id)) != NULL &&
-           (record->registered ? record->logical_id[0] != 0 : record->logical_id[0] == 0);
+           (record->registered ? node_logical_id_valid(record->logical_id) : record->logical_id[0] == 0);
 }
 static esp_err_t load_record(registration_record_t *record) {
     make_record(record, 0, NULL);
@@ -175,8 +175,7 @@ static esp_err_t apply_locked(uint32_t revision, const char *id) {
     return err;
 }
 esp_err_t node_registration_apply(uint32_t revision, const char *logical_id) {
-    if (logical_id != NULL && (logical_id[0] == 0 ||
-        strlen(logical_id) > OMK_NODE_LOGICAL_ID_MAX_LENGTH)) return ESP_ERR_INVALID_ARG;
+    if (logical_id != NULL && !node_logical_id_valid(logical_id)) return ESP_ERR_INVALID_ARG;
     if (!begin_write()) return ESP_ERR_INVALID_STATE;
     esp_err_t err = apply_locked(revision, logical_id);
     end_write();
@@ -193,8 +192,7 @@ static esp_err_t local_change(const char *id) {
     return err;
 }
 esp_err_t node_registration_save(const char *logical_id) {
-    if (logical_id == NULL || logical_id[0] == 0 ||
-        strlen(logical_id) > OMK_NODE_LOGICAL_ID_MAX_LENGTH) return ESP_ERR_INVALID_ARG;
+    if (!node_logical_id_valid(logical_id)) return ESP_ERR_INVALID_ARG;
     return local_change(logical_id);
 }
 esp_err_t node_registration_clear(void) { return local_change(NULL); }

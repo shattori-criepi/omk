@@ -6,7 +6,7 @@
 
 #include "esp_err.h"
 
-#define OMK_NODE_LOGICAL_ID_MAX_LENGTH 48
+#include "node_logical_id.h"
 
 /* NULL persists a clear tombstone. Stale or conflicting same-revision commands
  * return ESP_ERR_INVALID_STATE; identical commands do not write flash. */

@@ -20,7 +20,11 @@ static const char *TAG = "sensor_manager";
 #define SENSOR_I2C_FREQUENCY_HZ 100000
 #define SENSOR_RETRY_INTERVAL_MS 60000
 #define SENSOR_MEASUREMENT_INTERVAL_MS 10000
+#define SENSOR_PUBLICATION_INTERVAL_MS UINT64_C(20000)
 #define SENSOR_MEASUREMENT_LIVENESS_TIMEOUT_MS 60000
+/* ESP-IDF stack sizes are bytes. This task also formats JSON and copies a
+ * transport record; leave room for SDK calls and interrupt/context saves. */
+#define SENSOR_TASK_STACK_SIZE_BYTES 8192
 
 static i2c_master_bus_handle_t sensor_i2c_bus;
 typedef struct {
@@ -35,6 +39,8 @@ typedef struct {
     uint32_t measurement_timeout_count;
     uint64_t last_successful_measurement_ms;
     uint64_t next_attempt_ms;
+    uint64_t last_publication_attempt_ms;
+    bool publication_attempted;
 } sensor_slot_t;
 
 static uint64_t monotonic_milliseconds(void) {
@@ -82,6 +88,7 @@ static void sensor_slot_tick(sensor_slot_t *slot) {
         slot->context = context;
         selected->connected(true);
         slot->consecutive_read_failures = 0;
+        slot->publication_attempted = false;
         slot->last_successful_measurement_ms = monotonic_milliseconds();
         slot->next_attempt_ms = slot->last_successful_measurement_ms + SENSOR_MEASUREMENT_INTERVAL_MS;
         ESP_LOGI(TAG, "%s continuous measurement started", selected->driver_id);
@@ -116,8 +123,14 @@ static void sensor_slot_tick(sensor_slot_t *slot) {
                 ESP_LOGI(TAG, "%s publish waiting for logical ID", slot->driver->driver_id);
                 slot->logical_id_warning_logged = true;
             }
-        } else {
+        } else if (!slot->publication_attempted ||
+                   read_completed_ms - slot->last_publication_attempt_ms >= SENSOR_PUBLICATION_INTERVAL_MS) {
             slot->logical_id_warning_logged = false;
+            /* Consume the period before handoff, including queue rejection.
+             * Read/health processing stays at 10 s; publish this latest sample
+             * once, with no catch-up or delivery-dependent retry. */
+            slot->publication_attempted = true;
+            slot->last_publication_attempt_ms = read_completed_ms;
             err = slot->driver->publish(slot->context, logical_id);
             if (err != ESP_OK && !slot->delivery_warning_logged) {
                 ESP_LOGW(TAG, "%s delivery handoff unavailable: %s", slot->driver->driver_id, esp_err_to_name(err));
@@ -178,7 +191,7 @@ esp_err_t sensor_manager_start(void) {
         return err;
     }
 
-    if (xTaskCreate(sensor_manager_task, "sensor_manager", 3072, NULL, 5, NULL) != pdPASS) {
+    if (xTaskCreate(sensor_manager_task, "sensor_manager", SENSOR_TASK_STACK_SIZE_BYTES, NULL, 5, NULL) != pdPASS) {
         i2c_del_master_bus(sensor_i2c_bus);
         sensor_i2c_bus = NULL;
         return ESP_ERR_NO_MEM;

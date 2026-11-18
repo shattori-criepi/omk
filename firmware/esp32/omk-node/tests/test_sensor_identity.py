@@ -5,7 +5,8 @@ import subprocess
 SOURCE = Path(__file__).parents[1] / "src"
 
 
-def test_sensor_identity_and_recovery_in_production_c(tmp_path):
+def run_sensor_harness(tmp_path, body, source=SOURCE):
+    tmp_path.mkdir(parents=True, exist_ok=True)
     headers = {
         "esp_err.h": r"""
 #pragma once
@@ -53,7 +54,18 @@ esp_err_t i2c_del_master_bus(void *);
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content)
     harness = tmp_path / "harness.c"
-    harness.write_text(r'''
+    harness.write_text(body)
+
+    binary = tmp_path / "identity-test"
+    subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-fsanitize=undefined", "-fno-sanitize-recover=all", "-I", str(tmp_path), "-I", str(source),
+                    str(harness), str(source / "sen66_sensor.c"), str(source / "sensor_driver.c"),
+                    str(source / "sensor_drivers.c"), "-o", str(binary)], check=True, capture_output=True, text=True)
+    result = subprocess.run([str(binary)], check=True, capture_output=True, text=True)
+    return result.stdout
+
+
+def test_sensor_identity_and_recovery_in_production_c(tmp_path):
+    run_sensor_harness(tmp_path, r'''
 #include <assert.h>
 #include <string.h>
 #include <math.h>
@@ -163,6 +175,7 @@ int main(void) {
     product("SEN66");tick(&slot);assert(connected && slot.driver && mutations==3);
     logical_error=ESP_ERR_NOT_FOUND;tick(&slot);assert(publishes==0 && connected);logical_error=ESP_OK;
     mqtt_error=ESP_ERR_TIMEOUT;tick(&slot);assert(publishes==1 && connected);mqtt_error=ESP_OK;
+    tick(&slot);assert(publishes==1 && connected); // Failed attempt consumes 20 s.
     tick(&slot);assert(publishes==2 && connected);
     unsigned before=mutations, old_publishes=publishes, old_identities=identities;
     present=false;tick(&slot);assert(!connected && !slot.driver && handles==0 && mutations==before);
@@ -190,8 +203,3 @@ int main(void) {
     return 0;
 }
 ''')
-    binary = tmp_path / "identity-test"
-    subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-I", str(tmp_path), "-I", str(SOURCE),
-                    str(harness), str(SOURCE / "sen66_sensor.c"), str(SOURCE / "sensor_driver.c"),
-                    str(SOURCE / "sensor_drivers.c"), "-o", str(binary)], check=True, capture_output=True, text=True)
-    subprocess.run([str(binary)], check=True, capture_output=True, text=True)

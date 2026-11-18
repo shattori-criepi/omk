@@ -1,0 +1,1 @@
+../omk-node/tools/legacy_diag/diag_flash.py

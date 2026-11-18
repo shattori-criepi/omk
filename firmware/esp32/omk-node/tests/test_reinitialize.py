@@ -36,7 +36,7 @@ def reset_binary(tmp_path_factory):
 #define ESP_ERR_INVALID_STATE -3
 #define ESP_ERR_INVALID_ARG -4
 #define ESP_ERR_NVS_INVALID_LENGTH -5
-#define OMK_NODE_LOGICAL_ID_MAX_LENGTH 48
+#include "node_logical_id.h"
 #define OMK_NODE_PROVISIONING_STATE_UNREGISTERED 0U
 #define OMK_NODE_PROVISIONING_STATE_PROVISIONED 1U
 #define OMK_NODE_PROVISIONING_STATE_REGISTERED 2U
@@ -144,7 +144,7 @@ int main(int argc, char **argv) {
     root = tmp_path_factory.mktemp('reinitialize-c')
     (root/'reset.c').write_text(harness)
     binary = root/'reset'
-    subprocess.run([cc, '-std=c11', '-Wall', '-Wextra', '-Werror', '-Wno-unused-variable', str(root/'reset.c'), '-o', str(binary)], check=True, capture_output=True, text=True)
+    subprocess.run([cc, '-std=c11', '-Wall', '-Wextra', '-Werror', '-Wno-unused-variable', '-I', str(SOURCE), str(root/'reset.c'), '-o', str(binary)], check=True, capture_output=True, text=True)
     return binary
 
 

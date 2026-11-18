@@ -20,6 +20,8 @@
 #include "node_state.h"
 #include "node_protocol.h"
 #include "nvs.h"
+#include "mesh_diag.h"
+#include "diag_usb.h"
 
 #define USB_PROVISIONING_PROTOCOL_VERSION 2
 #define USB_PROVISIONING_LINE_MAX 256
@@ -114,6 +116,12 @@ static void handle_line(char *line) {
         write_status("busy");
         return;
     }
+#if OMK_DIAGNOSTICS
+    if (diag_usb_handle(root, command->valuestring, own_node_id)) {
+        cJSON_Delete(root);
+        return;
+    }
+#endif
     if (strcmp(command->valuestring, "verify_reinitialize") == 0) {
         /* Prove factory import completed before the host sends new Wi-Fi.
          * Never return the PoP or log the credential-bearing request. */
@@ -203,6 +211,7 @@ static void usb_provisioning_task(void *argument) {
     char line[USB_PROVISIONING_LINE_MAX + 1];
     size_t used = 0;
     while (true) {
+        mesh_diag_poll();
         uint8_t byte;
         int read = usb_serial_jtag_read_bytes(&byte, 1, pdMS_TO_TICKS(250));
         if (read != 1) {

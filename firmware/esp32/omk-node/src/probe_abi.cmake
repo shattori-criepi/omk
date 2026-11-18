@@ -1,0 +1,13 @@
+# Audited private TX ABI. Refuse a different blob instead of guessing offsets.
+  file(SHA256 "${IDF_PATH}/components/esp_wifi/lib/esp32s3/libpp.a" probe_sha)
+  if(NOT probe_sha STREQUAL "5e74f8b482f542851dfa595700aa4c6aba4e5152e3bf63659d4f09a70b9fff41")
+    message(FATAL_ERROR "V2 private TX probe: unaudited libpp.a; independently audit before changing this pin")
+  endif()
+  file(SHA256 "${IDF_PATH}/components/esp_wifi/lib/esp32s3/libmesh.a" probe_sha)
+  if(NOT probe_sha STREQUAL "395c3e893660e20ca23f65e400a5f5b2aa3cf46ad7b13b61c2149366ddc22b05")
+    message(FATAL_ERROR "V2 private TX probe: unaudited libmesh.a; independently audit before changing this pin")
+  endif()
+  file(SHA256 "${IDF_PATH}/components/esp_wifi/lib/esp32s3/libnet80211.a" probe_sha)
+  if(NOT probe_sha STREQUAL "2be2c71c0f6126dc0467097294d4aa6eb49df90cce734d0a5d61802c9b42d8cd")
+    message(FATAL_ERROR "V2 private TX probe: unaudited libnet80211.a; independently audit before changing this pin")
+  endif()

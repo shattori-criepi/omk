@@ -1,4 +1,7 @@
+#include "mesh_diag.h"
 #include "node_messages.h"
+#include "ble_scan_runtime.h"
+#include "discovery_ble.h"
 
 #include <inttypes.h>
 #include <math.h>
@@ -8,6 +11,7 @@
 #include "cJSON.h"
 #include "esp_log.h"
 #include "esp_random.h"
+#include "esp_system.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -20,6 +24,7 @@
 
 static const char *TAG = "node_messages";
 static char identity[13], boot_id[17];
+static esp_reset_reason_t reset_reason;
 static TaskHandle_t status_task;
 static atomic_bool ready;
 /* Config apply/drop and record snapshot/enqueue share one owner. Publishers
@@ -29,16 +34,12 @@ static SemaphoreHandle_t message_mutex;
 static portMUX_TYPE state_lock = portMUX_INITIALIZER_UNLOCKED;
 static bool sen66_connected;
 static uint32_t sensor_recoveries, sensor_timeouts, status_seq, ble_seq, enqueue_seq;
+/* Accessed only under message_mutex. Formatting is not a transport failure. */
+static uint16_t format_errors, send_errors;
+static void count_message_error(uint16_t *counter) { if (*counter < UINT16_MAX) ++*counter; }
 
 static bool publisher_enter(void) {
     return atomic_load(&ready) && xSemaphoreTake(message_mutex, 0) == pdTRUE;
-}
-static bool logical_id_valid(const char *id) {
-    if (!id || !id[0] || strlen(id) > OMK_NODE_LOGICAL_ID_MAX_LENGTH) return false;
-    for (const char *p = id; *p; ++p)
-        if (!((*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z') ||
-              (*p >= '0' && *p <= '9') || *p == '-' || *p == '_')) return false;
-    return true;
 }
 static bool hex_identity(const char *id) {
     if (!id || strlen(id) != 12) return false;
@@ -65,16 +66,26 @@ static cJSON *record(uint32_t sequence, uint32_t revision) {
     return root;
 }
 static esp_err_t publish(mesh_message_kind_t kind, cJSON *root) {
-    if (!root) return ESP_ERR_NO_MEM;
+    if (!root) { count_message_error(&format_errors); return ESP_ERR_NO_MEM; }
     char payload[MESH_TRANSPORT_PAYLOAD_MAX + 1];
     bool formatted = cJSON_PrintPreallocated(root, payload, sizeof(payload), false);
     cJSON_Delete(root);
-    return formatted ? mesh_transport_publish(kind, payload, strlen(payload)) : ESP_ERR_INVALID_SIZE;
+    if (!formatted) { count_message_error(&format_errors); return ESP_ERR_INVALID_SIZE; }
+    esp_err_t error = mesh_transport_publish(kind, payload, strlen(payload));
+    if (error != ESP_OK) count_message_error(&send_errors);
+    return error;
 }
-static cJSON *state_record(const char *result) {
+static cJSON *make_state_record(const char *result, bool diagnostic) {
     char logical_id[OMK_NODE_LOGICAL_ID_MAX_LENGTH + 1];
-    uint32_t revision;
-    if (node_registration_snapshot(logical_id, sizeof(logical_id), &revision) != ESP_OK) return NULL;
+    uint32_t revision = 0;
+    esp_err_t registration_error = node_registration_snapshot(logical_id, sizeof(logical_id), &revision);
+    if (registration_error == ESP_OK && logical_id[0] && !node_logical_id_valid(logical_id))
+        registration_error = ESP_ERR_INVALID_ARG;
+    if (registration_error != ESP_OK) {
+        if (!diagnostic) return NULL; /* Never claim a persisted registration/ACK. */
+        logical_id[0] = 0;
+        revision = 0;
+    }
     bool connected;
     uint32_t recoveries, timeouts;
     portENTER_CRITICAL(&state_lock);
@@ -90,22 +101,99 @@ static cJSON *state_record(const char *result) {
         cJSON_AddNumberToObject(root, "uptime_s", esp_timer_get_time() / 1000000) &&
         cJSON_AddNumberToObject(root, "sen66_rc", recoveries) &&
         cJSON_AddNumberToObject(root, "sen66_to", timeouts) &&
-        (!result || cJSON_AddStringToObject(root, "result", result));
+        (!result || cJSON_AddStringToObject(root, "result", result)) &&
+        (!diagnostic || cJSON_AddNumberToObject(root, "reg_err", registration_error));
+    if (!complete) { cJSON_Delete(root); return NULL; }
+    return root;
+}
+static cJSON *state_record(const char *result) { return make_state_record(result, false); }
+static bool add_mac(cJSON *root, const char *key, const uint8_t mac[6]) {
+    const uint8_t unknown[6] = {0};
+    if (!memcmp(mac, unknown, sizeof(unknown))) return cJSON_AddNullToObject(root, key) != NULL;
+    char text[18];
+    snprintf(text, sizeof(text), "%02x:%02x:%02x:%02x:%02x:%02x",
+             mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    return cJSON_AddStringToObject(root, key, text) != NULL;
+}
+static cJSON *heartbeat_record(void) {
+    cJSON *root = make_state_record(NULL, true);
+    if (!root) return NULL;
+    mesh_transport_status_t mesh;
+    mesh_transport_get_status(&mesh);
+    /* Only the existing non-retained heartbeat carries diagnostics. Retained
+     * registration and ACK records keep their schema and revision semantics.
+     * This is a local snapshot, not a delivery ACK or a recovery trigger. */
+    bool complete =
+        cJSON_AddNumberToObject(root, "mesh_layer", mesh.layer) &&
+        cJSON_AddBoolToObject(root, "is_root", mesh.is_root) &&
+        add_mac(root, "parent_bssid", mesh.parent_mac) &&
+        add_mac(root, "root_mac", mesh.root_mac) &&
+        cJSON_AddBoolToObject(root, "rootless", mesh.rootless) &&
+        cJSON_AddBoolToObject(root, "has_ip", mesh.has_ip) &&
+        cJSON_AddBoolToObject(root, "mqtt_connected", mesh.mqtt_connected) &&
+        cJSON_AddNumberToObject(root, "reset_reason", reset_reason) &&
+        cJSON_AddNumberToObject(root, "parent_disconnect_count", mesh.parent_disconnect_count) &&
+        cJSON_AddNumberToObject(root, "root_change_count", mesh.root_change_count) &&
+        (mesh.last_disconnect_valid ?
+            cJSON_AddNumberToObject(root, "last_disconnect_reason", mesh.last_disconnect_reason) :
+            cJSON_AddNullToObject(root, "last_disconnect_reason")) &&
+        (mesh.last_disconnect_valid ?
+            cJSON_AddNumberToObject(root, "last_disconnect_rssi", mesh.last_disconnect_rssi) :
+            cJSON_AddNullToObject(root, "last_disconnect_rssi")) &&
+        cJSON_AddNumberToObject(root, "tx_dropped", mesh.tx_dropped) &&
+        cJSON_AddNumberToObject(root, "mesh_tx_ok", mesh.mesh_tx_ok) &&
+        cJSON_AddNumberToObject(root, "mesh_tx_errors", mesh.mesh_tx_errors) &&
+        cJSON_AddNumberToObject(root, "mesh_rx_ok", mesh.mesh_rx_ok) &&
+        cJSON_AddNumberToObject(root, "fmt_err", format_errors) &&
+        cJSON_AddNumberToObject(root, "send_err", send_errors);
+    cJSON *recovery = complete ? cJSON_AddObjectToObject(root, "recovery") : NULL;
+    complete = recovery &&
+        cJSON_AddNumberToObject(recovery, "action", mesh.recovery_action) &&
+        cJSON_AddNumberToObject(recovery, "req", mesh.recovery_requests) &&
+        cJSON_AddNumberToObject(recovery, "ok", mesh.recovery_ok) &&
+        cJSON_AddNumberToObject(recovery, "err", mesh.recovery_error) &&
+        cJSON_AddNumberToObject(recovery, "link", mesh.recovery_link) &&
+        cJSON_AddNumberToObject(recovery, "ack", mesh.mqtt_pubacks) &&
+        cJSON_AddNumberToObject(recovery, "vote", mesh.recovery_votes) &&
+        cJSON_AddNumberToObject(recovery, "demote", mesh.recovery_demotions);
     if (!complete) { cJSON_Delete(root); return NULL; }
     return root;
 }
 static void send_state(void) {
     if (!publisher_enter()) return;
     /* Non-retained state is the heartbeat; retained registration is never liveness. */
-    publish(MESH_MESSAGE_NODE_STATUS, state_record(NULL));
+    publish(MESH_MESSAGE_NODE_STATUS, heartbeat_record());
     publish(MESH_MESSAGE_REGISTRATION_STATUS, state_record(NULL));
+    xSemaphoreGive(message_mutex);
+}
+static void send_scan_report(void) {
+    static uint8_t binary[AB_RECORD_SIZE];
+    static char payload[AB_JSON_MAX+1];
+    static uint32_t sequence;
+    ab_runtime_reported();
+    if (!publisher_enter()) { ab_runtime_drop(); return; }
+    uint32_t revision=node_registration_get_revision();
+    ab_runtime_pack(binary);
+    size_t length=ab_report_json(binary,identity,boot_id,++sequence,revision,payload,sizeof(payload));
+    if(length) mesh_transport_publish(MESH_MESSAGE_MEASUREMENT,payload,length);
+    else ab_runtime_drop();
     xSemaphoreGive(message_mutex);
 }
 static void state_task(void *arg) {
     (void)arg;
+    uint64_t status_due=0;
+    /* Deterministic stagger avoids all four reports sharing a boundary. */
+    uint64_t report_due=(uint64_t)esp_timer_get_time()/1000+60000+(unsigned char)identity[11]*97;
+    bool notified=false;
     for (;;) {
-        send_state();
-        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(30000));
+        uint64_t now=(uint64_t)esp_timer_get_time()/1000;
+        discovery_ble_control_tick();
+        ab_event_t event;
+        if(ab_runtime_event(&event)) mesh_diag_scan(event.ms,event.epoch,event.detail);
+        if(notified || now>=status_due) { send_state(); status_due=now+30000; }
+        if(now>=report_due) { if(ab_runtime_periodic_allowed()) send_scan_report(); report_due=now+60000; }
+        else if(ab_runtime_report_due()) send_scan_report();
+        notified=ulTaskNotifyTake(pdTRUE,pdMS_TO_TICKS(100))!=0;
     }
 }
 esp_err_t node_messages_start(void) {
@@ -120,6 +208,9 @@ esp_err_t node_messages_start(void) {
         uint64_t boot = ((uint64_t)esp_random() << 32) | esp_random();
         snprintf(boot_id, sizeof(boot_id), "%016" PRIx64, boot);
     }
+    reset_reason = esp_reset_reason();
+    mesh_diag_boot(identity, boot_id, reset_reason);
+    ab_runtime_boot(identity,boot_id);
     atomic_store(&ready, true);
     if (xTaskCreate(state_task, "node_state", 4096, NULL, 4, &status_task) != pdPASS) {
         atomic_store(&ready, false); status_task = NULL; return ESP_ERR_NO_MEM;
@@ -139,7 +230,7 @@ void node_messages_handle_config(const char *payload, size_t length) {
         cJSON_IsNumber(version) && version->valuedouble == 2 &&
         cJSON_IsNumber(rev) && rev->valuedouble >= 1 && rev->valuedouble <= UINT32_MAX &&
         rev->valuedouble == (uint32_t)rev->valuedouble &&
-        (cJSON_IsNull(id) || (cJSON_IsString(id) && logical_id_valid(id->valuestring)));
+        (cJSON_IsNull(id) || (cJSON_IsString(id) && node_logical_id_valid(id->valuestring)));
     if (valid && xSemaphoreTake(message_mutex, portMAX_DELAY) == pdTRUE) {
         uint32_t before = node_registration_get_revision();
         esp_err_t err = node_registration_apply((uint32_t)rev->valuedouble,
@@ -192,7 +283,7 @@ static esp_err_t publish_sen66(const char *logical_id, const sen66_measurement_t
     return err;
 }
 esp_err_t node_messages_publish_sen66(const char *logical_id, const sen66_measurement_t *s) {
-    if (!logical_id_valid(logical_id) || !s) return ESP_ERR_INVALID_ARG;
+    if (!node_logical_id_valid(logical_id) || !s) return ESP_ERR_INVALID_ARG;
     if (!publisher_enter()) return ESP_ERR_INVALID_STATE;
     esp_err_t err = publish_sen66(logical_id, s);
     xSemaphoreGive(message_mutex);

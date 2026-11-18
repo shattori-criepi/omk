@@ -73,3 +73,10 @@ config/omk-ap.env
 even-terminal-*.log
 data/provisioning/nodes/
 firmware/esp32/omk-node/src/development_wifi_config.h
+
+# Local firmware experiments, SDK copies and private diagnostic captures.
+/firmware-stability-work/
+/firmware-stability-backups/
+/firmware-diagnostics-backups/
+/firmware-trial-backups/
+/firmware/esp32/offline-components/

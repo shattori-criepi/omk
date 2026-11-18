@@ -1,56 +1,63 @@
-# OMK ESP32 Node
+# Native Mesh V2D-P1（実験ブランチ）
 
-ESP-IDF 6.0.1 / PlatformIO espressif32 7.0.1。AtomS3 Liteを主対象とする、native ESP-WIFI-MESH版です。実機導入前の実装であり、旧IP/NAT版の実機確認結果はこの版の安定性を保証しません。
+FW: `native-BLE-AB1-V2D-P1`。対象は AtomS3 Lite / ESP32-S3、診断ON。
+最終BIN SHA-256: `fa04fc425b5ebef9c8ca554234b6c7a1c88dd154bdf473aee66bb7b36af1e9eb`。
 
-## 通信
+Native Meshの公開済み基点 `ff1eb4e` からB1、子機回復AB1–AB5、DIAG1/LR2R1、
+BLE-AB1、V2、V2D、P1修正をまとめて取り込んだ。旧IP/MQTT Meshのmainや
+lifecycle作業ブランチを基点にするとNative Meshへの移行を欠くため、この祖先を使用する。
+実機導入済みBINとELFのハッシュ、BIN内のFW名・IDF版・ELFハッシュ、
+ビルド時記録の137入力すべてを照合した。詳しい入力ハッシュと依存版は
+`v2d-p1-provenance.json`。実装・ビルド設定・decoder/collectorは保存版と同一。
+テストだけ旧作業ディレクトリ参照を修正し、実機IDを合成値に置換、非公開ログに
+依存する比較テストを除外した。生ログ・過去レビュー・BIN/ELFは新規追加しない。
+祖先commitの `prebuilt/` や `experiments/native-mesh-p1-20261110/` は旧版であり、
+このFWの配布物ではない。
 
-```text
-各Node: SEN66 / BLE → bounded queue → esp_mesh_send(NULL)
-                       ↓ SDKが多段中継・親選択・Root選出
-Root: esp_mesh_recv → bounded queue → ESP-MQTT → Gateway内部topic
-Gateway: SEN66の所有者/revision照合 → 従来の共通MQTT topic
-Gateway: desired revision → MQTT config → Root → Mesh → 対象Node
-```
+## ビルド
 
-非RootはIPアドレス、DHCP、TCP/MQTT接続を持ちません。Root候補として全Nodeに公式のSTA netifを一度だけ生成し、現在のRootだけがDHCP clientとMQTTを使用します。仮想netif、DHCP server、NAPT、netif再生成、独自parent選択、復旧用restart、MQTT patchは廃止しました。
+PlatformIO Core 6系、`espressif32@7.0.1`、ESP-IDF 6.0.1
+(`framework-espidf@4.60001.0`)、Xtensa GCC `15.2.0+20251204` を使用。
+各ビルドツールの正確な版はprovenance参照。cJSON `1.7.19~2`、MQTT `1.1.0` は
+`dependencies.lock` に固定し、実ビルドに使ったコピーの全590ファイルが
+registry配布時のCHECKSUMSと一致することを確認済み（ローカル修正なし）。
+`src/probe_abi.cmake` は3つのESP Wi-Fi静的ライブラリをSHAで固定し、異なるSDKを拒否する。
 
-- Mesh形成・親変更・Root選出はSDKのself-organized mode。固定Rootは設定しません。
-- 上りは公式`esp_mesh_send(NULL, ...)`、受信は`esp_mesh_recv()`、下りは宛先MAC指定です。`recv_toDS()`によるIP/socket転送は使用しません。
-- Mesh受信taskは有限queueへコピーするだけです。MQTT enqueueと設定のNVS保存は別taskで実行します。
-- JSONは最大1024 bytes。周期値はQoS 0。有限queueと30秒の保持期限を持ち、満杯・期限切れ・Root交代では破棄します。SDK内の通過時間を含む端到端30秒保証はありません。
-- Node状態は30秒周期。Gatewayは新しい状態または計測の受信から120秒でofflineとし、5秒周期で判定します。Node別のMQTT LWTは使用しません。
-- 登録・解除・ID変更はGatewayの永続desired revisionとNode NVSの適用revisionを照合します。未完了設定はGatewayが再送します。
-- SEN66は物理Node IDの内部topicへ代理送信します。Gatewayで所有者/revisionを確認してから従来の測定topicへ転送するため、BLE Sensor ManagerはSEN66運用にも必要です。
+通常の依存解決では `IDF_COMPONENT_MANAGER` を未設定にして、このディレクトリで
+`pio run -e atom-s3-lite`。依存lockとSDK版を勝手に更新しないこと。
+保存版と同じofflineビルドは、上記版のcJSON/MQTTを
+`../offline-components/cjson` と `../offline-components/mqtt` に展開し、
+`IDF_COMPONENT_MANAGER=0 pio run -e atom-s3-lite`。
+既存の最終実験環境では、その `pio-core` を `PLATFORMIO_CORE_DIR` に指定できる。
+これはビルドのみであり、uploadは実行しない。
+`atom-s3-lite-diag-off` は比較用で、実機導入版ではない。他ボードやreset/wifi-set環境は今回の対象外。
+ビルド日時・絶対パスを含むため別環境でのBINハッシュ完全再現は保証しない。
+今回再ビルドはせず、保存入力と実物ハッシュによって対応を確認した。
 
-具体的な責務、削除した機構、限界は[設計](../../../docs/decisions/esp-wifi-mesh-node-networking.md)、移行手順と検証結果は[移行資料](../../../docs/developer/native-mesh-migration.md)を参照してください。
+## 診断ツールと主要テスト
 
-## 計測とBLE
+`tools/ble_scan_ab/` にA/B collector・decoder・V2 probe・quality・replay、
+`tools/legacy_diag/` にUSB collectorとFlash/payload decoderを置く。
+`../tools/` は同じ実装への相対symlinkで、従来の呼び出しパスを維持する。
+USB collectorはPython 3.10以上とpyserial 3.5、オフラインテストはpytestとCコンパイラを使用。
+A/B収集にはmosquitto_sub/btmonが必要。操作は各ツールの `--help` と
+`tools/ble_scan_ab/README-ja.md` を参照。採取ログは公開Gitへ追加しない。
 
-SEN66のドライバ、I2C自動検出、計測継続、sensor単体の復旧を維持します。通信queueが受け付けない場合はその測定値を破棄し、計測を続けます。測定連番は成功したreadごとに進みます。
-
-BLE Discovery v1とNode IDは維持します。SwitchBotのraw manufacturer/service dataをRoot経由でGatewayへ送り、既存Gateway decoderが通常topicへ変換します。
-
-- Active scan: interval 100ms、window 50ms。Scan Responseが必要な機種の収集を維持します。
-- 環境値の転送は最短25秒。Motion/Contact等の認識済み状態変化は即時送信し、現在状態も最短10秒で送信します。
-- BLE callbackは通信を待ちません。イベントの一時保留は機器ごとに2件・30秒までで、無制限の履歴配送はしません。
-- Wi-Fiはcore 0、BLE controller/hostはcore 1、software coexistenceを有効にします。RF共存とscanの非受信時間に起因するイベント取りこぼしは残ります。
-
-## Node identity・登録・USB
-
-`node_id`はeFuse base MACから導く従来の12桁hex IDです。Wi-Fi credential、PoP、factory partition、USB provisioning v2を維持します。BLE relay専用Nodeはlogical ID未登録でも動作します。
-
-登録はNVSの単一blobにrevisionとlogical IDを保存します。旧`registered`/`logical_id`は初回読取時にrevision 0として扱い、最初の変更で新形式に保存します。解除もrevision付きtombstoneです。旧firmwareへ戻しても新しい登録状態が読めるとは限りません。
-
-初回setup・通常更新・再セットアップの違いは[Node導入](../../../docs/user/esp32-node-setup.md)と[保守](../../../docs/user/node-maintenance.md)を参照してください。通常更新はNVSとfactory secretを消去しません。開発用登録resetは新しい解除revisionを保存します。ネットワーク診断用`OMKDIAG`・lifecycle試験コマンドはありません。
-
-## Offline build / test
+リポジトリのルートから、ローカルに準備したcJSONの場所を設定して実行する。
 
 ```sh
-cd firmware/esp32/omk-node
-pio run -e atom-s3-lite
-python -m pytest tests
+export OMK_TEST_CJSON_DIR="$PWD/firmware/esp32/omk-node/managed_components/espressif__cjson/cJSON"
+PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest -q -p no:cacheprovider \
+  firmware/esp32/omk-node/tests/test_diag_core.py \
+  firmware/esp32/omk-node/tests/test_diag_runtime.py \
+  firmware/esp32/omk-node/tests/test_diag_store.py \
+  firmware/esp32/omk-node/tests/test_diag_usb.py \
+  firmware/esp32/omk-node/tests/test_native_mesh_events.py \
+  firmware/esp32/omk-node/tests/test_v2_quality.py \
+  firmware/esp32/omk-node/tests/test_v2_tools.py \
+  firmware/esp32/omk-node/tests/test_ble_scan_tools.py \
+  -k 'test_diag_core or test_diag_runtime or test_diag_store or test_diag_usb or test_v2_quality or test_v2_tools or test_ble_scan_tools or (test_native_transport_events and (scan_m1 or ble_child_bridge or ble_roles or v2_gate_exclusion or sdk_upstream_contract or delivery_reconnect or tx_blocked_call))'
 ```
 
-Gatewayは`services/ble-sensor-manager/tests`を実行します。buildはuploadを含みません。`m5stick-c`は従来board設定を残していますが、native USB Serial/JTAGを持たず、このUSB setup経路は利用できません。保存済みWi-Fi設定でのbuild対象に限り、別boardの実機動作を保証するものではありません。
-
-旧版とnative版はMesh ID/PSKの導出ドメインを分離しています。既存Wi-Fi credentialは再利用できますが、旧Nodeを新Nodeの中継器として使えません。Gatewayサービスと経路上の全Nodeを揃えて移行してください。保存済みprebuiltはこのソースへ自動更新されません。
+取り込み元で上記対象は386 passed / 1 skipped（legacy fixtureではprivate probe無効）。
+全体再検証・実機操作・Gateway/MQTT/サービス設定変更は行っていない。

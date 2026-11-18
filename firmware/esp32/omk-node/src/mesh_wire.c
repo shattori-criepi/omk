@@ -1,3 +1,4 @@
+#include "node_logical_id.h"
 #include "mesh_wire.h"
 
 #include <string.h>
@@ -12,14 +13,7 @@ bool mesh_wire_valid_node_id(const char *id) {
 }
 
 bool mesh_wire_valid_logical_id(const char *id) {
-    if (!id || !*id) return false;
-    size_t i = 0;
-    for (; id[i] && i <= 48; ++i) {
-        char c = id[i];
-        if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
-              (c >= '0' && c <= '9') || c == '-' || c == '_')) return false;
-    }
-    return i <= 48;
+    return node_logical_id_valid(id);
 }
 
 bool mesh_wire_is_registration(mesh_message_kind_t kind) {
@@ -31,7 +25,7 @@ bool mesh_wire_is_fresh(uint64_t queued_ms, uint64_t now_ms) {
 }
 
 static bool valid_kind(unsigned kind) {
-    return kind >= MESH_MESSAGE_SEN66 && kind <= MESH_MESSAGE_CONFIG;
+    return kind >= MESH_MESSAGE_SEN66 && kind <= MESH_MESSAGE_MEASUREMENT;
 }
 
 bool mesh_wire_encode(const mesh_wire_message_t *m, uint8_t *buffer,
@@ -84,6 +78,15 @@ bool mesh_wire_config_topic(const char *topic, size_t length, char node_id[13]) 
     return mesh_wire_valid_node_id(node_id);
 }
 
+bool mesh_wire_scan_topic(const char *topic,size_t length,char node_id[13]) {
+    static const char prefix[]="omk/node/",suffix[]="/ble_scan/config";
+    if(!topic || !node_id || length!=sizeof(prefix)-1+12+sizeof(suffix)-1 ||
+       memcmp(topic,prefix,sizeof(prefix)-1) ||
+       memcmp(topic+sizeof(prefix)-1+12,suffix,sizeof(suffix)-1)) return false;
+    memcpy(node_id,topic+sizeof(prefix)-1,12); node_id[12]=0;
+    return mesh_wire_valid_node_id(node_id);
+}
+
 int mesh_wire_config_fragment(mesh_config_assembler_t *a,
                               const char *topic, size_t topic_length,
                               const char *payload, size_t length,
@@ -92,8 +95,9 @@ int mesh_wire_config_fragment(mesh_config_assembler_t *a,
     if (offset == 0) {
         a->valid = false;
         a->received = 0;
-        if (!total || total > MESH_TRANSPORT_PAYLOAD_MAX ||
-            !mesh_wire_config_topic(topic, topic_length, a->message.node_id)) return -1;
+        a->scan=mesh_wire_scan_topic(topic,topic_length,a->message.node_id);
+        if (!total || total > (a->scan ? 512U : MESH_TRANSPORT_PAYLOAD_MAX) ||
+            (!a->scan && !mesh_wire_config_topic(topic, topic_length, a->message.node_id))) return -1;
         a->message.kind = MESH_MESSAGE_CONFIG;
         a->message.length = (uint16_t)total;
         a->valid = true;
@@ -106,7 +110,7 @@ int mesh_wire_config_fragment(mesh_config_assembler_t *a,
     }
     if (offset && topic_length) {
         char id[13];
-        if (!mesh_wire_config_topic(topic, topic_length, id) || strcmp(id, a->message.node_id)) {
+        if (!(a->scan ? mesh_wire_scan_topic(topic, topic_length, id) : mesh_wire_config_topic(topic, topic_length, id)) || strcmp(id, a->message.node_id)) {
             a->valid = false;
             return -1;
         }

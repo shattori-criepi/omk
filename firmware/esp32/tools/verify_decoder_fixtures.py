@@ -1,0 +1,1 @@
+../omk-node/tools/legacy_diag/verify_decoder_fixtures.py

@@ -59,7 +59,10 @@ bool mesh_session_root_ready(const mesh_session_t *s) {
 
 bool mesh_session_got_ip(mesh_session_t *s, uint32_t observed_epoch) {
     if (s->epoch != observed_epoch || !s->started || !s->is_root ||
-        !s->parent_connected || s->rootless) return false;
+        !s->parent_connected) return false;
+    /* The caller validates the live Root netif/lease. Rootless gates MQTT,
+     * not lease acquisition: DHCP may finish before NETWORK_STATE clears.
+     * Link/role changes still invalidate this lease and reject old epochs. */
     s->has_ip = true;
     return true;
 }

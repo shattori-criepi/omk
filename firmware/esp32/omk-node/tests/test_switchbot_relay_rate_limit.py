@@ -5,7 +5,8 @@ import subprocess
 ROOT = Path(__file__).parents[1]
 
 
-def test_native_ble_state_and_periodic_delivery(tmp_path):
+def run_ble_harness(tmp_path, body, source=ROOT / "src"):
+    tmp_path.mkdir(parents=True, exist_ok=True)
     (tmp_path / "esp_err.h").write_text('''#pragma once
 typedef int esp_err_t;
 #define ESP_OK 0
@@ -15,7 +16,19 @@ typedef int esp_err_t;
 ''')
     (tmp_path / "esp_timer.h").write_text('#pragma once\n#include <stdint.h>\nint64_t esp_timer_get_time(void);\n')
     (tmp_path / "esp_log.h").write_text('#pragma once\n#define ESP_LOGW(tag, ...) do { (void)(tag); } while (0)\n')
-    (tmp_path / "test.c").write_text(r'''
+    (tmp_path / "test.c").write_text(body)
+
+    binary = tmp_path / "ble-test"
+    result = subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-fsanitize=undefined",
+                             "-I", str(tmp_path), "-I", str(source),
+                             str(tmp_path / "test.c"), "-o", str(binary)], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    result = subprocess.run([str(binary)], check=True, timeout=10, capture_output=True, text=True)
+    return result.stdout
+
+
+def test_native_ble_state_and_periodic_delivery(tmp_path):
+    run_ble_harness(tmp_path, r'''
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -48,8 +61,8 @@ int main(void){
  motion[9]++;observe(1,100,motion,10,NULL,0);assert(accepted==1);
  motion[7]=0x6c;observe(1,200,motion,10,NULL,0);assert(accepted==2&&sent[1].state==1);
  motion[7]=0x2c;observe(1,300,motion,10,NULL,0);assert(accepted==3&&sent[2].state==0);
- observe(1,10299,motion,10,NULL,0);assert(accepted==3);
- observe(1,10300,motion,10,NULL,0);assert(accepted==4);
+ observe(1,60299,motion,10,NULL,0);assert(accepted==3);
+ observe(1,60300,motion,10,NULL,0);assert(accepted==4);
  reset();observe(1,0,contact,13,NULL,0);contact[7]=0x5c;observe(1,100,contact,13,NULL,0);
  assert(accepted==2&&sent[1].state==1);contact[7]=0x6c;observe(1,200,contact,13,NULL,0);
  assert(accepted==2);contact[7]=0xcc;observe(1,300,contact,13,NULL,0);assert(accepted==3&&sent[2].state==0);
@@ -60,10 +73,11 @@ int main(void){
  assert(relay_device_slots[0].pending_count==2);
  queue_error=0;observe(1,1100,motion,10,NULL,0);
  assert(accepted==3&&sent[1].state==1&&sent[2].state==0&&relay_device_slots[0].pending_count==0);
- // An ordinary failed enqueue does not consume the 25-second interval either.
+ // LR2: identical failed unknown payloads consume the existing 25-second interval.
  reset();queue_error=ESP_FAIL;observe(1,0,env,12,NULL,0);assert(!accepted);
  queue_error=0;observe(1,999,env,12,NULL,0);assert(attempts==1);
- observe(1,1000,env,12,NULL,0);assert(accepted==1);
+ observe(1,1000,env,12,NULL,0);assert(accepted==0);
+ observe(1,25000,env,12,NULL,0);assert(accepted==1);
  // Fragment completion is forwarded once; manufacturer and service expire separately.
  reset();uint8_t svc[3]={0x54,0,50};observe(1,0,env,12,NULL,0);
  observe(1,100,NULL,0,svc,3);assert(accepted==2&&sent[1].manufacturer_length==12&&sent[1].service_length==3);
@@ -105,9 +119,3 @@ int main(void){
  return 0;
 }
 ''')
-    binary = tmp_path / "ble-test"
-    result = subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-fsanitize=undefined",
-                             "-I", str(tmp_path), "-I", str(ROOT / "src"),
-                             str(tmp_path / "test.c"), "-o", str(binary)], capture_output=True, text=True)
-    assert result.returncode == 0, result.stderr
-    subprocess.run([str(binary)], check=True, timeout=10)

@@ -117,6 +117,24 @@ int main(void) {
  assert(node_registration_clear()==0);check(1,"");reboot();check(1,""); // legacy must not resurrect
  persisted[0]^=1;reboot();assert(node_registration_get_logical_id(id,sizeof(id))==ESP_FAIL);
  initial=writes;assert(node_registration_apply(8,"bad")==ESP_FAIL&&writes==initial);
+ // Shared command/NVS validation rejects quotes, controls, slash and overlength.
+ const char *bad[]={"bad/id","bad\"id","bad\\id","bad\x01id",""};
+ for(unsigned i=0;i<sizeof(bad)/sizeof(*bad);++i) {
+   assert(node_registration_apply(20,bad[i])==ESP_ERR_INVALID_ARG);
+   assert(node_registration_save(bad[i])==ESP_ERR_INVALID_ARG);
+   if(!bad[i][0])continue;
+   have_blob=false;strcpy(legacy_id,bad[i]);reboot();
+   assert(node_registration_snapshot(id,sizeof(id),&(uint32_t){0})==ESP_FAIL);
+   assert(node_registration_get_provisioning_state(true,&state)==ESP_FAIL);
+   registration_record_t broken;make_record(&broken,9,bad[i]);memcpy(persisted,&broken,64);have_blob=true;reboot();
+   assert(node_registration_get_logical_id(id,sizeof(id))==ESP_FAIL);
+ }
+ char long_id[50];memset(long_id,'a',49);long_id[49]=0;
+ assert(node_registration_save(long_id)==ESP_ERR_INVALID_ARG);
+ long_id[48]=0;assert(node_logical_id_valid(long_id));
+ registration_record_t good;make_record(&good,10,long_id);memcpy(persisted,&good,64);have_blob=true;reboot();check(10,long_id);
+ memset(((registration_record_t*)persisted)->logical_id,'a',49);reboot();
+ assert(node_registration_get_logical_id(id,sizeof(id))==ESP_FAIL);
  have_blob=false;namespace_missing=true;initialized=false;node_registration_init_cache();check(0,"");
  return 0;
 }

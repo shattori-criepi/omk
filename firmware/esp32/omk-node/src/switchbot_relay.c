@@ -7,10 +7,11 @@
 #include "esp_timer.h"
 #include "node_messages.h"
 #include "node_identity.h"
+#include "mesh_diag.h"
 
 static const char *TAG = "switchbot_relay";
 #define SWITCHBOT_RELAY_INTERVAL_US (25LL * 1000LL * 1000LL)
-#define SWITCHBOT_STATE_INTERVAL_US (10LL * 1000LL * 1000LL)
+#define SWITCHBOT_STATE_INTERVAL_US UINT64_C(60000000)
 #define SWITCHBOT_RELAY_RETRY_US (1LL * 1000LL * 1000LL)
 #define SWITCHBOT_FRAGMENT_JOIN_WINDOW_US (2LL * 1000LL * 1000LL)
 #define SWITCHBOT_RELAY_DEVICE_SLOTS 16
@@ -41,6 +42,18 @@ typedef struct {
     uint8_t published_state_kind;
     uint8_t published_state;
     int64_t last_publish_us;
+    uint64_t last_state_attempt_us;
+    bool state_attempted;
+    /* Missing-field completion has its own bounded attempt budget. Neither
+     * repeated fragments nor failed handoffs may bypass the period forever. */
+    uint64_t completion_attempt_us;
+    bool completion_attempted;
+    /* Exact bytes, not a hash: unknown/encrypted changes must never collide.
+     * Only repeated failed handoffs of the same payload consume this budget. */
+    uint8_t unknown_manufacturer[31], unknown_service[31];
+    uint8_t unknown_ml, unknown_sl;
+    uint64_t unknown_attempt_us;
+    bool unknown_attempted;
     int64_t retry_after_us;
     relay_sample_t pending[SWITCHBOT_PENDING_STATES];
     uint8_t pending_count;
@@ -150,13 +163,58 @@ static void record_transition(relay_device_slot_t *slot, int64_t now_us) {
     }
     slot->pending[slot->pending_count++] = *sample;
 }
+static bool completion_due(const relay_device_slot_t *slot, const relay_sample_t *sample,
+                           int64_t now_us) {
+    return sample->state_kind && slot->has_published &&
+        ((!slot->published_has_service && sample->service_length) ||
+         (!slot->published_has_manufacturer && sample->manufacturer_length)) &&
+        (!slot->completion_attempted ||
+         (uint64_t)now_us - slot->completion_attempt_us >= SWITCHBOT_STATE_INTERVAL_US);
+}
 static bool periodic_due(const relay_device_slot_t *slot, int64_t now_us) {
-    int64_t interval = slot->latest.state_kind ? SWITCHBOT_STATE_INTERVAL_US : SWITCHBOT_RELAY_INTERVAL_US;
-    return !slot->has_published || now_us - slot->last_publish_us >= interval ||
+    /* Only the existing validated state hints distinguish a periodic snapshot
+     * from a transition. Unknown/encrypted layouts retain the original path.
+     * Events bypass this gate. Missing fields get at most one extra handoff
+     * attempt per device per 60 s, even when handoff fails. */
+    if (slot->latest.state_kind)
+        return completion_due(slot, &slot->latest, now_us) || !slot->state_attempted ||
+            (uint64_t)now_us - slot->last_state_attempt_us >= SWITCHBOT_STATE_INTERVAL_US;
+    bool unchanged = slot->unknown_attempted &&
+        slot->unknown_ml == slot->latest.manufacturer_length &&
+        slot->unknown_sl == slot->latest.service_length &&
+        !memcmp(slot->unknown_manufacturer, slot->latest.manufacturer_data, slot->unknown_ml) &&
+        !memcmp(slot->unknown_service, slot->latest.service_data, slot->unknown_sl);
+    if (unchanged && (uint64_t)now_us - slot->unknown_attempt_us < SWITCHBOT_RELAY_INTERVAL_US)
+        return false;
+    return !slot->has_published || now_us - slot->last_publish_us >= SWITCHBOT_RELAY_INTERVAL_US ||
         (!slot->published_has_manufacturer && slot->latest.manufacturer_length) ||
         (!slot->published_has_service && slot->latest.service_length);
 }
+#if OMK_DIAGNOSTICS
+static unsigned diagnostic_type(const relay_sample_t *sample) {
+    if (sample->state_kind == 1 && sample->service_length == 7 && sample->manufacturer_length == 12)
+        return 3; /* Existing validated Presence hint; scheduling is unchanged. */
+    return sample->state_kind;
+}
+#endif
 static esp_err_t publish_sample(relay_device_slot_t *slot, const relay_sample_t *sample, int64_t now_us) {
+    /* Failed handoffs also consume the periodic budget. The existing finite
+     * transition queue/retry path remains independent and unchanged. */
+    if (sample->state_kind) {
+        if (!slot->pending_count && completion_due(slot, sample, now_us)) {
+            slot->completion_attempted = true;
+            slot->completion_attempt_us = (uint64_t)now_us;
+        }
+        slot->state_attempted = true;
+        slot->last_state_attempt_us = (uint64_t)now_us;
+    } else {
+        slot->unknown_attempted = true;
+        slot->unknown_attempt_us = (uint64_t)now_us;
+        slot->unknown_ml = sample->manufacturer_length; slot->unknown_sl = sample->service_length;
+        memcpy(slot->unknown_manufacturer, sample->manufacturer_data, slot->unknown_ml);
+        memcpy(slot->unknown_service, sample->service_data, slot->unknown_sl);
+    }
+    mesh_diag_ble(diagnostic_type(sample), slot->pending_count != 0, false, false);
     char relay_node_id[OMK_NODE_ID_HEX_LENGTH + 1], ble_address[13];
     esp_err_t err = node_identity_get_id_hex(relay_node_id, sizeof(relay_node_id));
     if (err == ESP_OK) {
@@ -168,10 +226,12 @@ static esp_err_t publish_sample(relay_device_slot_t *slot, const relay_sample_t 
                     sample->service_data, sample->service_length);
     }
     if (err != ESP_OK) {
+        mesh_diag_ble(diagnostic_type(sample), false, true, false);
         slot->retry_after_us = now_us + SWITCHBOT_RELAY_RETRY_US;
         return err;
     }
     slot->retry_after_us = 0;
+    slot->unknown_attempted = false; /* Successful unknown periodic path stays at 25 s. */
     slot->has_published = true;
     slot->published_has_manufacturer = sample->manufacturer_length != 0;
     slot->published_has_service = sample->service_length != 0;
@@ -214,5 +274,8 @@ void switchbot_relay_handle_observation(const uint8_t address[6], int rssi,
         if (publish_sample(slot, &slot->pending[0], now_us) != ESP_OK) return;
         pop_pending(slot);
     }
-    if (!sent_pending && periodic_due(slot, now_us)) (void)publish_sample(slot, &slot->latest, now_us);
+    if (!sent_pending) {
+        if (periodic_due(slot, now_us)) (void)publish_sample(slot, &slot->latest, now_us);
+        else mesh_diag_ble(diagnostic_type(&slot->latest), false, false, true);
+    }
 }
