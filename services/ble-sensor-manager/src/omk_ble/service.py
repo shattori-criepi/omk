@@ -141,18 +141,22 @@ class BleManager:
         """Record an advertisement without ever reordering setup candidates."""
         # BlueZ and MQTT callbacks run on separate threads.
         with self._advertisement_lock:
+            sensor = next((item for item in self.registry.list() if item.device_key == decoded.device_key), None)
             if source == "direct":
-                self.observations[decoded.device_key] = decoded
+                previous = self.observations.get(decoded.device_key)
+                # Keep reporting the last valid measurement when decoding fails.
+                if (sensor is None or previous is None or self._observation_is_valid(decoded, sensor)
+                        or not self._observation_is_valid(previous, sensor)):
+                    self.observations[decoded.device_key] = decoded
             if source == "direct" and decoded.model == "omk_node":
                 self.node_observations[decoded.values["node_id"]] = decoded
-            registered_keys = {sensor.device_key for sensor in self.registry.list()}
-            if source == "direct" and self.scanning and decoded.device_key not in registered_keys:
+            if source == "direct" and self.scanning and sensor is None:
                 if decoded.device_key not in self.setup_candidates:
                     self._setup_candidate_order.append(decoded.device_key)
                 # Always replace the complete snapshot: RSSI, receive time, values,
                 # raw packet, and visual highlighting all use the latest packet.
                 self.setup_candidates[decoded.device_key] = decoded
-            self._publish_if_registered(decoded, source=source, relay_node_id=relay_node_id)
+            self._publish_if_registered(decoded, sensor, source=source, relay_node_id=relay_node_id)
 
     def node_list(self) -> list[dict[str, Any]]:
         now = self._now_provider()
@@ -408,6 +412,11 @@ class BleManager:
                 math.isfinite(temperature_c) and -20.0 <= temperature_c <= 60.0 and
                 not isinstance(humidity, bool) and isinstance(humidity, int) and 0 <= humidity <= 100)
 
+    @staticmethod
+    def _observation_is_valid(advertisement: DecodedAdvertisement, sensor: RegisteredSensor) -> bool:
+        return (bool(advertisement.values) and advertisement.sensor_type != "unknown"
+                and advertisement.model == sensor.model and advertisement.sensor_type == sensor.sensor_type)
+
     def registered_list(self) -> list[dict[str, Any]]:
         """Join immutable registry settings with in-memory latest observations."""
         now = self._now_provider()
@@ -431,8 +440,7 @@ class BleManager:
                 except ValueError:
                     item["online"] = False
                 item["status"] = "normal" if item["online"] else "offline"
-                if (seen.sensor_type == "unknown" or seen.model != sensor.model
-                        or seen.sensor_type != sensor.sensor_type):
+                if not self._observation_is_valid(seen, sensor):
                     item["latest"]["values"] = {}
                     item["status"] = "unrecognized"
             result.append(item)
@@ -527,17 +535,10 @@ class BleManager:
         """Unregister a physical device without deleting observations or history."""
         return self.registry.delete(device_key)
 
-    def _publish_if_registered(self, advertisement: DecodedAdvertisement, *, source: str,
-                               relay_node_id: str | None) -> None:
-        try:
-            sensor = next((item for item in self.registry.list() if item.device_key == advertisement.device_key), None)
-        except Exception as error:
-            LOGGER.error("Ignoring BLE measurement because registry cannot be read: %s", error)
+    def _publish_if_registered(self, advertisement: DecodedAdvertisement, sensor: RegisteredSensor | None, *,
+                               source: str, relay_node_id: str | None) -> None:
+        if sensor is None or not self._observation_is_valid(advertisement, sensor):
             return
-        if not sensor or not advertisement.values:
-            return
-        if advertisement.model != sensor.model or advertisement.sensor_type != sensor.sensor_type:
-            return  # Never publish a new model under an existing model's sensor ID.
         now = self._monotonic_provider()
         if source == "direct":
             # This is observation freshness, deliberately independent from

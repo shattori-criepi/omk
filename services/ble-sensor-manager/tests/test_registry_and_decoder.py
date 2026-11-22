@@ -811,6 +811,71 @@ def test_registered_plug_model_hint_is_used_for_direct_and_raw_relay(tmp_path: P
     assert relay_payload["source"] == "relay" and relay_payload["power_w"] == 0.0
 
 
+@pytest.mark.parametrize("model,sensor_type,values", [
+    pytest.param("unknown_switchbot", "unknown", {}, id="unrecognized"),
+    pytest.param("temperature_humidity_sensor", "environment", {}, id="empty-values"),
+    pytest.param("waterproof_sensor", "environment", {"temperature_c": 27.0}, id="wrong-model"),
+    pytest.param("temperature_humidity_sensor", "power", {"power_w": 2.0}, id="wrong-type"),
+])
+def test_invalid_direct_observation_keeps_latest_valid_relay(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, model: str, sensor_type: str, values: dict[str, float],
+) -> None:
+    registry = SensorRegistry(tmp_path / "sensors.json")
+    registry.register(RegisteredSensor(
+        "switchbot:meter", "th-001", "environment", "switchbot", "temperature_humidity_sensor", "", "温湿度計",
+    ))
+    start = datetime(2026, 8, 20, 10, tzinfo=timezone.utc)
+    clock = [0.0]
+
+    def now() -> datetime:
+        return start + timedelta(seconds=clock[0])
+
+    publisher = _MqttPublisher()
+    manager = BleManager(registry, publisher, now_provider=now, monotonic_provider=lambda: clock[0])
+    monkeypatch.setattr(ble_main, "manager", manager)
+
+    def invalid_direct() -> None:
+        manager.record_advertisement(DecodedAdvertisement(
+            "switchbot:meter", "switchbot", model, sensor_type, -40, now().isoformat(), values,
+        ))
+
+    def valid(temperature: float, *, source: str) -> None:
+        manager.record_advertisement(DecodedAdvertisement(
+            "switchbot:meter", "switchbot", "temperature_humidity_sensor", "environment", -50, now().isoformat(),
+            {"temperature_c": temperature, "relative_humidity_percent": 50},
+        ), source=source)
+
+    invalid_direct()
+    observed = ble_main.sensors()["sensors"][0]
+    assert observed["online"] is True and observed["status"] == "unrecognized"
+    assert observed["latest"] == {"received_at": now().isoformat(), "rssi": -40, "values": {}}
+    assert publisher.messages == []
+
+    clock[0] = 1.0
+    valid(22.8, source="relay")
+    relayed = ble_main.sensors()["sensors"][0]
+    assert relayed["online"] is True and relayed["status"] == "normal"
+    assert relayed["latest"]["values"]["temperature_c"] == 22.8
+
+    clock[0] = 2.0
+    invalid_direct()
+    assert ble_main.sensors()["sensors"][0] == relayed
+    clock[0] = 3.0
+    valid(23.0, source="relay")
+    assert ble_main.sensors()["sensors"][0]["latest"]["values"]["temperature_c"] == 23.0
+    assert [json.loads(payload)["source"] for _, payload in publisher.messages] == ["relay"]
+
+    clock[0] = 4.0
+    valid(24.0, source="direct")
+    direct = ble_main.sensors()["sensors"][0]
+    assert direct["latest"]["values"]["temperature_c"] == 24.0
+    clock[0] = 5.0
+    invalid_direct()
+    valid(25.0, source="relay")
+    assert ble_main.sensors()["sensors"][0] == direct
+    assert [json.loads(payload)["source"] for _, payload in publisher.messages] == ["relay", "direct"]
+
+
 def test_environment_direct_route_suppresses_relay_then_falls_back_and_recovers(tmp_path: Path) -> None:
     registry = SensorRegistry(tmp_path / "sensors.json")
     registry.register(RegisteredSensor("switchbot:meter", "th-001", "environment", "switchbot", "temperature_humidity_sensor", "", "温湿度計"))
