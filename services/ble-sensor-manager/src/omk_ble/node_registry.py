@@ -20,10 +20,12 @@ class NodeRegistry:
                 return {}
             try:
                 data = json.loads(self.path.read_text(encoding="utf-8"))
-                nodes = data.get("nodes", {})
-                return nodes if isinstance(nodes, dict) else {}
-            except (OSError, json.JSONDecodeError):
-                return {}
+                nodes = data.get("nodes") if isinstance(data, dict) else None
+                if not isinstance(nodes, dict) or any(not isinstance(node, dict) for node in nodes.values()):
+                    raise RuntimeError("Invalid Node registry; refusing to replace persisted registration")
+                return nodes
+            except (OSError, json.JSONDecodeError) as error:
+                raise RuntimeError("Cannot read Node registry; registration is unchanged") from error
 
     def update(self, node_id: str, **values: Any) -> dict[str, Any]:
         with self._lock:
@@ -49,10 +51,22 @@ class NodeRegistry:
     def _write(self, nodes: dict[str, dict[str, Any]]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         payload = json.dumps({"nodes": nodes}, ensure_ascii=False, indent=2) + "\n"
-        with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=self.path.parent, delete=False) as output:
-            output.write(payload)
-            output.flush()
-            os.fsync(output.fileno())
-            temporary_path = output.name
-        os.replace(temporary_path, self.path)
-        os.chmod(self.path, 0o640)
+        temporary_path = None
+        try:
+            with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=self.path.parent, delete=False) as output:
+                temporary_path = output.name
+                os.fchmod(output.fileno(), 0o640)
+                output.write(payload)
+                output.flush()
+                os.fsync(output.fileno())
+            os.replace(temporary_path, self.path)
+            directory = os.open(self.path.parent, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                os.fsync(directory)
+            finally:
+                os.close(directory)
+        except OSError as error:
+            raise RuntimeError("Cannot persist Node registration; no config was sent") from error
+        finally:
+            if temporary_path and os.path.exists(temporary_path):
+                os.unlink(temporary_path)

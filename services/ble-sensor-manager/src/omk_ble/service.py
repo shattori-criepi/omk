@@ -13,6 +13,7 @@ from typing import Any, Callable
 import paho.mqtt.client as mqtt
 
 from .models import DecodedAdvertisement, RegisteredSensor, now_iso
+from .native_nodes import NODE_AVAILABLE_SECONDS, NativeNodeControl, native_registration
 from .node_registry import NodeRegistry
 from .omk_node import decode as decode_omk_node
 from .registry import SensorRegistry
@@ -32,19 +33,20 @@ NODE_SENSOR_FRESHNESS_SECONDS = 60.0
 NODE_CAPABILITY_NAMES = ((1 << 0, "ble_scan"), (1 << 1, "sen66"))
 
 
-def _fresh_node_timestamp(value: Any, now: datetime, seconds: float) -> bool:
+def _fresh_node_timestamp(value: Any, now: datetime, seconds: float, *, inclusive: bool = True) -> bool:
     if not isinstance(value, str):
         return False
     try:
         timestamp = datetime.fromisoformat(value)
         if timestamp.tzinfo is None:
             return False
-        return 0 <= (now - timestamp).total_seconds() <= seconds
+        age = (now - timestamp).total_seconds()
+        return 0 <= age and (age <= seconds if inclusive else age < seconds)
     except (ValueError, TypeError, OverflowError):
         return False
 
 
-class BleManager:
+class BleManager(NativeNodeControl):
     def __init__(
         self,
         registry: SensorRegistry,
@@ -76,6 +78,7 @@ class BleManager:
         self._mqtt = mqtt_client
         self._advertisement_lock = Lock()
         self._node_registration_lock = RLock()
+        self._node_control_init()
         self.offline_seconds = int(os.getenv("OMK_BLE_OFFLINE_SECONDS", "900"))
         self._now_provider = now_provider or (lambda: datetime.now(timezone.utc))
         self._monotonic_provider = monotonic_provider or monotonic
@@ -173,11 +176,15 @@ class BleManager:
             elif isinstance(item.get("capabilities"), int):
                 item["capabilities"] = [name for bit, name in NODE_CAPABILITY_NAMES if item["capabilities"] & bit]
             item["registration_state"] = item.get("registration_state", item.get("ble_state", "unregistered"))
-            item["relay_active"] = _fresh_node_timestamp(item.get("relay_last_seen_at"), now, NODE_RELAY_FRESHNESS_SECONDS)
+            native = native_registration(item) or "activity_boot_id" in item
+            item["relay_active"] = _fresh_node_timestamp(item.get("relay_last_seen_at"), now,
+                NODE_AVAILABLE_SECONDS if native else NODE_RELAY_FRESHNESS_SECONDS, inclusive=not native)
             item["online"] = (
-                bool(seen and _fresh_node_timestamp(seen.received_at, now, NODE_DISCOVERY_FRESHNESS_SECONDS))
+                bool(not native and seen and _fresh_node_timestamp(seen.received_at, now, NODE_DISCOVERY_FRESHNESS_SECONDS))
+                or _fresh_node_timestamp(item.get("heartbeat_last_seen_at"), now, NODE_AVAILABLE_SECONDS, inclusive=False)
                 or item["relay_active"]
-                or _fresh_node_timestamp(item.get("sen66_last_seen_at"), now, NODE_SENSOR_FRESHNESS_SECONDS)
+                or _fresh_node_timestamp(item.get("sen66_last_seen_at"), now,
+                    NODE_AVAILABLE_SECONDS if native else NODE_SENSOR_FRESHNESS_SECONDS, inclusive=not native)
             )
             item["attached_sensors"] = ["SEN66"] if "sen66" in item.get("connected_sensors", []) else []
             result.append(item)
@@ -195,7 +202,7 @@ class BleManager:
         if self.node_registry is None:
             return None
         for node_id, node in self.node_registry.list().items():
-            if node_id != excluding_node_id and logical_id in {node.get("logical_id"), node.get("requested_logical_id")}:
+            if node_id != excluding_node_id and logical_id in self._reserved_ids(node):
                 return node_id
         return None
 
@@ -211,6 +218,9 @@ class BleManager:
             owner = self._logical_id_owner(logical_id, excluding_node_id=node_id)
             if owner is not None:
                 raise ValueError(f"logical_id is already assigned to node {owner}")
+            if native_registration(current):
+                self._request_native_registration(current, logical_id)
+                return {"node_id": node_id, "logical_id": logical_id, "status": "request_sent"}
             if not self._mqtt:
                 raise RuntimeError("MQTT client is unavailable")
             payload = json.dumps({"protocol_version": 1, "logical_id": logical_id})
@@ -222,31 +232,38 @@ class BleManager:
                                           registration_revoked=False)
         return {"node_id": node_id, "logical_id": logical_id, "status": "request_sent"}
 
-    def handle_node_mqtt(self, topic: str, payload: bytes) -> None:
+    def handle_node_mqtt(self, topic: str, payload: bytes, *, retain: bool = False) -> None:
         parts = topic.split("/")
-        if len(parts) != 5 or parts[:2] != ["omk", "node"] or parts[3] != "registration" or not self._node_id_valid(parts[2]):
-            return
-        if parts[4] not in {"status", "ack"} or self.node_registry is None:
+        if self.node_registry is None or len(parts) < 4 or parts[:2] != ["omk", "node"] or not self._node_id_valid(parts[2]):
             return
         try:
             value = json.loads(payload.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError):
             LOGGER.warning("Ignoring invalid OMK Node MQTT JSON")
             return
-        if not isinstance(value, dict) or value.get("protocol_version") != 1 or value.get("node_id") != parts[2]:
+        if not isinstance(value, dict) or type(value.get("protocol_version")) is not int or value.get("node_id") != parts[2]:
+            return
+        if value["protocol_version"] == 2:
+            self._handle_native_report(parts, value, retain=retain)
+            return
+        if (value["protocol_version"] != 1 or len(parts) != 5 or parts[3] != "registration"
+                or parts[4] not in {"status", "ack"}):
             LOGGER.warning("Ignoring invalid OMK Node MQTT fields")
             return
         if parts[4] == "status":
             state = value.get("registration_state")
             capabilities = value.get("capabilities")
             connected_sensors = value.get("connected_sensors", [])
-            if (state not in {"provisioned", "registered"} or not isinstance(capabilities, int) or
+            if (state not in ("provisioned", "registered") or not isinstance(capabilities, int) or
                     not isinstance(connected_sensors, list) or any(sensor != "sen66" for sensor in connected_sensors)):
                 return
             status_values = {"protocol_version": 1, "capabilities": capabilities,
                              "connected_sensors": connected_sensors, "registration_state": state,
                              "mqtt_status_seen_at": now_iso()}
             with self._node_registration_lock:
+                current = self.node_registry.list().get(parts[2], {})
+                if native_registration(current):
+                    return
                 if state == "provisioned":
                     self.node_registry.clear_registration(parts[2], **status_values)
                 else:
@@ -257,7 +274,6 @@ class BleManager:
                         if not self._logical_id_valid(logical_id):
                             LOGGER.warning("Ignoring invalid OMK Node status logical_id for node_id=%s", parts[2])
                             return
-                        current = self.node_registry.list().get(parts[2], {})
                         if current.get("registration_revoked"):
                             LOGGER.info("Ignoring retained registration status after removal for node_id=%s", parts[2])
                             return
@@ -276,6 +292,8 @@ class BleManager:
             return
         with self._node_registration_lock:
             current = self.node_registry.list().get(parts[2], {})
+            if native_registration(current):
+                return
             if current.get("registration_revoked"):
                 LOGGER.info("Ignoring retained registration ACK after removal for node_id=%s", parts[2])
                 return
@@ -292,8 +310,43 @@ class BleManager:
                                       registration_state="registered", request_state="registered",
                                       requested_logical_id=None, ack_seen_at=now_iso(), registration_revoked=False)
 
-    def handle_sen66_mqtt(self, topic: str, payload: bytes) -> None:
-        """Mark a SEN66 as physically observed only after valid telemetry arrives."""
+    def _handle_raw_sen66(self, topic: str, payload: bytes, *, retain: bool = False) -> None:
+        """Authorize raw SEN66 once, before any shared-topic subscriber sees it."""
+        parts = topic.split("/")
+        if (retain or len(parts) != 4 or parts[0] != "omk-relay" or parts[2:] != ["sen66", "raw"]
+                or self.node_registry is None):
+            return
+        try:
+            value = json.loads(payload.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return
+        node_id = parts[1]
+        if not isinstance(value, dict) or not self._node_id_valid(node_id):
+            return
+        with self._node_registration_lock:
+            node = self.node_registry.list().get(node_id, {})
+            logical_id = value.get("device_id")
+            if (node.get("registration_state") != "registered" or not self._logical_id_valid(logical_id)
+                    or node.get("logical_id") != logical_id or node.get("registration_revoked")
+                    or ("desired_revision" not in node and node.get("requested_logical_id"))
+                    or value.get("revision") != node.get("revision")
+                    or ("desired_revision" in node and
+                        (node["desired_revision"] != value.get("revision") or node.get("desired_logical_id") != logical_id))):
+                return
+            fields = {}
+            if not self._accept_telemetry(node_id, node, value, "sen66", fields):
+                return
+            self.node_registry.update(node_id, **fields)
+            # The same lock serializes revocation/reassignment with this QoS 0
+            # handoff. Preserve the payload; all public consumers see this gate.
+            self._publish_node(f"omk/{logical_id}/sen66", payload, qos=0, retain=False)
+        self.refresh_node_availability()
+
+    def handle_sen66_mqtt(self, topic: str, payload: bytes, *, retain: bool = False) -> None:
+        if topic.startswith("omk-relay/"):
+            self._handle_raw_sen66(topic, payload, retain=retain)
+            return
+        # Legacy Nodes publish directly. A canonical echo cannot advance v2 liveness.
         parts = topic.split("/")
         if len(parts) != 3 or parts[0] != "omk" or parts[2] != "sen66" or self.node_registry is None:
             return
@@ -303,16 +356,23 @@ class BleManager:
             return
         if not isinstance(value, dict) or value.get("device_id") != parts[1]:
             return
-        for node_id, node in self.node_registry.list().items():
-            if node.get("logical_id") == parts[1]:
-                self.node_registry.update(node_id, sen66_last_seen_at=now_iso())
+        if value.get("protocol_version") == 2:
+            return
+        with self._node_registration_lock:
+            for node_id, node in self.node_registry.list().items():
+                if node.get("logical_id") == parts[1] and not native_registration(node):
+                    self.node_registry.update(node_id, sen66_last_seen_at=now_iso())
 
     def remove_node_registration(self, node_id: str) -> dict[str, Any]:
         if not self._node_id_valid(node_id) or self.node_registry is None:
             raise KeyError(node_id)
         with self._node_registration_lock:
-            if node_id not in self.node_registry.list():
+            node = self.node_registry.list().get(node_id)
+            if node is None:
                 raise KeyError(node_id)
+            if native_registration(node):
+                self._remove_native_registration(node)
+                return {"node_id": node_id, "status": "removed"}
             self.node_registry.clear_registration(node_id, registration_state="provisioned",
                                                   registration_revoked=True, removed_at=now_iso())
             if self._mqtt:
@@ -322,9 +382,9 @@ class BleManager:
                     raise RuntimeError("MQTT publish failed")
         return {"node_id": node_id, "status": "removed"}
 
-    def handle_relay_mqtt(self, topic: str, payload: bytes) -> None:
+    def handle_relay_mqtt(self, topic: str, payload: bytes, *, retain: bool = False) -> None:
         """Reconstruct a raw observation and use the normal SwitchBot decoder."""
-        if len(payload) > 512:
+        if len(payload) > 768:
             LOGGER.warning("Ignoring oversized relay MQTT payload topic=%s", topic)
             return
         parts = topic.split("/")
@@ -342,17 +402,29 @@ class BleManager:
         if not isinstance(value, dict):
             LOGGER.warning("Ignoring non-object relay MQTT payload topic=%s", topic)
             return
+        if value.get("protocol_version") == 1 and len(payload) > 512:
+            return
         observation = self._parse_relay_observation(value, relay_node_id)
         if observation is None:
             LOGGER.warning("Ignoring invalid relay MQTT fields topic=%s", topic)
             return
         address, rssi, manufacturer_data, service_data = observation
+        # Full native envelopes share boot history with SEN66 and heartbeat.
+        # Earlier BLE relays provide only identity and advertisement fields.
+        native_envelope = value["protocol_version"] == 2 and "boot_id" in value
+        if native_envelope and self.node_registry:
+            with self._node_registration_lock:
+                node = self.node_registry.list().get(relay_node_id, {})
+                fields = {}
+                if retain or not self._accept_telemetry(relay_node_id, node, value, "relay", fields):
+                    return
+                self.node_registry.update(relay_node_id, **fields)
         decoded = decode(address, rssi, manufacturer_data, service_data, now_iso(),
                          model_hint=self._registered_model_hint(address, manufacturer_data))
         if decoded is None or decoded.sensor_type == "unknown":
             LOGGER.debug("Ignoring unknown SwitchBot raw relay packet from node_id=%s", relay_node_id)
             return
-        if self.node_registry:
+        if self.node_registry and not native_envelope:
             self.node_registry.update(relay_node_id, relay_last_seen_at=now_iso())
         self.record_advertisement(decoded, source="relay", relay_node_id=relay_node_id)
 
