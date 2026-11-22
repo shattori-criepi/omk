@@ -5,7 +5,7 @@ import json
 import logging
 import math
 import os
-from threading import RLock
+from threading import Lock, RLock
 from time import monotonic
 from datetime import datetime, timezone
 from typing import Any, Callable
@@ -74,6 +74,7 @@ class BleManager:
         self._scanner: Any = None
         self._timeout_task: asyncio.Task[None] | None = None
         self._mqtt = mqtt_client
+        self._advertisement_lock = Lock()
         self._node_registration_lock = RLock()
         self.offline_seconds = int(os.getenv("OMK_BLE_OFFLINE_SECONDS", "900"))
         self._now_provider = now_provider or (lambda: datetime.now(timezone.utc))
@@ -138,18 +139,20 @@ class BleManager:
     def record_advertisement(self, decoded: DecodedAdvertisement, *, source: str = "direct",
                              relay_node_id: str | None = None) -> None:
         """Record an advertisement without ever reordering setup candidates."""
-        if source == "direct":
-            self.observations[decoded.device_key] = decoded
-        if source == "direct" and decoded.model == "omk_node":
-            self.node_observations[decoded.values["node_id"]] = decoded
-        registered_keys = {sensor.device_key for sensor in self.registry.list()}
-        if source == "direct" and self.scanning and decoded.device_key not in registered_keys:
-            if decoded.device_key not in self.setup_candidates:
-                self._setup_candidate_order.append(decoded.device_key)
-            # Always replace the complete snapshot: RSSI, receive time, values,
-            # raw packet, and visual highlighting all use the latest packet.
-            self.setup_candidates[decoded.device_key] = decoded
-        self._publish_if_registered(decoded, source=source, relay_node_id=relay_node_id)
+        # BlueZ and MQTT callbacks run on separate threads.
+        with self._advertisement_lock:
+            if source == "direct":
+                self.observations[decoded.device_key] = decoded
+            if source == "direct" and decoded.model == "omk_node":
+                self.node_observations[decoded.values["node_id"]] = decoded
+            registered_keys = {sensor.device_key for sensor in self.registry.list()}
+            if source == "direct" and self.scanning and decoded.device_key not in registered_keys:
+                if decoded.device_key not in self.setup_candidates:
+                    self._setup_candidate_order.append(decoded.device_key)
+                # Always replace the complete snapshot: RSSI, receive time, values,
+                # raw packet, and visual highlighting all use the latest packet.
+                self.setup_candidates[decoded.device_key] = decoded
+            self._publish_if_registered(decoded, source=source, relay_node_id=relay_node_id)
 
     def node_list(self) -> list[dict[str, Any]]:
         now = self._now_provider()
@@ -351,7 +354,10 @@ class BleManager:
 
     @staticmethod
     def _parse_relay_observation(value: dict[str, Any], relay_node_id: str) -> tuple[str, int, dict[int, bytes], dict[str, bytes]] | None:
-        if value.get("protocol_version") != 1 or value.get("relay_node_id") != relay_node_id:
+        version = value.get("protocol_version")
+        if isinstance(version, bool) or version not in (1, 2) or value.get("relay_node_id") != relay_node_id:
+            return None
+        if version == 2 and value.get("node_id") != relay_node_id:
             return None
         address, rssi = value.get("ble_address"), value.get("rssi")
         if (not isinstance(address, str) or len(address) != 12 or any(char not in "0123456789abcdef" for char in address) or
@@ -541,6 +547,8 @@ class BleManager:
             last_direct = self._last_direct_observation_at.get(sensor.device_key)
             if last_direct is not None and now - last_direct < DIRECT_FRESHNESS_SECONDS:
                 return
+            # Keep sensor health current even when the MQTT publish is rate-limited.
+            self.observations[sensor.device_key] = advertisement
         else:
             return
         source_switched = self._last_canonical_source.get(sensor.device_key) not in (None, source)

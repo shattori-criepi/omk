@@ -254,6 +254,37 @@ def relay_json(md, sd):
     }
 
 
+@pytest.mark.parametrize("version", [1, 2])
+@pytest.mark.parametrize("service", ["540025099631", None], ids=["meter-service", "manufacturer-only"])
+def test_th_001_relay_with_nonmatching_meter_marker(tmp_path, version, service):
+    address = "cf3941c7ed79"
+    registry = SensorRegistry(tmp_path / "sensors.json")
+    registry.register(RegisteredSensor(
+        f"switchbot:{address}", "th-001", "environment", "switchbot", "temperature_humidity_sensor", "", "玄関",
+    ))
+    publisher = Publisher()
+    manager = BleManager(registry, publisher)
+    manufacturer_data = {sb.SWITCHBOT_COMPANY_ID: bytes.fromhex("cf3941c7ed790c02099631")}
+    service_data = {sb.METER_SERVICE_UUID: bytes.fromhex(service)} if service is not None else {}
+    raw = relay_json(manufacturer_data, service_data)
+    raw.update(protocol_version=version, ble_address=address)
+    if version == 2:
+        raw.update(node_id=NODE, boot_id="0123456789abcdef", revision=0, seq=1)
+    manager.handle_relay_mqtt(f"omk-relay/{NODE}/ble/raw", json.dumps(raw).encode())
+
+    if service is None:
+        assert publisher.messages == []
+        assert manager.registered_list()[0]["latest"] is None
+        return
+
+    [(topic, payload)] = publisher.messages
+    assert topic == "omk/th-001/environment"
+    assert payload["source"] == "relay" and payload["relay_node_id"] == NODE
+    assert payload["temperature_c"] == 22.9
+    assert payload["relative_humidity_percent"] == 49
+    assert payload["battery_percent"] == 37
+
+
 @pytest.mark.parametrize("kind,model,tail,service,values", CASES)
 @pytest.mark.parametrize("registered", [True, False])
 def test_direct_and_relay_share_model_values_and_physical_identity(tmp_path, monkeypatch, kind, model, tail, service, values, registered):

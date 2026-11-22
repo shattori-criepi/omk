@@ -165,9 +165,13 @@ def _decode_meter_expression(fraction: int, signed_integer: int, humidity: int) 
     return temperature, humidity
 
 
-def _decode_meter_manufacturer_data(data: bytes) -> tuple[str, str, dict[str, Any]] | None:
-    """Decode Meter only when the complete observed manufacturer layout fits."""
-    if len(data) != METER_MANUFACTURER_LENGTH or data[METER_MANUFACTURER_LAYOUT_MARKER_INDEX] != METER_MANUFACTURER_LAYOUT_MARKER:
+def _decode_meter_manufacturer_data(
+    data: bytes, *, require_layout_marker: bool = True,
+) -> tuple[str, str, dict[str, Any]] | None:
+    """Decode the Meter manufacturer layout, requiring its observed marker by default."""
+    if len(data) != METER_MANUFACTURER_LENGTH:
+        return None
+    if require_layout_marker and data[METER_MANUFACTURER_LAYOUT_MARKER_INDEX] != METER_MANUFACTURER_LAYOUT_MARKER:
         return None
     measurement = _decode_meter_expression(*data[8:11])
     if measurement is None:
@@ -356,7 +360,11 @@ def _decode_selected(
     # data; it never changes the selected model.
     manufacturer_result = None
     if company is not None and len(company) > 6:
-        manufacturer_result = MANUFACTURER_DECODERS[model](company)
+        if model == "temperature_humidity_sensor" and service_result is not None:
+            # Validated Meter service data supplies independent model evidence.
+            manufacturer_result = _decode_meter_manufacturer_data(company, require_layout_marker=False)
+        else:
+            manufacturer_result = MANUFACTURER_DECODERS[model](company)
         if manufacturer_result is None or not _values_valid(manufacturer_result[2]):
             if model == "motion_sensor" and service_result is not None:
                 return service_result

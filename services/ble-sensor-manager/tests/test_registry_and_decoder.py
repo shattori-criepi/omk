@@ -1,6 +1,6 @@
 import asyncio
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -701,27 +701,69 @@ def test_updated_sensor_id_is_used_for_next_mqtt_publish_and_disabled_sensor_is_
     assert len(publisher.messages) == 1
 
 
-def test_raw_relay_reuses_switchbot_decoder_and_resolves_registered_sensor_id(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("version", [1, 2])
+def test_raw_relay_reuses_decoder_and_updates_registered_sensor(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, version: int) -> None:
     registry = SensorRegistry(tmp_path / "sensors.json")
     registry.register(RegisteredSensor(
         "switchbot:020000000004", "th-001", "environment", "switchbot",
         "temperature_humidity_sensor", "", "温湿度計",
     ))
     publisher = _MqttPublisher()
-    manager = BleManager(registry, publisher)
-    monkeypatch.setattr("omk_ble.service.now_iso", lambda: "2026-08-20T10:00:00+00:00")
+    started_at = datetime(2026, 8, 20, 10, tzinfo=timezone.utc)
+    clock = [0.0]
 
-    manager.handle_relay_mqtt(
-        "omk-relay/09dda0d5a8f2/ble/raw",
-        b'{"protocol_version":1,"relay_node_id":"09dda0d5a8f2","ble_address":"020000000004","rssi":-42,'
-        b'"manufacturer_data":[{"company_id":2409,"data":"020000000004f40304992c"}],"service_data":[]}',
-    )
+    def now() -> datetime:
+        return started_at + timedelta(seconds=clock[0])
 
+    manager = BleManager(registry, publisher, now_provider=now, monotonic_provider=lambda: clock[0])
+    monkeypatch.setattr("omk_ble.service.now_iso", lambda: now().isoformat())
+    monkeypatch.setattr(ble_main, "manager", manager)
+    assert ble_main.sensors()["sensors"][0]["status"] == "unreceived"
+
+    def relay(node_id: str, rssi: int) -> None:
+        payload = {
+            "protocol_version": version, "relay_node_id": node_id, "ble_address": "020000000004", "rssi": rssi,
+            "manufacturer_data": [{"company_id": 2409, "data": "020000000004f40304992c"}], "service_data": [],
+        }
+        if version == 2:
+            payload.update(node_id=node_id, boot_id="0123456789abcdef", revision=0, seq=1)
+        manager.handle_relay_mqtt(f"omk-relay/{node_id}/ble/raw", json.dumps(payload).encode())
+
+    relay("09dda0d5a8f2", -42)
     assert publisher.messages == [("omk/th-001/environment", json.dumps({
-        "device_id": "th-001", "measured_at": "2026-08-20T10:00:00+00:00", "quality": "normal",
+        "device_id": "th-001", "measured_at": started_at.isoformat(), "quality": "normal",
         "temperature_c": 25.4, "relative_humidity_percent": 44,
         "source": "relay", "relay_node_id": "09dda0d5a8f2",
     }))]
+
+    clock[0] = 1.0
+    relay("112233445566", -50)
+    assert len(publisher.messages) == 1
+    sensor = ble_main.sensors()["sensors"][0]
+    assert sensor["online"] is True and sensor["status"] == "normal"
+    assert sensor["latest"] == {
+        "received_at": now().isoformat(), "rssi": -50,
+        "values": {"temperature_c": 25.4, "relative_humidity_percent": 44},
+    }
+
+
+@pytest.mark.parametrize("version,node_id,relay_node_id", [
+    (2, None, "09dda0d5a8f2"),
+    (2, "112233445566", "09dda0d5a8f2"),
+    (2, "09dda0d5a8f2", "112233445566"),
+    (2, "112233445566", "112233445566"),
+    (1, None, "112233445566"),
+    (3, "09dda0d5a8f2", "09dda0d5a8f2"),
+    (True, None, "09dda0d5a8f2"),
+])
+def test_raw_relay_rejects_invalid_version_or_node_identity(version, node_id, relay_node_id) -> None:
+    payload = {
+        "protocol_version": version, "relay_node_id": relay_node_id, "ble_address": "020000000004", "rssi": -42,
+        "manufacturer_data": [{"company_id": 2409, "data": "020000000004f40304992c"}], "service_data": [],
+    }
+    if node_id is not None:
+        payload["node_id"] = node_id
+    assert BleManager._parse_relay_observation(payload, "09dda0d5a8f2") is None
 
 
 def test_raw_relay_does_not_publish_unregistered_or_disabled_devices(tmp_path: Path) -> None:
@@ -786,10 +828,12 @@ def test_environment_direct_route_suppresses_relay_then_falls_back_and_recovers(
     clock[0] = 30.9
     manager.record_advertisement(observation(30.0, "relay-29.9"), source="relay", relay_node_id="09dda0d5a8f2")
     assert [json.loads(payload)["source"] for _, payload in publisher.messages] == ["direct"]
+    assert manager.registered_list()[0]["latest"]["received_at"] == "direct-rate-limited"
 
     clock[0] = 31.0
     manager.record_advertisement(observation(30.0, "relay-fallback"), source="relay", relay_node_id="09dda0d5a8f2")
     assert json.loads(publisher.messages[-1][1])["source"] == "relay"
+    assert manager.registered_list()[0]["latest"]["received_at"] == "relay-fallback"
     clock[0] = 31.1
     manager.record_advertisement(observation(30.0, "direct-recovered"))
     assert json.loads(publisher.messages[-1][1])["source"] == "direct"
@@ -797,6 +841,7 @@ def test_environment_direct_route_suppresses_relay_then_falls_back_and_recovers(
     clock[0] = 31.2
     manager.record_advertisement(observation(99.0, "relay-after-recovery"), source="relay", relay_node_id="09dda0d5a8f2")
     assert len(publisher.messages) == 3
+    assert manager.registered_list()[0]["latest"]["received_at"] == "direct-recovered"
 
 
 def test_contact_direct_recovery_forces_same_state_source_switch(tmp_path: Path) -> None:
