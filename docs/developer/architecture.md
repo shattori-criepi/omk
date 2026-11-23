@@ -42,13 +42,11 @@ system-managerはDashboardの`host.docker.internal`経由の要求をBearer toke
 
 共通ESP32 NodeはUSB Serial/JTAG Provisioning、ESP-WIFI-MESH、Wi-Fi/IP/MQTT、SEN66などのI2Cセンサ、BLE relayを同時に扱います。SEN66が未接続でもBLE relayとして利用でき、SEN66とBLE relayを接続したNodeも同じfirmwareで動作します。production対象はAtomS3 Liteです。初回登録に物理ボタン操作は必要ありません。
 
-保存済みGateway SSID/PSKを使ってESP-WIFI-MESHを自動形成する。topologyはrootを頂点に各childがparentへ接続するtreeであり、全Nodeが相互に直接通信する構成ではない。Nodeごとのparent、root、SSID、IPの手動指定は行わない。rootはGateway APへ通常STA接続し、childはMesh parent経由のinternal IP networkへDHCP接続する。rootはinternal subnet (`10.0.0.1/16`) のDHCP/DNS/NAPTを提供するため、root/childのどちらも通常TCPのMQTTで`192.168.50.1:1883`へ到達できる。
+mainのAtomS3 Liteは、保存済みGateway SSID/PSKからNative ESP-WIFI-MESHを形成します。SDKがRootと親を選び、子Nodeが送るSEN66・BLEメッセージをRootまで中継します。RootはGateway APでIPを取得し、子からのデータと自機の計測を `192.168.50.1:1883` にpublishします。GatewayのBLE Sensor Managerは登録済みNodeのSEN66を公開トピックに転送します。
 
-Nodeは計測・BLE relay・Mesh中継を兼ねる。配置と電波条件に応じてroot/parent/childは自動選択され、parentまたはrootを失うとMeshが再構成される。Gatewayは通常のAPとMosquittoだけを提供し、専用Mesh daemonや独自relay protocolを必要としない。市販Wi-Fi中継機は必須ではないが、到達性はNode配置、壁、階層、RSSIに依存する。AC電源を前提とし、電池駆動の省電力Meshとしては設計しない。
+SwitchBot BLE sensorはGateway direct BLEを主系とし、ESP32 Node raw relayをfallbackにします。非RootのNodeはactive scanでADVとScan Responseを取得してGateway decoderへ渡し、directが30秒以上途絶した場合だけrelayのデータを通常のsensor topicへpublishします。direct復帰時は同値でも最初のdirectから戻ります。BLEアドバタイズ単位の厳密dedupより、1分集約用途の経路冗長化を優先します。詳細な入力topicと選択理由は[データ経路とMQTT](data-and-mqtt.md)および[decision](../decisions/ble-direct-relay-route-selection.md)を参照してください。
 
-SwitchBot BLE sensorはGateway direct BLEを主系とし、ESP32 Node raw relayをfallbackにします。Nodeはactive scanでADVとScan Responseを取得してGateway decoderへ渡し、directが30秒以上途絶した場合だけrelayのデータを通常のsensor topicへpublishします。direct復帰時は同値でも最初のdirectから戻ります。BLEアドバタイズ単位の厳密dedupより、1分集約用途の経路冗長化を優先します。詳細な入力topicと選択理由は[データ経路とMQTT](data-and-mqtt.md)および[decision](../decisions/ble-direct-relay-route-selection.md)を参照してください。
-
-Mesh診断status、credential導出、再構成時の観測上の注意は[ESP-WIFI-MESH Node networking decision](../decisions/esp-wifi-mesh-node-networking.md)に記載しています。
+役割別の通信、旧prebuiltとの互換性、復旧条件と実機観測は[ESP-WIFI-MESH Node networking decision](../decisions/esp-wifi-mesh-node-networking.md)に記載しています。
 
 ## 保存・表示・送信
 

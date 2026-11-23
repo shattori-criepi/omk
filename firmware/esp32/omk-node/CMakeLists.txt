@@ -1,6 +1,7 @@
 cmake_minimum_required(VERSION 3.16)
-option(OMK_NETWORK_DIAGNOSTICS "Bounded Mesh/MQTT diagnostic trial" ON)
+if(NOT DEFINED PROJECT_VER)
+    set(PROJECT_VER "V2D-P1-stable-p1")
+endif()
+list(APPEND EXTRA_COMPONENT_DIRS "${CMAKE_CURRENT_LIST_DIR}/src")
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(omk_node)
-# The bounded MQTT adapter is required even when diagnostic reporting is off.
-include(cmake/network_diagnostics.cmake)

@@ -28,6 +28,8 @@ Logical IDを登録済みのNodeが以前と同じWi-Fiへ接続できる場合�
 
 ## ファームウェアを更新する
 
+mainのソースから更新するとNative Mesh版になります。DashboardのUSBセットアップで配布する旧Mesh版とは親・子として接続できないため、同じMeshに参加させるNodeの版を揃えてください。
+
 現在、Dashboardには設定を保持したまま更新する専用ボタンはありません。「OMK Nodeを再セットアップ」では、上記のとおりWi-Fiの再設定とLogical IDの解除が行われます。
 
 Wi-FiやLogical IDを保持する通常更新には、開発・保守用の実行環境が必要です。更新手順は[「OMK ESP32 Node」](../../firmware/esp32/omk-node/README.md#factory-flashとpartition-table)を参照してください。

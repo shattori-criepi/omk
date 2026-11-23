@@ -18,6 +18,10 @@ Nodeの`node_id`はeFuse由来の物理IDであり、`logical_id`はNode自身�
 
 `device_key`は物理的な識別子（`switchbot:<コロンを除いた小文字MAC>`）、`sensor_id`はOMKの論理的な識別子です。registryには`device_key`、`sensor_id`、`sensor_type`、vendor、model、location、`display_name`、`enabled`だけを保存します。最新の測定値、RSSI、受信時刻、生のBLEアドバタイズデータはruntime stateとして保持し、registryへは書き込みません。
 
+## Native MeshのSEN66入力
+
+Rootが `omk-relay/<node_id>/sen66/raw` に転送した測定値は、登録状態・Logical ID・revisionが台帳と一致するとき、同じpayloadのまま `omk/<logical_id>/sen66` にQoS 0で配信します。旧登録から移行したrevision 0も扱います。BLE観測は別のrawトピックで受け取り、既存のdecoderとdirect優先処理を通ります。[MQTT仕様](../../docs/developer/data-and-mqtt.md)
+
 ## ESP32 Node relay入力
 
 ESP32 NodeはGatewayの`sensor_id`、SwitchBotの機種判定、decoderを持たない。Nodeはmanufacturer data、service data、BLE address、RSSIをraw observationとして次の内部MQTT topicへpublishし、Gatewayがdirect BLEと同じdecoderで`device_key`を決定する。

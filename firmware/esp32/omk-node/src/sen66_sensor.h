@@ -29,13 +29,14 @@ typedef struct sen66_measurement {
 typedef struct {
     i2c_master_dev_handle_t device;
     sen66_sensor_state_t state;
+    uint32_t errors; /* Last CRC-checked flags for sample quality during status I/O loss. */
 } sen66_sensor_t;
 
 esp_err_t sen66_sensor_probe(i2c_master_bus_handle_t bus, sen66_sensor_t *sensor);
 sensor_identity_t sen66_sensor_identify(i2c_master_bus_handle_t bus);
 void sen66_sensor_close(sen66_sensor_t *sensor);
-esp_err_t sen66_sensor_start(i2c_master_bus_handle_t bus, sen66_sensor_t *sensor);
+esp_err_t sen66_sensor_start(i2c_master_bus_handle_t bus, sen66_sensor_t *sensor, bool reset);
 esp_err_t sen66_sensor_stop(sen66_sensor_t *sensor);
 esp_err_t sen66_sensor_read(sen66_sensor_t *sensor, sen66_measurement_t *measurement,
-                            bool *data_ready);
+                            bool *data_ready, sensor_health_t *health);
 bool sen66_sensor_is_measuring(const sen66_sensor_t *sensor);

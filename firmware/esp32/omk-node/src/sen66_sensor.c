@@ -10,6 +10,14 @@
 #define SEN66_I2C_ADDRESS 0x6B
 #define SEN66_I2C_FREQUENCY_HZ 100000
 #define SEN66_I2C_TIMEOUT_MS 100
+#define SEN66_READ_STATUS_COMMAND 0xD206
+#define SEN66_READ_AND_CLEAR_STATUS_COMMAND 0xD210
+/* SEN66 sticky errors: PM, CO2-2, GAS, RH&T, FAN. SPEED (bit 21) is a warning. */
+enum {
+    SEN66_ERROR_PM = 1U << 11, SEN66_ERROR_CO2 = 1U << 9, SEN66_ERROR_GAS = 1U << 7,
+    SEN66_ERROR_RHT = 1U << 6, SEN66_ERROR_FAN = 1U << 4,
+    SEN66_STATUS_ERRORS = SEN66_ERROR_PM | SEN66_ERROR_CO2 | SEN66_ERROR_GAS | SEN66_ERROR_RHT | SEN66_ERROR_FAN,
+};
 #define SEN66_DEVICE_RESET_COMMAND 0xD304
 #define SEN66_START_CONTINUOUS_MEASUREMENT_COMMAND 0x0021
 #define SEN66_STOP_MEASUREMENT_COMMAND 0x0104
@@ -67,6 +75,14 @@ static uint16_t sen66_u16(const uint8_t *value) {
     return ((uint16_t)value[0] << 8) | value[1];
 }
 
+static bool read_status_errors(i2c_master_dev_handle_t device, uint16_t command, uint32_t *errors) {
+    uint8_t data[4];
+    if (sen66_read_response(device, command, data, sizeof(data)) != ESP_OK) return false;
+    uint32_t status = ((uint32_t)sen66_u16(data) << 16) | sen66_u16(data + 2);
+    *errors = status & SEN66_STATUS_ERRORS;
+    return true;
+}
+
 static sensor_identity_t identify_device(i2c_master_dev_handle_t device) {
     uint8_t name[32];
     if (sen66_read_response(device, SEN66_GET_PRODUCT_NAME_COMMAND, name, sizeof(name)) != ESP_OK)
@@ -111,6 +127,7 @@ esp_err_t sen66_sensor_probe(i2c_master_bus_handle_t bus, sen66_sensor_t *sensor
     }
 
     memset(sensor, 0, sizeof(*sensor));
+    sensor->errors = SEN66_STATUS_ERRORS; /* No verified status on this handle yet. */
     sensor->state = SEN66_SENSOR_STATE_ABSENT;
     if (sen66_sensor_identify(bus) == SENSOR_ID_EXACT) {
         sensor->state = SEN66_SENSOR_STATE_PROBED;
@@ -119,7 +136,7 @@ esp_err_t sen66_sensor_probe(i2c_master_bus_handle_t bus, sen66_sensor_t *sensor
     return ESP_ERR_NOT_FOUND;
 }
 
-esp_err_t sen66_sensor_start(i2c_master_bus_handle_t bus, sen66_sensor_t *sensor) {
+esp_err_t sen66_sensor_start(i2c_master_bus_handle_t bus, sen66_sensor_t *sensor, bool reset) {
     if (bus == NULL || sensor == NULL || sensor->state != SEN66_SENSOR_STATE_PROBED) {
         return ESP_ERR_INVALID_STATE;
     }
@@ -134,20 +151,20 @@ esp_err_t sen66_sensor_start(i2c_master_bus_handle_t bus, sen66_sensor_t *sensor
         sen66_sensor_close(sensor);
         return ESP_ERR_INVALID_STATE;
     }
-    /* Recovery (or an MCU reboot) may leave a confirmed SEN66 measuring.
-     * Reset is idle-only. Stop can NACK if already idle; the following identity
-     * read and reset must still succeed. Never do this during discovery. */
+    /* Stop may NACK when already idle. Ordinary Stop/Start retains VOC state
+     * if the SEN66 stayed powered across an MCU restart. */
     (void)sen66_send_command(sensor->device, SEN66_STOP_MEASUREMENT_COMMAND);
     vTaskDelay(pdMS_TO_TICKS(1400));
     if (identify_device(sensor->device) != SENSOR_ID_EXACT) {
         sen66_sensor_close(sensor);
         return ESP_ERR_INVALID_STATE;
     }
-    err = sen66_send_command(sensor->device, SEN66_DEVICE_RESET_COMMAND);
-    if (err == ESP_OK) {
-        vTaskDelay(pdMS_TO_TICKS(1200));
-        err = sen66_send_command(sensor->device, SEN66_START_CONTINUOUS_MEASUREMENT_COMMAND);
+    if (reset) {
+        err = sen66_send_command(sensor->device, SEN66_DEVICE_RESET_COMMAND);
+        if (err == ESP_OK) vTaskDelay(pdMS_TO_TICKS(1200));
     }
+    if (err == ESP_OK)
+        err = sen66_send_command(sensor->device, SEN66_START_CONTINUOUS_MEASUREMENT_COMMAND);
     if (err == ESP_OK) {
         vTaskDelay(pdMS_TO_TICKS(50));
         sensor->state = SEN66_SENSOR_STATE_MEASURING;
@@ -182,16 +199,29 @@ esp_err_t sen66_sensor_stop(sen66_sensor_t *sensor) {
 }
 
 esp_err_t sen66_sensor_read(sen66_sensor_t *sensor, sen66_measurement_t *measurement,
-                            bool *data_ready) {
-    if (sensor == NULL || measurement == NULL || data_ready == NULL ||
+                            bool *data_ready, sensor_health_t *health) {
+    if (sensor == NULL || measurement == NULL || data_ready == NULL || health == NULL ||
         sensor->state != SEN66_SENSOR_STATE_MEASURING) {
         return ESP_ERR_INVALID_STATE;
     }
 
     *data_ready = false;
+    *health = SENSOR_HEALTH_UNKNOWN;
     /* Product Name is available during measurement too. A replaced endpoint
      * must not publish under the old SEN66 Logical ID even if values fit. */
     if (identify_device(sensor->device) != SENSOR_ID_EXACT) return ESP_ERR_INVALID_STATE;
+
+    if (read_status_errors(sensor->device, SEN66_READ_STATUS_COMMAND, &sensor->errors)) {
+        if (!sensor->errors) {
+            *health = SENSOR_HEALTH_OK;
+        } else {
+            uint32_t cleared;
+            if (read_status_errors(sensor->device, SEN66_READ_AND_CLEAR_STATUS_COMMAND, &cleared)) {
+                sensor->errors |= cleared;
+                if (cleared) *health = SENSOR_HEALTH_ERROR;
+            }
+        }
+    }
 
     uint8_t ready_response[2];
     esp_err_t err = sen66_read_response(sensor->device, SEN66_GET_DATA_READY_COMMAND,
@@ -232,6 +262,23 @@ esp_err_t sen66_sensor_read(sen66_sensor_t *sensor, sen66_measurement_t *measure
         .co2_ppm = co2 == UINT16_MAX ? NAN : (float)co2,
         .uptime_ms = (uint32_t)(esp_timer_get_time() / 1000),
     };
+    /* Datasheet 4.3: PM/CO2/GAS faults also affect RH&T compensation.
+     * FAN and RH&T faults can affect other measurements across the module. */
+    const uint32_t errors = sensor->errors;
+    const bool all = (errors & (SEN66_ERROR_FAN | SEN66_ERROR_RHT)) != 0;
+    if (all || (errors & SEN66_ERROR_PM)) {
+        measurement->pm1_0_ug_m3 = measurement->pm2_5_ug_m3 = NAN;
+        measurement->pm4_0_ug_m3 = measurement->pm10_0_ug_m3 = NAN;
+    }
+    if (errors) measurement->temperature_celsius = measurement->relative_humidity_percent = NAN;
+    if (all || (errors & SEN66_ERROR_GAS)) measurement->voc_index = measurement->nox_index = NAN;
+    if (all || (errors & SEN66_ERROR_CO2)) measurement->co2_ppm = NAN;
+    /* A fresh but incomplete frame may be published, but cannot rearm reset. */
+    if (*health == SENSOR_HEALTH_OK &&
+        (pm1_0 == UINT16_MAX || pm2_5 == UINT16_MAX || pm4_0 == UINT16_MAX || pm10_0 == UINT16_MAX ||
+         humidity == INT16_MAX || temperature == INT16_MAX || voc_index == INT16_MAX ||
+         nox_index == INT16_MAX || co2 == UINT16_MAX))
+        *health = SENSOR_HEALTH_UNKNOWN;
     return ESP_OK;
 }
 

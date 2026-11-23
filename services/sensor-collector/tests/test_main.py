@@ -157,11 +157,24 @@ class CollectorTests(unittest.TestCase):
                 Message(b'{"device_id":"node-001","contact_state":"open"}', "omk/node-001/contact"),
                 self.received_at,
             ))
+            # Native Mesh adds transport metadata to the existing SEN66 topic;
+            # these scalars must never become Dashboard measurement choices.
+            native = {
+                "device_id": "sen66-001", "node_id": "020000000041",
+                "protocol_version": 2, "revision": 7, "seq": 42,
+                "boot_id": "1234abcd1234abcd", "uptime_ms": 123400, "uptime_s": 123,
+                "meta": {"boot_id": "1234abcd1234abcd", "seq": 42, "enqueue_seq": 40},
+                "temperature_celsius": 23.5, "co2_ppm": 600,
+            }
+            native_record = build_record(Message(json.dumps(native).encode(), "omk/sen66-001/sen66"), self.received_at)
+            LatestDataWriter(root).write(native_record)
+            self.assertEqual(native_record["payload"], native)  # Raw evidence stays intact.
             catalog = json.loads((root / "catalog.json").read_text(encoding="utf-8"))
             fields = {item["field"]: item["value_type"] for item in catalog["items"]}
             self.assertEqual(fields, {
                 "temperature_c": "number", "switch_state": "boolean",
                 "battery_state": "string", "contact_state": "string",
+                "temperature_celsius": "number", "co2_ppm": "number",
             })
 
     def test_ble_route_selection_prefers_direct_and_limits_relay_fallback(self) -> None:

@@ -12,13 +12,11 @@
 
 `NetworkManager`の`ipv4.method shared`はDHCP払い出しに使うだけで、Internet共有を目的にしません。shared-mode dnsmasqには`no-resolv`を設定し、AP clientの上流DNS解決も停止します。
 
-## ESP-WIFI-MESH Node internal network
+## Native ESP-WIFI-MESH
 
-AtomS3 Lite NodeはGateway APの外側にESP-WIFI-MESH internal IP networkを形成できる。root NodeだけがGateway APへ通常STA接続し、rootは`10.0.0.1/16`でMesh childへDHCP/DNSを提供してNAPTを有効化する。childの`10.0.0.x`通信はrootでNAPTされ、Gateway Mosquittoの`192.168.50.1:1883`へ通常TCPで到達する。
+AtomS3 Liteの開発版では、非RootのNodeが上りメッセージをMesh経由でRootに送り、RootがGateway APのSTAとしてMosquitto（`192.168.50.1:1883`）へ接続する。Gatewayは既存のAP専用MQTT socketを使う。Mesh IDとMesh APパスワードは保存済みGateway SSID/PSKから実行時に導出する。
 
-これはGatewayの`wlan0`にMesh専用プロトコルを追加するものではない。Gateway側にはMesh daemon、static route、Node別IP設定を置かず、既存のAP、AP専用MQTT socket、nftables境界を維持する。NodeのMesh AP credentialは保存済みGateway SSID/PSKからruntime導出し、Gateway credential、導出値ともログやsourceへ出さない。
-
-共通firmwareではroot/parent/childをNode IDへ固定しない。配置、電波条件、起動順により役割は変わる。2026-08-20のAtomS3 Lite 2台試験ではrootがGateway側IPを取得し、childが`10.0.0.2`を取得して通常ESP-MQTTでMosquittoへ到達した。これは実測例であり、IPや役割の固定仕様ではない。E2E範囲とcredential migrationは[ESP-WIFI-MESH Node networking decision](../decisions/esp-wifi-mesh-node-networking.md)を参照する。
+旧prebuiltは子NodeがRoot経由でDHCPとNAPTを利用する旧方式である。Native Meshとは異なるMeshを形成する。[Nodeの通信設計](../decisions/esp-wifi-mesh-node-networking.md)
 
 ## forwardingルール
 

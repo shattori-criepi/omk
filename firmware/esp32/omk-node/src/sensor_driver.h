@@ -18,6 +18,9 @@ typedef struct {
     union { uint16_t i2c_address; unsigned uart_port; unsigned adc_channel; } location;
 } sensor_endpoint_t;
 
+/* A poll can return a valid sample independently of the device health check. */
+typedef enum { SENSOR_HEALTH_UNKNOWN, SENSOR_HEALTH_OK, SENSOR_HEALTH_ERROR } sensor_health_t;
+
 typedef struct sensor_driver {
     const char *driver_id;
     sensor_transport_t transport;
@@ -26,8 +29,8 @@ typedef struct sensor_driver {
     /* Must release temporary resources and never reset/configure/start. */
     sensor_identity_t (*identify)(const sensor_endpoint_t *endpoint);
     size_t context_size;
-    esp_err_t (*start)(const sensor_endpoint_t *endpoint, void *context);
-    esp_err_t (*read)(void *context, bool *ready);
+    esp_err_t (*start)(const sensor_endpoint_t *endpoint, void *context, bool reset);
+    esp_err_t (*read)(void *context, bool *ready, sensor_health_t *health);
     esp_err_t (*publish)(void *context, const char *logical_id);
     /* Recovery closes locally; never send commands to a possibly replaced device. */
     void (*close)(void *context);

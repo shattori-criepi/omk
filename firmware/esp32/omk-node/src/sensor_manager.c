@@ -19,8 +19,14 @@ static const char *TAG = "sensor_manager";
 #endif
 #define SENSOR_I2C_FREQUENCY_HZ 100000
 #define SENSOR_RETRY_INTERVAL_MS 60000
+#define SENSOR_PERSISTENT_RETRY_MS (15 * 60000)
+#define SENSOR_HEALTH_CONFIRM_POLLS 3
 #define SENSOR_MEASUREMENT_INTERVAL_MS 10000
+#define SENSOR_PUBLICATION_INTERVAL_MS UINT64_C(20000)
 #define SENSOR_MEASUREMENT_LIVENESS_TIMEOUT_MS 60000
+/* ESP-IDF stack sizes are bytes. This task also formats JSON and copies a
+ * transport record; leave room for SDK calls and interrupt/context saves. */
+#define SENSOR_TASK_STACK_SIZE_BYTES 8192
 
 static i2c_master_bus_handle_t sensor_i2c_bus;
 typedef struct {
@@ -28,17 +34,31 @@ typedef struct {
     const sensor_driver_t *driver;
     void *context;
     unsigned consecutive_read_failures;
+    unsigned status_error_polls, healthy_polls;
     bool logical_id_warning_logged;
-    bool mqtt_warning_logged;
-    bool recovery_pending;
+    bool delivery_warning_logged;
+    enum { START_NORMAL, START_SOFT_RECOVERY, START_DEVICE_RESET, START_RESET_SPENT } start_mode;
     uint32_t recovery_count;
     uint32_t measurement_timeout_count;
     uint64_t last_successful_measurement_ms;
     uint64_t next_attempt_ms;
+    uint64_t last_publication_attempt_ms;
+    bool publication_attempted;
 } sensor_slot_t;
 
 static uint64_t monotonic_milliseconds(void) {
     return (uint64_t)(esp_timer_get_time() / 1000);
+}
+
+/* Every hard reset requires a failed soft recovery in the same episode. */
+static void next_recovery_attempt(sensor_slot_t *slot) {
+    if (slot->start_mode == START_RESET_SPENT) return;
+    slot->start_mode = slot->start_mode == START_SOFT_RECOVERY
+        ? START_DEVICE_RESET : START_SOFT_RECOVERY;
+}
+
+static unsigned retry_interval_ms(const sensor_slot_t *slot) {
+    return slot->start_mode == START_RESET_SPENT ? SENSOR_PERSISTENT_RETRY_MS : SENSOR_RETRY_INTERVAL_MS;
 }
 
 static void recover_sensor(sensor_slot_t *slot, const char *reason) {
@@ -52,8 +72,9 @@ static void recover_sensor(sensor_slot_t *slot, const char *reason) {
     slot->context = NULL;
     slot->driver = NULL;
     slot->consecutive_read_failures = 0;
-    slot->recovery_pending = true;
-    slot->next_attempt_ms = monotonic_milliseconds() + SENSOR_RETRY_INTERVAL_MS;
+    slot->status_error_polls = slot->healthy_polls = 0;
+    next_recovery_attempt(slot);
+    slot->next_attempt_ms = monotonic_milliseconds() + retry_interval_ms(slot);
 }
 
 static void sensor_slot_tick(sensor_slot_t *slot) {
@@ -62,19 +83,29 @@ static void sensor_slot_tick(sensor_slot_t *slot) {
         const sensor_driver_t *selected = NULL;
         sensor_identity_t identity = sensor_discover(&slot->endpoint, sensor_drivers,
                                                      sensor_driver_count, &selected);
-        slot->next_attempt_ms = monotonic_milliseconds() + SENSOR_RETRY_INTERVAL_MS;
+        slot->next_attempt_ms = monotonic_milliseconds() + retry_interval_ms(slot);
         if (identity != SENSOR_ID_EXACT) {
-            ESP_LOGI(TAG, "Sensor identity unresolved (%d); retrying in 60 seconds", identity);
+            if (slot->start_mode != START_RESET_SPENT) slot->start_mode = START_NORMAL;
+            ESP_LOGI(TAG, "Sensor identity unresolved (%d)", identity);
             return;
         }
         void *context = calloc(1, selected->context_size);
         if (!context) return;
-        esp_err_t err = selected->start(&slot->endpoint, context);
+        bool reset = slot->start_mode == START_DEVICE_RESET;
+        /* Charge before I/O: a timeout can mean the sensor already reset. */
+        if (reset) slot->start_mode = START_RESET_SPENT;
+        esp_err_t err = selected->start(&slot->endpoint, context, reset);
         if (err != ESP_OK) {
+            /* Only an actual command NACK/timeout advances recovery. A
+             * failed probe, identity check or handle allocation cannot. */
+            if (err == ESP_ERR_INVALID_RESPONSE || err == ESP_ERR_TIMEOUT)
+                next_recovery_attempt(slot);
+            else if (slot->start_mode != START_RESET_SPENT)
+                slot->start_mode = START_NORMAL;
             selected->connected(false);
             selected->close(context);
             free(context);
-            slot->next_attempt_ms = monotonic_milliseconds() + SENSOR_RETRY_INTERVAL_MS;
+            slot->next_attempt_ms = monotonic_milliseconds() + retry_interval_ms(slot);
             ESP_LOGW(TAG, "%s startup failed: %s", selected->driver_id, esp_err_to_name(err));
             return;
         }
@@ -82,6 +113,7 @@ static void sensor_slot_tick(sensor_slot_t *slot) {
         slot->context = context;
         selected->connected(true);
         slot->consecutive_read_failures = 0;
+        slot->publication_attempted = false;
         slot->last_successful_measurement_ms = monotonic_milliseconds();
         slot->next_attempt_ms = slot->last_successful_measurement_ms + SENSOR_MEASUREMENT_INTERVAL_MS;
         ESP_LOGI(TAG, "%s continuous measurement started", selected->driver_id);
@@ -89,9 +121,12 @@ static void sensor_slot_tick(sensor_slot_t *slot) {
     }
 
     bool data_ready = false;
-    esp_err_t err = slot->driver->read(slot->context, &data_ready);
+    sensor_health_t health = SENSOR_HEALTH_UNKNOWN;
+    esp_err_t err = slot->driver->read(slot->context, &data_ready, &health);
     const uint64_t read_completed_ms = monotonic_milliseconds();
     const bool measurement_succeeded = err == ESP_OK && data_ready;
+    if (health != SENSOR_HEALTH_ERROR) slot->status_error_polls = 0;
+    if (!measurement_succeeded || health != SENSOR_HEALTH_OK) slot->healthy_polls = 0;
     if (err != ESP_OK) {
         ++slot->consecutive_read_failures;
         ESP_LOGW(TAG, "%s read failed: %s (consecutive_failures=%u)",
@@ -99,15 +134,17 @@ static void sensor_slot_tick(sensor_slot_t *slot) {
         // Loss of identity is immediate; ordinary transient I/O retains the
         // existing three-failure recovery policy.
         if (err == ESP_ERR_INVALID_STATE || slot->consecutive_read_failures >= 3) {
+            if (err == ESP_ERR_INVALID_STATE && slot->start_mode != START_RESET_SPENT) slot->start_mode = START_NORMAL;
             recover_sensor(slot, "identity lost or consecutive read failures");
             return;
         }
     } else if (data_ready) {
         slot->consecutive_read_failures = 0;
         slot->last_successful_measurement_ms = read_completed_ms;
-        if (slot->recovery_pending) {
+        if (slot->start_mode != START_NORMAL && health == SENSOR_HEALTH_OK &&
+            ++slot->healthy_polls >= SENSOR_HEALTH_CONFIRM_POLLS) {
             ESP_LOGI(TAG, "%s measurement recovered", slot->driver->driver_id);
-            slot->recovery_pending = false;
+            slot->start_mode = START_NORMAL;
         }
         char logical_id[OMK_NODE_LOGICAL_ID_MAX_LENGTH + 1];
         err = node_registration_get_logical_id(logical_id, sizeof(logical_id));
@@ -116,16 +153,27 @@ static void sensor_slot_tick(sensor_slot_t *slot) {
                 ESP_LOGI(TAG, "%s publish waiting for logical ID", slot->driver->driver_id);
                 slot->logical_id_warning_logged = true;
             }
-        } else {
+        } else if (!slot->publication_attempted ||
+                   read_completed_ms - slot->last_publication_attempt_ms >= SENSOR_PUBLICATION_INTERVAL_MS) {
             slot->logical_id_warning_logged = false;
+            /* Consume the period before handoff, including queue rejection.
+             * Read/health processing stays at 10 s; publish this latest sample
+             * once, with no catch-up or delivery-dependent retry. */
+            slot->publication_attempted = true;
+            slot->last_publication_attempt_ms = read_completed_ms;
             err = slot->driver->publish(slot->context, logical_id);
-            if (err != ESP_OK && !slot->mqtt_warning_logged) {
+            if (err != ESP_OK && !slot->delivery_warning_logged) {
                 ESP_LOGW(TAG, "%s delivery handoff unavailable: %s", slot->driver->driver_id, esp_err_to_name(err));
-                slot->mqtt_warning_logged = true;
+                slot->delivery_warning_logged = true;
             } else if (err == ESP_OK) {
-                slot->mqtt_warning_logged = false;
+                slot->delivery_warning_logged = false;
             }
         }
+    }
+    if (slot->start_mode != START_RESET_SPENT && health == SENSOR_HEALTH_ERROR &&
+        ++slot->status_error_polls >= SENSOR_HEALTH_CONFIRM_POLLS) {
+        recover_sensor(slot, "recurring device status error");
+        return;
     }
     /* Evaluate sensor health at read completion, never after delivery work. */
     if (!measurement_succeeded &&
@@ -178,7 +226,7 @@ esp_err_t sensor_manager_start(void) {
         return err;
     }
 
-    if (xTaskCreate(sensor_manager_task, "sensor_manager", 3072, NULL, 5, NULL) != pdPASS) {
+    if (xTaskCreate(sensor_manager_task, "sensor_manager", SENSOR_TASK_STACK_SIZE_BYTES, NULL, 5, NULL) != pdPASS) {
         i2c_del_master_bus(sensor_i2c_bus);
         sensor_i2c_bus = NULL;
         return ESP_ERR_NO_MEM;

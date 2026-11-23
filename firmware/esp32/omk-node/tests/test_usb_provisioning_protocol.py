@@ -15,12 +15,12 @@ SOURCE = Path(__file__).parents[1] / "src/usb_provisioning.c"
 NODE_ID = "020000000001"  # Synthetic identity, unrelated to any physical Node.
 
 
-@pytest.fixture(scope="module")
-def handler(tmp_path_factory):
+def build_handler(tmp_path_factory, node=NODE_ID):
     compiler = shutil.which("cc")
     configured = os.environ.get("OMK_TEST_CJSON_DIR")
     core = Path(os.environ.get("PLATFORMIO_CORE_DIR", Path.home() / ".platformio"))
     candidates = [Path(configured)] if configured else sorted(core.glob("packages/framework-espidf*/components/json/cJSON"))
+    candidates.append(SOURCE.parents[1] / "managed_components/espressif__cjson/cJSON")
     cjson = next((path for path in candidates if (path / "cJSON.c").is_file()), None)
     if compiler is None or cjson is None:
         pytest.skip("host cc and ESP-IDF cJSON required; set OMK_TEST_CJSON_DIR")
@@ -29,6 +29,7 @@ def handler(tmp_path_factory):
     # Compile the actual command handlers, replacing only platform I/O/storage.
     handlers = source[source.index("#define USB_PROVISIONING_PROTOCOL_VERSION"):source.index("static void usb_provisioning_task")]
     harness = r'''
+#include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <inttypes.h>
@@ -56,6 +57,9 @@ static int nvs_get_blob(nvs_handle_t nvs, const char *key, void *value, size_t *
     (void)nvs; (void)key; memset(value, 0xab, *size); return ESP_OK;
 }
 static void nvs_close(nvs_handle_t nvs) { (void)nvs; }
+#define ESP_FAIL -1
+#define ESP_ERR_INVALID_ARG -2
+
 static bool saved_wifi;
 static uint8_t saved_state;
 static int node_registration_get_provisioning_state(bool wifi, uint8_t *state) {
@@ -84,6 +88,7 @@ int main(int argc, char **argv) {
 }
 '''
     path = directory / "handler.c"
+    harness = harness.replace("0x020000000001", "0x" + node)
     path.write_text(harness)
     binary = directory / "handler"
     subprocess.run([compiler, "-std=c99", "-Wall", "-Wextra", "-Werror", "-Wno-unused-variable",
@@ -93,6 +98,14 @@ int main(int argc, char **argv) {
         assert "synthetic-secret" not in result.stdout + result.stderr
         return [json.loads(line) for line in result.stdout.splitlines()]
     return run
+
+
+@pytest.fixture(scope="module")
+def handler(tmp_path_factory):
+    return build_handler(tmp_path_factory)
+
+
+
 
 
 @pytest.mark.parametrize("command", ["set_wifi", "clear_wifi"])

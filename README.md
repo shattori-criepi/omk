@@ -78,6 +78,8 @@ OMKで動作確認している推奨構成は次のとおりです。
 
 ## OMKを開発する
 
+mainのAtomS3 Lite用ソースは、2026年11月に4台で稼働を確認したNative Mesh版です。Dashboard用の公開prebuiltは旧Mesh版（`021ff22` 対応）です。[運用版の識別とビルド](firmware/esp32/omk-node/README.md)
+
 - [アーキテクチャ](docs/developer/architecture.md)
 - [開発ガイド](docs/developer/development.md)
 - [Gatewayネットワーク設計](docs/developer/networking.md)

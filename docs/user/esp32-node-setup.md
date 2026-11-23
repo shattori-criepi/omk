@@ -2,6 +2,8 @@
 
 AtomS3 Liteは市販のハードウェアです。OMK用ファームウェアと設定を書き込むと、センサのデータをGatewayへ送る「OMK Node」になります。このページでは、前のページで組み立てたSEN66 NodeをGatewayへUSB接続し、Dashboardから設定・登録して計測を始めます。
 
+この手順でDashboardが書き込む公開ファームウェアは旧Mesh版です。Native Meshで運用中の設備へNodeを追加する場合は、既設Nodeと版を揃えてください。[開発版と公開prebuiltの対応](../../firmware/esp32/omk-node/README.md)
+
 新品・未セットアップのAtomS3 Liteを使い、以下の順に進めます。
 
 ## この手順の前に

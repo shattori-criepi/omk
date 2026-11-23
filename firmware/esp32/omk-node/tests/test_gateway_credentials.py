@@ -44,18 +44,6 @@ def test_usb_identify_exposes_only_wifi_configured_boolean_and_reboots_in_its_ow
     assert "gateway_credentials_load(&credentials)" in wifi
 
 
-def test_runtime_sta_configuration_is_not_the_gateway_credential_store():
-    wifi = (SOURCE / "wifi_station.c").read_text()
-    network = (SOURCE / "mesh_network.c").read_text()
-
-    save = wifi[wifi.index("esp_err_t wifi_station_save_credentials") : wifi.index("esp_err_t wifi_station_set_saved_credentials_for_development")]
-    assert "gateway_credentials_save" in save
-    assert "esp_wifi_set_config" not in save
-    start = network[network.index("esp_err_t mesh_network_start_prepared") :]
-    assert "gateway_credentials_load(&gateway)" in start
-    assert "esp_wifi_get_config(WIFI_IF_STA" not in start
-    assert "mesh_credentials_derive(gateway.ssid" in start
-    assert "config.router.ssid, gateway.ssid" in start
 
 
 def test_legacy_mesh_parent_state_is_not_migrated_as_gateway_credential():
@@ -65,78 +53,3 @@ def test_legacy_mesh_parent_state_is_not_migrated_as_gateway_credential():
     assert "legacy->sta.bssid_set" in migration
     assert "is_mesh_default_ap_ssid(legacy->sta.ssid, ssid_length)" in migration
     assert "return ESP_ERR_NOT_SUPPORTED;" in migration
-
-
-def test_sen66_mqtt_failure_does_not_stop_periodic_measurement():
-    sensor_manager = (SOURCE / "sensor_manager.c").read_text()
-
-    publish = sensor_manager[sensor_manager.index("err = slot->driver->publish") :]
-    assert "mqtt_warning_logged = true;" in publish
-    assert "mqtt_warning_logged = false;" in publish
-    assert "slot->next_attempt_ms = read_completed_ms + SENSOR_MEASUREMENT_INTERVAL_MS;" in publish
-    assert "sen66_delivery_submit(logical_id, &ctx->sample)" in (SOURCE / "sensor_drivers.c").read_text()
-
-
-def test_registration_status_payload_has_dedicated_capacity_for_sensor_presence():
-    source = (SOURCE / "mqtt_registration.c").read_text()
-    assert "#define OMK_REGISTRATION_PAYLOAD_SIZE 256" in source
-    assert "static char registration_payload[OMK_REGISTRATION_PAYLOAD_SIZE];" in source
-    status = source[source.index("static bool publish_registration_status") : source.index("static bool logical_id_is_valid(const char *logical_id) {")]
-    assert '"\\\"connected_sensors\\\":%s%s}"' in status
-    assert "esp_mqtt_client_publish_bounded(client, registration_topic," in status
-    assert "OMK_MQTT_OUTBOX_BYTES" in status
-    assert "registration_payload, 0, 1, 1" in status
-
-    for state, sensors in (("registered", ["sen66"]), ("provisioned", [])):
-        payload = json.dumps({
-            "protocol_version": 1,
-            "node_id": "09dda0d5a8f2",
-            "registration_state": state,
-            "capabilities": 3,
-            "connected_sensors": sensors,
-        }, separators=(",", ":"))
-        assert len(payload) < 256
-        decoded = json.loads(payload)
-        assert decoded["registration_state"] == state
-        assert decoded["capabilities"] == 3
-        assert decoded["connected_sensors"] == sensors
-
-    diagnostics_payload = json.dumps({
-        "protocol_version": 1,
-        "node_id": "09dda0d5a8f2",
-        "registration_state": "registered",
-        "logical_id": "a" * 48,
-        "capabilities": 3,
-        "connected_sensors": ["sen66"],
-        "sen66_rc": 4294967295,
-        "sen66_to": 4294967295,
-    }, separators=(",", ":"))
-    assert len(diagnostics_payload) < 256
-
-
-def test_registration_status_includes_sen66_recovery_diagnostics_only_after_recovery():
-    source = (SOURCE / "mqtt_registration.c").read_text()
-    status = source[source.index("static bool publish_registration_status") : source.index("static bool logical_id_is_valid(const char *logical_id) {")]
-
-    assert "if (diagnostics_available)" in status
-    assert "sen66_rc" in status
-    assert "sen66_to" in status
-    assert "mqtt_registration_set_sen66_diagnostics" in source
-
-
-def test_operational_logs_cover_boot_mesh_ip_and_mqtt_transitions_without_poc_breadcrumbs():
-    main = (SOURCE / "main.c").read_text()
-    mesh = (SOURCE / "mesh_network.c").read_text()
-    netif = (SOURCE / "mesh_netif.c").read_text()
-    mqtt_registration = (SOURCE / "mqtt_registration.c").read_text()
-    assert "Normal boot begin" in main
-    assert "Mesh parent connected" in mesh
-    assert "Mesh parent disconnected" in mesh
-    assert "Starting child internal STA netif" in netif
-    assert "Stopping current Mesh IP netif" in netif
-    assert "STA IP acquired for MQTT" in mqtt_registration
-    assert "MQTT connected" in mqtt_registration
-    assert "MQTT disconnected" in mqtt_registration
-    for source in (main, mesh, netif, mqtt_registration):
-        assert "OMK_MQTT_DIAG" not in source
-    assert "internal mesh TX observed" not in netif

@@ -4,8 +4,8 @@
 
 #include "psa/crypto.h"
 
-static const uint8_t mesh_id_domain[] = "OMK-MESH-ID-v1\0";
-static const uint8_t mesh_password_domain[] = "OMK-MESH-PSK-v1\0";
+static const uint8_t mesh_id_domain[] = "OMK-MESH-ID-v2\0";
+static const uint8_t mesh_password_domain[] = "OMK-MESH-PSK-v2\0";
 static const uint8_t separator[] = {0};
 static const char hex[] = "0123456789abcdef";
 
@@ -56,8 +56,8 @@ esp_err_t mesh_credentials_derive(const uint8_t *ssid, size_t ssid_length,
 bool mesh_credentials_test_vector_matches(void) {
     static const uint8_t ssid[] = "OMK-Test-SSID";
     static const uint8_t psk[] = "correct-horse-battery-staple";
-    static const uint8_t expected_id[6] = {0x43, 0x3d, 0x71, 0xb8, 0x6f, 0x8d};
-    static const char expected_password[] = "fed195b85f7c0447709a67a3c06e2585";
+    static const uint8_t expected_id[6] = {0xed, 0x67, 0xd4, 0xa3, 0xfe, 0x8e};
+    static const char expected_password[] = "0b0af930113b29727544c2cc4914ea84";
     uint8_t mesh_id[6];
     char password[OMK_MESH_AP_PASSWORD_LENGTH + 1];
     return mesh_credentials_derive(ssid, sizeof(ssid) - 1, psk, sizeof(psk) - 1,

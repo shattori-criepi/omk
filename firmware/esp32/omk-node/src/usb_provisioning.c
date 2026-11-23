@@ -1,5 +1,7 @@
 #include "usb_provisioning.h"
-#include "network_diagnostics.h"
+#include "soc/soc_caps.h"
+
+#if SOC_USB_SERIAL_JTAG_SUPPORTED
 
 #include <inttypes.h>
 #include <stdbool.h>
@@ -18,6 +20,8 @@
 #include "node_state.h"
 #include "node_protocol.h"
 #include "nvs.h"
+#include "mesh_diag.h"
+#include "diag_usb.h"
 
 #define USB_PROVISIONING_PROTOCOL_VERSION 2
 #define USB_PROVISIONING_LINE_MAX 256
@@ -71,9 +75,6 @@ static bool schedule_reboot(void) {
 }
 
 static void handle_line(char *line) {
-#ifdef OMK_NETWORK_DIAGNOSTICS
-    if (network_diag_usb(line, provision_node_id)) return;
-#endif
     cJSON *root = cJSON_Parse(line);
     if (root == NULL) {
         write_status("invalid_request");
@@ -115,6 +116,12 @@ static void handle_line(char *line) {
         write_status("busy");
         return;
     }
+#if OMK_DIAGNOSTICS
+    if (diag_usb_handle(root, command->valuestring, own_node_id)) {
+        cJSON_Delete(root);
+        return;
+    }
+#endif
     if (strcmp(command->valuestring, "verify_reinitialize") == 0) {
         /* Prove factory import completed before the host sends new Wi-Fi.
          * Never return the PoP or log the credential-bearing request. */
@@ -204,6 +211,7 @@ static void usb_provisioning_task(void *argument) {
     char line[USB_PROVISIONING_LINE_MAX + 1];
     size_t used = 0;
     while (true) {
+        mesh_diag_poll();
         uint8_t byte;
         int read = usb_serial_jtag_read_bytes(&byte, 1, pdMS_TO_TICKS(250));
         if (read != 1) {
@@ -250,3 +258,12 @@ esp_err_t usb_provisioning_start(uint64_t node_id) {
     ESP_LOGI(TAG, "USB Serial/JTAG provisioning ready");
     return ESP_OK;
 }
+
+#else
+/* ESP32 boards such as M5Stick-C have no native USB Serial/JTAG. Keep their
+ * pre-provisioned Mesh build usable without pretending USB setup is supported. */
+esp_err_t usb_provisioning_start(uint64_t node_id) {
+    (void)node_id;
+    return ESP_ERR_NOT_SUPPORTED;
+}
+#endif
