@@ -16,6 +16,8 @@ Logical IDを登録済みのNodeが以前と同じWi-Fiへ接続できる場合�
 
 再セットアップすると、Node IDは変わりませんが、**Wi-Fiは接続先Gateway用に設定し直され、以前のLogical IDは解除されます。** SEN66を使う場合は、完了後に登録し直してください。
 
+Dashboardの再セットアップでは、Native Mesh版を使用中のNodeにも旧Mesh版の公開ファームウェア（prebuilt）が書き込まれます。再セットアップ後は、ほかのNative MeshのNodeと同じMeshに参加できません。
+
 1. 対象のAtomS3 LiteだけをGatewayへUSB接続します。ほかの同種USB機器は一時的に取り外します。OnyxとRS-WSUHA-Pは接続したままで構いません。
 2. Dashboardの「管理メニュー → 機器管理」で、「接続: USB接続」のNodeカードにある「OMK Nodeを再セットアップ」を押します。
 3. 確認画面で、Wi-Fiが再設定されLogical IDが消去されることを読み、実行します。

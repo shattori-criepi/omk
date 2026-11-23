@@ -24,6 +24,8 @@ AtomS3 Liteをデータ通信対応のUSBケーブルでGatewayへ接続しま�
 
 ## 3. Dashboardからセットアップする
 
+Dashboardが書き込む公開ファームウェア（prebuilt）は旧Mesh版です。この手順で設定した中継専用Nodeは、Native MeshのNodeと同じMeshに参加できません。
+
 1. Touch Display 2のDashboardで「管理メニュー → 機器管理」を開きます。
 2. 「接続: USB接続」のカードに「USB接続されたNode候補」と「OMK Nodeをセットアップ」が表示されることを確認します。
 3. 接続した実物を確かめ、「未セットアップのAtomS3 Liteであることを確認しました」にチェックを入れます。初回設定の再開時には、この確認欄が表示されないことがあります。

@@ -17,7 +17,7 @@ for service in ('ichijo-energy-node','broute-meter','ble-sensor-manager'):
             assert '192.168.50.1' not in path.read_text(), f'Legacy Gateway broker remains: {path}'
 for path in (root/'systemd').glob('*.in'):
     assert 'MQTT_HOST=192.168.50.1' not in path.read_text(), path
-assert 'mqtt://192.168.50.1:1883' in (root/'firmware/esp32/omk-node/src/mqtt_registration.c').read_text()
+assert 'mqtt://192.168.50.1:1883' in (root/'firmware/esp32/omk-node/src/mesh_transport.c').read_text()
 checker=root/'scripts/lib/check-host-mqtt-config.py'
 with tempfile.TemporaryDirectory() as tmp:
     for name,content in [('settings.yaml','mqtt:\n  host: "192.168.50.1"\n'),('ichijo.env','MQTT_HOST=192.168.50.1\n')]:
