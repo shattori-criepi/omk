@@ -1061,7 +1061,7 @@ $FreeBSD: head/include/strings.h 272673 2014-10-07 04:54:11Z delphij $
 
 ## GCC runtime — GPL-3.0-or-later WITH GCC-exception-3.1
 
-libstdc++ 15.2.0 / libsupc++ and GCC runtime headers. Copyright (C) Free Software Foundation, Inc.; the included `new` header carries Copyright (C) 1994-2025. These portions are distributed as part of eligible compiled target code under the GCC Runtime Library Exception. This does not license OMK under the GPL and does not impose a corresponding-source or relinking requirement on this combined firmware.
+GCC 15.2.0 runtime: libgcc (_fixunsdfdi.o), libstdc++ / libsupc++, and GCC runtime headers. Copyright (C) Free Software Foundation, Inc.; the included `new` header carries Copyright (C) 1994-2025. These portions are distributed as part of eligible compiled target code under the GCC Runtime Library Exception. This does not license OMK under the GPL and does not impose a corresponding-source or relinking requirement on this combined firmware.
 
 Sources: toolchain `share/licenses/gcc/COPYING3` and `COPYING.RUNTIME`.
 

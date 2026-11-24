@@ -2,7 +2,9 @@
 
 正式対象はAtomS3 Liteのみ。Gatewayは追跡対象のprebuilt packageを検証し、system-manager venvの`esptool==4.11.0`で書き込む。開発環境のespressif32 7.0.1 / tool-esptoolpy 2.41100.0の`esptool.__version__`も4.11.0であることを確認済み。
 
-## 開発者のpackage更新手順
+現在の配布版は、11月22日に実機へ投入したアプリBINとそのビルドのパーティション表を採用しています。bootloaderは既存配布品です。manifestの `source_commit` はmainへのソース統合コミットを示します。[各セグメントの由来](../../firmware/esp32/omk-node/prebuilt/atom-s3-lite/provenance.json)
+
+## 開発者が新たにビルドしてpackageを更新する場合
 
 1. firmware sourceを変更する。
 2. host testsと関連testsを実行する。

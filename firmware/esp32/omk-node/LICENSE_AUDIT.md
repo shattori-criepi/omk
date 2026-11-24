@@ -1,5 +1,13 @@
 # AtomS3 Lite配布ファームウェアのライセンス監査
 
+## 2026-11-24 Native Mesh安定運用版
+
+アプリは4台に投入した `V2D-P1-stable-p1`、パーティション表はそのビルドの生成物です。公開bootloaderは従来と同じSHA-256で、11月4日の監査結果が適用されます。アプリのリンク構成は保存されたELFに対応するリンクマップから、実アドレスと非ゼロ長を持つ入力セクションを抽出して照合しました。アプリの72アーカイブ（OMK自身を含む）のmember名と元マップのSHA-256は[配布記録](prebuilt/atom-s3-lite/provenance.json)に記載しています。
+
+ESP-IDF 6.0.1、ESP-MQTT 1.1.0、cJSON 1.7.19~2を使用しています。従来の監査と照合すると、GCC 15.2.0の `libgcc.a(_fixunsdfdi.o)` が新たにアプリに残ります。第三者通知のGCCランタイム欄に明記し、GPL本文とGCC Runtime Library Exceptionを同梱しています。Picolibcとlibstdc++の残存memberは従来の監査対象と一致します。[SPDX SBOM](prebuilt/atom-s3-lite/sbom.spdx.json)には実際の配布ファイルのハッシュと各パッケージの根拠を記載しています。
+
+以下は各日付の配布版についての記録です。
+
 ## 2026-11-04の候補準備時点の対応関係
 
 後段の「2026-10-01の監査履歴」でいう「現在の配布物」「現在のbuild」は当時の監査対象を指します。更新前のprebuiltはmanifestが`0a386a9d11a88231c6c07631b5a01e8f50958da4`を指し、SBOMが`c375ca9`のapp/bootloader checksumを保持する不整合がありました。今回のprebuiltでは対応ソースを`021ff22`とし、manifest・SBOMを実ファイルへ揃えています。

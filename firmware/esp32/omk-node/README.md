@@ -16,7 +16,7 @@ EVOの保存ソースを当時の実効設定・依存関係で再ビルドし�
 
 統合後のソースも同じESP-IDFビルド条件で照合しました。実機BINと各セグメントのアドレス・長さは一致し、ELFハッシュと末尾の検証情報を除く差は13バイトでした。逆アセンブルで、いずれも `main.c` の `ESP_ERROR_CHECK` に渡すソース行番号の変更と確認しました。PlatformIOの通常ビルドも成功し、生成したパーティションテーブルは実機版のビルド成果物と一致しました。
 
-DashboardのUSBセットアップが使う公開prebuiltは `021ff22` 対応の旧Mesh版です。Native Meshへの切り替えには同一Mesh内のNodeを揃え、Gatewayに `f6a0f8b` 以降のBLE Sensor Managerを使用します。公開パッケージの由来と配布条件は別途記録しています。[公開prebuiltの記録](docs/release-021ff22.md)
+Dashboardの初回・再セットアップは、この4台で使用した `V2D-P1-stable-p1` のアプリBINを書き込みます。Gatewayでこの配布版を含むmainを取得してください。同じMeshに参加させるNodeはNative Mesh版に揃えます。[配布ファイルの由来](prebuilt/atom-s3-lite/provenance.json)・[第三者通知](prebuilt/atom-s3-lite/THIRD_PARTY_NOTICES.md)
 
 ## 有線センサの識別（M4）
 
